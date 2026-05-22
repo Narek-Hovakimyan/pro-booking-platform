@@ -300,8 +300,8 @@ export default function Header() {
         {isAuthenticated && isClient && (
           <nav className="hidden items-center gap-0.5 lg:flex">
             <Link
-              to="/barbers"
-              className={linkClass(pathname === "/barbers")}
+              to="/specialists"
+              className={linkClass(pathname === "/specialists" || pathname === "/barbers")}
             >
               Specialists
             </Link>
@@ -477,7 +477,7 @@ export default function Header() {
             {/* Client mobile nav */}
             {isClient &&
               [
-                { label: "Specialists", to: "/barbers" },
+                { label: "Specialists", to: "/specialists" },
                 { label: "Salons", to: "/salons" },
                 { label: "Favorites", to: "/favorites" },
                 { label: "Bookings", to: "/my-bookings" },

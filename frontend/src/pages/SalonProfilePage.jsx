@@ -385,7 +385,7 @@ export default function SalonProfilePage() {
   };
 
   if (!isLoading && !salon) {
-    return <Navigate to="/barbers" replace />;
+    return <Navigate to="/specialists" replace />;
   }
 
   const averageRating = Number(salon?.averageRating || 0);

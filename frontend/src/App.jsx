@@ -557,7 +557,23 @@ export default function App() {
               }
             />
             <Route
+              path="/specialists"
+              element={
+                <ProtectedRoute role="client">
+                  <BarbersPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/barbers/:barberId/profile"
+              element={
+                <ProtectedRoute role="client">
+                  <ClientBarberProfilePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/specialists/:barberId/profile"
               element={
                 <ProtectedRoute role="client">
                   <ClientBarberProfilePage />

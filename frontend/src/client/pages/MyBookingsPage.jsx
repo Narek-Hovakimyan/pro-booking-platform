@@ -349,7 +349,7 @@ export default function MyBookingsPage() {
 
     if (!barberId) return;
 
-    navigate(`/barbers/${barberId}/profile`, {
+    navigate(`/specialists/${barberId}/profile`, {
       state: {
         barber: barber && typeof barber === "object" ? barber : null,
       },
@@ -643,7 +643,7 @@ export default function MyBookingsPage() {
             statusLabel={getUpcomingStatusLabel(nextBooking?.status)}
             onCancel={() => openCancelBookingModal(nextBooking)}
             onDelay={() => openDelayBookingModal(nextBooking)}
-            onFindBarber={() => navigate("/barbers")}
+            onFindBarber={() => navigate("/specialists")}
             onMessage={messageBarber}
             onViewDetails={() => openBookingDetailsModal(nextBooking)}
           />

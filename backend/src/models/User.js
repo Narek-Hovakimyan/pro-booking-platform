@@ -114,6 +114,17 @@ const userSchema = new mongoose.Schema({
     type: [salonEntrySchema],
     default: [],
   },
+  profession: {
+    type: String,
+    enum: ["barber", "hair_stylist", "nail_master", "makeup_artist", "cosmetologist", "lash_brow", "massage", "other"],
+    default: "barber",
+  },
+  barberType: {
+    type: String,
+    enum: ["men", "women", "unisex", ""],
+    default: "",
+  },
+  // Kept for backward compatibility — derived from profession/barberType on read
   specialty: {
     type: String,
     enum: ["men", "women", "unisex"],
@@ -161,6 +172,55 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+});
+
+// Pre-save: enforce profession/barberType consistency
+// - non-barber profession → clear barberType, keep specialty unisex
+// - barber profession → default barberType to "unisex", align legacy specialty
+userSchema.pre("save", function () {
+  if (this.profession && this.profession !== "barber") {
+    this.barberType = "";
+    if (!["men", "women", "unisex"].includes(this.specialty)) {
+      this.specialty = "unisex";
+    }
+  } else if (this.profession === "barber") {
+    this.barberType = this.barberType || "unisex";
+    this.specialty = this.barberType;
+  }
+});
+
+// Pre-findOneAndUpdate: enforce invariants for findByIdAndUpdate queries
+// (findByIdAndUpdate bypasses pre('save'))
+userSchema.pre("findOneAndUpdate", function () {
+  const update = this.getUpdate();
+  const set = update?.$set || update;
+
+  if (set.profession !== undefined) {
+    if (set.profession !== "barber") {
+      // Non-barber → clear barberType, specialty stays valid
+      this.set({ barberType: "" });
+    } else {
+      // Barbers get a default barberType
+      this.set({ barberType: set.barberType || "unisex" });
+    }
+  }
+
+  // Align specialty when barberType is explicitly being set
+  // Note: only for barbers — non-barber profession block above already cleared barberType
+  if (set.barberType !== undefined) {
+    const isBarber = set.profession === undefined || set.profession === "barber";
+    if (isBarber && set.barberType && ["men", "women", "unisex"].includes(set.barberType)) {
+      this.set({ specialty: set.barberType });
+    }
+  }
+});
+
+// Pre-init: derive profession/barberType from old specialty for backward compatibility
+userSchema.pre("init", function (doc) {
+  if (!doc.profession && doc.specialty) {
+    doc.profession = "barber";
+    doc.barberType = doc.specialty;
+  }
 });
 
 // Virtual getter for backward compatibility - returns the primary approved salon

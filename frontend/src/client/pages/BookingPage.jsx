@@ -452,7 +452,7 @@ export default function BookingPage({
   }
 
   if (!barber && !isLoading && !isBarberLoading) {
-    return <Navigate to="/barbers" replace />;
+    return <Navigate to="/specialists" replace />;
   }
 
   if (!barber && (isLoading || isBarberLoading)) {

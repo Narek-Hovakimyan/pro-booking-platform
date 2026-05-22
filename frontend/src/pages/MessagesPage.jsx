@@ -532,7 +532,7 @@ export default function MessagesPage() {
           isRefreshing={isContactsRefreshing}
           socketConnected={socketConnected}
           userRole={currentUser?.role}
-          onFindBarber={() => navigate("/barbers")}
+          onFindBarber={() => navigate("/specialists")}
           onCheckBookings={() => navigate("/admin/bookings")}
           isCollapsed={showChatOnMobile && Boolean(selectedUser)}
         />

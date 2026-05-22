@@ -332,6 +332,8 @@ export const getBarberCardSummary = async (req, res) => {
         salons: approvedSalons,
         approvedSalons,
         primarySalon,
+        profession: barber.profession || "barber",
+        barberType: barber.barberType || "",
         specialty: barber.specialty || "unisex",
         bio: profile?.bio || "",
         city: profile?.city || barber.city || "",
@@ -405,6 +407,8 @@ export const getProfileByBarberId = async (req, res) => {
       salonStatus: barber?.salonStatus || "none",
       salonName: approvedSalon?.name || "",
       workHistory: barber?.workHistory || [],
+      profession: barber?.profession || "barber",
+      barberType: barber?.barberType || "",
       specialty: barber?.specialty || "unisex",
       city: profile?.city || barber?.city || "",
       avatarUrl: barber?.avatarUrl || "",
@@ -434,6 +438,8 @@ export const upsertProfileByBarberId = async (req, res) => {
       address,
       instagram,
       specialty,
+      profession,
+      barberType,
       imageUrl: bodyImageUrl,
       avatarUrl: bodyAvatarUrl,
       galleryImages,
@@ -464,6 +470,8 @@ export const upsertProfileByBarberId = async (req, res) => {
     if (address !== undefined) profileUpdates.address = address;
     if (instagram !== undefined) profileUpdates.instagram = instagram;
     if (specialty !== undefined) userUpdates.specialty = specialty;
+    if (profession !== undefined) userUpdates.profession = profession;
+    if (barberType !== undefined) userUpdates.barberType = barberType;
     if (Array.isArray(galleryImages)) {
       profileUpdates.galleryImages = galleryImages.filter(Boolean);
     }
@@ -497,6 +505,8 @@ export const upsertProfileByBarberId = async (req, res) => {
       salon: user?.salon || null,
       salonStatus: user?.salonStatus || "none",
       workHistory: user?.workHistory || [],
+      profession: user?.profession || "barber",
+      barberType: user?.barberType || "",
       specialty: user?.specialty || "unisex",
       city: profile.city || user?.city || "",
       avatarUrl: user?.avatarUrl || "",

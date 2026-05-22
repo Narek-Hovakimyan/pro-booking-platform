@@ -118,8 +118,8 @@ export default function RegisterPage() {
               value={form.role}
               onChange={(event) => updateField("role", event.target.value)}
             >
-              <option value="client">client</option>
-              <option value="barber">barber</option>
+              <option value="client">Client</option>
+              <option value="barber">Specialist</option>
             </select>
           </label>
 

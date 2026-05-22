@@ -114,7 +114,7 @@ export default function HomePage({ startBooking }) {
                 className="min-w-[180px]"
                 onClick={startBooking}
                 size="lg"
-                to={canBook ? "/barbers" : "/register"}
+                to={canBook ? "/specialists" : "/register"}
               >
                 <Scissors className="mr-2 h-4 w-4" />
                 {canBook ? "Find a specialist" : "Get started"}
@@ -273,7 +273,7 @@ export default function HomePage({ startBooking }) {
                 className="w-full"
                 onClick={startBooking}
                 size="lg"
-                to={canBook ? "/barbers" : "/register"}
+                to={canBook ? "/specialists" : "/register"}
               >
                 {canBook ? "Find a specialist" : "Create client account"}
               </Button>
@@ -369,7 +369,7 @@ export default function HomePage({ startBooking }) {
                 className="min-w-[200px]"
                 onClick={startBooking}
                 size="lg"
-                to="/barbers"
+                to="/specialists"
               >
                 <Scissors className="mr-2 h-4 w-4" />
                 Book now

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import api from "@/shared/api/axios";
 import SettingsCard from "@/barber/components/settings/SettingsCard";
+import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { getMediaUrl } from "@/shared/utils/media";
 
 function StaffCard({ person }) {
@@ -53,11 +54,15 @@ function StaffCard({ person }) {
           </span>
           {roleBadge()}
         </div>
-        {person.specialty && (
-          <p className="mt-0.5 text-xs capitalize text-neutral-500">
-            {person.specialty}
-          </p>
-        )}
+        {(() => {
+          const display = getSpecialistProfessionDisplay(person);
+          if (!display) return null;
+          return (
+            <p className={`mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${display.className}`}>
+              {display.icon} {display.label}
+            </p>
+          );
+        })()}
         {person.city && (
           <p className="text-xs text-neutral-400">{person.city}</p>
         )}

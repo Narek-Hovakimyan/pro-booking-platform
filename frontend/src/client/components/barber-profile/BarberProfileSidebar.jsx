@@ -1,7 +1,8 @@
-import { Award, BadgeCheck, Calendar, MapPin, Scissors, Star } from "lucide-react";
+import { Award, BadgeCheck, Calendar, MapPin, Star } from "lucide-react";
 
 import ReviewReplyBlock from "@/features/reviews/components/ReviewReplyBlock";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 
 export default function BarberProfileSidebar({
   barber,
@@ -122,16 +123,17 @@ export default function BarberProfileSidebar({
             Quick info
           </h3>
           <div className="space-y-3">
-            {barber?.specialty && (
-              <div className="flex items-center gap-3 text-sm">
-                <Scissors className="h-4 w-4 shrink-0 text-neutral-400" />
-                <span className="text-neutral-700">
-                  {barber.specialty === "men" && "Men's barber"}
-                  {barber.specialty === "women" && "Women's hairdresser"}
-                  {barber.specialty === "unisex" && "Unisex"}
-                </span>
-              </div>
-            )}
+            {(() => {
+              const display = getSpecialistProfessionDisplay(barber);
+              if (!display) return null;
+              return (
+                <div className="flex items-center gap-3 text-sm">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${display.className}`}>
+                    {display.icon} {display.label}
+                  </span>
+                </div>
+              );
+            })()}
             {startingPrice && (
               <div className="flex items-center gap-3 text-sm">
                 <Calendar className="h-4 w-4 shrink-0 text-neutral-400" />

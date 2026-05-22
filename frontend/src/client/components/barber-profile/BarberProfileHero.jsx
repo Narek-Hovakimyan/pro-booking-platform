@@ -13,6 +13,7 @@ import { Link } from "react-router-dom";
 
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { getMediaUrl } from "@/shared/utils/media";
 
 export default function BarberProfileHero({
@@ -70,14 +71,16 @@ export default function BarberProfileHero({
               </h1>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {barber?.specialty && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-semibold text-neutral-700 shadow-sm">
-                    <Scissors className="h-3.5 w-3.5 text-neutral-500" />
-                    {barber.specialty === "men" && "Men's barber"}
-                    {barber.specialty === "women" && "Women's hairdresser"}
-                    {barber.specialty === "unisex" && "Unisex"}
-                  </span>
-                )}
+                {(() => {
+                  const display = getSpecialistProfessionDisplay(barber);
+                  if (!display) return null;
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold shadow-sm ring-1 ring-inset ${display.className}`}>
+                      <Scissors className="h-3.5 w-3.5 text-neutral-500" />
+                      {display.icon} {display.label}
+                    </span>
+                  );
+                })()}
 
                 {barber?.isVerified && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">

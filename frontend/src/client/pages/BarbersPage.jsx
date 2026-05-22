@@ -276,7 +276,7 @@ export default function BarbersPage() {
         if (isMounted && availabilityRequestId.current === requestId) {
           setError(
             requestError.response?.data?.message ||
-              "Could not load barbers. Please try again."
+              "Could not load specialists. Please try again."
           );
         }
       } finally {
@@ -561,7 +561,7 @@ export default function BarbersPage() {
 
       <Drawer
         closeLabel="Close filters"
-        description="Refine the barber list instantly."
+        description="Refine the specialist list instantly."
         footer={
           <>
             <Button onClick={() => setIsFilterDrawerOpen(false)}>

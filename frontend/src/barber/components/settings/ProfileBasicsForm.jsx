@@ -103,21 +103,49 @@ export default function ProfileBasicsForm({
         />
       </div>
 
-      <label className="grid gap-2 text-sm font-semibold">
-        Specialty / Մասնագիտացում
-        <select
-          className="w-full rounded-2xl border p-3 font-normal"
-          disabled={isSaving}
-          value={profile.specialty || "unisex"}
-          onChange={(event) =>
-            onChange("specialty", event.target.value)
-          }
-        >
-          <option value="men">Men's barber (Տղամարդու վարսահարդար)</option>
-          <option value="women">Women's hairdresser (Կանացի վարսահարդար)</option>
-          <option value="unisex">Unisex / Both (Ունիվերսալ)</option>
-        </select>
-      </label>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="grid gap-2 text-sm font-semibold">
+          Profession / Մասնագիտություն
+          <select
+            className="w-full rounded-2xl border p-3 font-normal"
+            disabled={isSaving}
+            value={profile.profession || "barber"}
+            onChange={(event) => {
+              onChange("profession", event.target.value);
+              if (event.target.value !== "barber") {
+                onChange("barberType", "");
+              }
+            }}
+          >
+            <option value="barber">Barber / Վարսահարդար</option>
+            <option value="hair_stylist">Hair stylist / Սանրվածքների վարպետ</option>
+            <option value="nail_master">Nail master / Մատնահարդար</option>
+            <option value="makeup_artist">Makeup artist / Դիմահարդար</option>
+            <option value="cosmetologist">Cosmetologist / Կոսմետոլոգ</option>
+            <option value="lash_brow">Lash & Brow / Թարթիչ-Հոնքերի վարպետ</option>
+            <option value="massage">Massage therapist / Մասաժիստ</option>
+            <option value="other">Other / Այլ</option>
+          </select>
+        </label>
+
+        {profile.profession === "barber" && (
+          <label className="grid gap-2 text-sm font-semibold">
+            Barber type / Վարսահարդարի տեսակ
+            <select
+              className="w-full rounded-2xl border p-3 font-normal"
+              disabled={isSaving}
+              value={profile.barberType || "unisex"}
+              onChange={(event) =>
+                onChange("barberType", event.target.value)
+              }
+            >
+              <option value="men">Men's barber (Տղամարդու վարսահարդար)</option>
+              <option value="women">Women's hairdresser (Կանացի վարսահարդար)</option>
+              <option value="unisex">Unisex / Both (Ունիվերսալ)</option>
+            </select>
+          </label>
+        )}
+      </div>
 
       <label className="grid gap-2 text-sm font-semibold">
         Bio

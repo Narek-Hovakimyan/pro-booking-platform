@@ -6,6 +6,7 @@ import SalonListModal from "@/client/components/SalonListModal";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
+import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { formatAvailabilityLabel, getAvailabilityTone } from "@/shared/utils/availability";
 import { getMediaUrl } from "@/shared/utils/media";
 
@@ -211,26 +212,18 @@ export default function BarberCard({
           </p>
         )}
 
-        {/* Specialty badge */}
-        {barber?.specialty && (
-          <div className="flex items-center gap-1.5 text-sm">
-            {barber.specialty === "men" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-200">
-                💈 Men's barber
+        {/* Profession / specialty badge */}
+        {(() => {
+          const display = getSpecialistProfessionDisplay(barber);
+          if (!display) return null;
+          return (
+            <div className="flex items-center gap-1.5 text-sm">
+              <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${display.className}`}>
+                {display.icon} {display.label}
               </span>
-            )}
-            {barber.specialty === "women" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 px-3 py-1 text-xs font-semibold text-pink-700 ring-1 ring-inset ring-pink-200">
-                💇‍♀️ Women's hairdresser
-              </span>
-            )}
-            {barber.specialty === "unisex" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700 ring-1 ring-inset ring-purple-200">
-                ✂️ Unisex
-              </span>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* Salon link */}
         {showSalonLink && (
@@ -314,7 +307,7 @@ export default function BarberCard({
           <div className="flex flex-col gap-2">
             <Button
               as={Link}
-              to={`/barbers/${barberId}/profile`}
+              to={`/specialists/${barberId}/profile`}
               className="w-full sm:w-full"
               variant="outline"
             >

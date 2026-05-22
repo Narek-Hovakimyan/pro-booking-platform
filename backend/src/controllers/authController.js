@@ -15,6 +15,8 @@ const getUserData = (user) => ({
   salon: user.salon || null,
   salonStatus: user.salonStatus || "none",
   salons: user.salons || [],
+  profession: user.profession || "barber",
+  barberType: user.barberType || "",
   specialty: user.specialty || "unisex",
   workHistory: user.workHistory || [],
   favoriteBarbers: user.favoriteBarbers || [],

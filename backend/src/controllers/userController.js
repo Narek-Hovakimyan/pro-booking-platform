@@ -25,6 +25,8 @@ const getUserData = (user) => ({
   salon: user.salon || null,
   salonStatus: user.salonStatus || "none",
   salons: user.salons || [],
+  profession: user.profession || "barber",
+  barberType: user.barberType || "",
   specialty: user.specialty || "unisex",
   workHistory: user.workHistory || [],
   favoriteBarbers: user.favoriteBarbers || [],
@@ -195,6 +197,8 @@ export const getBarbers = async (_req, res) => {
                 id: approvedSalon._id,
               }
             : null,
+          profession: barber.profession || "barber",
+          barberType: barber.barberType || "",
           specialty: barber.specialty || "unisex",
           bio: profile?.bio || "",
           city: profile?.city || barber.city || "",

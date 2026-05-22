@@ -12,12 +12,15 @@ import {
 } from "@/client/utils/bookingStatusUtils";
 
 import api from "@/shared/api/axios";
+import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import {
   BarberCardSkeleton,
   SalonCardSkeleton,
 } from "@/shared/components/LoadingSkeletons";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
+import { formatAvailabilityLabel, getAvailabilityTone } from "@/shared/utils/availability";
 import {
   removeFavorite,
   removeSalonFavorite,
@@ -63,15 +66,63 @@ function getStartingPrice(services, barberId) {
   return prices.length > 0 ? Math.min(...prices) : null;
 }
 
+const AVAILABILITY_STATUS = {
+  LOADING: "loading",
+  READY: "ready",
+  UNAVAILABLE: "unavailable",
+};
+
+function getBarberId(barber) {
+  return barber?.id || barber?._id;
+}
+
+function mapByBarberId(items = []) {
+  return Object.fromEntries(
+    items
+      .map((item) => [String(item?.barberId || ""), item])
+      .filter(([barberId]) => Boolean(barberId))
+  );
+}
+
+function getReviewStatsFromReviews(reviews, barberId) {
+  const barberReviews = (reviews || []).filter(
+    (review) => String(review?.barberId) === String(barberId)
+  );
+  const total = barberReviews.reduce(
+    (sum, review) => sum + Number(review?.rating || 0),
+    0
+  );
+  return {
+    average: barberReviews.length > 0 ? total / barberReviews.length : 0,
+    count: barberReviews.length,
+  };
+}
+
+function getActiveServicesForBarber(services, barberId) {
+  return (services || []).filter(
+    (service) =>
+      String(service?.barberId) === String(barberId) && service?.active
+  );
+}
+
+function getUniqueCategories(services) {
+  return Array.from(
+    new Set(services.map((service) => service?.category || "other"))
+  );
+}
+
 export default function FavoritesPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("barbers");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [firstAvailableSlotByBarberId, setFirstAvailableSlotByBarberId] = useState({});
+  const [availabilityStatusByBarberId, setAvailabilityStatusByBarberId] = useState({});
   const { currentUser } = useSelector((state) => state.auth);
   const users = useSelector((state) => state.users);
   const services = useSelector((state) => state.services);
+  const reviews = useSelector((state) => state.reviews);
   const favorites = useSelector((state) => state.favorites);
   const bookings = useSelector((state) => state.bookings);
   const hadFavoritesOnMount = useRef(
@@ -148,6 +199,49 @@ export default function FavoritesPage() {
 
     dispatch(fetchClientBookings(currentUser.id));
   }, [currentUser?.id, dispatch]);
+
+  // Non-blocking card-summary fetch for enriched availability
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    let isMounted = true;
+
+    async function fetchCardSummaryForFavorites() {
+      try {
+        const { data } = await api.get("/barbers/card-summary");
+        if (!isMounted) return;
+
+        const availabilityItems = mapByBarberId(data.availability || []);
+        setFirstAvailableSlotByBarberId(
+          Object.fromEntries(
+            Object.entries(availabilityItems).map(([barberId, item]) => [
+              barberId,
+              item?.firstAvailableSlot || null,
+            ])
+          )
+        );
+        setAvailabilityStatusByBarberId(
+          Object.fromEntries(
+            (data.barbers || [])
+              .map((barber) => {
+                const bid = String(getBarberId(barber) || "");
+                if (!bid) return null;
+                return [bid, availabilityItems[bid]?.status || AVAILABILITY_STATUS.READY];
+              })
+              .filter(Boolean)
+          )
+        );
+      } catch {
+        // Card-summary is best-effort enrichment; fall through silently.
+      }
+    }
+
+    fetchCardSummaryForFavorites();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.id]);
 
   const favoriteBarbers = uniqueById(
     (favorites || [])
@@ -301,7 +395,7 @@ export default function FavoritesPage() {
           onClick={() => setActiveTab("barbers")}
           type="button"
         >
-          Barbers
+          Specialists
         </button>
         <button
           className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
@@ -339,7 +433,7 @@ export default function FavoritesPage() {
       ) : activeTab === "barbers" && favoriteBarbers.length === 0 ? (
         <Card className="rounded-2xl sm:rounded-3xl">
           <CardContent className="p-5 text-neutral-500 sm:p-6">
-            No favorite barbers yet
+            No favorite specialists yet
           </CardContent>
         </Card>
       ) : activeTab === "salons" && favoriteSalons.length === 0 ? (
@@ -355,6 +449,36 @@ export default function FavoritesPage() {
             const startingPrice = getStartingPrice(services, barberId);
             const eligibleBooking = eligibleBookingByBarberId[barberId];
             const showBookAgain = Boolean(eligibleBooking);
+            const barberActiveServices = getActiveServicesForBarber(services, barberId);
+            const mainServices = barberActiveServices.slice(0, 3);
+            const uniqueCategories = getUniqueCategories(barberActiveServices);
+            const showCategoryChips = uniqueCategories.length > 1;
+            const hasBookableServices = barberActiveServices.length > 0;
+            const reviewStats = getReviewStatsFromReviews(reviews, barberId);
+            const availabilitySlot = firstAvailableSlotByBarberId[String(barberId)];
+            const availStatus = availabilityStatusByBarberId[String(barberId)];
+            const availabilityTone =
+              !hasBookableServices
+                ? "services"
+                : availStatus === "loading"
+                  ? "services"
+                  : availStatus === "unavailable"
+                    ? "none"
+                    : getAvailabilityTone(availabilitySlot);
+            const availabilityClass = {
+              today: "bg-emerald-50 text-emerald-700",
+              future: "bg-amber-50 text-amber-700",
+              none: "bg-red-50 text-red-700",
+              services: "bg-neutral-100 text-neutral-600",
+            }[availabilityTone];
+            const availabilityLabel =
+              !hasBookableServices
+                ? "No services yet"
+                : !availStatus
+                  ? "Checking availability..."
+                  : availStatus === "unavailable"
+                    ? "Schedule unavailable"
+                    : formatAvailabilityLabel(availabilitySlot);
 
             return (
               <Card key={barberId} className="rounded-2xl sm:rounded-3xl">
@@ -390,12 +514,78 @@ export default function FavoritesPage() {
                     </p>
                   </div>
 
+                  {/* Profession / specialty badge */}
+                  {(() => {
+                    const display = getSpecialistProfessionDisplay(barber);
+                    if (!display) return null;
+                    return (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${display.className}`}>
+                          {display.icon} {display.label}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Pricing */}
                   <p className="rounded-xl bg-neutral-50 p-3 text-sm font-semibold text-neutral-900">
                     {startingPrice
-                      ? `Starting from ${startingPrice.toLocaleString()} դրամ`
+                      ? `From ${startingPrice.toLocaleString()} դրամ`
                       : "No services yet"}
                   </p>
 
+                  {/* Review stars */}
+                  <div className="flex items-center gap-1.5 text-sm text-neutral-600">
+                    <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+                    {reviewStats.average ? (
+                      <span>
+                        <span className="font-semibold text-neutral-900">{reviewStats.average.toFixed(1)}</span>
+                        <span className="text-neutral-400"> · {reviewStats.count} {reviewStats.count === 1 ? "review" : "reviews"}</span>
+                      </span>
+                    ) : (
+                      <span className="text-neutral-400">No reviews yet</span>
+                    )}
+                  </div>
+
+                  {/* Service chips */}
+                  {mainServices.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5" aria-label="Services">
+                      {mainServices.map((service) => (
+                        <span
+                          className="inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700"
+                          key={service?.id || service?._id}
+                        >
+                          {service?.name || "Service"}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Category chips */}
+                  {showCategoryChips && (
+                    <div className="flex flex-wrap gap-1.5" aria-label="Service categories">
+                      {uniqueCategories
+                        .filter((c) => c !== "other")
+                        .slice(0, 3)
+                        .map((category) => (
+                          <span
+                            className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                            key={category}
+                          >
+                            {getServiceCategoryLabel(category)}
+                          </span>
+                        ))}
+                    </div>
+                  )}
+
+                  {/* Availability widget */}
+                  {availStatus !== undefined && (
+                    <div className={`rounded-xl px-3 py-2.5 text-sm font-medium ${availabilityClass}`}>
+                      {availabilityLabel}
+                    </div>
+                  )}
+
+                  {/* Actions */}
                   {showBookAgain ? (
                     <Button
                       className="w-full"
@@ -417,7 +607,7 @@ export default function FavoritesPage() {
                     as={Link}
                     className="w-full"
                     state={{ barber }}
-                    to={`/barbers/${barberId}/profile`}
+                    to={`/specialists/${barberId}/profile`}
                     variant="outline"
                   >
                     View Profile
@@ -494,7 +684,7 @@ export default function FavoritesPage() {
                   </div>
 
                   <p className="rounded-xl bg-neutral-50 p-3 text-sm font-semibold text-neutral-900">
-                    {barbers.length} {barbers.length === 1 ? "barber" : "barbers"}
+                    {barbers.length} {barbers.length === 1 ? "specialist" : "specialists"}
                   </p>
 
                   <p className="text-sm text-neutral-600">
@@ -512,7 +702,7 @@ export default function FavoritesPage() {
                     to={`/salons/${salonId}`}
                     variant="outline"
                   >
-                    View barbers
+                    View specialists
                   </Button>
                 </CardContent>
               </Card>

@@ -67,6 +67,8 @@ export default function BarberSettings({
     phone: currentUser?.phone || "",
     imageUrl: savedProfile?.imageUrl || currentUser?.avatarUrl || "",
     bio: savedProfile?.bio || "",
+    profession: savedProfile?.profession || currentUser?.profession || "barber",
+    barberType: savedProfile?.barberType || currentUser?.barberType || "",
     specialty: savedProfile?.specialty || currentUser?.specialty || "unisex",
   });
   // eslint-disable-next-line no-unused-vars
@@ -121,6 +123,8 @@ export default function BarberSettings({
           phone: data.phone || currentUser.phone || "",
           imageUrl: data.imageUrl || data.avatarUrl || "",
           bio: data.bio || "",
+          profession: data.profession || "barber",
+          barberType: data.barberType || "",
           specialty: data.specialty || "unisex",
         };
 
@@ -304,6 +308,8 @@ export default function BarberSettings({
         imageUrl: profile.imageUrl,
         avatarUrl: profile.imageUrl,
         bio: profile.bio,
+        profession: profile.profession,
+        barberType: profile.barberType,
         specialty: profile.specialty,
       });
       const nextProfile = {
@@ -331,6 +337,8 @@ export default function BarberSettings({
         phone: nextProfile.phone || "",
         imageUrl: nextProfile.imageUrl || nextProfile.avatarUrl || "",
         bio: nextProfile.bio || "",
+        profession: nextProfile.profession || profile.profession || "barber",
+        barberType: nextProfile.barberType || profile.barberType || "",
         specialty: nextProfile.specialty || profile.specialty || "unisex",
       });
       setProfileSaved(true);
@@ -371,6 +379,8 @@ export default function BarberSettings({
       phone: nextProfile.phone || "",
       imageUrl: nextProfile.imageUrl || nextProfile.avatarUrl || "",
       bio: nextProfile.bio || "",
+      profession: nextProfile.profession || profile.profession || "barber",
+      barberType: nextProfile.barberType || profile.barberType || "",
       specialty: nextProfile.specialty || profile.specialty || "unisex",
     });
     setProfileSaved(true);
