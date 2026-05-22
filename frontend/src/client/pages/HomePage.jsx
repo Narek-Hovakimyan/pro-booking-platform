@@ -23,7 +23,7 @@ const BENEFITS = [
   },
   {
     icon: UserRound,
-    title: "Compare barbers & salons",
+    title: "Compare specialists & salons",
     description:
       "View profiles, specialties, prices, and reviews to find the perfect match for your style.",
   },
@@ -45,9 +45,9 @@ const STEPS = [
   {
     step: 1,
     icon: UserRound,
-    title: "Choose a barber or salon",
+    title: "Choose a specialist or salon",
     description:
-      "Browse through barbers, check their work, read reviews, and find the right professional for you.",
+      "Browse through specialists, check their work, read reviews, and find the right professional for you.",
   },
   {
     step: 2,
@@ -61,7 +61,7 @@ const STEPS = [
     icon: CheckCheck,
     title: "Confirm your booking",
     description:
-      "Review your appointment details and confirm. You'll get a notification and can message your barber.",
+      "Review your appointment details and confirm. You'll get a notification and can message your specialist.",
   },
 ];
 
@@ -86,7 +86,7 @@ export default function HomePage({ startBooking }) {
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 backdrop-blur-sm">
               <Sparkles className="h-3.5 w-3.5 text-amber-400" />
               <span className="text-xs font-medium tracking-wide text-neutral-300">
-                Barber & salon booking platform
+                Salon & specialist booking platform
               </span>
             </div>
 
@@ -103,7 +103,7 @@ export default function HomePage({ startBooking }) {
 
             {/* Subtitle */}
             <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-neutral-400 sm:text-lg">
-              Browse barbers and salons in your city, check real-time availability,
+              Browse specialists and salons in your city, check real-time availability,
               read reviews, and book your appointment — all in one place.
             </p>
 
@@ -117,7 +117,7 @@ export default function HomePage({ startBooking }) {
                 to={canBook ? "/barbers" : "/register"}
               >
                 <Scissors className="mr-2 h-4 w-4" />
-                {canBook ? "Find a barber" : "Get started"}
+                {canBook ? "Find a specialist" : "Get started"}
               </Button>
               <Button
                 as={Link}
@@ -153,7 +153,7 @@ export default function HomePage({ startBooking }) {
             Why use HairBook?
           </h2>
           <p className="mt-2 text-neutral-500">
-            Everything you need for a seamless barber experience.
+            Everything you need for a seamless booking experience.
           </p>
         </div>
 
@@ -248,7 +248,7 @@ export default function HomePage({ startBooking }) {
               <ul className="space-y-2.5 text-sm text-neutral-600">
                 <li className="flex items-start gap-2.5">
                   <CheckCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                  Browse barbers and salons with real profiles and photos
+                  Browse specialists and salons with real profiles and photos
                 </li>
                 <li className="flex items-start gap-2.5">
                   <CheckCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
@@ -256,11 +256,11 @@ export default function HomePage({ startBooking }) {
                 </li>
                 <li className="flex items-start gap-2.5">
                   <CheckCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                  Message your barber directly
+                  Message your specialist directly
                 </li>
                 <li className="flex items-start gap-2.5">
                   <CheckCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                  Leave reviews and save your favorite barbers
+                  Leave reviews and save your favorite specialists
                 </li>
                 <li className="flex items-start gap-2.5">
                   <CheckCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
@@ -275,7 +275,7 @@ export default function HomePage({ startBooking }) {
                 size="lg"
                 to={canBook ? "/barbers" : "/register"}
               >
-                {canBook ? "Find a barber" : "Create client account"}
+                {canBook ? "Find a specialist" : "Create client account"}
               </Button>
             </CardContent>
           </Card>
@@ -289,7 +289,7 @@ export default function HomePage({ startBooking }) {
                   <Scissors className="h-5 w-5 text-blue-600" />
                 </div>
                 <h3 className="text-lg font-bold text-neutral-950">
-                  For barbers & salons
+                  For salon staff
                 </h3>
               </div>
 
@@ -324,7 +324,7 @@ export default function HomePage({ startBooking }) {
                   to="/register"
                   variant="outline"
                 >
-                  Create barber account
+                  Create staff account
                 </Button>
               ) : isBarber ? (
                 <Button
@@ -343,7 +343,7 @@ export default function HomePage({ startBooking }) {
                   to="/register"
                   variant="outline"
                 >
-                  Switch to barber account
+                  Switch to staff account
                 </Button>
               )}
             </CardContent>
@@ -362,7 +362,7 @@ export default function HomePage({ startBooking }) {
                 Ready to book?
               </h2>
               <p className="text-neutral-500">
-                Find your next barber or salon and book in seconds.
+                Find your next specialist or salon and book in seconds.
               </p>
               <Button
                 as={Link}

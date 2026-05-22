@@ -21,7 +21,7 @@ export default function BarbersGrid({
       <EmptyState
         className="border-red-200 bg-red-50 text-red-700"
         description={error}
-        title="Could not load barbers"
+        title="Could not load specialists"
       />
     );
   }
@@ -43,10 +43,10 @@ export default function BarbersGrid({
         description={
           hasActiveFilters
             ? "Try removing filters or searching a different name."
-            : "There are no barbers available right now."
+            : "There are no specialists available right now."
         }
         onAction={onResetFilters}
-        title="No barbers found"
+        title="No specialists found"
       />
     );
   }

@@ -207,7 +207,7 @@ export default function BookingPage({
         if (isMounted) {
           setError(
             requestError.response?.data?.message ||
-              "Cannot re-book because barber/service data is missing"
+              "Cannot re-book because specialist/service data is missing"
           );
         }
       } finally {
@@ -361,7 +361,7 @@ export default function BookingPage({
 
     if (!matchingService) {
       const resetId = window.setTimeout(() => {
-        setError("Cannot re-book because barber/service data is missing");
+        setError("Cannot re-book because specialist/service data is missing");
         setStep(2);
         setSelectedServiceId(null);
         setRebookContext(null);
@@ -446,7 +446,7 @@ export default function BookingPage({
   if (!barber && !isLoading && !isBarberLoading && isRebooking) {
     return (
       <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-        Cannot re-book because barber/service data is missing
+        Cannot re-book because specialist/service data is missing
       </p>
     );
   }

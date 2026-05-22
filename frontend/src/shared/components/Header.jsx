@@ -303,7 +303,7 @@ export default function Header() {
               to="/barbers"
               className={linkClass(pathname === "/barbers")}
             >
-              Barbers
+              Specialists
             </Link>
             <Link
               to="/salons"
@@ -477,7 +477,7 @@ export default function Header() {
             {/* Client mobile nav */}
             {isClient &&
               [
-                { label: "Barbers", to: "/barbers" },
+                { label: "Specialists", to: "/barbers" },
                 { label: "Salons", to: "/salons" },
                 { label: "Favorites", to: "/favorites" },
                 { label: "Bookings", to: "/my-bookings" },

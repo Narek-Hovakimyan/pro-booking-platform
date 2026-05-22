@@ -154,7 +154,7 @@ export default function BookingDetailsModal({
                   variant="outline"
                 >
                   <MessageCircle className="mr-2 h-4 w-4" />
-                  Message barber
+                  Message specialist
                 </Button>
               )}
               {canCancel && (

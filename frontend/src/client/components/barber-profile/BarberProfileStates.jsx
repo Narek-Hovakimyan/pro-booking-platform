@@ -27,7 +27,7 @@ export function BarberProfileNotFound() {
       <div className="rounded-2xl border border-neutral-200 bg-white p-8 text-center shadow-sm">
         <UserRound className="mx-auto h-12 w-12 text-neutral-300" />
         <p className="mt-4 text-lg font-semibold text-neutral-900">Profile not found</p>
-        <p className="mt-1 text-sm text-neutral-500">This barber does not exist or has been removed.</p>
+        <p className="mt-1 text-sm text-neutral-500">This specialist does not exist or has been removed.</p>
       </div>
     </div>
   );

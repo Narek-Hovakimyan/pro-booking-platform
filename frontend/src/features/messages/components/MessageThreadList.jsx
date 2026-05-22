@@ -63,7 +63,7 @@ export default function MessageThreadList({
           <EmptyState
             className="flex flex-1 flex-col items-center justify-center text-center"
             title="No messages yet"
-            description="Start from a barber profile or an existing booking."
+            description="Start from a specialist profile or an existing booking."
             action={
               userRole === "client" && onFindBarber ? (
                 <Button
@@ -71,7 +71,7 @@ export default function MessageThreadList({
                   onClick={onFindBarber}
                   variant="outline"
                 >
-                  Find a barber
+                  Find a specialist
                 </Button>
               ) : userRole === "barber" && onCheckBookings ? (
                 <Button
