@@ -14,8 +14,10 @@ export default function BarbersFiltersPanel({
   serviceNames = [],
   selectedCategory,
   onCategoryChange,
-  selectedSpecialty,
-  onSpecialtyChange,
+  selectedProfession,
+  onProfessionChange,
+  selectedBarberType,
+  onBarberTypeChange,
   priceRange,
   onPriceRangeChange,
   rating,
@@ -98,18 +100,39 @@ export default function BarbersFiltersPanel({
       </label>
 
       <label className="grid gap-2 text-sm font-semibold">
-        Specialty
+        Profession
         <select
           className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
-          value={selectedSpecialty}
-          onChange={(event) => onSpecialtyChange(event.target.value)}
+          value={selectedProfession}
+          onChange={(event) => onProfessionChange(event.target.value)}
         >
-          <option value="">All specialties</option>
-          <option value="men">Men's barber</option>
-          <option value="women">Women's hairdresser</option>
-          <option value="unisex">Unisex</option>
+          <option value="">All specialists</option>
+          <option value="barber">Barber</option>
+          <option value="hair_stylist">Hair stylist</option>
+          <option value="nail_master">Nail master</option>
+          <option value="makeup_artist">Makeup artist</option>
+          <option value="cosmetologist">Cosmetologist</option>
+          <option value="lash_brow">Lash & brow</option>
+          <option value="massage">Massage</option>
+          <option value="other">Other specialist</option>
         </select>
       </label>
+
+      {selectedProfession === "barber" && (
+        <label className="grid gap-2 text-sm font-semibold">
+          Barber type
+          <select
+            className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+            value={selectedBarberType}
+            onChange={(event) => onBarberTypeChange(event.target.value)}
+          >
+            <option value="">Any barber type</option>
+            <option value="men">Men's barber</option>
+            <option value="women">Women's hairdresser</option>
+            <option value="unisex">Unisex</option>
+          </select>
+        </label>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="grid gap-2 text-sm font-semibold">

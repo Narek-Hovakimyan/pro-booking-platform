@@ -8,6 +8,7 @@ import BarbersFiltersPanel from "@/client/components/barbers/BarbersFiltersPanel
 import BarbersGrid from "@/client/components/barbers/BarbersGrid";
 import { Button } from "@/shared/components/ui/button";
 import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
+import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import {
   addFavorite,
   removeFavorite,
@@ -121,6 +122,13 @@ function normalizeCardSummary(summary = {}) {
   };
 }
 
+function getNormalizedBarberType(barber) {
+  if (barber?.profession === "barber") {
+    return barber?.barberType || barber?.specialty || "unisex";
+  }
+  return "";
+}
+
 export default function BarbersPage() {
 
   const dispatch = useDispatch();
@@ -128,7 +136,8 @@ export default function BarbersPage() {
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedService, setSelectedService] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedSpecialty, setSelectedSpecialty] = useState("");
+  const [selectedProfession, setSelectedProfession] = useState("");
+  const [selectedBarberType, setSelectedBarberType] = useState("");
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
   const [rating, setRating] = useState("");
   const initialCardSummary = useMemo(
@@ -196,6 +205,7 @@ export default function BarbersPage() {
 
     return nextServicesByBarberId;
   }, [services]);
+
   useEffect(() => {
     let isMounted = true;
     const requestId = availabilityRequestId.current + 1;
@@ -303,7 +313,8 @@ export default function BarbersPage() {
     setSelectedCity("");
     setSelectedService("");
     setSelectedCategory("");
-    setSelectedSpecialty("");
+    setSelectedProfession("");
+    setSelectedBarberType("");
     setPriceRange({ min: "", max: "" });
     setRating("");
   };
@@ -312,7 +323,8 @@ export default function BarbersPage() {
     Boolean(selectedCity) ||
     Boolean(selectedService) ||
     Boolean(selectedCategory) ||
-    Boolean(selectedSpecialty) ||
+    Boolean(selectedProfession) ||
+    Boolean(selectedBarberType) ||
     Boolean(priceRange.min) ||
     Boolean(priceRange.max) ||
     Boolean(rating);
@@ -321,7 +333,8 @@ export default function BarbersPage() {
     (selectedCity ? 1 : 0) +
     (selectedService ? 1 : 0) +
     (selectedCategory ? 1 : 0) +
-    (selectedSpecialty ? 1 : 0) +
+    (selectedProfession ? 1 : 0) +
+    (selectedBarberType ? 1 : 0) +
     (priceRange.min || priceRange.max ? 1 : 0) +
     (rating ? 1 : 0);
   const filterChips = [
@@ -337,8 +350,17 @@ export default function BarbersPage() {
     selectedCategory
       ? { label: getServiceCategoryLabel(selectedCategory), onRemove: () => setSelectedCategory("") }
       : null,
-    selectedSpecialty
-      ? { label: selectedSpecialty === "men" ? "Men's barber" : selectedSpecialty === "women" ? "Women's hairdresser" : "Unisex", onRemove: () => setSelectedSpecialty("") }
+    selectedProfession
+      ? {
+          label: getSpecialistProfessionDisplay({ profession: selectedProfession, barberType: selectedBarberType || "" })?.label || selectedProfession,
+          onRemove: () => { setSelectedProfession(""); setSelectedBarberType(""); }
+        }
+      : null,
+    selectedBarberType && selectedProfession === "barber"
+      ? {
+          label: getSpecialistProfessionDisplay({ profession: "barber", barberType: selectedBarberType })?.label || selectedBarberType,
+          onRemove: () => setSelectedBarberType("")
+        }
       : null,
     priceRange.min
       ? { label: `Min ${priceRange.min}`, onRemove: () => updatePriceRange("min", "") }
@@ -448,8 +470,12 @@ export default function BarbersPage() {
           !priceRange.max || prices.some((price) => price <= maxPrice);
         const ratingMatches =
           !rating || reviewStats.average >= minRating;
-        const specialtyMatches =
-          !selectedSpecialty || barber?.specialty === selectedSpecialty;
+        const professionMatches =
+          !selectedProfession || barber?.profession === selectedProfession;
+        const normalizedBarberType = getNormalizedBarberType(barber);
+        const barberTypeMatches =
+          !selectedBarberType ||
+          (barber?.profession === "barber" && normalizedBarberType === selectedBarberType);
 
         return (
           searchMatches &&
@@ -459,10 +485,11 @@ export default function BarbersPage() {
           minMatches &&
           maxMatches &&
           ratingMatches &&
-          specialtyMatches
+          professionMatches &&
+          barberTypeMatches
         );
       }),
-    [barbers, priceRange.max, priceRange.min, rating, reviewStatsByBarberId, reviews, searchTerm, selectedCategory, selectedCity, selectedService, selectedSpecialty, servicesByBarberId]
+    [barbers, priceRange.max, priceRange.min, rating, reviewStatsByBarberId, reviews, searchTerm, selectedCategory, selectedCity, selectedBarberType, selectedProfession, selectedService, servicesByBarberId]
   );
   const barbersWithAvailability = useMemo(
     () =>
@@ -587,8 +614,15 @@ export default function BarbersPage() {
           serviceNames={serviceNames}
           selectedCategory={selectedCategory}
           onCategoryChange={setSelectedCategory}
-          selectedSpecialty={selectedSpecialty}
-          onSpecialtyChange={setSelectedSpecialty}
+          selectedProfession={selectedProfession}
+          onProfessionChange={(value) => {
+            setSelectedProfession(value);
+            if (value !== "barber") {
+              setSelectedBarberType("");
+            }
+          }}
+          selectedBarberType={selectedBarberType}
+          onBarberTypeChange={setSelectedBarberType}
           priceRange={priceRange}
           onPriceRangeChange={updatePriceRange}
           rating={rating}
