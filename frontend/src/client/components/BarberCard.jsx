@@ -66,9 +66,10 @@ export default function BarberCard({
     (service) => String(service?.barberId) === String(barberId) && service?.active
   );
   const mainServices = activeServices.slice(0, 3);
-  const mainCategories = Array.from(
+  const uniqueCategories = Array.from(
     new Set(activeServices.map((service) => service?.category || "other"))
-  ).slice(0, 3);
+  );
+  const showCategoryChips = uniqueCategories.length > 1;
   const hasBookableServices = activeServices.length > 0;
   const barberAvatarUrl = getBarberAvatarUrl(barber);
   const availabilityTone =
@@ -285,16 +286,19 @@ export default function BarberCard({
           </div>
         )}
 
-        {mainCategories.length > 0 && (
+        {showCategoryChips && (
           <div className="flex flex-wrap gap-1.5" aria-label="Service categories">
-            {mainCategories.map((category) => (
-              <span
-                className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
-                key={category}
-              >
-                {getServiceCategoryLabel(category)}
-              </span>
-            ))}
+            {uniqueCategories
+              .filter((c) => c !== "other")
+              .slice(0, 3)
+              .map((category) => (
+                <span
+                  className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                  key={category}
+                >
+                  {getServiceCategoryLabel(category)}
+                </span>
+              ))}
           </div>
         )}
 

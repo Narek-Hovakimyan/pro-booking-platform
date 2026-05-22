@@ -124,7 +124,7 @@ export default function SelectedSalonView({
               <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
                 <UserRound className="h-4 w-4 text-neutral-500" />
                 {selectedBarbers.length}{" "}
-                {selectedBarbers.length === 1 ? "barber" : "barbers"}
+                {selectedBarbers.length === 1 ? "specialist" : "specialists"}
               </p>
 
               <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
@@ -159,9 +159,9 @@ export default function SelectedSalonView({
       <div className="space-y-3">
         <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-xl font-bold">Barbers at {selectedSalon?.name}</h2>
+            <h2 className="text-xl font-bold">Specialists at {selectedSalon?.name}</h2>
             <p className="mt-1 text-sm text-neutral-500">
-              Select a barber to view their profile or book an appointment directly.
+              Select a specialist to view their profile or book an appointment directly.
             </p>
           </div>
           <label className="grid gap-1.5 text-sm font-semibold sm:w-56">
@@ -185,10 +185,10 @@ export default function SelectedSalonView({
           <EmptyState
             description={
               selectedCategory
-                ? "No approved barbers in this salon have active services in this category."
-                : "This salon does not have approved barbers yet."
+                ? "No approved specialists in this salon have active services in this category."
+                : "This salon does not have approved specialists yet."
             }
-            title={selectedCategory ? "No matching barbers" : "No barbers in this salon"}
+            title={selectedCategory ? "No matching specialists" : "No specialists in this salon"}
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

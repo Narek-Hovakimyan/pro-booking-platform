@@ -487,7 +487,7 @@ export default function SalonProfilePage() {
                   <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
                     <Store className="h-4 w-4 text-neutral-500" />
                     {barbersList.length}{" "}
-                    {barbersList.length === 1 ? "barber" : "barbers"}
+                    {barbersList.length === 1 ? "specialist" : "specialists"}
                   </p>
                   <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
                     <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
@@ -512,7 +512,7 @@ export default function SalonProfilePage() {
 
             {salonReviews.length === 0 ? (
               <EmptyState
-                description="No salon reviews yet. Book an appointment with one of our barbers and leave a review!"
+                description="No salon reviews yet. Book an appointment with one of our specialists and leave a review!"
                 title="No reviews yet"
               />
             ) : (
@@ -670,9 +670,9 @@ export default function SalonProfilePage() {
           <div className="space-y-3">
             <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-xl font-bold">Barbers at {salon?.name}</h2>
+                <h2 className="text-xl font-bold">Specialists at {salon?.name}</h2>
                 <p className="mt-1 text-sm text-neutral-500">
-                  Select a barber to view their profile or book an appointment.
+                  Select a specialist to view their profile or book an appointment.
                 </p>
               </div>
               <label className="grid gap-1.5 text-sm font-semibold sm:w-56">
@@ -696,10 +696,10 @@ export default function SalonProfilePage() {
               <EmptyState
                 description={
                   selectedStaffCategory
-                    ? "No approved barbers in this salon have active services in this category."
-                    : "This salon does not have approved barbers yet."
+                    ? "No approved specialists in this salon have active services in this category."
+                    : "This salon does not have approved specialists yet."
                 }
-                title={selectedStaffCategory ? "No matching barbers" : "No barbers in this salon"}
+                title={selectedStaffCategory ? "No matching specialists" : "No specialists in this salon"}
               />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

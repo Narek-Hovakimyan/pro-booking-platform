@@ -514,10 +514,10 @@ export default function BarbersPage() {
       <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Barbers
+            Specialists
           </h1>
           <p className="mt-2 text-neutral-500">
-            Find a barber, then choose an available appointment time.
+            Find a specialist, then choose an available appointment time.
           </p>
         </div>
 
@@ -549,7 +549,7 @@ export default function BarbersPage() {
 
       {refreshing && (
         <p className="rounded-xl bg-neutral-50 px-3 py-2 text-sm text-neutral-500">
-          Refreshing barbers...
+          Refreshing specialists...
         </p>
       )}
 
