@@ -1,4 +1,4 @@
-import Service from "../models/Service.js";
+import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 import { createCrudController } from "./crudController.js";
 
 export const serviceController = createCrudController(Service, "Service");
@@ -7,6 +7,40 @@ const isBarber = (user) => user?.role === "barber";
 
 const isBlankNumberInput = (value) =>
   value === null || (typeof value === "string" && !value.trim());
+
+const maxServiceTags = 10;
+const maxServiceTagLength = 32;
+
+const sanitizeTags = (tags) => {
+  if (tags === undefined) return { value: undefined };
+  if (!Array.isArray(tags)) return { error: "Tags must be an array" };
+
+  const nextTags = [];
+  const seenTags = new Set();
+
+  for (const tag of tags) {
+    if (typeof tag !== "string") {
+      return { error: "Tags must be strings" };
+    }
+
+    const normalizedTag = tag.trim().toLowerCase();
+
+    if (!normalizedTag) continue;
+    if (normalizedTag.length > maxServiceTagLength) {
+      return { error: `Tags must be ${maxServiceTagLength} characters or less` };
+    }
+    if (seenTags.has(normalizedTag)) continue;
+
+    seenTags.add(normalizedTag);
+    nextTags.push(normalizedTag);
+  }
+
+  if (nextTags.length > maxServiceTags) {
+    return { error: `Use ${maxServiceTags} tags or fewer` };
+  }
+
+  return { value: nextTags };
+};
 
 const validateServicePayload = (body, { partial = false } = {}) => {
   const source = body || {};
@@ -44,7 +78,24 @@ const validateServicePayload = (body, { partial = false } = {}) => {
   }
 
   if (source.description !== undefined) {
-    next.description = source.description;
+    next.description = String(source.description || "").trim();
+  }
+
+  if (!partial || source.category !== undefined) {
+    const category = String(source.category || "other").trim();
+
+    if (!SERVICE_CATEGORIES.includes(category)) {
+      return { error: "Invalid service category" };
+    }
+
+    next.category = category;
+  }
+
+  if (source.tags !== undefined) {
+    const { value, error } = sanitizeTags(source.tags);
+
+    if (error) return { error };
+    next.tags = value;
   }
 
   if (source.active !== undefined) {

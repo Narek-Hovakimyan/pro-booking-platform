@@ -4,7 +4,7 @@ import EventCertificate from "../models/EventCertificate.js";
 import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
+import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 import User from "../models/User.js";
 import { createCrudController } from "./crudController.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
@@ -95,6 +95,36 @@ const getReviewStatsByBarberId = (reviews = []) => {
   return result;
 };
 
+const normalizeSearchValue = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const serviceMatchesDiscoveryFilters = (service, filters) => {
+  if (!service?.active) return false;
+
+  const serviceName = normalizeSearchValue(service.name);
+  const category = normalizeSearchValue(service.category || "other");
+  const tags = Array.isArray(service.tags)
+    ? service.tags.map(normalizeSearchValue).filter(Boolean)
+    : [];
+
+  if (filters.category && category !== filters.category) {
+    return false;
+  }
+
+  if (filters.search) {
+    const search = filters.search;
+    const matchesName = serviceName.includes(search);
+    const matchesCategory = category.includes(search);
+    const matchesTag = tags.some((tag) => tag.includes(search));
+
+    if (!matchesName && !matchesCategory && !matchesTag) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const getApprovedSalonEntries = (barber, salonsById) => {
   const entries = [];
   const salons = Array.isArray(barber?.salons) ? barber.salons : [];
@@ -168,10 +198,24 @@ const getMainScheduleForBarber = ({ barber, profile, schedules }) => {
 
 export const getBarberCardSummary = async (req, res) => {
   try {
-    const selectedServiceName =
-      typeof req.query?.serviceName === "string"
-        ? req.query.serviceName.trim()
-        : "";
+    const selectedServiceName = normalizeSearchValue(req.query?.serviceName);
+    const selectedServiceCategory = normalizeSearchValue(req.query?.category);
+    const serviceSearch = normalizeSearchValue(req.query?.serviceSearch);
+
+    if (
+      selectedServiceCategory &&
+      !SERVICE_CATEGORIES.includes(selectedServiceCategory)
+    ) {
+      return res.status(400).json({ message: "Invalid service category" });
+    }
+
+    const discoveryFilters = {
+      category: selectedServiceCategory,
+      search: serviceSearch || selectedServiceName,
+    };
+    const hasDiscoveryFilters = Boolean(
+      discoveryFilters.category || discoveryFilters.search
+    );
     const barbers = await chainToArray(
       User.find({ role: "barber" }).select("-password")
     );
@@ -232,11 +276,18 @@ export const getBarberCardSummary = async (req, res) => {
       const primarySalon =
         approvedSalons.find((salon) => salon.isPrimary) || approvedSalons[0] || null;
       const barberServices = servicesByBarberId.get(barberId) || [];
-      const availabilityServices = selectedServiceName
-        ? barberServices.filter(
-            (service) =>
-              service?.active && service?.name === selectedServiceName
+      const matchingServices = hasDiscoveryFilters
+        ? barberServices.filter((service) =>
+            serviceMatchesDiscoveryFilters(service, discoveryFilters)
           )
+        : barberServices.filter((service) => service?.active);
+
+      if (hasDiscoveryFilters && matchingServices.length === 0) {
+        continue;
+      }
+
+      const availabilityServices = hasDiscoveryFilters
+        ? matchingServices
         : barberServices;
       const barberBookings = bookingsByBarberId.get(barberId) || [];
       const barberSchedules = schedulesByBarberId.get(barberId) || [];

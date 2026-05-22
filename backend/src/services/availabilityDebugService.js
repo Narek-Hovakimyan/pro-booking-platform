@@ -127,7 +127,7 @@ export const validateDebugRequest = ({ barberId, salonId, date, time, serviceId 
  * Load service and check availability.
  */
 export const loadDebugService = async ({ serviceId, barberId }) => {
-  const service = await Service.findOne({ _id: serviceId, barberId });
+  const service = await Service.findOne({ _id: serviceId, barberId, active: true });
 
   if (!service) {
     return { found: false, status: 400, message: "Service is not available for this barber" };

@@ -56,6 +56,8 @@ test("barber can create their own service using req.user._id", async () => {
         price: 0,
         duration: 20,
         active: true,
+        category: "beard",
+        tags: [" Trim ", "trim", "Line Up"],
       },
     },
     res
@@ -65,6 +67,8 @@ test("barber can create their own service using req.user._id", async () => {
   assert.equal(createdPayload.barberId, barberA._id);
   assert.equal(createdPayload.name, "Beard Trim");
   assert.equal(createdPayload.price, 0);
+  assert.equal(createdPayload.category, "beard");
+  assert.deepEqual(createdPayload.tags, ["trim", "line up"]);
   assert.equal(res.body.barberId, barberA._id);
 });
 
@@ -101,6 +105,9 @@ test("create validates required service fields", async () => {
     { name: "Cut", price: -1, duration: 30 },
     { name: "Cut", price: 5000, duration: 0 },
     { name: "Cut", price: 5000, duration: 30, active: "true" },
+    { name: "Cut", price: 5000, duration: 30, category: "fitness" },
+    { name: "Cut", price: 5000, duration: 30, tags: "trim" },
+    { name: "Cut", price: 5000, duration: 30, tags: ["a".repeat(33)] },
   ];
 
   Service.create = async () => {
@@ -142,7 +149,7 @@ test("only service owner barber can update a service", async () => {
     {
       user: barberA,
       params: { id: service._id },
-      body: { name: "Fresh Cut", price: 7000, duration: 45, active: false },
+    body: { name: "Fresh Cut", price: 7000, duration: 45, active: false },
     },
     res
   );
@@ -154,6 +161,36 @@ test("only service owner barber can update a service", async () => {
   assert.equal(res.body.active, false);
 });
 
+test("barber can update service category and tags", async () => {
+  const res = createResponse();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    save: async function save() {
+      return this;
+    },
+  };
+
+  Service.findById = async () => service;
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { category: "nails", tags: ["Gel", " manicure "] },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.category, "nails");
+  assert.deepEqual(res.body.tags, ["gel", "manicure"]);
+});
+
 test("update validates service fields when provided", async () => {
   const invalidBodies = [
     { name: " " },
@@ -162,6 +199,8 @@ test("update validates service fields when provided", async () => {
     { price: -1 },
     { duration: 0 },
     { active: "false" },
+    { category: "trainer" },
+    { tags: [42] },
   ];
 
   for (const body of invalidBodies) {

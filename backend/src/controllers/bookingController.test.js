@@ -528,6 +528,39 @@ test("client-created booking ignores accepted status and saves salonId", async (
   assert.equal(String(res.body.salonId), salonId);
 });
 
+test("booking only accepts active services owned by the selected barber", async () => {
+  const createdBookings = [];
+  let serviceQuery;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async (query) => {
+    serviceQuery = query;
+    return null;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Service is not available for this barber");
+  assert.deepEqual(serviceQuery, { _id: serviceId, barberId, active: true });
+  assert.equal(createdBookings.length, 0);
+});
+
 test("barber sees their own booking list", async () => {
   const booking = createMutableBooking();
   const res = createResponse();

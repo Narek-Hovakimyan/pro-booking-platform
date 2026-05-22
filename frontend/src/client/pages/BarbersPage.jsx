@@ -7,6 +7,7 @@ import Drawer from "@/shared/components/common/Drawer";
 import BarbersFiltersPanel from "@/client/components/barbers/BarbersFiltersPanel";
 import BarbersGrid from "@/client/components/barbers/BarbersGrid";
 import { Button } from "@/shared/components/ui/button";
+import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
 import {
   addFavorite,
   removeFavorite,
@@ -36,11 +37,11 @@ function getTodayDateKey() {
   return `${year}-${month}-${day}`;
 }
 
-function getServiceCacheKey(serviceName) {
-  return serviceName || "";
+function getServiceCacheKey(serviceName, category) {
+  return `${serviceName || ""}:${category || ""}`;
 }
 
-function isFreshCardSummaryCache(serviceName) {
+function isFreshCardSummaryCache(serviceName, category) {
   if (!barbersCardSummaryCache) return false;
 
   const now = Date.now();
@@ -48,7 +49,7 @@ function isFreshCardSummaryCache(serviceName) {
   return (
     now - barbersCardSummaryCache.fetchedAt < CARD_SUMMARY_CACHE_TTL_MS &&
     barbersCardSummaryCache.dateKey === getTodayDateKey() &&
-    barbersCardSummaryCache.serviceName === getServiceCacheKey(serviceName)
+    barbersCardSummaryCache.serviceName === getServiceCacheKey(serviceName, category)
   );
 }
 
@@ -126,15 +127,16 @@ export default function BarbersPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedService, setSelectedService] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSpecialty, setSelectedSpecialty] = useState("");
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
   const [rating, setRating] = useState("");
   const initialCardSummary = useMemo(
     () =>
-      isFreshCardSummaryCache(selectedService)
+      isFreshCardSummaryCache(selectedService, selectedCategory)
         ? normalizeCardSummary(barbersCardSummaryCache.data)
         : null,
-    [selectedService]
+    [selectedCategory, selectedService]
   );
   const [isLoading, setIsLoading] = useState(!initialCardSummary);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
@@ -198,7 +200,7 @@ export default function BarbersPage() {
     let isMounted = true;
     const requestId = availabilityRequestId.current + 1;
     availabilityRequestId.current = requestId;
-    const serviceName = getServiceCacheKey(selectedService);
+    const serviceName = getServiceCacheKey(selectedService, selectedCategory);
 
     function applyCardSummary(summary) {
       const normalizedSummary = normalizeCardSummary(summary);
@@ -215,7 +217,7 @@ export default function BarbersPage() {
     }
 
     async function fetchBarbers() {
-      if (isFreshCardSummaryCache(serviceName)) {
+      if (isFreshCardSummaryCache(selectedService, selectedCategory)) {
         applyCardSummary(barbersCardSummaryCache.data);
         setIsLoading(false);
         setError("");
@@ -250,7 +252,10 @@ export default function BarbersPage() {
       try {
         const [summaryResponse, favoritesResponse] = await Promise.all([
           api.get("/barbers/card-summary", {
-            params: selectedService ? { serviceName: selectedService } : {},
+            params: {
+              ...(selectedService ? { serviceName: selectedService } : {}),
+              ...(selectedCategory ? { category: selectedCategory } : {}),
+            },
           }),
           api.get("/favorites"),
         ]);
@@ -287,7 +292,7 @@ export default function BarbersPage() {
       isMounted = false;
       availabilityRequestId.current += 1;
     };
-  }, [dispatch, selectedService]);
+  }, [dispatch, selectedCategory, selectedService]);
 
   const updatePriceRange = (field, value) => {
     setPriceRange((currentRange) => ({ ...currentRange, [field]: value }));
@@ -297,6 +302,7 @@ export default function BarbersPage() {
     setSearchTerm("");
     setSelectedCity("");
     setSelectedService("");
+    setSelectedCategory("");
     setSelectedSpecialty("");
     setPriceRange({ min: "", max: "" });
     setRating("");
@@ -305,6 +311,7 @@ export default function BarbersPage() {
     Boolean(searchTerm.trim()) ||
     Boolean(selectedCity) ||
     Boolean(selectedService) ||
+    Boolean(selectedCategory) ||
     Boolean(selectedSpecialty) ||
     Boolean(priceRange.min) ||
     Boolean(priceRange.max) ||
@@ -313,6 +320,7 @@ export default function BarbersPage() {
     (searchTerm.trim() ? 1 : 0) +
     (selectedCity ? 1 : 0) +
     (selectedService ? 1 : 0) +
+    (selectedCategory ? 1 : 0) +
     (selectedSpecialty ? 1 : 0) +
     (priceRange.min || priceRange.max ? 1 : 0) +
     (rating ? 1 : 0);
@@ -325,6 +333,9 @@ export default function BarbersPage() {
       : null,
     selectedService
       ? { label: selectedService, onRemove: () => setSelectedService("") }
+      : null,
+    selectedCategory
+      ? { label: getServiceCategoryLabel(selectedCategory), onRemove: () => setSelectedCategory("") }
       : null,
     selectedSpecialty
       ? { label: selectedSpecialty === "men" ? "Men's barber" : selectedSpecialty === "women" ? "Women's hairdresser" : "Unisex", onRemove: () => setSelectedSpecialty("") }
@@ -417,6 +428,13 @@ export default function BarbersPage() {
           barberServices.some(
             (service) => service?.active && service?.name === selectedService
           );
+        const categoryMatches =
+          !selectedCategory ||
+          barberServices.some(
+            (service) =>
+              service?.active &&
+              (service?.category || "other") === selectedCategory
+          );
         const prices = getBarberPrices(barberServices, barberId);
         const minPrice = Number(priceRange.min);
         const maxPrice = Number(priceRange.max);
@@ -437,13 +455,14 @@ export default function BarbersPage() {
           searchMatches &&
           cityMatches &&
           serviceMatches &&
+          categoryMatches &&
           minMatches &&
           maxMatches &&
           ratingMatches &&
           specialtyMatches
         );
       }),
-    [barbers, priceRange.max, priceRange.min, rating, reviewStatsByBarberId, reviews, searchTerm, selectedCity, selectedService, selectedSpecialty, servicesByBarberId]
+    [barbers, priceRange.max, priceRange.min, rating, reviewStatsByBarberId, reviews, searchTerm, selectedCategory, selectedCity, selectedService, selectedSpecialty, servicesByBarberId]
   );
   const barbersWithAvailability = useMemo(
     () =>
@@ -566,6 +585,8 @@ export default function BarbersPage() {
           selectedService={selectedService}
           onServiceChange={setSelectedService}
           serviceNames={serviceNames}
+          selectedCategory={selectedCategory}
+          onCategoryChange={setSelectedCategory}
           selectedSpecialty={selectedSpecialty}
           onSpecialtyChange={setSelectedSpecialty}
           priceRange={priceRange}

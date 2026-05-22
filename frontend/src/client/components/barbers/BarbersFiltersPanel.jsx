@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 
 import FilterChip from "@/shared/components/common/FilterChip";
+import { serviceCategories } from "@/shared/data/serviceCategories";
 
 export default function BarbersFiltersPanel({
   searchTerm,
@@ -11,6 +12,8 @@ export default function BarbersFiltersPanel({
   selectedService,
   onServiceChange,
   serviceNames = [],
+  selectedCategory,
+  onCategoryChange,
   selectedSpecialty,
   onSpecialtyChange,
   priceRange,
@@ -73,6 +76,22 @@ export default function BarbersFiltersPanel({
           {serviceNames.map((serviceName) => (
             <option key={serviceName} value={serviceName}>
               {serviceName}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="grid gap-2 text-sm font-semibold">
+        Service category
+        <select
+          className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+          value={selectedCategory}
+          onChange={(event) => onCategoryChange(event.target.value)}
+        >
+          <option value="">All categories</option>
+          {serviceCategories.map((category) => (
+            <option key={category.value} value={category.value}>
+              {category.label}
             </option>
           ))}
         </select>

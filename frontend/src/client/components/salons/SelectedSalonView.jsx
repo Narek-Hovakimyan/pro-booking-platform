@@ -1,11 +1,24 @@
 import { Heart, MapPin, Phone, Star, UserRound } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import BarberCard from "@/client/components/BarberCard";
 import SalonReviewsList from "@/client/components/salons/SalonReviewsList";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { serviceCategories } from "@/shared/data/serviceCategories";
 import { getMediaUrl } from "@/shared/utils/media";
+
+const getBarberId = (barber) => barber?.id || barber?._id;
+
+const hasActiveServiceInCategory = (services, barberId, category) =>
+  !category ||
+  (services || []).some(
+    (service) =>
+      service?.active &&
+      String(service?.barberId) === String(barberId) &&
+      (service?.category || "other") === category
+  );
 
 export default function SelectedSalonView({
   currentUser,
@@ -27,6 +40,15 @@ export default function SelectedSalonView({
   selectedSalonReviewsCount,
   services,
 }) {
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const visibleBarbers = useMemo(
+    () =>
+      selectedBarbers.filter((barber) =>
+        hasActiveServiceInCategory(services, getBarberId(barber), selectedCategory)
+      ),
+    [selectedBarbers, selectedCategory, services]
+  );
+
   return (
     <div className="space-y-5">
       <Button variant="outline" onClick={onBack}>
@@ -135,21 +157,42 @@ export default function SelectedSalonView({
       </div>
 
       <div className="space-y-3">
-        <div>
-          <h2 className="text-xl font-bold">Barbers at {selectedSalon?.name}</h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            Select a barber to view their profile or book an appointment directly.
-          </p>
+        <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold">Barbers at {selectedSalon?.name}</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              Select a barber to view their profile or book an appointment directly.
+            </p>
+          </div>
+          <label className="grid gap-1.5 text-sm font-semibold sm:w-56">
+            Service category
+            <select
+              className="rounded-xl border border-neutral-200 bg-white px-3 py-2 font-normal"
+              value={selectedCategory}
+              onChange={(event) => setSelectedCategory(event.target.value)}
+            >
+              <option value="">All categories</option>
+              {serviceCategories.map((category) => (
+                <option key={category.value} value={category.value}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        {selectedBarbers.length === 0 ? (
+        {visibleBarbers.length === 0 ? (
           <EmptyState
-            description="This salon does not have approved barbers yet."
-            title="No barbers in this salon"
+            description={
+              selectedCategory
+                ? "No approved barbers in this salon have active services in this category."
+                : "This salon does not have approved barbers yet."
+            }
+            title={selectedCategory ? "No matching barbers" : "No barbers in this salon"}
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {selectedBarbers.map((barber) => (
+            {visibleBarbers.map((barber) => (
               <BarberCard
                 barber={barber}
                 bookingSalon={selectedSalon}

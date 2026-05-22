@@ -14,8 +14,19 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
+import {
+  getServiceCategoryLabel,
+  serviceCategories,
+} from "@/shared/data/serviceCategories";
 
-const emptyForm = { name: "", price: "", duration: "", description: "" };
+const emptyForm = {
+  name: "",
+  price: "",
+  duration: "",
+  description: "",
+  category: "other",
+  tags: "",
+};
 
 function formatPrice(price) {
   return Number(price).toLocaleString();
@@ -50,6 +61,8 @@ export default function ServicesManager({
       price: String(service.price ?? ""),
       duration: String(service.duration ?? ""),
       description: service.description || "",
+      category: service.category || "other",
+      tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
     });
     setModalError("");
     setShowModal(true);
@@ -70,6 +83,10 @@ export default function ServicesManager({
     const name = form.name.trim();
     const price = Number(form.price);
     const duration = Number(form.duration);
+    const tags = form.tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
 
     if (!name) {
       setModalError("Service name is required.");
@@ -93,6 +110,8 @@ export default function ServicesManager({
           price,
           duration,
           description: form.description.trim(),
+          category: form.category,
+          tags,
         });
         closeModal();
       } catch (err) {
@@ -101,7 +120,14 @@ export default function ServicesManager({
         );
       }
     } else {
-      await addService({ name, price: Number(price), duration: Number(duration), description: form.description.trim() });
+      await addService({
+        name,
+        price: Number(price),
+        duration: Number(duration),
+        description: form.description.trim(),
+        category: form.category,
+        tags,
+      });
       closeModal();
     }
   };
@@ -222,6 +248,9 @@ export default function ServicesManager({
                             </span>
                           )}
                         </div>
+                        <span className="mt-1 inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">
+                          {getServiceCategoryLabel(s.category || "other")}
+                        </span>
 
                         <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
                           <span className="inline-flex items-center gap-1 text-neutral-600">
@@ -237,6 +266,11 @@ export default function ServicesManager({
                         {s.description && (
                           <p className="mt-1.5 text-xs leading-relaxed text-neutral-400 line-clamp-2">
                             {s.description}
+                          </p>
+                        )}
+                        {Array.isArray(s.tags) && s.tags.length > 0 && (
+                          <p className="mt-1 text-xs text-neutral-400">
+                            {s.tags.slice(0, 4).join(", ")}
                           </p>
                         )}
                       </div>
@@ -412,6 +446,36 @@ export default function ServicesManager({
                   </div>
                 </label>
               </div>
+
+              <label className="grid gap-1.5 text-sm font-semibold">
+                Category
+                <select
+                  className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                  disabled={isSaving}
+                  value={form.category}
+                  onChange={(e) => handleFieldChange("category", e.target.value)}
+                >
+                  {serviceCategories.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1.5 text-sm font-semibold">
+                Tags
+                <span className="text-xs font-normal text-neutral-400">
+                  Optional comma-separated search terms
+                </span>
+                <input
+                  className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                  placeholder="e.g. manicure, gel, bridal"
+                  disabled={isSaving}
+                  value={form.tags}
+                  onChange={(e) => handleFieldChange("tags", e.target.value)}
+                />
+              </label>
 
               <label className="grid gap-1.5 text-sm font-semibold">
                 Description

@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import SalonListModal from "@/client/components/SalonListModal";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
 import { formatAvailabilityLabel, getAvailabilityTone } from "@/shared/utils/availability";
 import { getMediaUrl } from "@/shared/utils/media";
 
@@ -65,6 +66,9 @@ export default function BarberCard({
     (service) => String(service?.barberId) === String(barberId) && service?.active
   );
   const mainServices = activeServices.slice(0, 3);
+  const mainCategories = Array.from(
+    new Set(activeServices.map((service) => service?.category || "other"))
+  ).slice(0, 3);
   const hasBookableServices = activeServices.length > 0;
   const barberAvatarUrl = getBarberAvatarUrl(barber);
   const availabilityTone =
@@ -276,6 +280,19 @@ export default function BarberCard({
                 key={service?.id || service?._id}
               >
                 {service?.name || "Service"}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {mainCategories.length > 0 && (
+          <div className="flex flex-wrap gap-1.5" aria-label="Service categories">
+            {mainCategories.map((category) => (
+              <span
+                className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                key={category}
+              >
+                {getServiceCategoryLabel(category)}
               </span>
             ))}
           </div>

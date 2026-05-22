@@ -362,7 +362,7 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    const service = await Service.findOne({ _id: serviceId, barberId });
+    const service = await Service.findOne({ _id: serviceId, barberId, active: true });
 
     if (!service) {
       return res.status(400).json({

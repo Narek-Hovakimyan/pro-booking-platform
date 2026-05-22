@@ -233,6 +233,8 @@ export default function App() {
     const price = serviceData?.price ?? newService.price;
     const duration = serviceData?.duration ?? newService.duration;
     const description = serviceData?.description || "";
+    const category = serviceData?.category || "other";
+    const tags = Array.isArray(serviceData?.tags) ? serviceData.tags : [];
 
     const serviceDuration = Number(duration);
 
@@ -256,6 +258,8 @@ export default function App() {
         price: Number(price),
         duration: serviceDuration,
         description,
+        category,
+        tags,
         active: true,
       });
 

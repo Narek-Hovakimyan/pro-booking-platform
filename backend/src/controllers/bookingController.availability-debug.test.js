@@ -134,6 +134,23 @@ test("debugBookingAvailability returns JSON result on success", async () => {
   assert.deepEqual(res.body.blockingBookings, []);
 });
 
+test("debugBookingAvailability rejects inactive services like booking creation", async () => {
+  const res = createResponse();
+  let serviceQuery;
+
+  mockSuccessfulDebugDependencies();
+  Service.findOne = async (query) => {
+    serviceQuery = query;
+    return null;
+  };
+
+  await debugBookingAvailability(createDebugRequest(), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Service is not available for this barber");
+  assert.deepEqual(serviceQuery, { _id: serviceId, barberId, active: true });
+});
+
 test("POST /availability-debug route is registered before generic POST routes", () => {
   const postPaths = bookingRoutes.stack
     .filter((layer) => layer.route?.methods?.post)

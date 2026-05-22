@@ -1,5 +1,18 @@
 import mongoose from "mongoose";
 
+export const SERVICE_CATEGORIES = [
+  "haircut",
+  "hair-color",
+  "styling",
+  "beard",
+  "nails",
+  "makeup",
+  "cosmetology",
+  "lashes-brows",
+  "massage",
+  "other",
+];
+
 const serviceSchema = new mongoose.Schema(
   {
     barberId: {
@@ -26,6 +39,15 @@ const serviceSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    category: {
+      type: String,
+      enum: SERVICE_CATEGORIES,
+      default: "other",
+    },
+    tags: {
+      type: [String],
+      default: [],
     },
     active: {
       type: Boolean,

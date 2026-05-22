@@ -272,6 +272,97 @@ test("card summary returns barber card data without per-barber requests", async 
   assert.equal(res.body.availability[0].status, "ready");
 });
 
+test("card summary filters specialists by active service category and tags", async () => {
+  const res = createResponse();
+  const salonId = "64b000000000000000000010";
+  const nailBarberId = "64b000000000000000000011";
+  const hairBarberId = "64b000000000000000000012";
+  const makeBarber = (barberId, name) => ({
+    _id: barberId,
+    name,
+    phone: "100",
+    city: "City",
+    role: "barber",
+    salonStatus: "none",
+    salons: [
+      {
+        salon: salonId,
+        status: "approved",
+        isPrimary: true,
+        defaultSchedule: {
+          startTime: "00:00",
+          endTime: "23:59",
+          hasBreak: false,
+        },
+      },
+    ],
+  });
+  const salon = {
+    _id: salonId,
+    name: "Salon",
+    toObject() {
+      return { _id: salonId, name: "Salon" };
+    },
+  };
+
+  User.find = () => createFindChain([
+    makeBarber(nailBarberId, "Nail Specialist"),
+    makeBarber(hairBarberId, "Hair Specialist"),
+  ]);
+  BarberProfile.find = () => createFindChain([]);
+  Salon.find = () => createFindChain([salon]);
+  Service.find = () => createFindChain([
+    {
+      _id: "service-nails",
+      barberId: nailBarberId,
+      name: "Gel Manicure",
+      category: "nails",
+      tags: ["gel"],
+      price: 100,
+      duration: 20,
+      active: true,
+    },
+    {
+      _id: "service-inactive",
+      barberId: hairBarberId,
+      name: "Nail Repair",
+      category: "nails",
+      tags: ["repair"],
+      price: 100,
+      duration: 20,
+      active: false,
+    },
+    {
+      _id: "service-hair",
+      barberId: hairBarberId,
+      name: "Haircut",
+      category: "haircut",
+      tags: ["cut"],
+      price: 100,
+      duration: 20,
+      active: true,
+    },
+  ]);
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([]);
+
+  await getBarberCardSummary({ query: { category: "nails", serviceName: "gel" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.barbers.map((barber) => barber.id), [nailBarberId]);
+  assert.deepEqual(res.body.services.map((service) => service._id), ["service-nails"]);
+});
+
+test("card summary rejects invalid service category query", async () => {
+  const res = createResponse();
+
+  await getBarberCardSummary({ query: { category: "fitness" } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid service category");
+});
+
 test("update certification rejects issue date that would invalidate existing expiry", async () => {
   const res = createResponse();
   const profile = createProfileWithCert();
