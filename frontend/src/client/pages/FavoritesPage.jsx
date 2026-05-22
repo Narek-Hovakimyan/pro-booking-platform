@@ -119,6 +119,10 @@ export default function FavoritesPage() {
   const [error, setError] = useState("");
   const [firstAvailableSlotByBarberId, setFirstAvailableSlotByBarberId] = useState({});
   const [availabilityStatusByBarberId, setAvailabilityStatusByBarberId] = useState({});
+  const [summaryBarbersById, setSummaryBarbersById] = useState({});
+  const [summaryServicesByBarberId, setSummaryServicesByBarberId] = useState({});
+  const [summaryReviewStatsByBarberId, setSummaryReviewStatsByBarberId] = useState({});
+  const [hasLoadedCardSummary, setHasLoadedCardSummary] = useState(false);
   const { currentUser } = useSelector((state) => state.auth);
   const users = useSelector((state) => state.users);
   const services = useSelector((state) => state.services);
@@ -200,7 +204,7 @@ export default function FavoritesPage() {
     dispatch(fetchClientBookings(currentUser.id));
   }, [currentUser?.id, dispatch]);
 
-  // Non-blocking card-summary fetch for enriched availability
+  // Non-blocking card-summary fetch for enriched barber data, services, review stats, and availability
   useEffect(() => {
     if (!currentUser?.id) return;
 
@@ -211,6 +215,33 @@ export default function FavoritesPage() {
         const { data } = await api.get("/barbers/card-summary");
         if (!isMounted) return;
 
+        // Build barber map by id for merging with favorite barbers
+        const barbersById = {};
+        (data.barbers || []).forEach((barber) => {
+          const bid = String(getBarberId(barber) || "");
+          if (bid) barbersById[bid] = barber;
+        });
+        setSummaryBarbersById(barbersById);
+
+        // Build services map by barberId
+        const servicesByBarberId = {};
+        (data.services || []).forEach((service) => {
+          const bid = String(service.barberId || "");
+          if (!bid) return;
+          if (!servicesByBarberId[bid]) servicesByBarberId[bid] = [];
+          servicesByBarberId[bid].push(service);
+        });
+        setSummaryServicesByBarberId(servicesByBarberId);
+
+        // Build review stats map by barberId
+        const reviewStatsByBarberId = {};
+        (data.reviewStats || []).forEach((stat) => {
+          const bid = String(stat.barberId || "");
+          if (bid) reviewStatsByBarberId[bid] = stat;
+        });
+        setSummaryReviewStatsByBarberId(reviewStatsByBarberId);
+
+        // Build availability maps
         const availabilityItems = mapByBarberId(data.availability || []);
         setFirstAvailableSlotByBarberId(
           Object.fromEntries(
@@ -233,6 +264,10 @@ export default function FavoritesPage() {
         );
       } catch {
         // Card-summary is best-effort enrichment; fall through silently.
+      } finally {
+        if (isMounted) {
+          setHasLoadedCardSummary(true);
+        }
       }
     }
 
@@ -250,14 +285,18 @@ export default function FavoritesPage() {
           favorite?.type !== "salon" &&
           String(favorite.clientId) === String(currentUser?.id)
       )
-      .map((favorite) =>
-        favorite.barber ||
-        users.find(
+      .map((favorite) => {
+        const barberFromFavorite = favorite.barber;
+        const barberFromRedux = users.find(
           (user) =>
             user.role === "barber" &&
             String(user.id) === String(favorite.barberId)
-        )
-      )
+        );
+        const barberId = barberFromFavorite?.id || barberFromFavorite?._id || barberFromRedux?.id || barberFromRedux?._id || String(favorite.barberId);
+        const summaryBarber = summaryBarbersById[String(barberId)];
+        // Merge: card-summary data is always freshest, fallback to favorite, then Redux
+        return { ...(barberFromFavorite || barberFromRedux), ...summaryBarber, id: summaryBarber?.id || summaryBarber?._id || barberId };
+      })
       .filter(Boolean)
   );
   const favoriteSalons = uniqueById(
@@ -446,15 +485,17 @@ export default function FavoritesPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {favoriteBarbers.map((barber) => {
             const barberId = barber?.id || barber?._id;
-            const startingPrice = getStartingPrice(services, barberId);
+            const bid = String(barberId);
+            const favServices = summaryServicesByBarberId[bid] || services;
+            const startingPrice = getStartingPrice(favServices, barberId);
             const eligibleBooking = eligibleBookingByBarberId[barberId];
             const showBookAgain = Boolean(eligibleBooking);
-            const barberActiveServices = getActiveServicesForBarber(services, barberId);
+            const barberActiveServices = getActiveServicesForBarber(favServices, barberId);
             const mainServices = barberActiveServices.slice(0, 3);
             const uniqueCategories = getUniqueCategories(barberActiveServices);
             const showCategoryChips = uniqueCategories.length > 1;
             const hasBookableServices = barberActiveServices.length > 0;
-            const reviewStats = getReviewStatsFromReviews(reviews, barberId);
+            const reviewStats = summaryReviewStatsByBarberId[bid] || getReviewStatsFromReviews(reviews, barberId);
             const availabilitySlot = firstAvailableSlotByBarberId[String(barberId)];
             const availStatus = availabilityStatusByBarberId[String(barberId)];
             const availabilityTone =
@@ -578,8 +619,8 @@ export default function FavoritesPage() {
                     </div>
                   )}
 
-                  {/* Availability widget */}
-                  {availStatus !== undefined && (
+                  {/* Availability widget — only show after card-summary loads */}
+                  {hasLoadedCardSummary && availStatus !== undefined && (
                     <div className={`rounded-xl px-3 py-2.5 text-sm font-medium ${availabilityClass}`}>
                       {availabilityLabel}
                     </div>

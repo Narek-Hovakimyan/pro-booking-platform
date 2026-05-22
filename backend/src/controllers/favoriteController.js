@@ -3,7 +3,7 @@ import SalonFavorite from "../models/SalonFavorite.js";
 import User from "../models/User.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 
-const userFields = "name phone role city salonName imageUrl";
+const userFields = "name phone role city salonName imageUrl profession barberType specialty";
 const salonFields = "name city address phone imageUrl";
 
 const requireClient = (req, res) => {

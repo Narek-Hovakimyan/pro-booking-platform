@@ -301,6 +301,9 @@ export default function BarberProfilePage() {
           phone: nextProfile.phone,
           city: nextProfile.city,
           avatarUrl: nextProfile.avatarUrl,
+          profession: nextProfile.profession,
+          barberType: nextProfile.barberType,
+          specialty: nextProfile.specialty,
         })
       );
       setProfile(nextProfile);
@@ -341,6 +344,9 @@ export default function BarberProfilePage() {
         phone: nextProfile.phone,
         city: nextProfile.city,
         avatarUrl: nextProfile.avatarUrl,
+        profession: nextProfile.profession,
+        barberType: nextProfile.barberType,
+        specialty: nextProfile.specialty,
       })
     );
     setProfile(nextProfile);

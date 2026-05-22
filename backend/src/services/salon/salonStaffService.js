@@ -51,7 +51,7 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
       { "salons.salon": salon._id, "salons.status": "approved" },
       { salon: salon._id, salonStatus: "approved" },
     ],
-  }).select("name avatarUrl specialty city role salons salon salonStatus");
+  }).select("name avatarUrl specialty profession barberType city role salons salon salonStatus");
 
   // Enrich with BarberProfile data
   const profiles = await BarberProfile.find({
@@ -80,6 +80,8 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
       name: user.name,
       avatarUrl: user.avatarUrl || "",
       imageUrl: profile?.imageUrl || user.avatarUrl || "",
+      profession: user.profession || "barber",
+      barberType: user.barberType || "",
       specialty: user.specialty || "unisex",
       city: profile?.city || user.city || "",
       bio: profile?.bio || "",
