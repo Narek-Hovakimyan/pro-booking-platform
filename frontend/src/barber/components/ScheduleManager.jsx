@@ -798,27 +798,6 @@ export default function ScheduleManager({
         onOpenDrawer={openDrawer}
       />
 
-      {/* ─── Error Display ─── */}
-      {displayError && (
-        <div
-          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-          role="alert"
-        >
-          <strong className="block font-semibold">Error</strong>
-          <p className="mt-1">{displayError}</p>
-        </div>
-      )}
-
-      {/* ─── Success Message ─── */}
-      {saveSuccess && (
-        <div
-          className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700"
-          role="status"
-        >
-          {saveSuccess}
-        </div>
-      )}
-
       {/* ─── Loading State ─── */}
       {isLoadingEffective ? (
         <ScheduleSkeleton />
@@ -833,7 +812,27 @@ export default function ScheduleManager({
         </Card>
       ) : (
         <>
+          {/* ─── Inline Status Banner ─── */}
+          {displayError && (
+            <div
+              className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+              role="alert"
+            >
+              <strong className="block font-semibold">Error</strong>
+              <p className="mt-1">{displayError}</p>
+            </div>
+          )}
+          {saveSuccess && (
+            <div
+              className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700"
+              role="status"
+            >
+              {saveSuccess}
+            </div>
+          )}
+
           <ScheduleWeeklyHours
+
             defaultSchedule={currentDefaultSchedule}
             weeklySchedule={effectiveSchedule.weeklySchedule}
           />

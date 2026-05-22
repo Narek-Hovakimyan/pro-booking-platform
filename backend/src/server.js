@@ -36,6 +36,11 @@ const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
+
+if (process.env.TRUST_PROXY === "true") {
+  app.set("trust proxy", 1);
+}
+
 const clientOrigins = (process.env.CLIENT_URL || "")
   .split(",")
   .map((origin) => origin.trim())

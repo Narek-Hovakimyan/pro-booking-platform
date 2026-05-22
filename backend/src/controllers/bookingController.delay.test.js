@@ -61,6 +61,8 @@ test("accepted booking can delay 10 minutes if slot is free", async () => {
   assert.equal(res.body.time, "10:10");
   assert.equal(res.body.bookingDate, bookingDate);
   assert.equal(res.body.reminderSentAt, null);
+  assert.equal(res.body.delayMinutesTotal, 10);
+  assert.ok(res.body.delayedAt);
   assert.equal(booking.time, "10:10");
 });
 
@@ -83,6 +85,8 @@ test("accepted booking can delay 20 minutes if slot is free", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.time, "10:20");
+  assert.equal(res.body.delayMinutesTotal, 20);
+  assert.ok(res.body.delayedAt);
 });
 
 test("booking delay is blocked if the next booking overlaps", async () => {
@@ -509,4 +513,130 @@ test("booking delay handles invalid booking time and date with 400", async () =>
 
   assert.equal(invalidDateResponse.statusCode, 400);
   assert.equal(invalidDateResponse.body.message, "bookingDate must be YYYY-MM-DD");
+});
+
+// ── Policy: one delay per booking ──────────────────────────────────────
+
+test("booking with delayMinutesTotal > 0 cannot be delayed again", async () => {
+  const booking = createMutableBooking({
+    status: "accepted",
+    delayMinutesTotal: 10,
+    delayedAt: new Date(),
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await delayBooking(
+    { user: client, params: { id: booking._id }, body: { delayMinutes: 10 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "This booking has already been delayed.");
+});
+
+test("booking with delayedAt set cannot be delayed again", async () => {
+  const booking = createMutableBooking({
+    status: "accepted",
+    delayMinutesTotal: 0,
+    delayedAt: new Date(),
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await delayBooking(
+    { user: client, params: { id: booking._id }, body: { delayMinutes: 20 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "This booking has already been delayed.");
+});
+
+// ── Policy: max 20 minute total delay ──────────────────────────────────
+
+test("booking delay rejects values that would exceed 20 minute total cap (already delayed 10)", async () => {
+  const booking = createMutableBooking({
+    status: "accepted",
+    delayMinutesTotal: 10,
+    delayedAt: new Date(),
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await delayBooking(
+    { user: client, params: { id: booking._id }, body: { delayMinutes: 20 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "This booking has already been delayed.");
+});
+
+// ── Policy: grace window after appointment start ───────────────────────
+
+test("booking delay is blocked when outside grace window (past appointment + 5 min)", async () => {
+  const booking = createMutableBooking({
+    status: "accepted",
+    bookingDate: "2020-01-15",
+    time: "10:00",
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await delayBooking(
+    { user: client, params: { id: booking._id }, body: { delayMinutes: 10 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "This booking can no longer be delayed.");
+});
+
+// ── Policy: concurrency guard on findOneAndUpdate ($or condition) ─────
+
+test("second concurrent delay attempt fails when first already applied delayMinutesTotal", async () => {
+  const storedBooking = createMutableBooking({
+    status: "accepted",
+    time: "10:00",
+  });
+  let firstDone = false;
+  const res1 = createResponse();
+  const res2 = createResponse();
+
+  // findById reads the booking each time; first succeeds, second sees it already has delay
+  Booking.findById = async () => {
+    if (firstDone) {
+      return createMutableBooking({
+        ...storedBooking,
+        _id: storedBooking._id,
+        status: "accepted",
+        time: "10:00",
+        delayMinutesTotal: 10,
+        delayedAt: new Date(),
+      });
+    }
+    return storedBooking;
+  };
+  mockDelayDependencies([], storedBooking);
+  Notification.create = async (payload) => payload;
+
+  await delayBooking(
+    { user: client, params: { id: storedBooking._id }, body: { delayMinutes: 10 } },
+    res1
+  );
+  firstDone = true;
+
+  await delayBooking(
+    { user: client, params: { id: storedBooking._id }, body: { delayMinutes: 10 } },
+    res2
+  );
+
+  assert.equal(res1.statusCode, 200);
+  assert.equal(res2.statusCode, 400);
+  assert.equal(res2.body.message, "This booking has already been delayed.");
 });

@@ -67,19 +67,20 @@ export default function ScheduleDateOverrideEditor({
                   {formatDateLabel(selectedDateObject)}
                 </h3>
                 {isNonWorkingDay && (
-                  <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                  <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700 shadow-sm ring-1 ring-red-200">
                     Day off
                   </span>
                 )}
                 {hasCustomHours && !isNonWorkingDay && (
-                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                  <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-700 shadow-sm ring-1 ring-amber-200">
                     Custom
                   </span>
                 )}
                 {!hasCustomHours && !isNonWorkingDay && (
-                  <span className="inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-500">
+                  <span className="inline-flex items-center rounded-full bg-neutral-100 px-3 py-1 text-sm font-semibold text-neutral-600 shadow-sm ring-1 ring-neutral-200">
                     Default
                   </span>
+
                 )}
               </div>
               <p className="mt-0.5 text-xs text-neutral-400">{selectedDateKey}</p>
@@ -99,12 +100,12 @@ export default function ScheduleDateOverrideEditor({
 
           <div className="mt-4 border-b border-neutral-100 pb-4">
             <label className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium">Barber works this date</span>
+              <span className="text-sm font-medium">Specialist works this date</span>
               <button
                 type="button"
                 role="switch"
                 aria-checked={activeDraft.isWorking}
-                aria-label="Toggle barber works this date"
+                aria-label="Toggle specialist works this date"
                 disabled={isSaving}
                 onClick={() => onUpdateDraft("isWorking", !activeDraft.isWorking)}
                 className={cn(
@@ -123,6 +124,7 @@ export default function ScheduleDateOverrideEditor({
               </button>
             </label>
           </div>
+
 
           {activeDraft.isWorking ? (
             <div className="mt-4 space-y-4">
@@ -177,30 +179,30 @@ export default function ScheduleDateOverrideEditor({
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold text-neutral-700">Break time</h4>
-                  <label className="inline-flex items-center gap-2 text-sm font-medium">
+                  {isBreakEnabled ? (
                     <button
                       type="button"
-                      role="switch"
-                      aria-checked={isBreakEnabled}
-                      aria-label="Toggle break time"
+                      onClick={() => onToggleBreakTime(false)}
                       disabled={isSaving}
-                      onClick={() => onToggleBreakTime(!isBreakEnabled)}
-                      className={cn(
-                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
-                        "focus:outline-none focus:ring-2 focus:ring-neutral-900/20 focus:ring-offset-2",
-                        "disabled:cursor-not-allowed disabled:opacity-50",
-                        isBreakEnabled ? "bg-neutral-900" : "bg-neutral-200"
-                      )}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+                      aria-label="Remove break time"
                     >
-                      <span
-                        className={cn(
-                          "inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
-                          isBreakEnabled ? "translate-x-4" : "translate-x-0.5"
-                        )}
-                      />
+                      Remove break
                     </button>
-                    <span>Add break</span>
-                  </label>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onToggleBreakTime(true)}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 shadow-sm transition hover:bg-neutral-50 disabled:opacity-50"
+                      aria-label="Add break time"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add break
+                    </button>
+                  )}
                 </div>
                 {isBreakEnabled && (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -250,6 +252,7 @@ export default function ScheduleDateOverrideEditor({
                   Break time will not be available for bookings.
                 </p>
               </div>
+
 
               {fieldErrors.general && (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">

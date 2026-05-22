@@ -196,7 +196,7 @@ npm run dev               # starts Vite dev server on port 5173
 
 ## Testing Checklist
 
-- [ ] Backend: `npm test` (117 tests covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, socket auth, availability)
+- [ ] Backend: `npm test` (616 tests covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, socket auth, availability)
 - [ ] Frontend lint: `npm run lint`
 - [ ] Frontend build: `npm run build`
 
@@ -290,22 +290,109 @@ Services and helpers extracted for:
 
 ---
 
+## Deployment
+
+The frontend and backend can be deployed separately. The backend is a Node.js/Express server; the frontend is a static SPA built with Vite.
+
+### Backend deploy
+
+```bash
+cd backend
+npm ci                 # clean install from lockfile
+npm test               # verify build — requires local MongoDB (see note below)
+npm start              # starts Node.js server
+```
+
+> **Note:** `npm test` requires a running MongoDB instance accessible at the `MONGO_URI` configured in your `.env` (or a local default). Some tests (e.g. `src/models/User.test.js`) connect to the database directly.
+
+### Frontend deploy
+
+```bash
+cd frontend
+npm ci                 # clean install from lockfile
+npm run build          # produces static output in dist/
+```
+
+Then serve `frontend/dist/` with any static file server, ensuring **SPA fallback** so that React Router handles client-side routes.
+
+#### SPA fallback requirement
+
+The app uses browser-history routing (not hash routing). Deep-linked routes like:
+
+- `/specialists`
+- `/specialists/:id/profile`
+- `/favorites`
+- `/my-bookings`
+- `/booking/:barberId`
+
+must all fall back to serving `index.html`. If the web server returns 404 for these paths, the app will break on page reload or direct navigation.
+
+**Example nginx config:**
+
+```nginx
+server {
+  listen 80;
+  server_name app.example.com;
+  root /path/to/frontend/dist;
+
+  location / {
+    try_files $uri /index.html;
+  }
+}
+```
+
+**Example Caddyfile:**
+
+```
+app.example.com {
+  root * /path/to/frontend/dist
+  try_files {path} /index.html
+  file_server
+}
+```
+
+### Upload persistence
+
+The backend stores uploaded files (avatars, certification images, event images, certificate files) on local disk under `backend/uploads/`. This is **not suitable for multi-instance production deployments** because each instance has its own local filesystem.
+
+For production:
+- Use a shared filesystem (NFS, EFS) mounted at `backend/uploads/`, **or**
+- Replace the multer disk storage with cloud object storage (S3, GCS, R2) and update `getMediaUrl()` and the static middleware accordingly.
+- Ensure the directory is writable by the server process.
+
+### Version control notes
+
+- Always commit `package-lock.json` to ensure reproducible installs.
+- Never commit `.env` files — they contain secrets.
+- `node_modules/`, `dist/`, and `backend/uploads/` are already excluded via `.gitignore`.
+
+### Quick reference: env variables to set before building
+
+| Context | Variable | Example |
+|---|---|---|
+| Frontend build | `VITE_API_URL` | `https://api.example.com/api` |
+| Frontend build | `VITE_SOCKET_URL` | `https://api.example.com` |
+| Frontend build | `VITE_API_ORIGIN` | `https://api.example.com` |
+| Backend runtime | `CLIENT_URL` | `https://app.example.com` |
+| Backend runtime | `NODE_ENV` | `production` |
+| Backend runtime | `MONGO_URI` | `mongodb+srv://...` |
+| Backend runtime | `JWT_SECRET` | `<random 64-char hex>` |
+| Backend runtime | `PORT` | `5000` |
+
 ## Deployment Checklist
 
-- [ ] Backend `npm test` passes (117 tests)
+- [ ] Backend `npm test` passes (616 tests — requires local MongoDB)
 - [ ] Frontend `npm run lint` passes
 - [ ] Frontend `npm run build` succeeds
-- [ ] `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_API_ORIGIN` set before build
-- [ ] `CLIENT_URL` set on backend
-- [ ] `JWT_SECRET` set to a strong random value
-- [ ] `MONGO_URI` pointing to production database
-- [ ] `NODE_ENV=production` on backend
+- [ ] `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_API_ORIGIN` set before frontend build
+- [ ] `CLIENT_URL`, `MONGO_URI`, `JWT_SECRET`, `NODE_ENV=production` set on backend runtime
 - [ ] `RUN_MIGRATIONS_ON_START=false`
 - [ ] `ENABLE_BOOKING_REMINDERS` intentionally set (`false` by default)
 - [ ] `ENABLE_WAITLIST_EXPIRATION` intentionally set (`false` by default)
-- [ ] Web server configured for SPA routing (`try_files $uri /index.html`)
-- [ ] `backend/uploads/` directory is accessible (or reverse proxy configured)
+- [ ] Web server configured for SPA fallback (`try_files $uri /index.html`)
+- [ ] `backend/uploads/` directory is accessible (or object storage configured)
 - [ ] `.env` files excluded from version control
 - [ ] `node_modules` excluded from version control
 - [ ] `dist/` excluded from version control
+- [ ] `package-lock.json` committed
 - [ ] Backend has `.gitignore` (created)

@@ -788,7 +788,63 @@ test("past event certificates still work", async () => {
   assert.equal(res.body[0].certificate.status, "issued");
 });
 
+test("getEvents aggregation receives only upcoming event IDs, not past", async () => {
+  const res = createResponse();
+  const upcomingEvent = {
+    ...baseEvent,
+    _id: "64b000000000000000000010",
+    date: "2099-12-25",
+  };
+  const pastEvent = {
+    ...baseEvent,
+    _id: "64b000000000000000000011",
+    date: "2020-01-01",
+  };
+
+  Event.find = () => createQuery([{ ...upcomingEvent }, { ...pastEvent }]);
+
+  let capturedEventIds = null;
+  let aggregateCallCount = 0;
+  EventRegistration.aggregate = async (pipeline) => {
+    aggregateCallCount++;
+    const matchStage = pipeline.find((s) => s.$match);
+    if (matchStage) {
+      capturedEventIds = matchStage.$match.eventId?.$in;
+    }
+    return [];
+  };
+  EventReview.aggregate = async () => [];
+  EventReview.find = () => ({ lean: async () => [] });
+  Notification.create = async (payload) => payload;
+  Salon.findById = async () => null;
+  EventRegistration.find = () => createQuery([]);
+  EventCertificate.find = () => createQuery([]);
+
+  await getEvents({ query: {} }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1, "only upcoming event returned");
+  assert.equal(
+    String(res.body[0]._id),
+    "64b000000000000000000010",
+    "upcoming event is returned"
+  );
+  assert.equal(aggregateCallCount, 1, "aggregation called once");
+  assert.ok(capturedEventIds, "aggregation was called with eventIds");
+  assert.equal(
+    capturedEventIds.length,
+    1,
+    "only one event ID in aggregation (past excluded)"
+  );
+  assert.equal(
+    String(capturedEventIds[0]),
+    "64b000000000000000000010",
+    "only upcoming event ID passed to aggregation"
+  );
+});
+
 test("past event data is preserved (no deletion)", async () => {
+
   // Verify the same past event style data exists and hasn't been mutated
   const res = createResponse();
   const pastEvent = {

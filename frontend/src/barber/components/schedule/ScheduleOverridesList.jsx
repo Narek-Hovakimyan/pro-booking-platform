@@ -44,16 +44,16 @@ export default function ScheduleOverridesList({
               return (
                 <div
                   className={cn(
-                    "rounded-2xl border p-4 shadow-sm",
+                    "rounded-2xl border p-4 shadow-sm transition hover:shadow-md",
                     isWorkingOverride
-                      ? "border-neutral-200 bg-white"
+                      ? "border-blue-100 bg-blue-50/40"
                       : "border-red-100 bg-red-50/60"
                   )}
                   key={dateKey}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-neutral-950">
+                      <p className="text-base font-bold text-neutral-950">
                         {parsedDate ? formatDateLabel(parsedDate) : dateKey}
                       </p>
                       <p className="mt-0.5 text-xs text-neutral-400">
@@ -62,33 +62,43 @@ export default function ScheduleOverridesList({
                     </div>
                     <span
                       className={cn(
-                        "rounded-full px-2.5 py-0.5 text-xs font-semibold",
+                        "inline-flex shrink-0 items-center rounded-full px-3 py-1 text-sm font-semibold shadow-sm ring-1",
                         isWorkingOverride
-                          ? "bg-green-50 text-green-700"
-                          : "bg-red-100 text-red-700"
+                          ? "bg-blue-100 text-blue-800 ring-blue-200"
+                          : "bg-red-100 text-red-700 ring-red-200"
                       )}
                     >
                       {isWorkingOverride ? "Working" : "Off"}
                     </span>
                   </div>
 
-                  <div className="mt-4 space-y-2 text-sm text-neutral-600">
-                    <p>
-                      <span className="font-medium text-neutral-800">
-                        Hours:
-                      </span>{" "}
-                      {isWorkingOverride
-                        ? `${override.startTime || "—"} to ${override.endTime || "—"}`
-                        : "No bookings"}
-                    </p>
-                    <p>
-                      <span className="font-medium text-neutral-800">
-                        Break:
-                      </span>{" "}
-                      {isWorkingOverride && hasOverrideBreak
-                        ? `${override.breakStart} to ${override.breakEnd}`
-                        : "None"}
-                    </p>
+                  <div className="mt-3 space-y-1.5 text-sm text-neutral-600">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-100 text-xs font-bold text-neutral-500" aria-hidden="true">
+                        H
+                      </span>
+                      <span>
+                        <span className="font-medium text-neutral-800">
+                          Hours:
+                        </span>{" "}
+                        {isWorkingOverride
+                          ? `${override.startTime || "—"} to ${override.endTime || "—"}`
+                          : "No bookings"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-100 text-xs font-bold text-neutral-500" aria-hidden="true">
+                        B
+                      </span>
+                      <span>
+                        <span className="font-medium text-neutral-800">
+                          Break:
+                        </span>{" "}
+                        {isWorkingOverride && hasOverrideBreak
+                          ? `${override.breakStart} to ${override.breakEnd}`
+                          : "None"}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row">

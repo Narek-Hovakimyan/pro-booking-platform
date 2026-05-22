@@ -38,7 +38,9 @@ import {
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import {
+  getBookingDateTime,
   getDayKeyFromDate,
+  isBeyondBookingHorizon,
   isDateKey,
   isTimeKey,
   timeToMinutes,
@@ -218,6 +220,13 @@ const validateBookingSlot = async ({
 
   if (isPastBookingTime(bookingDate, time)) {
     return { message: "This time is already past" };
+  }
+
+  if (isBeyondBookingHorizon(bookingDate)) {
+    return {
+      message:
+        "Bookings can only be scheduled up to 180 days in advance.",
+    };
   }
 
   const effectiveDayKey = getDayKeyFromDate(bookingDate) || dayKey;
@@ -490,16 +499,18 @@ export const updateBooking = async (req, res) => {
     const isBookingClient =
       req.user?.role === "client" &&
       String(req.user._id) === String(booking.clientId);
+    const normalizedBookingStatus = normalizeBookingStatus(booking.status);
     const safeUpdates = {};
     let rescheduleSlotRequest = null;
 
     if (
       isBookingClient &&
-      normalizeBookingStatus(booking.status) === "accepted" &&
+      (normalizedBookingStatus === "pending" ||
+        normalizedBookingStatus === "accepted") &&
       attemptsDateTimeChange(req.body, booking)
     ) {
       return res.status(400).json({
-        message: "Accepted bookings must be rescheduled by request.",
+        message: "Bookings must be rescheduled by request.",
       });
     }
 
@@ -981,10 +992,26 @@ export const delayBooking = async (req, res) => {
       return res.status(400).json({ message: "Only accepted bookings can be delayed" });
     }
 
+    // Policy: one delay per booking
+    if (booking.delayMinutesTotal > 0 || booking.delayedAt) {
+      return res.status(400).json({ message: "This booking has already been delayed." });
+    }
+
+    // Policy: max 20 minutes total delay
     const delayMinutes = req.body?.delayMinutes;
 
     if (!allowedBookingDelayMinutes.has(delayMinutes)) {
       return res.status(400).json({ message: "delayMinutes must be 10 or 20" });
+    }
+
+    // Policy: delay only until appointment start + 5 minute grace window (Armenia time)
+    const bookingStart = getBookingDateTime(booking);
+    if (bookingStart) {
+      const graceEnd = new Date(bookingStart.getTime() + 5 * 60 * 1000);
+      const now = new Date();
+      if (now > graceEnd) {
+        return res.status(400).json({ message: "This booking can no longer be delayed." });
+      }
     }
 
     const oldStartMinutes = timeToMinutes(booking.time);
@@ -1028,12 +1055,20 @@ export const delayBooking = async (req, res) => {
             status: "accepted",
             bookingDate: booking.bookingDate,
             time: booking.time,
+            // Concurrency guard: only succeed if delay hasn't been applied yet
+            $or: [
+              { delayMinutesTotal: { $lte: 0 } },
+              { delayMinutesTotal: { $exists: false } },
+            ],
+            delayedAt: null,
           },
           {
             $set: {
               time: newTime,
               dayKey: slotValidation.effectiveDayKey,
               reminderSentAt: null,
+              delayMinutesTotal: delayMinutes,
+              delayedAt: new Date(),
             },
           },
           { returnDocument: "after" }

@@ -25,7 +25,7 @@ import {
   otherClient,
 } from "./bookingController.testUtils.js";
 
-const requestedBookingDate = "2099-06-02";
+const requestedBookingDate = "2026-07-15";
 const requestedTime = "11:30";
 
 const dateKeyFromStoredValue = (value) =>
@@ -34,7 +34,7 @@ const dateKeyFromStoredValue = (value) =>
 const createPendingRescheduleRequest = (overrides = {}) => ({
   status: "pending",
   requestedBookingDate: new Date(`${requestedBookingDate}T00:00:00.000Z`),
-  requestedDayKey: "tue",
+  requestedDayKey: "wed",
   requestedTime,
   requestedBy: clientId,
   requestedAt: new Date("2099-06-01T08:00:00.000Z"),
@@ -74,6 +74,40 @@ afterEach(() => {
   Notification.create = originalMethods.notificationCreate;
   Schedule.findOne = originalMethods.scheduleFindOne;
   User.findById = originalMethods.userFindById;
+});
+
+test("client can create reschedule request for own pending booking", async () => {
+  const booking = createMutableBooking({ status: "pending" });
+  const notifications = [];
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+  mockRescheduleDependencies([]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await createRescheduleRequest(
+    {
+      user: client,
+      params: { id: booking._id },
+      body: createRequestBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.rescheduleRequest.status, "pending");
+  assert.equal(
+    dateKeyFromStoredValue(res.body.rescheduleRequest.requestedBookingDate),
+    requestedBookingDate
+  );
+  assert.equal(res.body.rescheduleRequest.requestedTime, requestedTime);
+  assert.equal(res.body.rescheduleRequest.requestedBy, clientId);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].userId, barberId);
+  assert.equal(notifications[0].type, "booking_reschedule_requested");
 });
 
 test("client can create reschedule request for own accepted booking", async () => {
@@ -318,7 +352,7 @@ test("accept mutates booking date/time and clears reminder timestamps", async ()
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.bookingDate, requestedBookingDate);
-  assert.equal(res.body.dayKey, "tue");
+  assert.equal(res.body.dayKey, "wed");
   assert.equal(res.body.time, requestedTime);
   assert.equal(res.body.reminderSentAt, null);
   assert.equal(res.body.reminder24hSentAt, null);

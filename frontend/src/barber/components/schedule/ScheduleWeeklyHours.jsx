@@ -28,7 +28,8 @@ const getDefaultDayState = (defaultSchedule) => {
     label: `${defaultSchedule.startTime} to ${defaultSchedule.endTime}`,
     breakLabel: hasBreak
       ? `${defaultSchedule.breakStart} — ${defaultSchedule.breakEnd}`
-      : "No break set",
+      : "No default break",
+
   };
 };
 
@@ -52,7 +53,8 @@ export default function ScheduleWeeklyHours({
   weeklySchedule = {},
 }) {
   const defaultDayState = getDefaultDayState(defaultSchedule);
-  const breakLabel = defaultDayState.breakLabel || "No break set";
+  const breakLabel = defaultDayState.breakLabel || "No default break";
+
   const summaryLabel = defaultDayState.working
     ? defaultDayState.label
     : "Off";
@@ -104,12 +106,13 @@ export default function ScheduleWeeklyHours({
                   <span
                     className={
                       dayState.working
-                        ? "rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700"
-                        : "rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
+                        ? "rounded-full bg-green-50 px-3 py-1 text-sm font-semibold text-green-700 shadow-sm ring-1 ring-green-200"
+                        : "rounded-full bg-neutral-100 px-3 py-1 text-sm font-semibold text-neutral-600 shadow-sm ring-1 ring-neutral-200"
                     }
                   >
                     {dayState.working ? "Working" : "Off"}
                   </span>
+
                 </div>
                 <p className="mt-2 text-sm tabular-nums text-neutral-600">
                   {dayState.label}

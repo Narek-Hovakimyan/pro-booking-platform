@@ -612,7 +612,7 @@ test("barber accepts and rejects their booking", async () => {
   }
 });
 
-test("client cancels and directly reschedules pending booking", async () => {
+test("client cancels but cannot directly reschedule pending booking", async () => {
   Notification.create = async (payload) => payload;
   User.findById = () => ({
     select: async (fields) => (fields === "name" ? { name: "Barber" } : barberWithSalon),
@@ -636,7 +636,11 @@ test("client cancels and directly reschedules pending booking", async () => {
   assert.equal(cancelResponse.statusCode, 200);
   assert.equal(cancelResponse.body.status, "cancelled");
 
-  const rescheduleBooking = createMutableBooking();
+  const rescheduleBooking = createMutableBooking({
+    bookingDate,
+    dayKey: "mon",
+    time: "10:00",
+  });
   const rescheduleResponse = createResponse();
   Booking.findById = async () => rescheduleBooking;
 
@@ -653,8 +657,15 @@ test("client cancels and directly reschedules pending booking", async () => {
     rescheduleResponse
   );
 
-  assert.equal(rescheduleResponse.statusCode, 200);
-  assert.equal(rescheduleResponse.body.time, "11:30");
+  assert.equal(rescheduleResponse.statusCode, 400);
+  assert.equal(
+    rescheduleResponse.body.message,
+    "Bookings must be rescheduled by request."
+  );
+  assert.equal(rescheduleBooking.bookingDate, bookingDate);
+  assert.equal(rescheduleBooking.dayKey, "mon");
+  assert.equal(rescheduleBooking.time, "10:00");
+  assert.equal(rescheduleBooking.saveCalled, false);
 });
 
 test("client cannot directly reschedule accepted or confirmed booking", async () => {
@@ -685,7 +696,7 @@ test("client cannot directly reschedule accepted or confirmed booking", async ()
     assert.equal(res.statusCode, 400);
     assert.equal(
       res.body.message,
-      "Accepted bookings must be rescheduled by request."
+      "Bookings must be rescheduled by request."
     );
     assert.equal(booking.bookingDate, bookingDate);
     assert.equal(booking.dayKey, "mon");
@@ -723,76 +734,36 @@ test("barber direct reschedule behavior is unchanged", async () => {
   assert.equal(booking.saveCalled, false);
 });
 
-test("concurrent pending direct reschedules cannot move different bookings into the same slot", async () => {
-  Notification.create = async (payload) => payload;
-  User.findById = () => ({
-    select: async (fields) => (fields === "name" ? { name: "Barber" } : barberWithSalon),
-  });
-  Schedule.findOne = async () => null;
-
-  const firstBooking = createMutableBooking({
+test("pending direct reschedule is blocked before slot validation", async () => {
+  const booking = createMutableBooking({
     _id: "booking-reschedule-1",
     status: "pending",
     time: "10:00",
     duration: 30,
   });
-  const secondBooking = createMutableBooking({
-    _id: "booking-reschedule-2",
-    status: "pending",
-    time: "12:00",
-    duration: 30,
-    clientId,
-  });
-  const storedBookings = [firstBooking, secondBooking];
-  const originalTimes = storedBookings.map((booking) => ({
-    ...booking,
-    save: booking.save,
-  }));
+  const res = createResponse();
   let findCalls = 0;
-  let releasePrevalidations;
-  const bothPrevalidationsStarted = new Promise((resolve) => {
-    releasePrevalidations = resolve;
-  });
 
-  Booking.findById = async (id) =>
-    storedBookings.find((booking) => String(booking._id) === String(id));
-  Booking.find = async (query) => {
+  Booking.findById = async () => booking;
+  Booking.find = async () => {
     findCalls++;
-    if (findCalls === 2) releasePrevalidations();
-    if (findCalls <= 2) {
-      await bothPrevalidationsStarted;
-      return mockBookingFind(originalTimes)(query);
-    }
-
-    return mockBookingFind(storedBookings)(query);
+    return [];
   };
 
-  const firstResponse = createResponse();
-  const secondResponse = createResponse();
+  await updateBooking(
+    {
+      user: client,
+      params: { id: booking._id },
+      body: { bookingDate, dayKey: "mon", time: "11:00" },
+    },
+    res
+  );
 
-  await Promise.all([
-    updateBooking(
-      {
-        user: client,
-        params: { id: firstBooking._id },
-        body: { bookingDate, dayKey: "mon", time: "11:00" },
-      },
-      firstResponse
-    ),
-    updateBooking(
-      {
-        user: client,
-        params: { id: secondBooking._id },
-        body: { bookingDate, dayKey: "mon", time: "11:00" },
-      },
-      secondResponse
-    ),
-  ]);
-
-  const statusCodes = [firstResponse.statusCode, secondResponse.statusCode].sort();
-
-  assert.deepEqual(statusCodes, [200, 400]);
-  assert.equal(storedBookings.filter((booking) => booking.time === "11:00").length, 1);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Bookings must be rescheduled by request.");
+  assert.equal(findCalls, 0);
+  assert.equal(booking.time, "10:00");
+  assert.equal(booking.saveCalled, false);
 });
 
 test("unauthorized user cannot update another user's booking", async () => {

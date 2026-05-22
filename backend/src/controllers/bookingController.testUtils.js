@@ -36,7 +36,7 @@ export const serviceId = "64b000000000000000000002";
 export const clientId = "64b000000000000000000003";
 export const salonId = "64b000000000000000000004";
 export const salonBId = "64b000000000000000000005";
-export const bookingDate = "2099-06-01";
+export const bookingDate = "2026-06-15";
 export const pastBookingDate = "2020-01-15";
 
 // ── User fixtures ───────────────────────────────────────────────────
@@ -182,6 +182,13 @@ export const mockDelayStatusClaim = (booking) => {
     if (booking.status !== query.status) return null;
     if (booking.bookingDate !== query.bookingDate) return null;
     if (booking.time !== query.time) return null;
+
+    // Concurrency guard: reject if delayMinutesTotal > 0 or delayedAt set
+    if (query.$or) {
+      const hasDelay = booking.delayMinutesTotal > 0;
+      const hasDelayedAt = Boolean(booking.delayedAt);
+      if (hasDelay || hasDelayedAt) return null;
+    }
 
     Object.assign(booking, update.$set || {});
     return booking;

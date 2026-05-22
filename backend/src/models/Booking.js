@@ -155,6 +155,15 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    delayMinutesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    delayedAt: {
+      type: Date,
+      default: null,
+    },
     noShowMarkedAt: {
       type: Date,
       default: null,

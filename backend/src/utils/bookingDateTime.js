@@ -11,8 +11,7 @@ export const formatDateKey = (date) => {
 };
 
 export const getCurrentMonthKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return getArmeniaDateKey(new Date()).slice(0, 7);
 };
 
 export const getDayKeyFromDate = (dateKey) => {
@@ -112,6 +111,23 @@ export const getArmeniaDateKey = (date) => {
   const day = String(armeniaDate.getUTCDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+};
+
+export const MAX_BOOKING_HORIZON_DAYS = 180;
+
+export const isBeyondBookingHorizon = (bookingDate) => {
+  if (typeof bookingDate !== "string" || !dateKeyPattern.test(bookingDate)) return false;
+
+  const todayKey = getArmeniaDateKey(new Date());
+  const [year, month, day] = todayKey.split("-").map(Number);
+
+  // Use Date.UTC for reliable arithmetic (not affected by mock-sensitive multi-arg constructor).
+  // Add MAX days to today's Armenia date in UTC, then format as date key.
+  const maxUtcMs = Date.UTC(year, month - 1, day + MAX_BOOKING_HORIZON_DAYS);
+  const maxDate = new Date(maxUtcMs);
+  const maxKey = formatDateKey(maxDate);
+
+  return bookingDate > maxKey;
 };
 
 export { dateKeyPattern, timeKeyPattern };

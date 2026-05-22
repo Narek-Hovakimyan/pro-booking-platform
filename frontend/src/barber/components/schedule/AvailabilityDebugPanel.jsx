@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, Info, Search, XCircle } from "lucide-react";
+import { AlertCircle, Bug, CheckCircle2, Info, Search, XCircle } from "lucide-react";
 
 import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
@@ -103,16 +103,19 @@ export default function AvailabilityDebugPanel({
   };
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl border-2 border-dashed border-neutral-200 sm:rounded-3xl">
       <CardContent className="space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold text-neutral-950">
-              Availability diagnostics
-            </h2>
-            <p className="mt-1 text-sm text-neutral-500">
-              Read-only admin check for the selected salon schedule.
-            </p>
+          <div className="flex items-center gap-2">
+            <Bug className="h-5 w-5 text-neutral-400" aria-hidden="true" />
+            <div>
+              <h2 className="text-base font-semibold text-neutral-700">
+                Availability diagnostics
+              </h2>
+              <p className="mt-0.5 text-xs text-neutral-400">
+                Internal debugging tool — not used for normal schedule editing.
+              </p>
+            </div>
           </div>
           {result && <ResultBadge result={result} />}
         </div>
@@ -167,6 +170,8 @@ export default function AvailabilityDebugPanel({
               className="w-full md:w-auto"
               disabled={!canCheck || isChecking}
               onClick={checkAvailability}
+              variant="outline"
+              size="sm"
             >
               <Search className="mr-2 h-4 w-4" />
               {isChecking ? "Checking..." : "Check availability"}

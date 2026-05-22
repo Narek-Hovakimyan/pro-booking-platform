@@ -75,39 +75,45 @@ export const getEvents = async (req, res) => {
     // Exclude past events from public listing
     const upcomingEvents = events.filter((event) => !isEventInPast(event));
 
-    // Get registration counts for all events
-    const eventIds = events.map((e) => e._id);
-    const [registrations, reviewStats] = await Promise.all([
-      EventRegistration.aggregate([
-        {
-          $match: {
-            eventId: { $in: eventIds },
-            status: APPROVED_REGISTRATION_STATUS,
+    // Get registration counts only for upcoming events (past events are excluded)
+    const eventIds = upcomingEvents.map((e) => e._id);
+
+    let regCountMap = {};
+    let reviewStatsMap = {};
+
+    if (upcomingEvents.length > 0) {
+      const [registrations, reviewStats] = await Promise.all([
+        EventRegistration.aggregate([
+          {
+            $match: {
+              eventId: { $in: eventIds },
+              status: APPROVED_REGISTRATION_STATUS,
+            },
           },
-        },
-        { $group: { _id: "$eventId", count: { $sum: 1 } } },
-      ]),
-      EventReview.aggregate([
-        { $match: { eventId: { $in: eventIds } } },
-        {
-          $group: {
-            _id: "$eventId",
-            averageRating: { $avg: "$rating" },
-            reviewsCount: { $sum: 1 },
+          { $group: { _id: "$eventId", count: { $sum: 1 } } },
+        ]),
+        EventReview.aggregate([
+          { $match: { eventId: { $in: eventIds } } },
+          {
+            $group: {
+              _id: "$eventId",
+              averageRating: { $avg: "$rating" },
+              reviewsCount: { $sum: 1 },
+            },
           },
-        },
-      ]),
-    ]);
-    const regCountMap = {};
-    for (const r of registrations) {
-      regCountMap[r._id.toString()] = r.count;
-    }
-    const reviewStatsMap = {};
-    for (const stat of reviewStats) {
-      reviewStatsMap[stat._id.toString()] = {
-        averageRating: Number(stat.averageRating || 0),
-        reviewsCount: Number(stat.reviewsCount || 0),
-      };
+        ]),
+      ]);
+      regCountMap = {};
+      for (const r of registrations) {
+        regCountMap[r._id.toString()] = r.count;
+      }
+      reviewStatsMap = {};
+      for (const stat of reviewStats) {
+        reviewStatsMap[stat._id.toString()] = {
+          averageRating: Number(stat.averageRating || 0),
+          reviewsCount: Number(stat.reviewsCount || 0),
+        };
+      }
     }
 
     const result = upcomingEvents.map((event) => ({

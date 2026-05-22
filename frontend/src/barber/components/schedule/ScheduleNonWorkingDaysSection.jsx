@@ -61,15 +61,15 @@ export default function ScheduleNonWorkingDaysSection({
 
                 return (
                   <div
-                    className="flex flex-col gap-2 rounded-xl border border-neutral-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-3 rounded-xl border border-red-100 bg-red-50/40 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
                     key={dateKey}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-50 text-sm text-red-500" aria-hidden="true">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100 text-sm font-bold text-red-600" aria-hidden="true">
                         ✕
                       </span>
                       <div>
-                        <p className="text-sm font-medium text-neutral-900">
+                        <p className="text-sm font-semibold text-neutral-900">
                           {label}
                         </p>
                         <p className="text-xs text-neutral-400">{dateKey}</p>
@@ -80,6 +80,7 @@ export default function ScheduleNonWorkingDaysSection({
                       variant="outline"
                       disabled={isSaving}
                       size="sm"
+                      className="w-full border-red-200 text-red-700 hover:bg-red-50 sm:w-auto"
                       aria-label={`Restore ${label} as working day`}
                     >
                       Restore to default
