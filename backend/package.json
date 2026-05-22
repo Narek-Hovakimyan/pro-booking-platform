@@ -1,0 +1,35 @@
+{
+  "name": "hairbook-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test \"src/**/*.test.js\"",
+    "migrate:salons": "node migrations/migrateToMultipleSalons.js",
+    "migrate:fix-work-history": "node migrations/fixWorkHistory.js",
+    "migrate:schedule-per-salon": "node migrations/migrateScheduleToPerSalon.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.5.0",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1",
+    "resend": "^6.12.3",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  },
+  "overrides": {
+    "engine.io": "6.6.8",
+    "socket.io-adapter": "2.5.7",
+    "ws": "8.20.1",
+    "brace-expansion": "5.0.6"
+  }
+}

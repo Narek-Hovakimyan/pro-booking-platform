@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+!backend/.env.example
+!frontend/.env.example
+.env.local
+.env.production
+dist/
+build/
+uploads/
+.codex/
+.agents/
+coverage/
+logs/
+*.log
+.DS_Store
