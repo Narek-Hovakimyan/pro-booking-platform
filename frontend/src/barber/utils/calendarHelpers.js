@@ -65,6 +65,10 @@ export function getBookingDuration(booking) {
   return Number.isFinite(duration) && duration > 0 ? duration : 20;
 }
 
+export function getBookingServiceName(booking) {
+  return booking?.service?.name || booking?.serviceName || "Service";
+}
+
 export function getBookingStatus(booking) {
   return booking?.status || "pending";
 }

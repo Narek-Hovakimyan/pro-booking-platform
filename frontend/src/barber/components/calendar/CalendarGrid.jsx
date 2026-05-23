@@ -3,9 +3,8 @@ import {
   WEEKDAYS,
   getBookingColor,
   getBookingId,
-  getClientName,
+  getBookingServiceName,
   getBookingTime,
-  getBookingStatus,
   getEffectiveDaySchedule,
   isDayToday,
   isDaySelected,
@@ -58,13 +57,16 @@ export default function CalendarGrid({
 
             const dateStr = getDayDateStr(day, viewYear, viewMonth);
             const dayBookings = bookingsByDate[dateStr] || [];
+            const sortedBookings = [...dayBookings].sort((a, b) =>
+              getBookingTime(a).localeCompare(getBookingTime(b))
+            );
             const { isNonWorkingDay: isNonWorking } = getEffectiveDaySchedule(
               scheduleEntry,
               dateStr,
               barberDefaultSchedule
             );
-            const dots = dayBookings.slice(0, 3);
-            const extraCount = dayBookings.length - 3;
+            const visibleLabels = sortedBookings.slice(0, 2);
+            const extraCount = dayBookings.length - 2;
 
             return (
               <button
@@ -88,21 +90,28 @@ export default function CalendarGrid({
                   {day}
                 </span>
 
-                {dots.length > 0 && (
-                  <div className="flex flex-wrap justify-center gap-0.5">
-                    {dots.map((b) => (
-                      <span
+                {visibleLabels.length > 0 && (
+                  <div className="hidden w-full space-y-0.5 sm:block">
+                    {visibleLabels.map((b) => (
+                      <div
                         key={getBookingId(b)}
-                        className={`h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2 ${getBookingColor(b.status)}`}
-                        title={`${getClientName(b)} - ${getBookingTime(b)} (${getBookingStatus(b)})`}
-                      />
+                        className="flex items-center gap-1 truncate text-left"
+                      >
+                        <span
+                          className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${getBookingColor(b.status)}`}
+                        />
+                        <span className="truncate text-[10px] leading-tight text-neutral-600">
+                          {getBookingTime(b)}{" "}
+                          {getBookingServiceName(b)}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 )}
 
                 {extraCount > 0 && (
-                  <span className="text-[10px] font-medium leading-none text-neutral-400">
-                    +{extraCount}
+                  <span className="hidden text-[10px] font-medium leading-none text-neutral-400 sm:inline">
+                    +{extraCount} more
                   </span>
                 )}
               </button>
