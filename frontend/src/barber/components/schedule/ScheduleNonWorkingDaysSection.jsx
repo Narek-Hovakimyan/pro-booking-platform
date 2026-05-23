@@ -4,13 +4,8 @@ import { Button } from "@/shared/components/ui/button";
 import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
 export default function ScheduleNonWorkingDaysSection({
-  todayKey,
-  dayOffDate,
-  canMarkDayOff,
   isSaving,
   sortedNonWorkingDays,
-  onDayOffDateChange,
-  onMarkDayOff,
   onRestoreWorkingDate,
 }) {
   return (
@@ -18,31 +13,8 @@ export default function ScheduleNonWorkingDaysSection({
       <CardContent className="p-4 sm:p-6">
         <h2 className="text-lg font-bold">Non-Working Days</h2>
         <p className="mt-1 text-xs text-neutral-500">
-          Mark specific dates when you are not available.
+          Dates marked as days off. Use the Date-Specific Override editor above to mark a date as day off.
         </p>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
-          <label className="grid gap-1.5 text-sm font-medium">
-            <span>Select date</span>
-            <input
-              className="rounded-xl border border-neutral-200 px-3 py-2.5 text-sm font-normal focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
-              min={todayKey}
-              type="date"
-              value={dayOffDate}
-              onChange={(event) => onDayOffDateChange(event.target.value)}
-              aria-label="Select date to mark as day off"
-            />
-          </label>
-          <Button
-            className="w-full sm:self-end sm:w-auto"
-            disabled={!canMarkDayOff || isSaving}
-            onClick={onMarkDayOff}
-            variant="outline"
-            aria-label="Mark selected date as day off"
-          >
-            Mark as day off
-          </Button>
-        </div>
 
         <div className="mt-5">
           <h3 className="mb-2 text-sm font-semibold text-neutral-700">

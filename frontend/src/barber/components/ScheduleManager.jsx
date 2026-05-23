@@ -13,7 +13,6 @@ import {
 import { cn } from "@/shared/lib/utils";
 import {
   formatDateKey,
-  formatDateLabel,
   getNext7Days,
   parseDateKey,
 } from "@/shared/utils/dates";
@@ -21,7 +20,6 @@ import { formatTimeInput, timeToMinutes } from "@/shared/utils/time";
 import ScheduleSalonDrawer from "@/barber/components/schedule/ScheduleSalonDrawer";
 import ScheduleSalonSelector from "@/barber/components/schedule/ScheduleSalonSelector";
 import ScheduleWeeklyHours from "@/barber/components/schedule/ScheduleWeeklyHours";
-import SchedulePreview from "@/barber/components/schedule/SchedulePreview";
 import ScheduleOverridesList from "@/barber/components/schedule/ScheduleOverridesList";
 import ScheduleDateOverrideEditor from "@/barber/components/schedule/ScheduleDateOverrideEditor";
 import ScheduleNonWorkingDaysSection from "@/barber/components/schedule/ScheduleNonWorkingDaysSection";
@@ -362,7 +360,6 @@ export default function ScheduleManager({
 
   const dateOptions = useMemo(() => getNext7Days(), []);
   const [selectedDate, setSelectedDate] = useState(dateOptions[0].value);
-  const [dayOffDate, setDayOffDate] = useState(() => formatDateKey(new Date()));
   const scheduleOverrides = useMemo(
     () => effectiveSchedule.scheduleOverrides || {},
     [effectiveSchedule.scheduleOverrides]
@@ -459,9 +456,8 @@ export default function ScheduleManager({
   const isNonWorkingDay = nonWorkingDays.includes(selectedDateKey);
   const hasCustomHours = Boolean(scheduleOverrides[selectedDateKey]);
   const canMarkDayOff =
-    dayOffDate &&
-    dayOffDate >= todayKey &&
-    !nonWorkingDays.includes(dayOffDate);
+    selectedDateKey >= todayKey &&
+    !nonWorkingDays.includes(selectedDateKey);
   const isSaving = Boolean(isPerSalonLoading && !isLoadingSalons && selectedSalonId);
 
   const selectDate = useCallback((dateKey) => {
@@ -650,9 +646,9 @@ export default function ScheduleManager({
     await savePerSalonSchedule({
       scheduleOverrides: {
         ...scheduleOverrides,
-        [dayOffDate]: { isWorking: false },
+        [selectedDateKey]: { isWorking: false },
       },
-      nonWorkingDays: Array.from(new Set([...nonWorkingDays, dayOffDate])),
+      nonWorkingDays: Array.from(new Set([...nonWorkingDays, selectedDateKey])),
     });
   };
 
@@ -837,56 +833,50 @@ export default function ScheduleManager({
             weeklySchedule={effectiveSchedule.weeklySchedule}
           />
 
-          <ScheduleDateOverrideEditor
-            dateOptions={dateOptions}
-            selectedDateKey={selectedDateKey}
-            selectedDateObject={selectedDateObject}
-            todayKey={todayKey}
-            isNonWorkingDay={isNonWorkingDay}
-            hasCustomHours={hasCustomHours}
-            activeDraft={activeDraft}
-            isSaving={isSaving}
-            fieldErrors={fieldErrors}
-            isBreakEnabled={isBreakEnabled}
-            timeInputClass={timeInputClass}
-            onSelectDate={selectDate}
-            onUpdateDraft={updateDraft}
-            onUpdateTimeDraft={updateTimeDraft}
-            onToggleBreakTime={toggleBreakTime}
-            onSaveSelectedDateSchedule={saveSelectedDateSchedule}
-            onResetDraftToDefault={resetDraftToDefault}
-            onRemoveOverride={removeOverride}
-          />
+          <div>
+            <h2 className="text-lg font-bold sm:text-xl">Date Overrides & Day Offs</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              Customize hours or mark specific dates as non-working.
+            </p>
 
-          <ScheduleOverridesList
-            overrides={sortedOverrides}
-            onEdit={selectDate}
-            onRemove={removeOverride}
-            disabled={isSaving}
-          />
+            <div className="mt-4 space-y-6">
+              <ScheduleDateOverrideEditor
+                dateOptions={dateOptions}
+                selectedDateKey={selectedDateKey}
+                selectedDateObject={selectedDateObject}
+                todayKey={todayKey}
+                isNonWorkingDay={isNonWorkingDay}
+                hasCustomHours={hasCustomHours}
+                activeDraft={activeDraft}
+                isSaving={isSaving}
+                fieldErrors={fieldErrors}
+                isBreakEnabled={isBreakEnabled}
+                timeInputClass={timeInputClass}
+                canMarkDayOff={canMarkDayOff}
+                onSelectDate={selectDate}
+                onUpdateDraft={updateDraft}
+                onUpdateTimeDraft={updateTimeDraft}
+                onToggleBreakTime={toggleBreakTime}
+                onSaveSelectedDateSchedule={saveSelectedDateSchedule}
+                onResetDraftToDefault={resetDraftToDefault}
+                onRemoveOverride={removeOverride}
+                onMarkDayOff={markDayOff}
+              />
 
-          <ScheduleNonWorkingDaysSection
-            todayKey={todayKey}
-            dayOffDate={dayOffDate}
-            canMarkDayOff={canMarkDayOff}
-            isSaving={isSaving}
-            sortedNonWorkingDays={sortedNonWorkingDays}
-            onDayOffDateChange={setDayOffDate}
-            onMarkDayOff={markDayOff}
-            onRestoreWorkingDate={restoreWorkingDate}
-          />
+              <ScheduleOverridesList
+                overrides={sortedOverrides}
+                onEdit={selectDate}
+                onRemove={removeOverride}
+                disabled={isSaving}
+              />
 
-          <SchedulePreview
-            selectedDateLabel={formatDateLabel(selectedDateObject)}
-            isNonWorkingDay={isNonWorkingDay}
-            isWorking={activeDraft.isWorking}
-            startTime={activeDraft.startTime}
-            endTime={activeDraft.endTime}
-            isBreakEnabled={isBreakEnabled}
-            breakStart={activeDraft.breakStart}
-            breakEnd={activeDraft.breakEnd}
-            hasCustomHours={hasCustomHours}
-          />
+              <ScheduleNonWorkingDaysSection
+                isSaving={isSaving}
+                sortedNonWorkingDays={sortedNonWorkingDays}
+                onRestoreWorkingDate={restoreWorkingDate}
+              />
+            </div>
+          </div>
 
           <AvailabilityDebugPanel
             barberId={currentUserId}

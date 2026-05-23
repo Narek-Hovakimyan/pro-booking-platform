@@ -15,6 +15,7 @@ export default function ScheduleDateOverrideEditor({
   fieldErrors,
   isBreakEnabled,
   timeInputClass,
+  canMarkDayOff,
   onSelectDate,
   onUpdateDraft,
   onUpdateTimeDraft,
@@ -22,6 +23,7 @@ export default function ScheduleDateOverrideEditor({
   onSaveSelectedDateSchedule,
   onResetDraftToDefault,
   onRemoveOverride,
+  onMarkDayOff,
 }) {
   return (
     <Card className="rounded-2xl sm:rounded-3xl">
@@ -267,6 +269,17 @@ export default function ScheduleDateOverrideEditor({
           )}
 
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+            {!isNonWorkingDay && (
+              <Button
+                onClick={onMarkDayOff}
+                disabled={!canMarkDayOff || isSaving}
+                variant="outline"
+                className="w-full border-red-200 text-red-700 hover:bg-red-50 sm:w-auto"
+                aria-label="Mark selected date as day off"
+              >
+                Mark selected date as day off
+              </Button>
+            )}
             <Button
               onClick={onSaveSelectedDateSchedule}
               disabled={isSaving}

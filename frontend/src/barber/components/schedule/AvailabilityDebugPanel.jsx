@@ -3,7 +3,7 @@ import { AlertCircle, Bug, CheckCircle2, Info, Search, XCircle } from "lucide-re
 
 import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
-import { Card, CardContent } from "@/shared/components/ui/card";
+import { CardContent } from "@/shared/components/ui/card";
 import { formatDateKey } from "@/shared/utils/dates";
 
 const inputClass =
@@ -103,22 +103,30 @@ export default function AvailabilityDebugPanel({
   };
 
   return (
-    <Card className="rounded-2xl border-2 border-dashed border-neutral-200 sm:rounded-3xl">
-      <CardContent className="space-y-4 p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Bug className="h-5 w-5 text-neutral-400" aria-hidden="true" />
-            <div>
+    <details className="group rounded-2xl border-2 border-dashed border-neutral-200 sm:rounded-3xl open:shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center gap-2">
+          <Bug className="h-5 w-5 text-neutral-400" aria-hidden="true" />
+          <div>
+            <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-neutral-700">
-                Availability diagnostics
+                Testing tools
               </h2>
-              <p className="mt-0.5 text-xs text-neutral-400">
-                Internal debugging tool — not used for normal schedule editing.
-              </p>
+              <svg className="h-4 w-4 text-neutral-400 transition group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
+            <p className="mt-0.5 text-xs text-neutral-400">
+              Internal debugging tool — not used for normal schedule editing.
+            </p>
           </div>
-          {result && <ResultBadge result={result} />}
         </div>
+        {result && <ResultBadge result={result} />}
+      </summary>
+      <CardContent className="space-y-4 p-4 pt-2 sm:p-5 sm:pt-2">
+        <p className="text-xs text-neutral-500">
+          Check whether a specific service, date, and time can be booked. Your current schedule settings and existing bookings are evaluated.
+        </p>
 
         <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
           <label className="grid gap-1.5 text-xs font-semibold uppercase text-neutral-500">
@@ -129,6 +137,9 @@ export default function AvailabilityDebugPanel({
               value={effectiveDate}
               onChange={(event) => setDateOverride(event.target.value)}
             />
+            <p className="mt-1 text-xs font-normal normal-case text-neutral-400">
+              Defaults to the selected override date above. Change to debug a different date.
+            </p>
           </label>
 
           <label className="grid gap-1.5 text-xs font-semibold uppercase text-neutral-500">
@@ -156,13 +167,16 @@ export default function AvailabilityDebugPanel({
           </label>
 
           <label className="grid gap-1.5 text-xs font-semibold uppercase text-neutral-500">
-            Time optional
+            Time (optional)
             <input
               className={inputClass}
               type="time"
               value={time}
               onChange={(event) => setTime(event.target.value)}
             />
+            <p className="mt-1 text-xs font-normal normal-case text-neutral-400">
+              Leave empty to check date-level availability. Enter a specific time for slot-level check.
+            </p>
           </label>
 
           <div className="flex items-end">
@@ -288,7 +302,7 @@ export default function AvailabilityDebugPanel({
           </div>
         )}
       </CardContent>
-    </Card>
+    </details>
   );
 }
 
