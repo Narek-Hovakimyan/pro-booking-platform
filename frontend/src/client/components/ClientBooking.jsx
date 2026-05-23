@@ -500,7 +500,7 @@ export default function ClientBooking({
               <div>
                 <h2 className="text-xl font-bold sm:text-2xl">Choose a salon</h2>
                 <p className="mt-1 text-sm text-neutral-500">
-                  This barber works at multiple salons. Select one for your booking.
+                  This specialist works at multiple salons. Select one for your booking.
                 </p>
               </div>
 
@@ -561,7 +561,7 @@ export default function ClientBooking({
           selectedDate={selectedDateLabel || selectedDate}
           selectedTime={selectedTime}
           selectedSalonName={selectedSalonName}
-          barberName={barber?.name || "Barber"}
+          barberName={barber?.name || "Specialist"}
           canConfirm={canConfirmBooking}
           isSubmitting={isSaving}
           error={error}

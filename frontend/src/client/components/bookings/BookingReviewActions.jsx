@@ -15,7 +15,7 @@ export default function BookingReviewActions({
         disabled={hasReviewedBarber}
         onClick={() => onReviewBarber?.(booking)}
       >
-        {hasReviewedBarber ? "Barber reviewed ✓" : "Review barber"}
+        {hasReviewedBarber ? "Specialist reviewed ✓" : "Review specialist"}
       </Button>
 
       {canReviewSalon && (

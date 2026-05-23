@@ -28,7 +28,7 @@ export default function GallerySection({ images = [] }) {
                 key={imageUrl}
               >
                 <img
-                  alt="Gallery example of barber work"
+                  alt="Gallery example of specialist work"
                   className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-105"
                   src={getMediaUrl(imageUrl)}
                 />

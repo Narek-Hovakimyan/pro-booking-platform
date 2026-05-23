@@ -127,7 +127,7 @@ export default function RescheduleBooking({ booking, onClose }) {
     : EMPTY_SLOT_SUMMARY;
   const availableSlots = slotSummary.availableSlots;
   const slotMessage = isBarberNotWorking
-    ? "Barber is not working this day"
+    ? "Specialist is not working this day"
     : slotSummary.blockedByTime
       ? "Not enough time for selected service"
       : slotSummary.blockedByBooking

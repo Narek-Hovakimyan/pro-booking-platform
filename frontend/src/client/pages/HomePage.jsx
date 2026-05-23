@@ -37,7 +37,7 @@ const BENEFITS = [
     icon: Sparkles,
     title: "Events & certificates",
     description:
-      "Barbers can host events, manage attendance, issue certificates — clients earn verified credentials.",
+      "Specialists can host events, manage attendance, issue certificates — clients earn verified credentials.",
   },
 ];
 

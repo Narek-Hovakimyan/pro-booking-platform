@@ -2,11 +2,14 @@ import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
-const MENU_GROUPS = [
+const getMenuGroups = (canShowManageHiring) => [
   {
     key: "work",
     label: "Work",
     children: [
+      ...(canShowManageHiring
+        ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
+        : []),
       { label: "Waitlist", to: "/admin/waitlist" },
       { label: "Calendar", to: "/admin/calendar" },
       { label: "Events", to: "/events" },
@@ -45,6 +48,7 @@ export default function NestedHeaderMenu({
   onLinkClick,
   currentUser,
   onLogout,
+  canShowManageHiring = false,
 }) {
   const { pathname } = useLocation();
   const [activeGroup, setActiveGroup] = useState(null);
@@ -118,7 +122,7 @@ export default function NestedHeaderMenu({
         role="menu"
       >
         <div onMouseLeave={handleMenuLeave}>
-          {MENU_GROUPS.map((group) => (
+          {getMenuGroups(canShowManageHiring).map((group) => (
             <div key={group.key} className="relative">
               {/* Group header (trigger for submenu) */}
               <button
@@ -175,7 +179,7 @@ export default function NestedHeaderMenu({
   /* ── Mobile render ── */
   return (
     <div className="flex flex-col gap-0.5">
-      {MENU_GROUPS.map((group) => {
+      {getMenuGroups(canShowManageHiring).map((group) => {
         const isExpanded = expandedGroup === group.key;
 
         return (

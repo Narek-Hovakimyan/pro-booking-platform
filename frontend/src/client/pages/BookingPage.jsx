@@ -436,7 +436,7 @@ export default function BookingPage({
     : !selectedDate
       ? "Choose a date first"
     : isBarberNotWorking
-      ? "Barber is not working this day"
+      ? "Specialist is not working this day"
       : slotSummary.blockedByTime
         ? "Not enough time for selected service"
         : slotSummary.blockedByBooking

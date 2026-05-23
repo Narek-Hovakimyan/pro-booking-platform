@@ -56,7 +56,7 @@ export default function CancelBookingModal({
               className="min-h-28 w-full rounded-2xl border bg-white p-3 font-normal"
               disabled={isSubmitting}
               maxLength={maxReasonLength}
-              placeholder="Tell the barber why you are cancelling..."
+              placeholder="Tell the specialist why you are cancelling..."
               value={reason}
               onBlur={() => setTouched(true)}
               onChange={(event) => setReason(event.target.value)}

@@ -126,7 +126,7 @@ export default function SalonsGrid({
               <div className="flex items-center gap-3 rounded-xl bg-neutral-50 p-3">
                 <Users className="h-4 w-4 shrink-0 text-neutral-500" aria-hidden="true" />
                 <span className="text-sm font-semibold text-neutral-900">
-                  {barbers.length} {barbers.length === 1 ? "barber" : "barbers"}
+                  {barbers.length} {barbers.length === 1 ? "specialist" : "specialists"}
                 </span>
               </div>
 
@@ -143,13 +143,13 @@ export default function SalonsGrid({
               </div>
 
               <Button
-                aria-label={`View barbers at ${salon?.name || "salon"}`}
+                aria-label={`View specialists at ${salon?.name || "salon"}`}
                 className="w-full"
                 onClick={() => onViewSalon(salon)}
                 variant="outline"
               >
                 <Users className="mr-2 h-4 w-4" aria-hidden="true" />
-                View barbers
+                View specialists
               </Button>
             </CardContent>
           </Card>

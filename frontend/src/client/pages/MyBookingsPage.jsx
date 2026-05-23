@@ -257,7 +257,7 @@ export default function MyBookingsPage() {
   const getBarberName = (booking) => {
     const barber = getBarberForBooking(booking);
 
-    return barber?.name || "Barber";
+    return barber?.name || "Specialist";
   };
 
   const getServiceName = (booking) => {
@@ -359,7 +359,7 @@ export default function MyBookingsPage() {
   const renderBarberName = (booking) => {
     const barber = getBarberForBooking(booking);
     const barberId = getBookingBarberId(booking) || getEntityId(barber);
-    const barberName = barber?.name || "Barber";
+    const barberName = barber?.name || "Specialist";
 
     if (!barberId) return barberName;
 

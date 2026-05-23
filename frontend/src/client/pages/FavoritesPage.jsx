@@ -1,5 +1,5 @@
 import { Heart, MapPin, MessageCircle, Phone, Star, UserRound } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -30,15 +30,6 @@ import {
 import { fetchClientBookings } from "@/store/slices/bookingsSlice";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { getMediaUrl } from "@/shared/utils/media";
-
-const CACHE_TTL_MS = 60 * 1000;
-const favoritesCacheByClientId = new Map();
-
-const getFavoriteBarberId = (favorite) =>
-  favorite?.barberId?.id || favorite?.barberId?._id || favorite?.barberId;
-
-const getFavoriteSalonId = (favorite) =>
-  favorite?.salonId?.id || favorite?.salonId?._id || favorite?.salonId;
 
 const uniqueById = (items) => {
   const seenIds = new Set();
@@ -129,11 +120,6 @@ export default function FavoritesPage() {
   const reviews = useSelector((state) => state.reviews);
   const favorites = useSelector((state) => state.favorites);
   const bookings = useSelector((state) => state.bookings);
-  const hadFavoritesOnMount = useRef(
-    favorites.some(
-      (favorite) => String(favorite.clientId) === String(currentUser?.id)
-    )
-  );
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -141,23 +127,7 @@ export default function FavoritesPage() {
     let isMounted = true;
 
     async function loadFavorites() {
-      const cachedEntry = favoritesCacheByClientId.get(String(currentUser.id));
-      const cachedFavorites = cachedEntry?.barbers;
-      const cachedSalonFavorites = cachedEntry?.salons;
-
-      if (cachedFavorites && !hadFavoritesOnMount.current) {
-        dispatch(setFavorites(cachedFavorites));
-      }
-      if (cachedSalonFavorites) {
-        dispatch(setSalonFavorites(cachedSalonFavorites));
-      }
-
-      if (cachedEntry && Date.now() - cachedEntry.loadedAt < CACHE_TTL_MS) {
-        setIsLoading(false);
-        return;
-      }
-
-      setIsLoading(!cachedFavorites);
+      setIsLoading(true);
       setError("");
 
       try {
@@ -168,11 +138,6 @@ export default function FavoritesPage() {
           ]);
 
         if (isMounted) {
-          favoritesCacheByClientId.set(String(currentUser.id), {
-            barbers: barberFavoritesResponse.data,
-            salons: salonFavoritesResponse.data,
-            loadedAt: Date.now(),
-          });
           dispatch(setFavorites(barberFavoritesResponse.data));
           dispatch(setSalonFavorites(salonFavoritesResponse.data));
         }
@@ -366,16 +331,6 @@ export default function FavoritesPage() {
     try {
       await api.delete(`/favorites/${barberId}`);
       dispatch(removeFavorite({ clientId: currentUser.id, barberId }));
-      const cachedEntry = favoritesCacheByClientId.get(String(currentUser.id));
-
-      if (cachedEntry) {
-        favoritesCacheByClientId.set(String(currentUser.id), {
-          ...cachedEntry,
-          barbers: (cachedEntry.barbers || []).filter(
-            (favorite) => String(getFavoriteBarberId(favorite)) !== String(barberId)
-          ),
-        });
-      }
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
@@ -397,16 +352,6 @@ export default function FavoritesPage() {
           ),
         })
       );
-      const cachedEntry = favoritesCacheByClientId.get(String(currentUser.id));
-
-      if (cachedEntry) {
-        favoritesCacheByClientId.set(String(currentUser.id), {
-          ...cachedEntry,
-          salons: (cachedEntry.salons || []).filter(
-            (favorite) => String(getFavoriteSalonId(favorite)) !== String(salonId)
-          ),
-        });
-      }
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||

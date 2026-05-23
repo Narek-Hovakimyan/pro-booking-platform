@@ -527,12 +527,12 @@ export default function BarberSettings({
   const openRemoveBarberConfirmation = (salon, barber) => {
     setConfirmation({
       type: "remove",
-      title: "Remove barber",
-      message: "Remove this barber from salon?",
-      confirmLabel: "Remove barber",
+      title: "Remove specialist",
+      message: "Remove this specialist from salon?",
+      confirmLabel: "Remove specialist",
       salonId: salon?.id || salon?._id,
       barberId: barber?.id || barber?._id,
-      barberName: barber?.name || "Barber",
+      barberName: barber?.name || "Specialist",
       salonName: salon?.name || "salon",
     });
   };
@@ -882,7 +882,7 @@ export default function BarberSettings({
               />
               <SettingsHubCard
                 title="Certifications"
-                description="Manage your barber certifications and event certificates."
+                description="Manage your specialist certifications and event certificates."
                 to="/admin/settings/certifications"
               />
             </div>

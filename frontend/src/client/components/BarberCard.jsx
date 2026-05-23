@@ -167,7 +167,7 @@ export default function BarberCard({
         <div className="relative">
           {barberAvatarUrl ? (
             <img
-              alt={barber?.name || "Barber"}
+              alt={barber?.name || "Specialist"}
               className="aspect-[4/3] w-full rounded-2xl object-cover"
               src={getMediaUrl(barberAvatarUrl)}
               loading="lazy"
@@ -175,7 +175,7 @@ export default function BarberCard({
           ) : (
             <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-neutral-100">
               <UserRound className="h-12 w-12 text-neutral-400" aria-hidden="true" />
-              <span className="sr-only">Barber image placeholder</span>
+              <span className="sr-only">Specialist image placeholder</span>
             </div>
           )}
 
@@ -197,7 +197,7 @@ export default function BarberCard({
         {/* Name and contact */}
         <div>
           <h2 className="text-xl font-bold tracking-tight text-neutral-950">
-            {barber?.name || "Barber"}
+            {barber?.name || "Specialist"}
           </h2>
           {barber?.phone && (
             <p className="mt-0.5 text-sm text-neutral-500">{barber.phone}</p>

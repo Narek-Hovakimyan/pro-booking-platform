@@ -103,7 +103,7 @@ export default function BookingDetailsModal({
         ) : (
           <>
             <div className="mt-5 space-y-3">
-              <DetailRow label="Barber" value={bookingBarber?.name || "Barber"} />
+              <DetailRow label="Specialist" value={bookingBarber?.name || "Specialist"} />
               {salonName && <DetailRow label="Salon" value={salonName} />}
               <DetailRow label="Service" value={serviceName} />
               <DetailRow
@@ -141,7 +141,7 @@ export default function BookingDetailsModal({
 
             {booking.status === "expired" && (
               <p className="mt-5 rounded-xl border border-orange-100 bg-orange-50 p-3 text-sm text-orange-700">
-                {booking.expiredReason || "Barber did not confirm this booking in time"}
+                {booking.expiredReason || "Specialist did not confirm this booking in time"}
               </p>
             )}
 

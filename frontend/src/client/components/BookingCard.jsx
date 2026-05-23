@@ -99,7 +99,7 @@ export default function BookingCard({
 
         {booking?.status === "expired" && (
           <p className="rounded-xl border border-orange-100 bg-orange-50 p-3 text-sm text-orange-700">
-            {booking?.expiredReason || "Barber did not confirm this booking in time"}
+            {booking?.expiredReason || "Specialist did not confirm this booking in time"}
           </p>
         )}
 
@@ -141,7 +141,7 @@ export default function BookingCard({
               variant="outline"
             >
               <MessageCircle className="mr-2 h-4 w-4" />
-              Message barber
+              Message specialist
             </Button>
           )}
 

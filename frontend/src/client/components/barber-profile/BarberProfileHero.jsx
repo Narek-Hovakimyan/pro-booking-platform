@@ -36,7 +36,7 @@ export default function BarberProfileHero({
         <div className="relative overflow-hidden bg-neutral-100 lg:min-h-full">
           {barber.imageUrl ? (
             <img
-              alt={`Photo of ${barber?.name || "barber"}`}
+              alt={`Photo of ${barber?.name || "specialist"}`}
               className="aspect-[4/3] w-full object-cover lg:aspect-auto lg:h-full"
               src={getMediaUrl(barber.imageUrl)}
             />
@@ -67,7 +67,7 @@ export default function BarberProfileHero({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <h1 className="text-3xl font-bold tracking-tight text-neutral-950 sm:text-4xl">
-                {barber?.name || "Barber"}
+                {barber?.name || "Specialist"}
               </h1>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">

@@ -16,7 +16,7 @@ export default function SalonsPageHeader({
           Salons
         </h1>
         <p className="mt-2 text-neutral-500">
-          Browse salons and book with approved barbers.
+          Browse salons and book with approved specialists.
         </p>
       </div>
 

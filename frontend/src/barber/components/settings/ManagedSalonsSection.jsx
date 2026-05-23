@@ -18,7 +18,7 @@ export default function ManagedSalonsSection({
   return (
     <SettingsCard
       title="Manage salons"
-      description="Manage barbers and admins for your salons."
+      description="Manage specialists and admins for your salons."
     >
       {managedSalonStaff.map((managedSalon) => {
         const managedSalonId = managedSalon.id || managedSalon._id;
@@ -137,7 +137,7 @@ export default function ManagedSalonsSection({
             {managedSalon.barbers && managedSalon.barbers.length > 0 && (
               <div className="mt-3">
                 <div className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-                  Barbers
+                  Specialists
                 </div>
                 <div className="mt-1 space-y-1">
                   {managedSalon.barbers.map((barber) => {

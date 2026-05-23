@@ -29,7 +29,7 @@ export default function SalonReviewsList({
   if (!reviews.length) {
     return (
       <EmptyState
-        description="No salon reviews yet. Book an appointment with one of our barbers and leave a review!"
+        description="No salon reviews yet. Book an appointment with one of our specialists and leave a review!"
         title="No reviews yet"
       />
     );

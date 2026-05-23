@@ -105,11 +105,8 @@ export default function Header() {
     { label: "Schedule", to: "/admin/schedule" },
     { label: "Bookings", to: "/admin/bookings" },
     { label: "Find Jobs", to: "/jobs" },
+    { label: "Profile", to: "/admin/profile" },
   ];
-
-  if (canShowManageHiring) {
-    barberNavItems.push({ label: "Manage Hiring", to: "/admin/jobs" });
-  }
 
   useEffect(() => {
     if (!currentUser?.id) {
@@ -374,6 +371,7 @@ export default function Header() {
                     onLinkClick={handleMoreLink}
                     currentUser={currentUser}
                     onLogout={logout}
+                    canShowManageHiring={canShowManageHiring}
                   />
                 </div>
               )}
@@ -471,6 +469,7 @@ export default function Header() {
                 onLinkClick={handleMobileLink}
                 currentUser={currentUser}
                 onLogout={logout}
+                canShowManageHiring={canShowManageHiring}
               />
             )}
 

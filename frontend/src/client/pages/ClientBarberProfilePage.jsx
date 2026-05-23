@@ -231,7 +231,7 @@ export default function ClientBarberProfilePage() {
         if (isMounted) {
           setError(
             requestError.response?.data?.message ||
-              "Could not load barber profile. Please try again."
+              "Could not load specialist profile. Please try again."
           );
         }
       } finally {
