@@ -38,9 +38,9 @@ import {
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import {
+  getArmeniaDateKey,
   getBookingDateTime,
   getDayKeyFromDate,
-  isBeyondBookingHorizon,
   isDateKey,
   isTimeKey,
   timeToMinutes,
@@ -222,11 +222,15 @@ const validateBookingSlot = async ({
     return { message: "This time is already past" };
   }
 
-  if (isBeyondBookingHorizon(bookingDate)) {
-    return {
-      message:
-        "Bookings can only be scheduled up to 180 days in advance.",
-    };
+  const todayKey = getArmeniaDateKey(new Date());
+  const [ty, tm, td] = todayKey.split("-").map(Number);
+  const [by, bm, bd] = bookingDate.split("-").map(Number);
+  const todayDate = new Date(ty, tm - 1, td);
+  const bookDate = new Date(by, bm - 1, bd);
+  const diffDays = (bookDate - todayDate) / (1000 * 60 * 60 * 24);
+
+  if (diffDays > 365) {
+    return { message: "Booking date is too far in the future" };
   }
 
   const effectiveDayKey = getDayKeyFromDate(bookingDate) || dayKey;
