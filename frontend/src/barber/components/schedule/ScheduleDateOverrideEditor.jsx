@@ -5,6 +5,7 @@ import { formatDateLabel } from "@/shared/utils/dates";
 
 export default function ScheduleDateOverrideEditor({
   dateOptions,
+  dateStatusMap,
   selectedDateKey,
   selectedDateObject,
   todayKey,
@@ -34,19 +35,55 @@ export default function ScheduleDateOverrideEditor({
         </p>
 
         <div className="mt-4">
-          <div className="flex flex-wrap gap-2">
-            {dateOptions.map((day) => (
-              <Button
-                className="flex-1 sm:flex-none"
-                key={day.value}
-                onClick={() => onSelectDate(day.value)}
-                variant={selectedDateKey === day.value ? "default" : "outline"}
-                size="sm"
-                aria-pressed={selectedDateKey === day.value}
-              >
-                {day.label}
-              </Button>
-            ))}
+          <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+            {dateOptions.map((day) => {
+              const status = dateStatusMap?.[day.value] || {};
+              const weekDay = day.label.split(" ")[0];
+              const dayNum = day.label.split(" ")[1];
+
+              return (
+                <button
+                  key={day.value}
+                  type="button"
+                  disabled={status.isPast}
+                  onClick={() => onSelectDate(day.value)}
+                  aria-pressed={day.value === selectedDateKey}
+                  aria-label={`${day.label} — ${status.isCustom ? "Custom" : status.isDayOff ? "Day off" : "Default"}`}
+                  className={cn(
+                    "flex flex-col items-center gap-0 rounded-xl px-0.5 py-2 text-[10px] leading-tight transition",
+                    "focus:outline-none focus:ring-2 focus:ring-neutral-900/20",
+                    day.value === selectedDateKey
+                      ? "bg-neutral-900 text-white shadow-sm"
+                      : status.isPast
+                        ? "text-neutral-300 cursor-not-allowed"
+                        : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+                  )}
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wide">
+                    {weekDay}
+                  </span>
+                  <span className="text-sm font-bold">
+                    {dayNum}
+                  </span>
+                  <span
+                    className={cn(
+                      "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
+                      status.isCustom && "bg-amber-400",
+                      status.isDayOff && "bg-red-400",
+                      status.isDefault && "bg-emerald-400",
+                      status.isPast && "bg-neutral-200",
+                      day.value === selectedDateKey && "bg-white"
+                    )}
+                  />
+                  <span className="mt-0.5 text-[9px] font-medium leading-none">
+                    {status.isCustom && "Custom"}
+                    {status.isDayOff && "Off"}
+                    {status.isDefault && "Default"}
+                    {!status.isCustom && !status.isDayOff && !status.isDefault && ""}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <label className="mt-3 grid max-w-xs gap-1.5 text-sm font-medium">
             <span>Or pick a custom date</span>

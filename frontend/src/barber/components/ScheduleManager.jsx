@@ -460,6 +460,24 @@ export default function ScheduleManager({
     !nonWorkingDays.includes(selectedDateKey);
   const isSaving = Boolean(isPerSalonLoading && !isLoadingSalons && selectedSalonId);
 
+  const dateStatusMap = useMemo(() => {
+    const map = {};
+    dateOptions.forEach(({ value }) => {
+      const inOverride = Boolean(scheduleOverrides[value]);
+      const isDayOff =
+        nonWorkingDays.includes(value) ||
+        (inOverride && scheduleOverrides[value].isWorking === false);
+      map[value] = {
+        isDefault: !inOverride && !isDayOff,
+        isCustom: inOverride && scheduleOverrides[value].isWorking !== false,
+        isDayOff,
+        isPast: value < todayKey,
+        isSelected: value === selectedDateKey,
+      };
+    });
+    return map;
+  }, [dateOptions, scheduleOverrides, nonWorkingDays, todayKey, selectedDateKey]);
+
   const selectDate = useCallback((dateKey) => {
     if (!parseDateKey(dateKey) || dateKey < todayKey) return;
     setSelectedDate(dateKey);
@@ -842,6 +860,7 @@ export default function ScheduleManager({
             <div className="mt-4 space-y-6">
               <ScheduleDateOverrideEditor
                 dateOptions={dateOptions}
+                dateStatusMap={dateStatusMap}
                 selectedDateKey={selectedDateKey}
                 selectedDateObject={selectedDateObject}
                 todayKey={todayKey}
