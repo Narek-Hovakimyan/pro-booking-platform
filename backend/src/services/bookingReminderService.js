@@ -37,6 +37,9 @@ const createReminderNotifications = async (notifications) => {
   }
 };
 
+const getBookingNotificationData = (booking) =>
+  booking?._id ? { bookingId: booking._id } : undefined;
+
 /**
  * Run booking reminders:
  * - 24h reminder for accepted bookings starting within the next 24 hours
@@ -84,11 +87,13 @@ export const runBookingReminders = async (now = new Date()) => {
           userId: booking.clientId,
           type: "booking_reminder_2h",
           message: "Your appointment starts in 2 hours.",
+          data: getBookingNotificationData(booking),
         },
         {
           userId: booking.barberId,
           type: "booking_reminder_2h",
           message: "Your appointment starts in 2 hours.",
+          data: getBookingNotificationData(booking),
         },
       ]);
 
@@ -114,11 +119,13 @@ export const runBookingReminders = async (now = new Date()) => {
           userId: booking.clientId,
           type: "booking_reminder_24h",
           message: `Reminder: your appointment with ${barberName} is tomorrow at ${time}.`,
+          data: getBookingNotificationData(booking),
         },
         {
           userId: booking.barberId,
           type: "booking_reminder_24h",
           message: `Reminder: you have an appointment with ${clientName} tomorrow at ${time}.`,
+          data: getBookingNotificationData(booking),
         },
       ]);
 

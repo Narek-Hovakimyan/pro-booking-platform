@@ -66,7 +66,9 @@ test("past pending booking becomes expired and sends notifications", async () =>
   assert.ok(expiredBookings[0].expiredAt instanceof Date);
   assert.equal(notifications.length, 2);
   assert.equal(notifications[0].type, "booking_expired");
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
   assert.equal(notifications[1].type, "booking_expired_missed");
+  assert.deepEqual(notifications[1].data, { bookingId: booking._id });
 });
 
 test("future pending booking stays pending", async () => {

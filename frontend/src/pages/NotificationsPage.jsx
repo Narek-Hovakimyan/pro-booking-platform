@@ -3,23 +3,105 @@ import {
   Bell,
   Calendar,
   CalendarCheck,
+  Check,
   CheckCheck,
+  Eye,
   Info,
   Mail,
   MessageCircle,
   RefreshCw,
   Star,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
 
+import RejectBookingModal from "@/barber/components/RejectBookingModal";
 import api from "@/shared/api/axios";
 import { NotificationSkeleton } from "@/shared/components/LoadingSkeletons";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { cn } from "@/shared/lib/utils";
+import {
+  fetchBarberBookings,
+  updateBooking,
+} from "@/store/slices/bookingsSlice";
+
+// ---------------------------------------------------------------------------
+// Notification type grouping
+// ---------------------------------------------------------------------------
+
+function getNotificationGroup(rawType) {
+  if (!rawType) return "system";
+
+  if (
+    rawType.startsWith("booking_reminder_") ||
+    rawType.startsWith("booking_expired") ||
+    [
+      "booking_created",
+      "booking_accepted",
+      "booking_rejected",
+      "booking_cancelled",
+      "booking_delayed",
+      "booking_no_show",
+      "booking_late_cancelled",
+    ].includes(rawType)
+  ) {
+    return "booking";
+  }
+
+  if (
+    [
+      "booking_reschedule_requested",
+      "booking_reschedule_accepted",
+      "booking_reschedule_rejected",
+    ].includes(rawType)
+  ) {
+    return "reschedule";
+  }
+
+  if (rawType.startsWith("event_")) {
+    return "event";
+  }
+
+  if (rawType === "salon_job_application_status") {
+    return "job";
+  }
+
+  if (rawType.startsWith("event_certificate_")) {
+    return "certificate";
+  }
+
+  // message, review, and others fall back to their raw type or system
+  return rawType;
+}
+
+// ---------------------------------------------------------------------------
+// Destination helpers
+// ---------------------------------------------------------------------------
+
+function getViewDestination(group, currentUser) {
+  if (group === "booking" || group === "reschedule") {
+    return currentUser?.role === "barber" ? "/admin/bookings" : "/my-bookings";
+  }
+
+  if (group === "job") {
+    return "/jobs/applications";
+  }
+
+  if (group === "event") {
+    return "/events";
+  }
+
+  if (group === "certificate") {
+    return currentUser?.role === "barber" ? "/admin/settings/certifications" : null;
+  }
+
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Type visual config
@@ -31,6 +113,12 @@ const TYPE_CONFIG = {
     label: "Booking",
     accent: "border-l-blue-400 bg-blue-50/40",
     dot: "bg-blue-500",
+  },
+  reschedule: {
+    icon: RefreshCw,
+    label: "Reschedule",
+    accent: "border-l-orange-400 bg-orange-50/40",
+    dot: "bg-orange-500",
   },
   message: {
     icon: MessageCircle,
@@ -55,6 +143,12 @@ const TYPE_CONFIG = {
     label: "Certificate",
     accent: "border-l-emerald-400 bg-emerald-50/40",
     dot: "bg-emerald-500",
+  },
+  job: {
+    icon: Star,
+    label: "Job",
+    accent: "border-l-violet-400 bg-violet-50/40",
+    dot: "bg-violet-500",
   },
   system: {
     icon: Info,
@@ -111,6 +205,77 @@ function formatNotificationDate(date) {
 }
 
 // ---------------------------------------------------------------------------
+// Booking action helpers
+// ---------------------------------------------------------------------------
+
+function getIdString(value) {
+  if (!value) return "";
+  if (value._id) return String(value._id);
+  if (value.id) return String(value.id);
+  return String(value);
+}
+
+function getNotificationBookingId(notification) {
+  return getIdString(notification?.data?.bookingId);
+}
+
+function getBookingId(booking) {
+  return getIdString(booking?.id || booking?._id);
+}
+
+function getBookingNotificationAction(notification, booking, currentUser) {
+  if (currentUser?.role !== "barber") return null;
+  if (!getNotificationBookingId(notification) || !booking) return null;
+
+  if (notification.type === "booking_created" && booking.status === "pending") {
+    return {
+      primaryAction: "accept-booking",
+      primaryLabel: "Accept",
+      secondaryAction: "reject-booking",
+      secondaryLabel: "Reject",
+    };
+  }
+
+  if (
+    notification.type === "booking_reschedule_requested" &&
+    booking.rescheduleRequest?.status === "pending"
+  ) {
+    return {
+      primaryAction: "accept-reschedule",
+      primaryLabel: "Approve",
+      secondaryAction: "reject-reschedule",
+      secondaryLabel: "Reject",
+    };
+  }
+
+  return null;
+}
+
+function getNotificationEventId(notification) {
+  return getIdString(notification?.data?.eventId);
+}
+
+function getNotificationEventRegistrationId(notification) {
+  return getIdString(notification?.data?.eventRegistrationId);
+}
+
+function getEventNotificationAction(notification, currentUser) {
+  if (currentUser?.role !== "barber") return null;
+  if (!getNotificationEventId(notification) || !getNotificationEventRegistrationId(notification)) return null;
+
+  if (notification.type === "event_registration_request") {
+    return {
+      primaryAction: "approve-event-registration",
+      primaryLabel: "Approve",
+      secondaryAction: "reject-event-registration",
+      secondaryLabel: "Reject",
+    };
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
 
@@ -120,7 +285,18 @@ const notificationsCacheByUserId = new Map();
 // Groups component
 // ---------------------------------------------------------------------------
 
-function NotificationGroup({ title, notifications, onMarkRead, onDelete }) {
+function NotificationGroup({
+  title,
+  notifications,
+  currentUser,
+  bookingById,
+  activeAction,
+  onBookingAction,
+  onEventAction,
+  onView,
+  onMarkRead,
+  onDelete,
+}) {
   if (notifications.length === 0) return null;
 
   return (
@@ -130,9 +306,20 @@ function NotificationGroup({ title, notifications, onMarkRead, onDelete }) {
       </h2>
       <div className="space-y-2">
         {notifications.map((notification) => {
-          const TypeConfig = getTypeConfig(notification.type);
+          const group = getNotificationGroup(notification.type);
+          const TypeConfig = getTypeConfig(group);
           const IconComponent = TypeConfig.icon;
           const createdAt = new Date(notification.createdAt);
+          const viewDestination = getViewDestination(group, currentUser);
+          const bookingId = getNotificationBookingId(notification);
+          const targetBooking = bookingId ? bookingById.get(bookingId) : null;
+          const bookingAction = getBookingNotificationAction(
+            notification,
+            targetBooking,
+            currentUser,
+          );
+          const eventAction = getEventNotificationAction(notification, currentUser);
+          const isActionPending = activeAction?.notificationId === notification.id;
 
           return (
             <Card
@@ -197,6 +384,118 @@ function NotificationGroup({ title, notifications, onMarkRead, onDelete }) {
 
                 {/* Actions */}
                 <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+                  {eventAction && (
+                    <>
+                      <Button
+                        aria-label={eventAction.primaryLabel}
+                        className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                        disabled={Boolean(activeAction)}
+                        onClick={() =>
+                          onEventAction(
+                            notification,
+                            eventAction.primaryAction,
+                          )
+                        }
+                        size="default"
+                        title={eventAction.primaryLabel}
+                      >
+                        <Check className="mr-1 h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">
+                          {isActionPending &&
+                          activeAction?.action === eventAction.primaryAction
+                            ? "Working..."
+                            : eventAction.primaryLabel}
+                        </span>
+                      </Button>
+                      <Button
+                        aria-label={eventAction.secondaryLabel}
+                        className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                        disabled={Boolean(activeAction)}
+                        onClick={() =>
+                          onEventAction(
+                            notification,
+                            eventAction.secondaryAction,
+                          )
+                        }
+                        size="default"
+                        title={eventAction.secondaryLabel}
+                        variant="outline"
+                      >
+                        <XCircle className="mr-1 h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">
+                          {isActionPending &&
+                          activeAction?.action === eventAction.secondaryAction
+                            ? "Working..."
+                            : eventAction.secondaryLabel}
+                        </span>
+                      </Button>
+                    </>
+                  )}
+
+                  {bookingAction && (
+                    <>
+                      <Button
+                        aria-label={bookingAction.primaryLabel}
+                        className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                        disabled={Boolean(activeAction)}
+                        onClick={() =>
+                          onBookingAction(
+                            notification,
+                            targetBooking,
+                            bookingAction.primaryAction,
+                          )
+                        }
+                        size="default"
+                        title={bookingAction.primaryLabel}
+                      >
+                        <Check className="mr-1 h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">
+                          {isActionPending &&
+                          activeAction?.action === bookingAction.primaryAction
+                            ? "Working..."
+                            : bookingAction.primaryLabel}
+                        </span>
+                      </Button>
+                      <Button
+                        aria-label={bookingAction.secondaryLabel}
+                        className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                        disabled={Boolean(activeAction)}
+                        onClick={() =>
+                          onBookingAction(
+                            notification,
+                            targetBooking,
+                            bookingAction.secondaryAction,
+                          )
+                        }
+                        size="default"
+                        title={bookingAction.secondaryLabel}
+                        variant="outline"
+                      >
+                        <XCircle className="mr-1 h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">
+                          {isActionPending &&
+                          activeAction?.action === bookingAction.secondaryAction
+                            ? "Working..."
+                            : bookingAction.secondaryLabel}
+                        </span>
+                      </Button>
+                    </>
+                  )}
+
+                  {viewDestination && (
+                    <Button
+                      aria-label="View"
+                      className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                      onClick={() => onView(notification, viewDestination)}
+                      size="default"
+                      title="View"
+                      variant="outline"
+                    >
+                      <Eye className="mr-1 h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">View</span>
+                    </Button>
+                  )}
+
                   {!notification.isRead && (
                     <Button
                       aria-label="Mark as read"
@@ -236,8 +535,11 @@ function NotificationGroup({ title, notifications, onMarkRead, onDelete }) {
 // ---------------------------------------------------------------------------
 
 export default function NotificationsPage() {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { currentUser } = useSelector((state) => state.auth);
-  const currentUserId = currentUser?.id;
+  const bookings = useSelector((state) => state.bookings || []);
+  const currentUserId = getIdString(currentUser?.id || currentUser?._id);
   const [notifications, setNotifications] = useState(
     () => notificationsCacheByUserId.get(String(currentUserId)) || [],
   );
@@ -245,6 +547,37 @@ export default function NotificationsPage() {
     () => !notificationsCacheByUserId.has(String(currentUserId)),
   );
   const [error, setError] = useState("");
+  const [activeAction, setActiveAction] = useState(null);
+  const [rejectingAction, setRejectingAction] = useState(null);
+  const [rejectionError, setRejectionError] = useState("");
+
+  const actionableNotificationCount = useMemo(
+    () =>
+      notifications.filter(
+        (notification) =>
+          (notification.type === "booking_created" ||
+            notification.type === "booking_reschedule_requested") &&
+          getNotificationBookingId(notification),
+      ).length,
+    [notifications],
+  );
+
+  const bookingById = useMemo(() => {
+    const nextMap = new Map();
+
+    if (currentUser?.role !== "barber" || !currentUserId) return nextMap;
+
+    bookings.forEach((booking) => {
+      const bookingId = getBookingId(booking);
+      const barberId = getIdString(booking?.barberId || booking?.barber);
+
+      if (bookingId && barberId === currentUserId) {
+        nextMap.set(bookingId, booking);
+      }
+    });
+
+    return nextMap;
+  }, [bookings, currentUser?.role, currentUserId]);
 
   // ---- Fetch ----
 
@@ -297,6 +630,30 @@ export default function NotificationsPage() {
       clearInterval(intervalId);
     };
   }, [currentUserId, loadNotifications]);
+
+  useEffect(() => {
+    if (
+      currentUser?.role !== "barber" ||
+      !currentUserId ||
+      actionableNotificationCount === 0
+    ) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    dispatch(fetchBarberBookings(currentUserId)).catch((requestError) => {
+      if (!isMounted) return;
+      setError(
+        requestError.response?.data?.message ||
+          "Could not load bookings for notification actions.",
+      );
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [actionableNotificationCount, currentUser?.role, currentUserId, dispatch]);
 
   // ---- Actions ----
 
@@ -390,6 +747,159 @@ export default function NotificationsPage() {
       );
     }
   }, [currentUserId]);
+
+  const refreshBarberBookings = useCallback(async () => {
+    if (currentUser?.role !== "barber" || !currentUserId) return;
+    await dispatch(fetchBarberBookings(currentUserId));
+  }, [currentUser?.role, currentUserId, dispatch]);
+
+  const finishBookingAction = useCallback(
+    async (notification, updatedBooking) => {
+      dispatch(updateBooking(updatedBooking));
+
+      if (!notification.isRead) {
+        await markOneRead(notification.id);
+      }
+
+      await refreshBarberBookings();
+    },
+    [dispatch, markOneRead, refreshBarberBookings],
+  );
+
+  const handleBookingAction = useCallback(
+    async (notification, booking, action) => {
+      if (activeAction) return;
+
+      const bookingId = getBookingId(booking) || getNotificationBookingId(notification);
+      if (!bookingId) return;
+
+      if (action === "reject-booking") {
+        setRejectingAction({ notification, booking });
+        setRejectionError("");
+        setError("");
+        return;
+      }
+
+      setError("");
+      setActiveAction({ notificationId: notification.id, action });
+
+      try {
+        let response;
+
+        if (action === "accept-booking") {
+          response = await api.put(`/bookings/${bookingId}`, { status: "accepted" });
+        } else if (action === "accept-reschedule") {
+          response = await api.patch(
+            `/bookings/${bookingId}/reschedule-request/accept`,
+            {},
+          );
+        } else if (action === "reject-reschedule") {
+          response = await api.patch(
+            `/bookings/${bookingId}/reschedule-request/reject`,
+            {},
+          );
+        } else {
+          return;
+        }
+
+        await finishBookingAction(notification, response.data);
+      } catch (requestError) {
+        setError(
+          requestError.response?.data?.message ||
+            "Could not update booking. Please try again.",
+        );
+      } finally {
+        setActiveAction(null);
+      }
+    },
+    [activeAction, finishBookingAction],
+  );
+
+  const rejectBookingFromNotification = useCallback(
+    async ({ rejectionReason }) => {
+      if (!rejectingAction || activeAction) return;
+
+      const { notification, booking } = rejectingAction;
+      const bookingId = getBookingId(booking) || getNotificationBookingId(notification);
+      if (!bookingId) return;
+
+      setRejectionError("");
+      setActiveAction({ notificationId: notification.id, action: "reject-booking" });
+
+      try {
+        const { data } = await api.put(`/bookings/${bookingId}`, {
+          status: "rejected",
+          rejectionReason,
+        });
+
+        await finishBookingAction(notification, data);
+        setRejectingAction(null);
+      } catch (requestError) {
+        setRejectionError(
+          requestError.response?.data?.message ||
+            "Could not reject booking. Please try again.",
+        );
+      } finally {
+        setActiveAction(null);
+      }
+    },
+    [activeAction, finishBookingAction, rejectingAction],
+  );
+
+  const handleEventAction = useCallback(
+    async (notification, action) => {
+      if (activeAction) return;
+
+      const eventId = getNotificationEventId(notification);
+      const eventRegistrationId = getNotificationEventRegistrationId(notification);
+      if (!eventId || !eventRegistrationId) return;
+
+      setError("");
+      setActiveAction({ notificationId: notification.id, action });
+
+      try {
+        if (action === "approve-event-registration") {
+          await api.patch(
+            `/events/${eventId}/registrations/${eventRegistrationId}/approve`,
+            {},
+          );
+        } else if (action === "reject-event-registration") {
+          await api.patch(
+            `/events/${eventId}/registrations/${eventRegistrationId}/reject`,
+            {},
+          );
+        } else {
+          return;
+        }
+
+        if (!notification.isRead) {
+          await markOneRead(notification.id);
+        }
+
+        await loadNotifications();
+      } catch (requestError) {
+        setError(
+          requestError.response?.data?.message ||
+            "Could not process event registration. Please try again.",
+        );
+      } finally {
+        setActiveAction(null);
+      }
+    },
+    [activeAction, markOneRead, loadNotifications],
+  );
+
+  // ---- Navigation ----
+
+  const handleView = useCallback(
+    async (notification, destination) => {
+      if (!notification.isRead) {
+        await markOneRead(notification.id);
+      }
+      navigate(destination);
+    },
+    [markOneRead, navigate],
+  );
 
   // ---- Derived state ----
 
@@ -501,40 +1011,86 @@ export default function NotificationsPage() {
         <div className="space-y-6">
           {groupedNotifications.Today.length > 0 && (
             <NotificationGroup
+              currentUser={currentUser}
+              activeAction={activeAction}
+              bookingById={bookingById}
               notifications={groupedNotifications.Today}
+              onBookingAction={handleBookingAction}
+              onEventAction={handleEventAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
+              onView={handleView}
               title="Today"
             />
           )}
 
           {groupedNotifications.Yesterday.length > 0 && (
             <NotificationGroup
+              currentUser={currentUser}
+              activeAction={activeAction}
+              bookingById={bookingById}
               notifications={groupedNotifications.Yesterday}
+              onBookingAction={handleBookingAction}
+              onEventAction={handleEventAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
+              onView={handleView}
               title="Yesterday"
             />
           )}
 
           {groupedNotifications["This Week"].length > 0 && (
             <NotificationGroup
+              currentUser={currentUser}
+              activeAction={activeAction}
+              bookingById={bookingById}
               notifications={groupedNotifications["This Week"]}
+              onBookingAction={handleBookingAction}
+              onEventAction={handleEventAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
+              onView={handleView}
               title="This Week"
             />
           )}
 
           {groupedNotifications.Earlier.length > 0 && (
             <NotificationGroup
+              currentUser={currentUser}
+              activeAction={activeAction}
+              bookingById={bookingById}
               notifications={groupedNotifications.Earlier}
+              onBookingAction={handleBookingAction}
+              onEventAction={handleEventAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
+              onView={handleView}
               title="Earlier"
             />
           )}
         </div>
+      )}
+
+      {rejectingAction && (
+        <RejectBookingModal
+          booking={{
+            ...rejectingAction.booking,
+            clientName:
+              rejectingAction.booking?.client?.name ||
+              rejectingAction.booking?.clientName,
+          }}
+          error={rejectionError}
+          isSubmitting={
+            activeAction?.notificationId === rejectingAction.notification.id &&
+            activeAction?.action === "reject-booking"
+          }
+          onClose={() => {
+            if (activeAction) return;
+            setRejectingAction(null);
+            setRejectionError("");
+          }}
+          onSubmit={rejectBookingFromNotification}
+        />
       )}
     </div>
   );

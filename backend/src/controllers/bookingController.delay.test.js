@@ -348,6 +348,12 @@ test("booking delay creates barber and client notifications", async () => {
   );
   assert.equal(notifications[0].type, "booking_delayed");
   assert.equal(
+    notifications.every(
+      (notification) => notification.data?.bookingId === booking._id
+    ),
+    true
+  );
+  assert.equal(
     notifications.some((notification) =>
       notification.message === "Client is running late. Booking moved to 10:10."
     ),

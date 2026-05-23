@@ -68,6 +68,7 @@ test("barber can mark own accepted past booking as no-show", async () => {
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].type, "booking_no_show");
   assert.equal(notifications[0].userId, clientId);
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
 });
 
 test("barber can mark own accepted past booking as late-cancelled", async () => {
@@ -102,6 +103,7 @@ test("barber can mark own accepted past booking as late-cancelled", async () => 
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].type, "booking_late_cancelled");
   assert.equal(notifications[0].userId, clientId);
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
 });
 
 test("client cannot mark no-show", async () => {

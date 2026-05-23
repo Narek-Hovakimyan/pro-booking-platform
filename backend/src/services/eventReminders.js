@@ -14,6 +14,17 @@ export const getEventStart = (event) => {
   return Number.isNaN(startsAt.getTime()) ? null : startsAt;
 };
 
+const getEventReminderNotificationData = (event, registration) => {
+  const eventId = event?._id || event?.id;
+  const eventRegistrationId = registration?._id || registration?.id;
+  const data = {};
+
+  if (eventId) data.eventId = eventId;
+  if (eventRegistrationId) data.eventRegistrationId = eventRegistrationId;
+
+  return Object.keys(data).length > 0 ? data : undefined;
+};
+
 export const sendEventReminders = async (now = new Date()) => {
   const reminderWindowStart = new Date(
     now.getTime() + REMINDER_LEAD_MINUTES * 60 * 1000
@@ -65,6 +76,7 @@ export const sendEventReminders = async (now = new Date()) => {
       userId: registration.userId || registration.barberId,
       type: "event_reminder",
       message: `Reminder: Your event '${event.title}' starts tomorrow at ${event.time}.`,
+      data: getEventReminderNotificationData(event, registration),
     });
 
     sentCount += 1;

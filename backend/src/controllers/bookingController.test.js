@@ -502,7 +502,12 @@ test("break time blocks booking slot", async () => {
 
 test("client-created booking ignores accepted status and saves salonId", async () => {
   const createdBookings = [];
+  const notifications = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
 
   const res = createResponse();
 
@@ -526,6 +531,9 @@ test("client-created booking ignores accepted status and saves salonId", async (
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.status, "pending");
   assert.equal(String(res.body.salonId), salonId);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "booking_created");
+  assert.deepEqual(notifications[0].data, { bookingId: res.body._id });
 });
 
 test("booking only accepts active services owned by the selected barber", async () => {

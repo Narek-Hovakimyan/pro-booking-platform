@@ -25,6 +25,9 @@ const getBarberName = async (barberId) => {
   return barber?.name || "Barber";
 };
 
+const getBookingNotificationData = (booking) =>
+  booking?._id ? { bookingId: booking._id } : undefined;
+
 export const emitBookingUpdated = (booking, action = "updated") => {
   try {
     const io = getIOForBookingSideEffects();
@@ -66,6 +69,7 @@ export const notifyUsersForBookingStatusChange = async ({
       userId: booking.clientId,
       type: "booking_accepted",
       message: formatStatusMessage(barberName, booking, "accepted"),
+      data: getBookingNotificationData(booking),
     });
   }
 
@@ -76,6 +80,7 @@ export const notifyUsersForBookingStatusChange = async ({
       userId: booking.clientId,
       type: "booking_rejected",
       message: formatRejectedMessage(barberName, booking),
+      data: getBookingNotificationData(booking),
     });
   }
 
@@ -86,6 +91,7 @@ export const notifyUsersForBookingStatusChange = async ({
       userId: booking.barberId,
       type: "booking_cancelled",
       message: formatCancelledMessage(notificationClientName, booking),
+      data: getBookingNotificationData(booking),
     });
   }
 };

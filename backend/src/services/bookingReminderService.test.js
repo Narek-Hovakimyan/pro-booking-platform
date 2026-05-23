@@ -98,6 +98,7 @@ test("24h reminder creates client and barber notifications for accepted booking"
 
   assert.ok(clientNotif);
   assert.equal(clientNotif.type, "booking_reminder_24h");
+  assert.deepEqual(clientNotif.data, { bookingId: booking._id });
   assert.equal(
     clientNotif.message,
     "Reminder: your appointment with John Barber is tomorrow at 10:00."
@@ -105,6 +106,7 @@ test("24h reminder creates client and barber notifications for accepted booking"
 
   assert.ok(barberNotif);
   assert.equal(barberNotif.type, "booking_reminder_24h");
+  assert.deepEqual(barberNotif.data, { bookingId: booking._id });
   assert.equal(
     barberNotif.message,
     "Reminder: you have an appointment with Jane Client tomorrow at 10:00."
@@ -180,10 +182,12 @@ test("2h reminder creates client and barber notifications for accepted booking",
 
   assert.ok(clientNotif);
   assert.equal(clientNotif.type, "booking_reminder_2h");
+  assert.deepEqual(clientNotif.data, { bookingId: booking._id });
   assert.equal(clientNotif.message, "Your appointment starts in 2 hours.");
 
   assert.ok(barberNotif);
   assert.equal(barberNotif.type, "booking_reminder_2h");
+  assert.deepEqual(barberNotif.data, { bookingId: booking._id });
   assert.equal(barberNotif.message, "Your appointment starts in 2 hours.");
 });
 

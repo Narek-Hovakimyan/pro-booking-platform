@@ -147,6 +147,9 @@ const createNotificationNonFatal = async (payload) => {
   }
 };
 
+const getBookingNotificationData = (booking) =>
+  booking?._id ? { bookingId: booking._id } : undefined;
+
 const resolveBookingSalon = async ({ barberId, salonId }) => {
   const barber = await User.findById(barberId).select(
     "salon salonStatus salons role"
@@ -464,6 +467,7 @@ export const createBooking = async (req, res) => {
         userId: barberId,
         type: "booking_created",
         message: formatBookedMessage(notificationClientName, booking),
+        data: getBookingNotificationData(booking),
       });
     }
 
@@ -825,6 +829,7 @@ export const createRescheduleRequest = async (req, res) => {
       userId: booking.barberId,
       type: "booking_reschedule_requested",
       message: `Client requested to reschedule booking from ${booking.bookingDate} at ${booking.time} to ${requestedBookingDate} at ${requestedTime}.`,
+      data: getBookingNotificationData(booking),
     });
 
     emitBookingUpdated(booking, "updated");
@@ -916,6 +921,7 @@ export const acceptRescheduleRequest = async (req, res) => {
         userId: updatedBooking.clientId,
         type: "booking_reschedule_accepted",
         message: `Your reschedule request was accepted. Booking moved to ${updatedBooking.bookingDate} at ${updatedBooking.time}.`,
+        data: getBookingNotificationData(updatedBooking),
       });
     }
 
@@ -963,6 +969,7 @@ export const rejectRescheduleRequest = async (req, res) => {
         message: rejectionReason
           ? `Your reschedule request was rejected. Reason: ${rejectionReason}`
           : "Your reschedule request was rejected.",
+        data: getBookingNotificationData(booking),
       });
     }
 
@@ -1097,6 +1104,7 @@ export const delayBooking = async (req, res) => {
         userId: updatedBooking.barberId,
         type: "booking_delayed",
         message: `Client is running late. Booking moved to ${newTime}.`,
+        data: getBookingNotificationData(updatedBooking),
       }),
     ];
 
@@ -1106,6 +1114,7 @@ export const delayBooking = async (req, res) => {
           userId: updatedBooking.clientId,
           type: "booking_delayed",
           message: `Your booking was delayed to ${newTime}.`,
+          data: getBookingNotificationData(updatedBooking),
         })
       );
     }
@@ -1165,6 +1174,7 @@ export const markNoShow = async (req, res) => {
         userId: updatedBooking.clientId,
         type: "booking_no_show",
         message: "Your booking was marked as no-show.",
+        data: getBookingNotificationData(updatedBooking),
       });
     }
 
@@ -1193,6 +1203,7 @@ export const markLateCancel = async (req, res) => {
         userId: updatedBooking.clientId,
         type: "booking_late_cancelled",
         message: "Your booking was marked as late cancellation.",
+        data: getBookingNotificationData(updatedBooking),
       });
     }
 

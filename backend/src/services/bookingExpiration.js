@@ -22,6 +22,9 @@ const getBookingDateKey = (booking) => {
   return "";
 };
 
+const getBookingNotificationData = (booking) =>
+  booking?._id ? { bookingId: booking._id } : undefined;
+
 export const shouldExpireBooking = (booking, now = new Date()) => {
   if (booking?.status !== "pending") return false;
 
@@ -81,6 +84,7 @@ export const expirePendingBookings = async (now = new Date()) => {
         userId: claimedBooking.clientId,
         type: "booking_expired",
         message: `Your booking on ${dateKey} at ${time} expired because the barber did not confirm it in time.`,
+        data: getBookingNotificationData(claimedBooking),
       });
     }
 
@@ -100,6 +104,7 @@ export const expirePendingBookings = async (now = new Date()) => {
         userId: claimedBooking.barberId,
         type: "booking_expired_missed",
         message: `You missed a pending booking confirmation for ${dateKey} at ${time}.`,
+        data: getBookingNotificationData(claimedBooking),
       });
     }
   }

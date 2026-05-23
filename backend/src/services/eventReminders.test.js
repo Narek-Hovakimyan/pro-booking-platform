@@ -97,6 +97,7 @@ test("approved participant gets reminder once in the 24h window", async () => {
   const registrations = [
     createRegistration({
       eventId: {
+        _id: "64b000000000000000000010",
         title: "Masterclass",
         date: "2099-07-02",
         time: "13:59",
@@ -122,6 +123,10 @@ test("approved participant gets reminder once in the 24h window", async () => {
   assert.equal(sentCount, 1);
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].type, "event_reminder");
+  assert.deepEqual(notifications[0].data, {
+    eventId: registrations[0].eventId._id,
+    eventRegistrationId: registrations[0]._id,
+  });
   assert.equal(findOneAndUpdateCalled, true);
   assert.equal(
     notifications[0].message,

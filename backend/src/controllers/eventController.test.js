@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 
 import {
   approveRegistration,
+  cancelEvent,
   cancelRegistration,
   checkInRegistration,
   createEvent,
@@ -189,7 +190,12 @@ const createControllerMocks = ({
 
 test("user registers for event with pending status", async () => {
   const res = createResponse();
+  const notifications = [];
   const { registrations } = createControllerMocks();
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
 
   await registerForEvent(
     {
@@ -204,6 +210,12 @@ test("user registers for event with pending status", async () => {
   assert.equal(res.body.registration.status, "pending");
   assert.equal(registrations.length, 1);
   assert.equal(registrations[0].status, "pending");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_registration_request");
+  assert.deepEqual(notifications[0].data, {
+    eventId,
+    eventRegistrationId: registrations[0]._id,
+  });
 });
 
 test("approved salon member can create event with second salonId", async () => {
@@ -359,8 +371,13 @@ test("full event moves new registration to waitlisted", async () => {
 
 test("organizer approves registration", async () => {
   const res = createResponse();
+  const notifications = [];
   const registration = createRegistration({ userId: attendeeId, status: "pending" });
   createControllerMocks({ registrations: [registration] });
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
 
   await approveRegistration(
     {
@@ -373,12 +390,23 @@ test("organizer approves registration", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.registration.status, "approved");
   assert.equal(registration.status, "approved");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_registration_approved");
+  assert.deepEqual(notifications[0].data, {
+    eventId,
+    eventRegistrationId: registration._id,
+  });
 });
 
 test("organizer rejects registration with reason", async () => {
   const res = createResponse();
+  const notifications = [];
   const registration = createRegistration({ userId: attendeeId, status: "pending" });
   createControllerMocks({ registrations: [registration] });
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
 
   await rejectRegistration(
     {
@@ -393,6 +421,12 @@ test("organizer rejects registration with reason", async () => {
   assert.equal(res.body.registration.status, "rejected");
   assert.equal(res.body.registration.rejectionReason, "Limited seats");
   assert.equal(registration.rejectionReason, "Limited seats");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_registration_rejected");
+  assert.deepEqual(notifications[0].data, {
+    eventId,
+    eventRegistrationId: registration._id,
+  });
 });
 
 test("non-organizer cannot approve or reject registrations", async () => {
@@ -517,8 +551,13 @@ test("organizer can approve waitlisted registration when capacity allows", async
 
 test("organizer can move registration to waitlist", async () => {
   const res = createResponse();
+  const notifications = [];
   const registration = createRegistration({ userId: attendeeId, status: "pending" });
   createControllerMocks({ registrations: [registration] });
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
 
   await waitlistRegistration(
     {
@@ -530,6 +569,12 @@ test("organizer can move registration to waitlist", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(registration.status, "waitlisted");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_registration_waitlisted");
+  assert.deepEqual(notifications[0].data, {
+    eventId,
+    eventRegistrationId: registration._id,
+  });
 });
 
 test("organizer can mark approved participant attended", async () => {
@@ -583,8 +628,13 @@ test("non-approved registration cannot be checked in", async () => {
 
 test("user can cancel own pending registration", async () => {
   const res = createResponse();
+  const notifications = [];
   const registration = createRegistration({ userId: attendeeId, status: "pending" });
   createControllerMocks({ registrations: [registration] });
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
 
   await cancelRegistration(
     {
@@ -597,6 +647,12 @@ test("user can cancel own pending registration", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(registration.status, "cancelled");
   assert.equal(res.body.message, "Registration cancelled");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_unregistration");
+  assert.deepEqual(notifications[0].data, {
+    eventId,
+    eventRegistrationId: registration._id,
+  });
 });
 
 test("user can cancel own waitlisted registration", async () => {
@@ -641,6 +697,39 @@ test("user cannot cancel own approved registration", async () => {
     "Approved registration cannot be cancelled by participant"
   );
   assert.equal(registration.status, "approved");
+});
+
+test("organizer cancellation notification includes event metadata", async () => {
+  const res = createResponse();
+  const event = {
+    ...baseEvent,
+    async save() {
+      return this;
+    },
+  };
+  const notifications = [];
+  const registration = createRegistration({ status: "approved" });
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+  EventRegistration.find = () => createQuery([registration]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await cancelEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(event.status, "cancelled");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_cancelled");
+  assert.deepEqual(notifications[0].data, { eventId });
 });
 
 test("my registrations include issued certificate data", async () => {

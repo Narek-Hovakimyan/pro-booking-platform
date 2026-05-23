@@ -192,6 +192,7 @@ test("accepted status change sends same client notification", async () => {
       userId: clientId,
       type: "booking_accepted",
       message: "Your booking with Barber on 2099-06-01 at 10:00 was accepted",
+      data: { bookingId: booking._id },
     },
   ]);
 });
@@ -221,6 +222,7 @@ test("rejected status change sends same client notification", async () => {
       type: "booking_rejected",
       message:
         "Your booking with Barber on 2099-06-01 at 10:00 was rejected. Reason: Unavailable",
+      data: { bookingId: booking._id },
     },
   ]);
 });
@@ -247,6 +249,7 @@ test("cancelled status change sends same barber notification", async () => {
       type: "booking_cancelled",
       message:
         "Client cancelled booking on 2099-06-01 at 10:00. Reason: Plans changed",
+      data: { bookingId: booking._id },
     },
   ]);
 });

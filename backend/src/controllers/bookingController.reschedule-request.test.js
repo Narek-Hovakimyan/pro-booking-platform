@@ -108,6 +108,7 @@ test("client can create reschedule request for own pending booking", async () =>
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].userId, barberId);
   assert.equal(notifications[0].type, "booking_reschedule_requested");
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
 });
 
 test("client can create reschedule request for own accepted booking", async () => {
@@ -142,6 +143,7 @@ test("client can create reschedule request for own accepted booking", async () =
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].userId, barberId);
   assert.equal(notifications[0].type, "booking_reschedule_requested");
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
 });
 
 test("client can create reschedule request for own legacy confirmed booking", async () => {
@@ -424,6 +426,7 @@ test("accept notifies client", async () => {
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].userId, clientId);
   assert.equal(notifications[0].type, "booking_reschedule_accepted");
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
 });
 
 test("barber can reject pending reschedule request", async () => {
@@ -483,6 +486,7 @@ test("reject keeps original booking date/time and notifies client", async () => 
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].userId, clientId);
   assert.equal(notifications[0].type, "booking_reschedule_rejected");
+  assert.deepEqual(notifications[0].data, { bookingId: booking._id });
 });
 
 test("reject works when request body is missing", async () => {

@@ -32,6 +32,17 @@ const countApprovedRegistrations = async (eventId) =>
     status: APPROVED_REGISTRATION_STATUS,
   });
 
+const getEventNotificationData = (event, registration = null) => {
+  const eventId = getId(event);
+  const eventRegistrationId = getId(registration);
+  const data = {};
+
+  if (eventId) data.eventId = eventId;
+  if (eventRegistrationId) data.eventRegistrationId = eventRegistrationId;
+
+  return Object.keys(data).length > 0 ? data : undefined;
+};
+
 async function getEventAuthorization(event, user) {
   const userId = getId(user);
   const eventOrganizerId = getId(event?.organizerId);
@@ -468,6 +479,7 @@ export const cancelEvent = async (req, res) => {
         userId: getRegistrationUserId(reg),
         type: "event_cancelled",
         message: `Event "${event.title}" has been cancelled`,
+        data: getEventNotificationData(event),
       });
     }
 
@@ -566,6 +578,7 @@ export const registerForEvent = async (req, res) => {
       userId: event.organizerId,
       type: "event_registration_request",
       message: `${req.user.name} requested to join your event: ${event.title}`,
+      data: getEventNotificationData(event, registration),
     });
 
     return res.json({
@@ -637,6 +650,7 @@ export const cancelRegistration = async (req, res) => {
       userId: event.organizerId,
       type: "event_unregistration",
       message: `${req.user.name} cancelled the registration request for "${event.title}"`,
+      data: getEventNotificationData(event, registration),
     });
 
     const newCount = await countApprovedRegistrations(event._id);
@@ -892,6 +906,7 @@ export const waitlistRegistration = async (req, res) => {
       userId: getRegistrationUserId(registration),
       type: "event_registration_waitlisted",
       message: `Your registration for ${event.title} was moved to the waiting list`,
+      data: getEventNotificationData(event, registration),
     });
 
     return res.json({
@@ -1089,6 +1104,7 @@ export const approveRegistration = async (req, res) => {
       userId: getRegistrationUserId(registration),
       type: "event_registration_approved",
       message: `Your registration for ${event.title} was approved`,
+      data: getEventNotificationData(event, registration),
     });
 
     return res.json({
@@ -1158,6 +1174,7 @@ export const rejectRegistration = async (req, res) => {
       message: rejectionReason
         ? `Your registration for ${event.title} was rejected. Reason: ${rejectionReason}`
         : `Your registration for ${event.title} was rejected`,
+      data: getEventNotificationData(event, registration),
     });
 
     return res.json({
