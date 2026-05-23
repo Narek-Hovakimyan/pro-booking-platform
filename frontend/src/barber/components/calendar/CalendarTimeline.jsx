@@ -46,10 +46,6 @@ function formatTimeRange(startTime, duration) {
   return `${minutesToTime(startMinutes)} - ${minutesToTime(startMinutes + duration)}`;
 }
 
-function isInactiveStatus(status) {
-  return ["rejected", "cancelled", "expired", "no_show", "late_cancelled"].includes(status);
-}
-
 export default function CalendarTimeline({
   timelineRows = [],
   isLoading = false,
@@ -217,9 +213,14 @@ function FullTimelineView({
   onNoShow,
   onLateCancel,
 }) {
+  // Hide occupied continuation rows — booking card already shows duration
+  const visibleRows = timelineRows.filter(
+    (row) => row.rowType !== "booking-continue"
+  );
+
   return (
     <div className="space-y-3">
-      {timelineRows.map((row) => {
+      {visibleRows.map((row) => {
         const booking = row.bookingEntry?.booking;
         const status = booking ? getBookingStatus(booking) : "";
         const bookingNotes = booking ? getBookingNotes(booking) : "";
@@ -254,16 +255,8 @@ function FullTimelineView({
                 </div>
               )}
 
-              {row.rowType === "booking-continue" && row.overlappingBooking && (
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-500">
-                  {isInactiveStatus(row.overlappingBooking.status)
-                    ? "Booking continues until "
-                    : "Occupied until "}
-                  {minutesToTime(row.overlappingBooking.endMinutes)}
-                </div>
-              )}
-
               {row.rowType === "booking-start" && booking && (
+
                 <CalendarBookingCard
                   booking={booking}
                   status={status}

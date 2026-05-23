@@ -25,6 +25,7 @@ import { getDayKeyFromDate, parseDateKey } from "./shared/utils/dates";
 
 const AdminPage = lazy(() => import("./barber/pages/AdminPage"));
 const BarberCalendarPage = lazy(() => import("./barber/pages/BarberCalendarPage"));
+const BarberCalendarDayPage = lazy(() => import("./barber/pages/BarberCalendarDayPage"));
 const BarberProfilePage = lazy(() => import("./barber/pages/BarberProfilePage"));
 const BarbersPage = lazy(() => import("./client/pages/BarbersPage"));
 const BookingPage = lazy(() => import("./client/pages/BookingPage"));
@@ -738,6 +739,14 @@ export default function App() {
               element={
                 <ProtectedRoute role="barber">
                   <BarberCalendarPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/calendar/day/:date"
+              element={
+                <ProtectedRoute role="barber">
+                  <BarberCalendarDayPage />
                 </ProtectedRoute>
               }
             />
