@@ -209,6 +209,8 @@ test("barber can apply to active job", async () => {
     createdPayload = payload;
     return createApplication({ ...payload, _id: applicationId });
   };
+  Salon.findById = async () => createSalon();
+  Notification.create = async (payload) => payload;
   // CRITICAL: NOT async — must return a raw thenable so applyApplicantPopulate
   // can chain .populate() on it before await
   SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
@@ -234,6 +236,179 @@ test("barber can apply to active job", async () => {
   assert.equal(createdPayload.experience, "3 years");
   assert.equal(createdPayload.contactInfo, "+37499000001");
   assert.equal(res.body.id, applicationId);
+});
+
+test("applying to a job notifies salon owner with application metadata", async () => {
+  const res = createResponse();
+  const notifications = [];
+
+  SalonJobPost.findById = async () => createActiveJob();
+  Salon.findById = async () => createSalon({ admins: [] });
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser({ name: "Test Barber" }),
+      params: { id: jobId },
+      body: { message: "I am interested" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(notifications, [
+    {
+      userId: ownerId,
+      type: "salon_job_application_submitted",
+      message: "Test Barber applied to Looking for barber",
+      data: {
+        jobApplicationId: applicationId,
+        jobId,
+        salonId,
+      },
+    },
+  ]);
+});
+
+test("applying to a job notifies salon admins", async () => {
+  const res = createResponse();
+  const notifications = [];
+
+  SalonJobPost.findById = async () => createActiveJob();
+  Salon.findById = async () => createSalon();
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser({ name: "Test Barber" }),
+      params: { id: jobId },
+      body: { message: "I am interested" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(
+    notifications.map((notification) => notification.userId).sort(),
+    [adminId, ownerId].sort()
+  );
+  assert.ok(
+    notifications.every(
+      (notification) =>
+        notification.type === "salon_job_application_submitted" &&
+        notification.data.jobApplicationId === applicationId &&
+        notification.data.jobId === jobId &&
+        notification.data.salonId === salonId
+    )
+  );
+});
+
+test("applying to a job notifies distinct job creator", async () => {
+  const res = createResponse();
+  const notifications = [];
+
+  SalonJobPost.findById = async () =>
+    createActiveJob({ createdBy: otherBarberId });
+  Salon.findById = async () => createSalon({ admins: [] });
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser({ name: "Test Barber" }),
+      params: { id: jobId },
+      body: { message: "I am interested" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(
+    notifications.map((notification) => notification.userId).sort(),
+    [otherBarberId, ownerId].sort()
+  );
+});
+
+test("application submitted notification dedupes manager recipients", async () => {
+  const res = createResponse();
+  const notifications = [];
+
+  SalonJobPost.findById = async () =>
+    createActiveJob({ createdBy: ownerId });
+  Salon.findById = async () => createSalon({ admins: [ownerId] });
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser({ name: "Test Barber" }),
+      params: { id: jobId },
+      body: { message: "I am interested" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(
+    notifications.map((notification) => notification.userId),
+    [ownerId]
+  );
+});
+
+test("application submitted notification skips applicant recipient", async () => {
+  const res = createResponse();
+  const notifications = [];
+
+  SalonJobPost.findById = async () =>
+    createActiveJob({ createdBy: barberId });
+  Salon.findById = async () =>
+    createSalon({ ownerId: barberId, admins: [barberId] });
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser({ name: "Test Barber" }),
+      params: { id: jobId },
+      body: { message: "I am interested" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(notifications, []);
 });
 
 test("client cannot apply", async () => {
@@ -339,6 +514,8 @@ test("application falls back to user phone for contactInfo", async () => {
     createdPayload = payload;
     return createApplication({ ...payload, _id: applicationId });
   };
+  Salon.findById = async () => createSalon();
+  Notification.create = async (payload) => payload;
   SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
 
   await applyToSalonJob(
@@ -700,6 +877,11 @@ test("status update creates notification for applicant", async () => {
     userId: barberId,
     type: "salon_job_application_status",
     message: "Your job application was accepted.",
+    data: {
+      jobApplicationId: applicationId,
+      jobId,
+      salonId,
+    },
   });
 });
 

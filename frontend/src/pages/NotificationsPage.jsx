@@ -63,16 +63,16 @@ function getNotificationGroup(rawType) {
     return "reschedule";
   }
 
+  if (rawType.startsWith("event_certificate_")) {
+    return "certificate";
+  }
+
   if (rawType.startsWith("event_")) {
     return "event";
   }
 
-  if (rawType === "salon_job_application_status") {
+  if (rawType.startsWith("salon_job_")) {
     return "job";
-  }
-
-  if (rawType.startsWith("event_certificate_")) {
-    return "certificate";
   }
 
   // message, review, and others fall back to their raw type or system
@@ -83,9 +83,17 @@ function getNotificationGroup(rawType) {
 // Destination helpers
 // ---------------------------------------------------------------------------
 
-function getViewDestination(group, currentUser) {
+function getViewDestination(group, currentUser, rawType) {
   if (group === "booking" || group === "reschedule") {
     return currentUser?.role === "barber" ? "/admin/bookings" : "/my-bookings";
+  }
+
+  if (rawType === "salon_job_application_status") {
+    return "/jobs/applications";
+  }
+
+  if (rawType === "salon_job_application_submitted") {
+    return "/admin/jobs";
   }
 
   if (group === "job") {
@@ -259,9 +267,15 @@ function getNotificationEventRegistrationId(notification) {
   return getIdString(notification?.data?.eventRegistrationId);
 }
 
-function getEventNotificationAction(notification, currentUser) {
+function getEventRegistrationId(registration) {
+  return getIdString(registration?.id || registration?._id);
+}
+
+function getEventNotificationAction(notification, registration, currentUser) {
   if (currentUser?.role !== "barber") return null;
   if (!getNotificationEventId(notification) || !getNotificationEventRegistrationId(notification)) return null;
+  if (!registration) return null;
+  if (!["pending", "waitlisted"].includes(registration.status)) return null;
 
   if (notification.type === "event_registration_request") {
     return {
@@ -273,6 +287,28 @@ function getEventNotificationAction(notification, currentUser) {
   }
 
   return null;
+}
+
+function getNotificationJobApplicationId(notification) {
+  return getIdString(notification?.data?.jobApplicationId);
+}
+
+function getJobApplicationId(application) {
+  return getIdString(application?.id || application?._id);
+}
+
+function getJobNotificationAction(notification, application, currentUser) {
+  if (currentUser?.role !== "barber") return null;
+  if (notification.type !== "salon_job_application_submitted") return null;
+  if (!getNotificationJobApplicationId(notification) || !application) return null;
+  if (!["pending", "reviewed"].includes(application.status)) return null;
+
+  return {
+    primaryAction: "accept-job-application",
+    primaryLabel: "Accept",
+    secondaryAction: "reject-job-application",
+    secondaryLabel: "Reject",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -290,9 +326,12 @@ function NotificationGroup({
   notifications,
   currentUser,
   bookingById,
+  eventRegistrationById,
+  jobApplicationById,
   activeAction,
   onBookingAction,
   onEventAction,
+  onJobAction,
   onView,
   onMarkRead,
   onDelete,
@@ -310,7 +349,11 @@ function NotificationGroup({
           const TypeConfig = getTypeConfig(group);
           const IconComponent = TypeConfig.icon;
           const createdAt = new Date(notification.createdAt);
-          const viewDestination = getViewDestination(group, currentUser);
+          const viewDestination = getViewDestination(
+            group,
+            currentUser,
+            notification.type,
+          );
           const bookingId = getNotificationBookingId(notification);
           const targetBooking = bookingId ? bookingById.get(bookingId) : null;
           const bookingAction = getBookingNotificationAction(
@@ -318,8 +361,27 @@ function NotificationGroup({
             targetBooking,
             currentUser,
           );
-          const eventAction = getEventNotificationAction(notification, currentUser);
+          const eventRegistrationId = getNotificationEventRegistrationId(notification);
+          const targetEventRegistration = eventRegistrationId
+            ? eventRegistrationById.get(eventRegistrationId)
+            : null;
+          const eventAction = getEventNotificationAction(
+            notification,
+            targetEventRegistration,
+            currentUser,
+          );
+          const jobApplicationId = getNotificationJobApplicationId(notification);
+          const targetJobApplication = jobApplicationId
+            ? jobApplicationById.get(jobApplicationId)
+            : null;
+          const jobAction = getJobNotificationAction(
+            notification,
+            targetJobApplication,
+            currentUser,
+          );
           const isActionPending = activeAction?.notificationId === notification.id;
+          const isSameNotificationPending =
+            activeAction?.notificationId === notification.id;
 
           return (
             <Card
@@ -384,6 +446,56 @@ function NotificationGroup({
 
                 {/* Actions */}
                 <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+                  {jobAction && (
+                    <>
+                      <Button
+                        aria-label={jobAction.primaryLabel}
+                        className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                        disabled={Boolean(activeAction)}
+                        onClick={() =>
+                          onJobAction(
+                            notification,
+                            targetJobApplication,
+                            jobAction.primaryAction,
+                          )
+                        }
+                        size="default"
+                        title={jobAction.primaryLabel}
+                      >
+                        <Check className="mr-1 h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">
+                          {isActionPending &&
+                          activeAction?.action === jobAction.primaryAction
+                            ? "Working..."
+                            : jobAction.primaryLabel}
+                        </span>
+                      </Button>
+                      <Button
+                        aria-label={jobAction.secondaryLabel}
+                        className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                        disabled={Boolean(activeAction)}
+                        onClick={() =>
+                          onJobAction(
+                            notification,
+                            targetJobApplication,
+                            jobAction.secondaryAction,
+                          )
+                        }
+                        size="default"
+                        title={jobAction.secondaryLabel}
+                        variant="outline"
+                      >
+                        <XCircle className="mr-1 h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">
+                          {isActionPending &&
+                          activeAction?.action === jobAction.secondaryAction
+                            ? "Working..."
+                            : jobAction.secondaryLabel}
+                        </span>
+                      </Button>
+                    </>
+                  )}
+
                   {eventAction && (
                     <>
                       <Button
@@ -486,6 +598,7 @@ function NotificationGroup({
                     <Button
                       aria-label="View"
                       className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                      disabled={isSameNotificationPending}
                       onClick={() => onView(notification, viewDestination)}
                       size="default"
                       title="View"
@@ -500,6 +613,7 @@ function NotificationGroup({
                     <Button
                       aria-label="Mark as read"
                       className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                      disabled={isSameNotificationPending}
                       onClick={() => onMarkRead(notification.id)}
                       size="default"
                       title="Mark as read"
@@ -513,6 +627,7 @@ function NotificationGroup({
                   <Button
                     aria-label="Delete notification"
                     className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
+                    disabled={isSameNotificationPending}
                     onClick={() => onDelete(notification.id)}
                     size="default"
                     title="Delete"
@@ -550,6 +665,8 @@ export default function NotificationsPage() {
   const [activeAction, setActiveAction] = useState(null);
   const [rejectingAction, setRejectingAction] = useState(null);
   const [rejectionError, setRejectionError] = useState("");
+  const [eventRegistrations, setEventRegistrations] = useState([]);
+  const [managedJobApplications, setManagedJobApplications] = useState([]);
 
   const actionableNotificationCount = useMemo(
     () =>
@@ -561,6 +678,32 @@ export default function NotificationsPage() {
       ).length,
     [notifications],
   );
+
+  const jobActionableNotificationCount = useMemo(
+    () =>
+      notifications.filter(
+        (notification) =>
+          notification.type === "salon_job_application_submitted" &&
+          getNotificationJobApplicationId(notification),
+      ).length,
+    [notifications],
+  );
+
+  const eventActionableEventIds = useMemo(() => {
+    const eventIds = new Set();
+
+    notifications.forEach((notification) => {
+      if (
+        notification.type === "event_registration_request" &&
+        getNotificationEventId(notification) &&
+        getNotificationEventRegistrationId(notification)
+      ) {
+        eventIds.add(getNotificationEventId(notification));
+      }
+    });
+
+    return [...eventIds];
+  }, [notifications]);
 
   const bookingById = useMemo(() => {
     const nextMap = new Map();
@@ -578,6 +721,34 @@ export default function NotificationsPage() {
 
     return nextMap;
   }, [bookings, currentUser?.role, currentUserId]);
+
+  const eventRegistrationById = useMemo(() => {
+    const nextMap = new Map();
+
+    eventRegistrations.forEach((registration) => {
+      const registrationId = getEventRegistrationId(registration);
+
+      if (registrationId) {
+        nextMap.set(registrationId, registration);
+      }
+    });
+
+    return nextMap;
+  }, [eventRegistrations]);
+
+  const jobApplicationById = useMemo(() => {
+    const nextMap = new Map();
+
+    managedJobApplications.forEach((application) => {
+      const applicationId = getJobApplicationId(application);
+
+      if (applicationId) {
+        nextMap.set(applicationId, application);
+      }
+    });
+
+    return nextMap;
+  }, [managedJobApplications]);
 
   // ---- Fetch ----
 
@@ -654,6 +825,85 @@ export default function NotificationsPage() {
       isMounted = false;
     };
   }, [actionableNotificationCount, currentUser?.role, currentUserId, dispatch]);
+
+  useEffect(() => {
+    if (
+      currentUser?.role !== "barber" ||
+      !currentUserId ||
+      eventActionableEventIds.length === 0
+    ) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    async function loadEventRegistrations() {
+      try {
+        const responses = await Promise.all(
+          eventActionableEventIds.map((eventId) =>
+            api.get(`/events/${eventId}/registrations`)
+          )
+        );
+        const nextRegistrations = responses.flatMap((response) =>
+          Array.isArray(response.data) ? response.data : []
+        );
+
+        if (isMounted) {
+          setEventRegistrations(nextRegistrations);
+        }
+      } catch (requestError) {
+        if (!isMounted) return;
+
+        setEventRegistrations([]);
+        setError(
+          requestError.response?.data?.message ||
+            "Could not load event registrations for notification actions.",
+        );
+      }
+    }
+
+    loadEventRegistrations();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.role, currentUserId, eventActionableEventIds]);
+
+  useEffect(() => {
+    if (
+      currentUser?.role !== "barber" ||
+      !currentUserId ||
+      jobActionableNotificationCount === 0
+    ) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    async function loadManagedJobApplications() {
+      try {
+        const { data } = await api.get("/salon-jobs/applications/managed");
+
+        if (isMounted) {
+          setManagedJobApplications(Array.isArray(data) ? data : []);
+        }
+      } catch (requestError) {
+        if (!isMounted) return;
+
+        setManagedJobApplications([]);
+        setError(
+          requestError.response?.data?.message ||
+            "Could not load job applications for notification actions.",
+        );
+      }
+    }
+
+    loadManagedJobApplications();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.role, currentUserId, jobActionableNotificationCount]);
 
   // ---- Actions ----
 
@@ -858,19 +1108,37 @@ export default function NotificationsPage() {
       setActiveAction({ notificationId: notification.id, action });
 
       try {
+        let response;
+
         if (action === "approve-event-registration") {
-          await api.patch(
+          response = await api.patch(
             `/events/${eventId}/registrations/${eventRegistrationId}/approve`,
             {},
           );
         } else if (action === "reject-event-registration") {
-          await api.patch(
+          response = await api.patch(
             `/events/${eventId}/registrations/${eventRegistrationId}/reject`,
             {},
           );
         } else {
           return;
         }
+
+        const nextRegistration =
+          response.data?.registration ||
+          {
+            _id: eventRegistrationId,
+            status:
+              action === "approve-event-registration" ? "approved" : "rejected",
+          };
+
+        setEventRegistrations((currentRegistrations) =>
+          currentRegistrations.map((registration) =>
+            getEventRegistrationId(registration) === eventRegistrationId
+              ? { ...registration, ...nextRegistration }
+              : registration,
+          ),
+        );
 
         if (!notification.isRead) {
           await markOneRead(notification.id);
@@ -881,6 +1149,59 @@ export default function NotificationsPage() {
         setError(
           requestError.response?.data?.message ||
             "Could not process event registration. Please try again.",
+        );
+      } finally {
+        setActiveAction(null);
+      }
+    },
+    [activeAction, markOneRead, loadNotifications],
+  );
+
+  const handleJobAction = useCallback(
+    async (notification, application, action) => {
+      if (activeAction) return;
+
+      const applicationId =
+        getJobApplicationId(application) ||
+        getNotificationJobApplicationId(notification);
+      if (!applicationId) return;
+
+      const status =
+        action === "accept-job-application"
+          ? "accepted"
+          : action === "reject-job-application"
+            ? "rejected"
+            : "";
+
+      if (!status) return;
+
+      setError("");
+      setActiveAction({ notificationId: notification.id, action });
+
+      try {
+        const { data } = await api.patch(
+          `/salon-jobs/applications/${applicationId}/status`,
+          { status },
+        );
+        const nextApplication = data || { ...application, status };
+
+        setManagedJobApplications((currentApplications) =>
+          currentApplications.map((currentApplication) =>
+            getJobApplicationId(currentApplication) === applicationId
+              ? nextApplication
+              : currentApplication,
+          ),
+        );
+
+        if (!notification.isRead) {
+          await markOneRead(notification.id);
+        }
+
+        await loadNotifications();
+      } catch (requestError) {
+        setError(
+          requestError.response?.data?.message ||
+            "Could not update job application. Please try again.",
         );
       } finally {
         setActiveAction(null);
@@ -1014,9 +1335,12 @@ export default function NotificationsPage() {
               currentUser={currentUser}
               activeAction={activeAction}
               bookingById={bookingById}
+              eventRegistrationById={eventRegistrationById}
+              jobApplicationById={jobApplicationById}
               notifications={groupedNotifications.Today}
               onBookingAction={handleBookingAction}
               onEventAction={handleEventAction}
+              onJobAction={handleJobAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
               onView={handleView}
@@ -1029,9 +1353,12 @@ export default function NotificationsPage() {
               currentUser={currentUser}
               activeAction={activeAction}
               bookingById={bookingById}
+              eventRegistrationById={eventRegistrationById}
+              jobApplicationById={jobApplicationById}
               notifications={groupedNotifications.Yesterday}
               onBookingAction={handleBookingAction}
               onEventAction={handleEventAction}
+              onJobAction={handleJobAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
               onView={handleView}
@@ -1044,9 +1371,12 @@ export default function NotificationsPage() {
               currentUser={currentUser}
               activeAction={activeAction}
               bookingById={bookingById}
+              eventRegistrationById={eventRegistrationById}
+              jobApplicationById={jobApplicationById}
               notifications={groupedNotifications["This Week"]}
               onBookingAction={handleBookingAction}
               onEventAction={handleEventAction}
+              onJobAction={handleJobAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
               onView={handleView}
@@ -1059,9 +1389,12 @@ export default function NotificationsPage() {
               currentUser={currentUser}
               activeAction={activeAction}
               bookingById={bookingById}
+              eventRegistrationById={eventRegistrationById}
+              jobApplicationById={jobApplicationById}
               notifications={groupedNotifications.Earlier}
               onBookingAction={handleBookingAction}
               onEventAction={handleEventAction}
+              onJobAction={handleJobAction}
               onDelete={deleteOne}
               onMarkRead={markOneRead}
               onView={handleView}

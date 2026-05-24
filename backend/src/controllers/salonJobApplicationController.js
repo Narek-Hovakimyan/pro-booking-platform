@@ -6,6 +6,12 @@ import { serializeApplication } from "../utils/salonJobApplicationUtils.js";
 import { createNotification } from "./notificationController.js";
 
 const getUserId = (user) => String(user?._id || user?.id || "");
+const getId = (value) => {
+  if (!value) return "";
+  if (value._id) return String(value._id);
+  if (value.id) return String(value.id);
+  return String(value);
+};
 
 const userFields = "name phone avatarUrl city";
 
@@ -22,16 +28,67 @@ const applicationStatusMessages = {
   pending: "Your job application status was updated.",
 };
 
+const getJobApplicationNotificationData = (application, job = null) => {
+  const data = {};
+  const jobApplicationId = getId(application);
+  const jobId = getId(application?.jobId) || getId(job);
+  const salonId = getId(application?.salonId) || getId(job?.salonId);
+
+  if (jobApplicationId) data.jobApplicationId = jobApplicationId;
+  if (jobId) data.jobId = jobId;
+  if (salonId) data.salonId = salonId;
+
+  return Object.keys(data).length > 0 ? data : undefined;
+};
+
 const notifyApplicationStatusChange = async (application, status) => {
   try {
     await createNotification({
       userId: application.applicantId,
       type: "salon_job_application_status",
       message: applicationStatusMessages[status],
+      data: getJobApplicationNotificationData(application),
     });
   } catch (error) {
     console.warn(
       "Salon job application notification failed (non-fatal):",
+      error.message
+    );
+  }
+};
+
+const notifyApplicationSubmitted = async ({ application, job, applicant }) => {
+  try {
+    const salon = await Salon.findById(job.salonId);
+    const applicantId = getId(application.applicantId);
+    const recipientIds = new Set();
+
+    [salon?.ownerId, ...(salon?.admins || []), job.createdBy].forEach((userId) => {
+      const recipientId = getId(userId);
+
+      if (recipientId && recipientId !== applicantId) {
+        recipientIds.add(recipientId);
+      }
+    });
+
+    const data = getJobApplicationNotificationData(application, job);
+    const applicantName = applicant?.name || "A specialist";
+    const jobTitle = job.title || "a salon job";
+    const message = `${applicantName} applied to ${jobTitle}`;
+
+    await Promise.all(
+      [...recipientIds].map((userId) =>
+        createNotification({
+          userId,
+          type: "salon_job_application_submitted",
+          message,
+          data,
+        })
+      )
+    );
+  } catch (error) {
+    console.warn(
+      "Salon job application submitted notification failed (non-fatal):",
       error.message
     );
   }
@@ -128,6 +185,12 @@ export const applyToSalonJob = async (req, res) => {
       message: message.trim(),
       experience: (experience || "").trim(),
       contactInfo: (contactInfo || "").trim() || req.user.phone || "",
+    });
+
+    await notifyApplicationSubmitted({
+      application,
+      job,
+      applicant: req.user,
     });
 
     const populated = await applyApplicantPopulate(
