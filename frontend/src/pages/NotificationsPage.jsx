@@ -185,7 +185,9 @@ function getGroupLabel(date) {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfYesterday = new Date(startOfToday.getTime() - 86_400_000);
-  const startOfWeek = new Date(startOfToday.getTime() - startOfToday.getDay() * 86_400_000);
+  const dayOfWeek = startOfToday.getDay();
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const startOfWeek = new Date(startOfToday.getTime() - mondayOffset * 86_400_000);
 
   if (date >= startOfToday) return "Today";
   if (date >= startOfYesterday) return "Yesterday";

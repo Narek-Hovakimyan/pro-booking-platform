@@ -124,6 +124,25 @@ export default function CalendarBookingCard({
         </p>
       )}
 
+      {/* Reschedule requested badge */}
+      {booking?.rescheduleRequest?.status === "pending" && (
+        <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+          <p className="font-semibold">Reschedule requested</p>
+          {(booking.rescheduleRequest.requestedBookingDate ||
+            booking.rescheduleRequest.requestedTime) && (
+            <p className="mt-0.5">
+              To:{" "}
+              {booking.rescheduleRequest.requestedBookingDate
+                ? String(booking.rescheduleRequest.requestedBookingDate).slice(0, 10)
+                : ""}
+              {booking.rescheduleRequest.requestedTime
+                ? ` ${booking.rescheduleRequest.requestedTime}`
+                : ""}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
         {status === "pending" && (
           <Button className="w-full sm:w-auto" onClick={onAccept}>

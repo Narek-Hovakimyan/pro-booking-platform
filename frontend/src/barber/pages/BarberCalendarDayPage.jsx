@@ -45,7 +45,6 @@ export default function BarberCalendarDayPage() {
   const { currentUser } = useSelector((state) => state.auth);
   const currentUserId = currentUser?.id || currentUser?._id;
   const bookings = useSelector((state) => state.bookings);
-  const notifications = useSelector((state) => state.notifications);
   const schedule = useSelector((state) => state.schedule);
   const scheduleEntry = schedule[currentUserId];
 
@@ -155,8 +154,6 @@ export default function BarberCalendarDayPage() {
     );
   }, [isValidDate, isNonWorkingDay, dayBookings, selectedDaySchedule]);
 
-  const notificationCount = notifications.length;
-
   const fetchBookings = useCallback(
     async ({
       showLoading = false,
@@ -199,7 +196,7 @@ export default function BarberCalendarDayPage() {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [currentUserId, fetchBookings, notificationCount]);
+  }, [currentUserId, fetchBookings]);
 
   // Socket listener for real-time booking updates
   useEffect(() => {
@@ -366,7 +363,14 @@ export default function BarberCalendarDayPage() {
       {/* Day navigation */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{dateLabel}</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {dateLabel}
+            {routeDate === todayKey && (
+              <span className="ml-2 inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700 align-middle">
+                Today
+              </span>
+            )}
+          </h1>
           <div className="mt-2 flex flex-wrap gap-2 text-sm text-neutral-500">
             <span className="rounded-full bg-neutral-100 px-3 py-1">
               {dayKey.toUpperCase()}

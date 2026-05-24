@@ -36,6 +36,8 @@ const notificationDataSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const TTL_SECONDS = 60 * 60 * 24 * 180; // 180 days
+
 const notificationSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -65,6 +67,12 @@ const notificationSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+// TTL index: auto-delete documents 180 days after createdAt
+notificationSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: TTL_SECONDS }
+);
 
 const Notification = mongoose.model("Notification", notificationSchema);
 

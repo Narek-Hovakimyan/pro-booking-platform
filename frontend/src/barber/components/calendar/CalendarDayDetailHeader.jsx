@@ -1,3 +1,4 @@
+// DEPRECATED — currently unused. BarberCalendarDayPage uses its own inline header.
 import { CalendarDays } from "lucide-react";
 
 export default function CalendarDayDetailHeader({

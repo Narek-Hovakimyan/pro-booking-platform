@@ -155,74 +155,75 @@ export const getMyEvents = async (req, res) => {
       .sort({ date: 1, time: 1 })
       .lean();
 
-    const eventIds = events.map((event) => event._id);
-    const [registrations, attendedRegs, certificates, reviewStats] = await Promise.all([
-      EventRegistration.aggregate([
-        {
-          $match: {
-            eventId: { $in: eventIds },
-            status: APPROVED_REGISTRATION_STATUS,
-          },
-        },
-        { $group: { _id: "$eventId", count: { $sum: 1 } } },
-      ]),
-      EventRegistration.aggregate([
-        {
-          $match: {
-            eventId: { $in: eventIds },
-            attended: true,
-          },
-        },
-        { $group: { _id: "$eventId", count: { $sum: 1 } } },
-      ]),
-      EventCertificate.aggregate([
-        {
-          $match: {
-            eventId: { $in: eventIds },
-            status: "issued",
-          },
-        },
-        { $group: { _id: "$eventId", count: { $sum: 1 } } },
-      ]),
-      EventReview.aggregate([
-        { $match: { eventId: { $in: eventIds } } },
-        {
-          $group: {
-            _id: "$eventId",
-            averageRating: { $avg: "$rating" },
-            reviewsCount: { $sum: 1 },
-          },
-        },
-      ]),
-    ]);
+    // Only aggregate counts for upcoming events to avoid overfetching registration/certificate/review data for past events
+    const upcomingEvents = events.filter((event) => !isEventInPast(event));
+    const upcomingEventIds = upcomingEvents.map((event) => event._id);
 
-    const regCountMap = new Map(
-      registrations.map((registration) => [
-        String(registration._id),
-        Number(registration.count || 0),
-      ])
-    );
-    const attendedCountMap = new Map(
-      attendedRegs.map((reg) => [
-        String(reg._id),
-        Number(reg.count || 0),
-      ])
-    );
-    const certificatesCountMap = new Map(
-      certificates.map((cert) => [
-        String(cert._id),
-        Number(cert.count || 0),
-      ])
-    );
-    const reviewStatsMap = new Map(
-      reviewStats.map((stat) => [
-        String(stat._id),
-        {
-          averageRating: Number(stat.averageRating || 0),
-          reviewsCount: Number(stat.reviewsCount || 0),
-        },
-      ])
-    );
+    let regCountMap = new Map();
+    let attendedCountMap = new Map();
+    let certificatesCountMap = new Map();
+    let reviewStatsMap = new Map();
+
+    if (upcomingEvents.length > 0) {
+      const [registrations, attendedRegs, certificates, reviewStats] = await Promise.all([
+        EventRegistration.aggregate([
+          {
+            $match: {
+              eventId: { $in: upcomingEventIds },
+              status: APPROVED_REGISTRATION_STATUS,
+            },
+          },
+          { $group: { _id: "$eventId", count: { $sum: 1 } } },
+        ]),
+        EventRegistration.aggregate([
+          {
+            $match: {
+              eventId: { $in: upcomingEventIds },
+              attended: true,
+            },
+          },
+          { $group: { _id: "$eventId", count: { $sum: 1 } } },
+        ]),
+        EventCertificate.aggregate([
+          {
+            $match: {
+              eventId: { $in: upcomingEventIds },
+              status: "issued",
+            },
+          },
+          { $group: { _id: "$eventId", count: { $sum: 1 } } },
+        ]),
+        EventReview.aggregate([
+          { $match: { eventId: { $in: upcomingEventIds } } },
+          {
+            $group: {
+              _id: "$eventId",
+              averageRating: { $avg: "$rating" },
+              reviewsCount: { $sum: 1 },
+            },
+          },
+        ]),
+      ]);
+
+      regCountMap = new Map(
+        registrations.map((r) => [String(r._id), Number(r.count || 0)])
+      );
+      attendedCountMap = new Map(
+        attendedRegs.map((r) => [String(r._id), Number(r.count || 0)])
+      );
+      certificatesCountMap = new Map(
+        certificates.map((c) => [String(c._id), Number(c.count || 0)])
+      );
+      reviewStatsMap = new Map(
+        reviewStats.map((s) => [
+          String(s._id),
+          {
+            averageRating: Number(s.averageRating || 0),
+            reviewsCount: Number(s.reviewsCount || 0),
+          },
+        ])
+      );
+    }
 
     return res.json(
       events.map((event) => ({

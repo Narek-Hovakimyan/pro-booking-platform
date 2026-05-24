@@ -46,6 +46,20 @@ function formatTimeRange(startTime, duration) {
   return `${minutesToTime(startMinutes)} - ${minutesToTime(startMinutes + duration)}`;
 }
 
+const TERMINAL_BOOKING_STATUSES = new Set([
+  "rejected",
+  "cancelled",
+  "expired",
+  "no_show",
+  "late_cancelled",
+]);
+
+function isTerminalBooking(booking) {
+  if (!booking) return false;
+  const status = getBookingStatus(booking);
+  return TERMINAL_BOOKING_STATUSES.has(status);
+}
+
 export default function CalendarTimeline({
   timelineRows = [],
   isLoading = false,
@@ -59,13 +73,14 @@ export default function CalendarTimeline({
   onNoShow,
   onLateCancel,
 }) {
-  // Extract unique bookings that start at a row's slot (agenda view)
+  // Extract unique non-terminal bookings that start at a row's slot (agenda view)
   const agendaBookings = useMemo(() => {
     const seen = new Set();
     return timelineRows
       .filter((row) => {
         if (row.rowType !== "booking-start" || !row.bookingEntry?.booking) return false;
         const booking = row.bookingEntry.booking;
+        if (isTerminalBooking(booking)) return false;
         const id = booking?.id || booking?._id || row.slotTime;
         if (seen.has(id)) return false;
         seen.add(id);
@@ -213,10 +228,15 @@ function FullTimelineView({
   onNoShow,
   onLateCancel,
 }) {
-  // Hide occupied continuation rows — booking card already shows duration
-  const visibleRows = timelineRows.filter(
-    (row) => row.rowType !== "booking-continue"
-  );
+  // Hide occupied continuation rows and terminal booking cards
+  const visibleRows = timelineRows.filter((row) => {
+    if (row.rowType === "booking-continue") return false;
+    if (row.rowType === "booking-start") {
+      const booking = row.bookingEntry?.booking;
+      return !isTerminalBooking(booking);
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-3">

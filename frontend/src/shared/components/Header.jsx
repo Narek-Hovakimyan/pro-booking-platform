@@ -104,6 +104,7 @@ export default function Header() {
     { label: "Services", to: "/admin/services" },
     { label: "Schedule", to: "/admin/schedule" },
     { label: "Bookings", to: "/admin/bookings" },
+    { label: "Calendar", to: "/admin/calendar" },
     { label: "Find Jobs", to: "/jobs" },
     { label: "Profile", to: "/admin/profile" },
   ];

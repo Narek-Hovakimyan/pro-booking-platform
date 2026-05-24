@@ -4,11 +4,19 @@ import { createNotification } from "../services/notificationService.js";
 export { createNotification };
 
 export const getMyNotifications = async (req, res) => {
-
   try {
-    const notifications = await Notification.find({ userId: req.user.id }).sort({
-      createdAt: -1,
-    });
+    const DEFAULT_LIMIT = 100;
+    const MAX_LIMIT = 200;
+    const query = req.query || {};
+    const rawLimit = parseInt(query.limit, 10);
+    const limit =
+      Number.isFinite(rawLimit) && rawLimit > 0
+        ? Math.min(rawLimit, MAX_LIMIT)
+        : DEFAULT_LIMIT;
+
+    const notifications = await Notification.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(limit);
 
     return res.json(notifications);
   } catch (error) {

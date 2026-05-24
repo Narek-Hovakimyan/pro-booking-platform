@@ -179,7 +179,9 @@ test("GET /notifications returns data", async () => {
     sort(sortQuery) {
       assert.deepEqual(query, { userId: String(userId) });
       assert.deepEqual(sortQuery, { createdAt: -1 });
-      return Promise.resolve(storedNotifications);
+      return {
+        limit: () => Promise.resolve(storedNotifications),
+      };
     },
   });
 
@@ -188,4 +190,15 @@ test("GET /notifications returns data", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(String(response.body[0].data.bookingId), String(bookingId));
+});
+
+test("Notification schema has TTL index on createdAt with 180-day expiry", () => {
+  const indexes = Notification.schema.indexes();
+  const ttlIndex = indexes.find(
+    ([key]) => JSON.stringify(key) === JSON.stringify({ createdAt: 1 })
+  );
+
+  assert.ok(ttlIndex, "Expected TTL index on createdAt to exist");
+  assert.equal(ttlIndex[1].expireAfterSeconds, 15552000);
+  assert.equal(ttlIndex[1].expireAfterSeconds, 60 * 60 * 24 * 180);
 });
