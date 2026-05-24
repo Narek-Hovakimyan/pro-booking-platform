@@ -57,8 +57,13 @@ export const runBookingReminders = async (now = new Date()) => {
   const endOf24hWindow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const endOf2hWindow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
+  // Upper bound: only fetch accepted bookings with a bookingDate up to 48h from now.
+  // This avoids loading all accepted bookings (including far-future ones) into memory.
+  const maxFetchDate = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+  const maxDateStr = maxFetchDate.toISOString().slice(0, 10);
+
   const acceptedBookings = await Booking.find({
-    bookingDate: { $ne: "" },
+    bookingDate: { $ne: "", $lte: maxDateStr },
     time: { $ne: "" },
     status: "accepted",
   });

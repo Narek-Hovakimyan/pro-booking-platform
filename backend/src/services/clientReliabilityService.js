@@ -35,47 +35,65 @@ const isValidObjectId = (value) =>
  * @returns {Promise<Object>} reliability summary
  */
 export async function getClientReliabilitySummary(clientId) {
-  const bookings = await Booking.find({ clientId });
-
-  const totalBookings = bookings.length;
-  let completedCount = 0;
-  let cancelledCount = 0;
-  let noShowCount = 0;
-  let lateCancelledCount = 0;
-  let rejectedCount = 0;
-  let pendingCount = 0;
-  let acceptedCount = 0;
-  let expiredCount = 0;
-
-  for (const booking of bookings) {
-    switch (booking.status) {
-      case "completed":
-        completedCount++;
-        break;
-      case "cancelled":
-        cancelledCount++;
-        break;
-      case "no_show":
-        noShowCount++;
-        break;
-      case "late_cancelled":
-        lateCancelledCount++;
-        break;
-      case "rejected":
-        rejectedCount++;
-        break;
-      case "pending":
-        pendingCount++;
-        break;
-      case "accepted":
-        acceptedCount++;
-        break;
-      case "expired":
-        expiredCount++;
-        break;
-      // no default needed
-    }
+  if (!isValidObjectId(clientId)) {
+    return {
+      clientId,
+      totalBookings: 0,
+      completedCount: 0,
+      cancelledCount: 0,
+      noShowCount: 0,
+      lateCancelledCount: 0,
+      rejectedCount: 0,
+      pendingCount: 0,
+      acceptedCount: 0,
+      expiredCount: 0,
+      reliabilityScore: 100,
+    };
   }
+
+  const pipeline = [
+    { $match: { clientId: new mongoose.Types.ObjectId(clientId) } },
+    {
+      $group: {
+        _id: null,
+        totalBookings: { $sum: 1 },
+        completedCount: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+        cancelledCount: { $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] } },
+        noShowCount: { $sum: { $cond: [{ $eq: ["$status", "no_show"] }, 1, 0] } },
+        lateCancelledCount: { $sum: { $cond: [{ $eq: ["$status", "late_cancelled"] }, 1, 0] } },
+        rejectedCount: { $sum: { $cond: [{ $eq: ["$status", "rejected"] }, 1, 0] } },
+        pendingCount: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+        acceptedCount: { $sum: { $cond: [{ $eq: ["$status", "accepted"] }, 1, 0] } },
+        expiredCount: { $sum: { $cond: [{ $eq: ["$status", "expired"] }, 1, 0] } },
+      },
+    },
+    { $project: { _id: 0 } },
+  ];
+
+  const results = await Booking.aggregate(pipeline);
+  const counts = results[0] || {
+    totalBookings: 0,
+    completedCount: 0,
+    cancelledCount: 0,
+    noShowCount: 0,
+    lateCancelledCount: 0,
+    rejectedCount: 0,
+    pendingCount: 0,
+    acceptedCount: 0,
+    expiredCount: 0,
+  };
+
+  const {
+    totalBookings,
+    completedCount,
+    cancelledCount,
+    noShowCount,
+    lateCancelledCount,
+    rejectedCount,
+    pendingCount,
+    acceptedCount,
+    expiredCount,
+  } = counts;
 
   // Calculate reliability score
   let reliabilityScore = 100;

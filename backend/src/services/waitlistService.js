@@ -8,6 +8,7 @@ import { createNotification } from "./notificationService.js";
 import {
   getArmeniaDateKey,
   getDayKeyFromDate,
+  isBeyondBookingHorizon,
   isDateKey,
   isTimeKey,
   timeToMinutes,
@@ -117,6 +118,10 @@ const validateWaitlistDate = (date) => {
 
   if (date < getArmeniaDateKey(new Date())) {
     return "date cannot be in the past";
+  }
+
+  if (isBeyondBookingHorizon(date)) {
+    return "date is too far in the future";
   }
 
   return "";

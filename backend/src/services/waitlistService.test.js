@@ -707,7 +707,7 @@ test("approve sends client notification", async () => {
 
   assert.equal(notificationCreated.userId, clientId);
   assert.equal(notificationCreated.type, "waitlist_approved");
-  assert.match(notificationCreated.message, /2099-06-15 at 15:30/);
+  assert.match(notificationCreated.message, new RegExp(`${futureDate} at 15:30`));
 });
 
 test("approve notification failure does not reopen converted waitlist entry", async () => {

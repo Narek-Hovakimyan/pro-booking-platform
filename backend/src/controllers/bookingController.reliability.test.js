@@ -20,6 +20,7 @@ afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
   Booking.countDocuments = originalMethods.bookingCountDocuments;
   Booking.find = originalMethods.bookingFind;
+  Booking.aggregate = originalMethods.bookingAggregate;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
 });
@@ -29,12 +30,19 @@ afterEach(() => {
 test("client can fetch own reliability summary", async () => {
   const res = createResponse();
 
-  Booking.find = async (query) => {
-    assert.equal(String(query.clientId), clientId);
-    return [
-      createMutableBooking({ status: "completed" }),
-      createMutableBooking({ status: "no_show" }),
-    ];
+  Booking.aggregate = async (pipeline) => {
+    assert.equal(String(pipeline[0].$match.clientId), clientId);
+    return [{
+      totalBookings: 2,
+      completedCount: 1,
+      cancelledCount: 0,
+      noShowCount: 1,
+      lateCancelledCount: 0,
+      rejectedCount: 0,
+      pendingCount: 0,
+      acceptedCount: 0,
+      expiredCount: 0,
+    }];
   };
 
   await getClientReliability(
@@ -77,12 +85,19 @@ test("barber can fetch reliability summary for client with booking relationship"
     assert.equal(String(query.clientId), clientId);
     return 1;
   };
-  Booking.find = async (query) => {
-    assert.equal(String(query.clientId), clientId);
-    return [
-      createMutableBooking({ status: "accepted" }),
-      createMutableBooking({ status: "late_cancelled" }),
-    ];
+  Booking.aggregate = async (pipeline) => {
+    assert.equal(String(pipeline[0].$match.clientId), clientId);
+    return [{
+      totalBookings: 2,
+      completedCount: 0,
+      cancelledCount: 0,
+      noShowCount: 0,
+      lateCancelledCount: 1,
+      rejectedCount: 0,
+      pendingCount: 0,
+      acceptedCount: 1,
+      expiredCount: 0,
+    }];
   };
 
   await getClientReliability(

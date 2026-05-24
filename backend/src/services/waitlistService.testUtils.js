@@ -15,7 +15,8 @@ export const salonId = "64b000000000000000000020";
 export const otherSalonId = "64b000000000000000000021";
 export const serviceId = "64b000000000000000000030";
 export const otherServiceId = "64b000000000000000000031";
-export const futureDate = "2099-06-15";
+export const futureDate = "2026-08-15";
+export const beyondHorizonDate = "2099-06-15";
 export const pastDate = "2020-01-01";
 export const waitlistEntryId = "64b000000000000000000040";
 

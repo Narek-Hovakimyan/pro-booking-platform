@@ -15,6 +15,7 @@ export const originalMethods = {
   bookingCreate: Booking.create,
   bookingCountDocuments: Booking.countDocuments,
   bookingFind: Booking.find,
+  bookingAggregate: Booking.aggregate,
   bookingFindById: Booking.findById,
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
   notificationCreate: Notification.create,

@@ -20,20 +20,39 @@ const mockBooking = (overrides = {}) => ({
   ...overrides,
 });
 
-const originalBookingFind = Booking.find;
+const originalBookingAggregate = Booking.aggregate;
 const originalBookingCountDocuments = Booking.countDocuments;
 
+/**
+ * Convert an array of mock booking objects into an aggregation result array.
+ * Accepts the same mockBooking-based arrays that the old Booking.find mock used.
+ */
+const toAggResult = (bookings) => {
+  if (bookings.length === 0) return [];
+  return [{
+    totalBookings: bookings.length,
+    completedCount: bookings.filter((b) => b.status === "completed").length,
+    cancelledCount: bookings.filter((b) => b.status === "cancelled").length,
+    noShowCount: bookings.filter((b) => b.status === "no_show").length,
+    lateCancelledCount: bookings.filter((b) => b.status === "late_cancelled").length,
+    rejectedCount: bookings.filter((b) => b.status === "rejected").length,
+    pendingCount: bookings.filter((b) => b.status === "pending").length,
+    acceptedCount: bookings.filter((b) => b.status === "accepted").length,
+    expiredCount: bookings.filter((b) => b.status === "expired").length,
+  }];
+};
+
 afterEach(() => {
-  Booking.find = originalBookingFind;
+  Booking.aggregate = originalBookingAggregate;
   Booking.countDocuments = originalBookingCountDocuments;
 });
 
 // --- getClientReliabilitySummary tests ---
 
 test("summary includes all booking status counts correctly", async () => {
-  Booking.find = async (query) => {
-    assert.equal(String(query.clientId), clientId);
-    return [
+  Booking.aggregate = async (pipeline) => {
+    assert.equal(String(pipeline[0].$match.clientId), clientId);
+    return toAggResult([
       mockBooking({ status: "completed" }),
       mockBooking({ status: "completed" }),
       mockBooking({ status: "completed" }),
@@ -46,7 +65,7 @@ test("summary includes all booking status counts correctly", async () => {
       mockBooking({ status: "pending" }),
       mockBooking({ status: "accepted" }),
       mockBooking({ status: "expired" }),
-    ];
+    ]);
   };
 
   const summary = await getClientReliabilitySummary(clientId);
@@ -64,92 +83,92 @@ test("summary includes all booking status counts correctly", async () => {
 });
 
 test("reliability score is 100 with no negative events", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "completed" }),
     mockBooking({ status: "completed" }),
     mockBooking({ status: "accepted" }),
     mockBooking({ status: "pending" }),
     mockBooking({ status: "rejected" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 100);
 });
 
 test("reliability score deducts for no_show (-20 each)", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "completed" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 60); // 100 - 40
 });
 
 test("reliability score deducts for late_cancelled (-10 each)", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "late_cancelled" }),
     mockBooking({ status: "late_cancelled" }),
     mockBooking({ status: "late_cancelled" }),
     mockBooking({ status: "completed" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 70); // 100 - 30
 });
 
 test("reliability score deducts for cancelled (-5 each)", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "cancelled" }),
     mockBooking({ status: "cancelled" }),
     mockBooking({ status: "cancelled" }),
     mockBooking({ status: "cancelled" }),
     mockBooking({ status: "completed" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 80); // 100 - 20
 });
 
 test("reliability score combines all deductions", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "no_show" }),           // -20
     mockBooking({ status: "late_cancelled" }),     // -10
     mockBooking({ status: "cancelled" }),           // -5
     mockBooking({ status: "cancelled" }),           // -5
     mockBooking({ status: "completed" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 60); // 100 - 20 - 10 - 5 - 5
 });
 
 test("reliability score does not go below 0", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "no_show" }),
     mockBooking({ status: "no_show" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 0); // would be -20, clamped to 0
 });
 
 test("reliability score does not go above 100", async () => {
-  Booking.find = async () => [];
+  Booking.aggregate = async () => toAggResult([]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.reliabilityScore, 100);
 });
 
 test("no personal data exposed in summary", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "completed", clientName: "John Doe", clientPhone: "555-0100" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
 
@@ -226,12 +245,12 @@ test("accessible summary rejects invalid clientId with structured 400", async ()
 });
 
 test("client can access own reliability summary", async () => {
-  Booking.find = async (query) => {
-    assert.equal(String(query.clientId), clientId);
-    return [
+  Booking.aggregate = async (pipeline) => {
+    assert.equal(String(pipeline[0].$match.clientId), clientId);
+    return toAggResult([
       mockBooking({ status: "completed" }),
       mockBooking({ status: "no_show" }),
-    ];
+    ]);
   };
 
   const summary = await getAccessibleClientReliabilitySummary({
@@ -252,12 +271,12 @@ test("barber with booking relationship can access reliability summary", async ()
     assert.equal(String(query.clientId), clientId);
     return 1;
   };
-  Booking.find = async (query) => {
-    assert.equal(String(query.clientId), clientId);
-    return [
+  Booking.aggregate = async (pipeline) => {
+    assert.equal(String(pipeline[0].$match.clientId), clientId);
+    return toAggResult([
       mockBooking({ status: "accepted" }),
       mockBooking({ status: "late_cancelled" }),
-    ];
+    ]);
   };
 
   const summary = await getAccessibleClientReliabilitySummary({
@@ -299,13 +318,13 @@ test("non-client and non-barber gets structured 403 for reliability summary", as
 });
 
 test("accessible summary does not expose personal data", async () => {
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({
       status: "completed",
       clientName: "John Doe",
       clientPhone: "555-0100",
     }),
-  ];
+  ]);
 
   const summary = await getAccessibleClientReliabilitySummary({
     clientId,
@@ -320,13 +339,10 @@ test("accessible summary does not expose personal data", async () => {
 });
 
 test("client can see own summary", async () => {
-  // This test validates the access rule: client sees own summary
-  // The service itself doesn't enforce access control; the controller does.
-  // But the service should correctly compute the summary for any valid clientId.
-  Booking.find = async () => [
+  Booking.aggregate = async () => toAggResult([
     mockBooking({ status: "completed" }),
     mockBooking({ status: "accepted" }),
-  ];
+  ]);
 
   const summary = await getClientReliabilitySummary(clientId);
   assert.equal(summary.totalBookings, 2);
@@ -336,7 +352,7 @@ test("client can see own summary", async () => {
 });
 
 test("empty booking history returns zero counts and score 100", async () => {
-  Booking.find = async () => [];
+  Booking.aggregate = async () => toAggResult([]);
 
   const summary = await getClientReliabilitySummary(clientId);
 
@@ -350,4 +366,45 @@ test("empty booking history returns zero counts and score 100", async () => {
   assert.equal(summary.acceptedCount, 0);
   assert.equal(summary.expiredCount, 0);
   assert.equal(summary.reliabilityScore, 100);
+});
+
+test("direct summary with invalid clientId returns zero counts and score 100", async () => {
+  Booking.aggregate = async () => {
+    throw new Error("aggregate should not be called for invalid clientId");
+  };
+
+  const summary = await getClientReliabilitySummary("not-a-client-id");
+
+  assert.equal(summary.clientId, "not-a-client-id");
+  assert.equal(summary.totalBookings, 0);
+  assert.equal(summary.completedCount, 0);
+  assert.equal(summary.cancelledCount, 0);
+  assert.equal(summary.noShowCount, 0);
+  assert.equal(summary.lateCancelledCount, 0);
+  assert.equal(summary.rejectedCount, 0);
+  assert.equal(summary.pendingCount, 0);
+  assert.equal(summary.acceptedCount, 0);
+  assert.equal(summary.expiredCount, 0);
+  assert.equal(summary.reliabilityScore, 100);
+});
+
+test("unknown booking statuses count only toward total bookings", async () => {
+  Booking.aggregate = async () => toAggResult([
+    mockBooking({ status: "completed" }),
+    mockBooking({ status: "mystery_status" }),
+    mockBooking({ status: "cancelled" }),
+  ]);
+
+  const summary = await getClientReliabilitySummary(clientId);
+
+  assert.equal(summary.totalBookings, 3);
+  assert.equal(summary.completedCount, 1);
+  assert.equal(summary.cancelledCount, 1);
+  assert.equal(summary.noShowCount, 0);
+  assert.equal(summary.lateCancelledCount, 0);
+  assert.equal(summary.rejectedCount, 0);
+  assert.equal(summary.pendingCount, 0);
+  assert.equal(summary.acceptedCount, 0);
+  assert.equal(summary.expiredCount, 0);
+  assert.equal(summary.reliabilityScore, 95);
 });

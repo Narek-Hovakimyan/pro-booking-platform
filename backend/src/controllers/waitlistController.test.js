@@ -12,7 +12,7 @@ const clientId = "64b000000000000000000001";
 const barberId = "64b000000000000000000010";
 const salonId = "64b000000000000000000020";
 const serviceId = "64b000000000000000000030";
-const futureDate = "2099-06-15";
+const futureDate = "2026-08-15";
 
 const originalMethods = {
   bookingCreate: Booking.create,
