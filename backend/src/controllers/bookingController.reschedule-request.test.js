@@ -5,7 +5,7 @@ import {
   acceptRescheduleRequest,
   createRescheduleRequest,
   rejectRescheduleRequest,
-} from "./bookingController.js";
+} from "./bookingRescheduleController.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Schedule from "../models/Schedule.js";

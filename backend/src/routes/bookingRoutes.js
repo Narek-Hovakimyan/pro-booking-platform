@@ -1,12 +1,14 @@
 import express from "express";
 import {
-  acceptRescheduleRequest,
   createBooking,
-  createRescheduleRequest,
   delayBooking,
-  rejectRescheduleRequest,
   updateBooking,
 } from "../controllers/bookingController.js";
+import {
+  acceptRescheduleRequest,
+  createRescheduleRequest,
+  rejectRescheduleRequest,
+} from "../controllers/bookingRescheduleController.js";
 import {
   getBarberBookings,
   getClientBookings,

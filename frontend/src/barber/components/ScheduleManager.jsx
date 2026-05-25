@@ -16,11 +16,8 @@ import {
 import { formatTimeInput, timeToMinutes } from "@/shared/utils/time";
 import ScheduleSalonDrawer from "@/barber/components/schedule/ScheduleSalonDrawer";
 import ScheduleSalonSelector from "@/barber/components/schedule/ScheduleSalonSelector";
-import ScheduleWeeklyHours from "@/barber/components/schedule/ScheduleWeeklyHours";
-import ScheduleOverridesList from "@/barber/components/schedule/ScheduleOverridesList";
-import ScheduleDateOverrideEditor from "@/barber/components/schedule/ScheduleDateOverrideEditor";
-import ScheduleNonWorkingDaysSection from "@/barber/components/schedule/ScheduleNonWorkingDaysSection";
-import AvailabilityDebugPanel from "@/barber/components/schedule/AvailabilityDebugPanel";
+import DefaultScheduleSection from "@/barber/components/schedule/DefaultScheduleSection";
+import SalonScheduleSection from "@/barber/components/schedule/SalonScheduleSection";
 import ScheduleSkeleton from "@/barber/components/ScheduleSkeleton";
 import {
   getSalonNameFromEntry,
@@ -775,77 +772,42 @@ export default function ScheduleManager({
             </div>
           )}
 
-          <ScheduleWeeklyHours
-
+          <DefaultScheduleSection
             defaultSchedule={currentDefaultSchedule}
             weeklySchedule={effectiveSchedule.weeklySchedule}
           />
 
-          <div>
-            <h2 className="text-lg font-bold sm:text-xl">Date Overrides & Day Offs</h2>
-            <p className="mt-1 text-sm text-neutral-500">
-              Customize hours or mark specific dates as non-working.
-            </p>
-
-            <div className="mt-4 space-y-6">
-              <ScheduleDateOverrideEditor
-                dateOptions={dateOptions}
-                dateStatusMap={dateStatusMap}
-                selectedDateKey={selectedDateKey}
-                selectedDateObject={selectedDateObject}
-                todayKey={todayKey}
-                isNonWorkingDay={isNonWorkingDay}
-                hasCustomHours={hasCustomHours}
-                activeDraft={activeDraft}
-                isSaving={isSaving}
-                fieldErrors={fieldErrors}
-                isBreakEnabled={isBreakEnabled}
-                timeInputClass={timeInputClass}
-                canMarkDayOff={canMarkDayOff}
-                onSelectDate={selectDate}
-                onUpdateDraft={updateDraft}
-                onUpdateTimeDraft={updateTimeDraft}
-                onToggleBreakTime={toggleBreakTime}
-                onSaveSelectedDateSchedule={saveSelectedDateSchedule}
-                onResetDraftToDefault={resetDraftToDefault}
-                onRemoveOverride={removeOverride}
-                onMarkDayOff={markDayOff}
-              />
-
-              <ScheduleOverridesList
-                overrides={sortedOverrides}
-                onEdit={selectDate}
-                onRemove={removeOverride}
-                disabled={isSaving}
-              />
-
-              <ScheduleNonWorkingDaysSection
-                isSaving={isSaving}
-                sortedNonWorkingDays={sortedNonWorkingDays}
-                onRestoreWorkingDate={restoreWorkingDate}
-              />
-            </div>
-          </div>
-
-          <AvailabilityDebugPanel
-            barberId={currentUserId}
-            selectedSalonId={selectedSalonId}
+          <SalonScheduleSection
+            dateOptions={dateOptions}
+            dateStatusMap={dateStatusMap}
             selectedDateKey={selectedDateKey}
-            services={barberServices}
-            isServicesLoading={isLoadingServices}
+            selectedDateObject={selectedDateObject}
+            todayKey={todayKey}
+            isNonWorkingDay={isNonWorkingDay}
+            hasCustomHours={hasCustomHours}
+            activeDraft={activeDraft}
+            isSaving={isSaving}
+            fieldErrors={fieldErrors}
+            isBreakEnabled={isBreakEnabled}
+            timeInputClass={timeInputClass}
+            canMarkDayOff={canMarkDayOff}
+            sortedOverrides={sortedOverrides}
+            sortedNonWorkingDays={sortedNonWorkingDays}
+            currentUserId={currentUserId}
+            selectedSalonId={selectedSalonId}
+            barberServices={barberServices}
+            isLoadingServices={isLoadingServices}
             servicesError={servicesError}
+            onSelectDate={selectDate}
+            onUpdateDraft={updateDraft}
+            onUpdateTimeDraft={updateTimeDraft}
+            onToggleBreakTime={toggleBreakTime}
+            onSaveSelectedDateSchedule={saveSelectedDateSchedule}
+            onResetDraftToDefault={resetDraftToDefault}
+            onRemoveOverride={removeOverride}
+            onMarkDayOff={markDayOff}
+            onRestoreWorkingDate={restoreWorkingDate}
           />
-
-          {/* ─── Save Feedback Bar ─── */}
-          {isSaving && (
-            <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
-              <svg className="h-5 w-5 animate-spin text-neutral-400" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span>Saving schedule…</span>
-            </div>
-          )}
         </>
       )}
 

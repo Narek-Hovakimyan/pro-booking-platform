@@ -2,17 +2,12 @@ import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import mongoose from "mongoose";
 import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
 import User from "../models/User.js";
 import {
   getApprovedUserSalonIds,
   getPrimaryApprovedSalonId,
 } from "../services/salon/salonMembershipService.js";
-import {
-  normalizeScheduleForAvailability,
-  serializeDefaultSchedule,
-} from "../utils/scheduleUtils.js";
 import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
@@ -21,11 +16,8 @@ import {
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import {
-  getArmeniaDateKey,
   getBookingDateTime,
   getDayKeyFromDate,
-  isDateKey,
-  isTimeKey,
   timeToMinutes,
 } from "../utils/bookingDateTime.js";
 import {
@@ -34,20 +26,19 @@ import {
   defaultWeeklySchedule,
   defaultWorkingDaySchedule,
   formatBookedMessage,
-  getBookingCreationLockKey,
   getDayScheduleFromDefaultSchedule,
-  getIdString,
-  getScheduleForDate,
-  getScheduleSlotError,
-  isPastBookingTime,
   maxCancellationReasonLength,
   maxRejectionReasonLength,
   normalizeBookingStatus,
   slotOverlaps,
 } from "../utils/bookingUtils.js";
 import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
-
-const bookingCreationLocks = new Map();
+import { storedDateToDateKey } from "../utils/bookingDateStorage.js";
+import {
+  getBookingCreationLockKey,
+  validateBookingSlot,
+  withBookingCreationLock,
+} from "../utils/bookingSlotValidation.js";
 
 export const bookingController = createCrudController(Booking, "Booking");
 
@@ -55,32 +46,11 @@ const isValidObjectId = (value) =>
   Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
 
 const allowedBookingDelayMinutes = new Set([10, 20]);
-const reschedulableBookingStatuses = new Set(["pending", "accepted"]);
-
 const minutesToTime = (minutes) => {
   const hours = Math.floor(minutes / 60).toString().padStart(2, "0");
   const mins = (minutes % 60).toString().padStart(2, "0");
 
   return `${hours}:${mins}`;
-};
-
-const dateKeyToDate = (dateKey) => {
-  if (!isDateKey(dateKey)) return undefined;
-
-  return new Date(`${dateKey}T00:00:00.000Z`);
-};
-
-const storedDateToDateKey = (value) => {
-  if (!value) return "";
-  if (typeof value === "string") {
-    return isDateKey(value) ? value : value.slice(0, 10);
-  }
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
-  }
-
-  return "";
 };
 
 const hasOwnBodyField = (body, field) =>
@@ -110,25 +80,6 @@ const attemptsDateTimeChange = (body, booking) => {
   }
 
   return false;
-};
-
-const isAssignedBarberForBooking = (requester, booking) =>
-  requester?.role === "barber" &&
-  String(requester._id) === String(booking.barberId);
-
-const isClientForBooking = (requester, booking) =>
-  requester?.role === "client" &&
-  String(requester._id) === String(booking.clientId);
-
-const hasPendingRescheduleRequest = (booking) =>
-  booking?.rescheduleRequest?.status === "pending";
-
-const createNotificationNonFatal = async (payload) => {
-  try {
-    await createNotification(payload);
-  } catch (error) {
-    console.error("Booking reschedule notification error:", error.message);
-  }
 };
 
 const resolveBookingSalon = async ({ barberId, salonId }) => {
@@ -182,122 +133,6 @@ const getClientName = async (booking, fallbackUser) => {
 
   const client = await User.findById(booking.clientId).select("name");
   return client?.name || "Client";
-};
-
-const validateBookingSlot = async ({
-  barberId,
-  salonId,
-  barber: providedBarber = null,
-  bookingDate,
-  dayKey,
-  time,
-  duration,
-  ignoreBookingId = null,
-}) => {
-  if (!isDateKey(bookingDate)) {
-    return { message: "bookingDate must be YYYY-MM-DD" };
-  }
-
-  if (!isTimeKey(time)) {
-    return { message: "time must be HH:mm" };
-  }
-
-  if (isPastBookingTime(bookingDate, time)) {
-    return { message: "This time is already past" };
-  }
-
-  const todayKey = getArmeniaDateKey(new Date());
-  const [ty, tm, td] = todayKey.split("-").map(Number);
-  const [by, bm, bd] = bookingDate.split("-").map(Number);
-  const todayDate = new Date(ty, tm - 1, td);
-  const bookDate = new Date(by, bm - 1, bd);
-  const diffDays = (bookDate - todayDate) / (1000 * 60 * 60 * 24);
-
-  if (diffDays > 365) {
-    return { message: "Booking date is too far in the future" };
-  }
-
-  const effectiveDayKey = getDayKeyFromDate(bookingDate) || dayKey;
-
-  // Get per-salon schedule
-  const scheduleQuery = salonId ? { barberId, salonId } : { barberId };
-  const [schedule, barber] = await Promise.all([
-    Schedule.findOne(scheduleQuery),
-    providedBarber || User.findById(barberId).select("-password"),
-  ]);
-
-  // Prefer the selected salon's saved schedule, while keeping legacy salon-entry defaults.
-  const salonEntry = (barber?.salons || []).find(
-    (s) => getIdString(s?.salon) === String(salonId || "")
-  );
-  const scheduleDefaults = serializeDefaultSchedule(
-    schedule?.defaultSchedule,
-    salonEntry?.defaultSchedule
-  );
-  const availabilitySchedule = normalizeScheduleForAvailability(schedule);
-
-  const daySchedule = getScheduleForDate(
-    availabilitySchedule,
-    bookingDate,
-    effectiveDayKey,
-    scheduleDefaults
-  );
-
-  if (availabilitySchedule?.nonWorkingDays?.includes(bookingDate) || !daySchedule?.working) {
-    return { message: "Barber is not working this day" };
-  }
-
-  const scheduleSlotError = getScheduleSlotError(daySchedule, time, duration);
-
-  if (scheduleSlotError) {
-    return { message: scheduleSlotError };
-  }
-
-  // Check barber slot overlap across all salons. Only blocking statuses reserve slots.
-  const activeBookingQuery = {
-    barberId,
-    status: { $in: blockingBookingStatuses },
-    bookingDate,
-  };
-
-  if (ignoreBookingId) {
-    activeBookingQuery._id = { $ne: ignoreBookingId };
-  }
-
-  const activeBookings = await Booking.find(activeBookingQuery);
-  const hasOverlap = activeBookings.some((booking) =>
-    blockingBookingStatuses.includes(normalizeBookingStatus(booking?.status)) &&
-    slotOverlaps(booking, time, duration)
-  );
-
-  if (hasOverlap) {
-    return { message: "This time is already booked" };
-  }
-
-  return { effectiveDayKey };
-};
-
-const withBookingCreationLock = async (lockKey, task) => {
-  const previousLock = bookingCreationLocks.get(lockKey) || Promise.resolve();
-  let releaseCurrentLock;
-  const currentLock = new Promise((resolve) => {
-    releaseCurrentLock = resolve;
-  });
-
-  const queuedLock = previousLock.then(() => currentLock, () => currentLock);
-  bookingCreationLocks.set(lockKey, queuedLock);
-
-  await previousLock.catch(() => {});
-
-  try {
-    return await task();
-  } finally {
-    releaseCurrentLock();
-
-    if (bookingCreationLocks.get(lockKey) === queuedLock) {
-      bookingCreationLocks.delete(lockKey);
-    }
-  }
 };
 
 export const __bookingTestHooks = {
@@ -740,226 +575,6 @@ export const updateBooking = async (req, res) => {
   } catch (error) {
     return res.status(400).json({
       message: error.message || "Could not update booking",
-    });
-  }
-};
-
-export const createRescheduleRequest = async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.id);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    if (!isClientForBooking(req.user, booking)) {
-      return res.status(403).json({
-        message: "Only the booking owner can request reschedule",
-      });
-    }
-
-    if (!reschedulableBookingStatuses.has(normalizeBookingStatus(booking.status))) {
-      return res.status(400).json({
-        message: "Cannot request reschedule for this booking status",
-      });
-    }
-
-    if (hasPendingRescheduleRequest(booking)) {
-      return res.status(400).json({
-        message: "A reschedule request is already pending",
-      });
-    }
-
-    const requestedBookingDate = req.body.bookingDate;
-    const requestedTime = req.body.time;
-    const requestedDayKey =
-      getDayKeyFromDate(requestedBookingDate) || req.body.dayKey || booking.dayKey;
-    const slotValidation = await validateBookingSlot({
-      barberId: booking.barberId,
-      salonId: booking?.salonId || null,
-      bookingDate: requestedBookingDate,
-      dayKey: requestedDayKey,
-      time: requestedTime,
-      duration: booking.duration,
-      ignoreBookingId: booking._id,
-    });
-
-    if (slotValidation.message) {
-      return res.status(400).json({ message: slotValidation.message });
-    }
-
-    booking.rescheduleRequest = {
-      status: "pending",
-      requestedBookingDate: dateKeyToDate(requestedBookingDate),
-      requestedDayKey: slotValidation.effectiveDayKey,
-      requestedTime,
-      requestedBy: req.user._id,
-      requestedAt: new Date(),
-      respondedBy: null,
-      respondedAt: null,
-      rejectionReason: "",
-      originalBookingDate: dateKeyToDate(booking.bookingDate),
-      originalDayKey: booking.dayKey,
-      originalTime: booking.time,
-      requestNote: (req.body.note || "").trim(),
-    };
-
-    await booking.save();
-
-    await createNotificationNonFatal({
-      userId: booking.barberId,
-      type: "booking_reschedule_requested",
-      message: `Client requested to reschedule booking from ${booking.bookingDate} at ${booking.time} to ${requestedBookingDate} at ${requestedTime}.`,
-      data: getBookingNotificationData(booking),
-    });
-
-    emitBookingUpdated(booking, "updated");
-
-    return res.status(201).json(booking);
-  } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not request reschedule",
-    });
-  }
-};
-
-export const acceptRescheduleRequest = async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.id);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    if (!isAssignedBarberForBooking(req.user, booking)) {
-      return res.status(403).json({
-        message: "Only the assigned barber can accept reschedule request",
-      });
-    }
-
-    if (!hasPendingRescheduleRequest(booking)) {
-      return res.status(400).json({ message: "No pending reschedule request" });
-    }
-
-    const pendingRequest = booking.rescheduleRequest;
-    const requestedBookingDate = storedDateToDateKey(
-      pendingRequest.requestedBookingDate
-    );
-    const requestedTime = pendingRequest.requestedTime;
-    const requestedDayKey =
-      pendingRequest.requestedDayKey ||
-      getDayKeyFromDate(requestedBookingDate) ||
-      booking.dayKey;
-
-    const acceptResult = await withBookingCreationLock(
-      getBookingCreationLockKey({
-        barberId: booking.barberId,
-        bookingDate: requestedBookingDate,
-      }),
-      async () => {
-        if (!hasPendingRescheduleRequest(booking)) {
-          return { message: "No pending reschedule request" };
-        }
-
-        const latestSlotValidation = await validateBookingSlot({
-          barberId: booking.barberId,
-          salonId: booking?.salonId || null,
-          bookingDate: requestedBookingDate,
-          dayKey: requestedDayKey,
-          time: requestedTime,
-          duration: booking.duration,
-          ignoreBookingId: booking._id,
-        });
-
-        if (latestSlotValidation.message) {
-          return { message: latestSlotValidation.message };
-        }
-
-        booking.bookingDate = requestedBookingDate;
-        booking.dayKey = latestSlotValidation.effectiveDayKey;
-        booking.time = requestedTime;
-        booking.reminderSentAt = null;
-        booking.reminder24hSentAt = null;
-        booking.reminder2hSentAt = null;
-        booking.rescheduleRequest.status = "accepted";
-        booking.rescheduleRequest.respondedBy = req.user._id;
-        booking.rescheduleRequest.respondedAt = new Date();
-
-        await booking.save();
-
-        return { booking };
-      }
-    );
-
-    if (acceptResult.message) {
-      return res.status(400).json({ message: acceptResult.message });
-    }
-
-    const updatedBooking = acceptResult.booking;
-
-    if (updatedBooking.clientId) {
-      await createNotificationNonFatal({
-        userId: updatedBooking.clientId,
-        type: "booking_reschedule_accepted",
-        message: `Your reschedule request was accepted. Booking moved to ${updatedBooking.bookingDate} at ${updatedBooking.time}.`,
-        data: getBookingNotificationData(updatedBooking),
-      });
-    }
-
-    emitBookingUpdated(updatedBooking, "updated");
-
-    return res.json(updatedBooking);
-  } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not accept reschedule request",
-    });
-  }
-};
-
-export const rejectRescheduleRequest = async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.id);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    if (!isAssignedBarberForBooking(req.user, booking)) {
-      return res.status(403).json({
-        message: "Only the assigned barber can reject reschedule request",
-      });
-    }
-
-    if (!hasPendingRescheduleRequest(booking)) {
-      return res.status(400).json({ message: "No pending reschedule request" });
-    }
-
-    const rejectionReason = (req.body?.reason || "").trim();
-
-    booking.rescheduleRequest.status = "rejected";
-    booking.rescheduleRequest.rejectionReason = rejectionReason;
-    booking.rescheduleRequest.respondedBy = req.user._id;
-    booking.rescheduleRequest.respondedAt = new Date();
-
-    await booking.save();
-
-    if (booking.clientId) {
-      await createNotificationNonFatal({
-        userId: booking.clientId,
-        type: "booking_reschedule_rejected",
-        message: rejectionReason
-          ? `Your reschedule request was rejected. Reason: ${rejectionReason}`
-          : "Your reschedule request was rejected.",
-        data: getBookingNotificationData(booking),
-      });
-    }
-
-    emitBookingUpdated(booking, "updated");
-
-    return res.json(booking);
-  } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not reject reschedule request",
     });
   }
 };
