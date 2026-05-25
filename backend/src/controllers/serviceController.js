@@ -162,7 +162,11 @@ const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
 export const getServicesByBarber = async (req, res) => {
   try {
     const services = await Service.find({ barberId: req.params.barberId })
-      .populate("customCategoryId", "_id name ownerType ownerId active sortOrder");
+      .populate({
+        path: "customCategoryId",
+        match: { active: true },
+        select: "_id name ownerType ownerId sortOrder",
+      });
     return res.json(services);
   } catch (error) {
     return res.status(500).json({

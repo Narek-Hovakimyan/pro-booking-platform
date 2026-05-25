@@ -689,7 +689,6 @@ test("GET services by barber returns populated customCategoryId when service has
     name: "Bridal Updo",
     ownerType: "barber",
     ownerId: barberA._id,
-    active: true,
     sortOrder: 0,
   };
   const services = [
@@ -702,8 +701,10 @@ test("GET services by barber returns populated customCategoryId when service has
     },
   ];
 
+  let capturedPopulate;
   Service.find = () => ({
-    populate() {
+    populate(opts) {
+      capturedPopulate = opts;
       return services;
     },
   });
@@ -719,7 +720,13 @@ test("GET services by barber returns populated customCategoryId when service has
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].customCategoryId._id, customCategoryId);
   assert.equal(res.body[0].customCategoryId.name, "Bridal Updo");
+  // Verify populate uses object-style with active match
+  assert.equal(capturedPopulate.path, "customCategoryId");
+  assert.equal(capturedPopulate.match?.active, true);
+  // active is excluded from select
+  assert.equal(capturedPopulate.select?.includes("active"), false);
 });
+
 
 test("GET services by barber returns null customCategoryId for system-category service", async () => {
   const res = createResponse();
@@ -749,4 +756,40 @@ test("GET services by barber returns null customCategoryId for system-category s
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].customCategoryId, null);
+});
+
+test("GET services by barber with inactive customCategoryId returns null (active match)", async () => {
+  const res = createResponse();
+
+  // Mongoose populate with `match: { active: true }` returns null
+  // when the referenced doc doesn't match the filter.
+  const services = [
+    {
+      _id: "service-c",
+      barberId: barberA._id,
+      name: "Deleted Cat Service",
+      category: "other",
+      customCategoryId: null, // Mongoose sets to null when match fails
+    },
+  ];
+
+  Service.find = () => ({
+    populate() {
+      return services;
+    },
+  });
+
+  await getServicesByBarber(
+    {
+      params: { barberId: barberA._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1);
+  // customCategoryId is null because the referenced category is inactive
+  // and Mongoose's populate match filter excluded it.
+  assert.equal(res.body[0].customCategoryId, null);
+  assert.equal(res.body[0].category, "other");
 });

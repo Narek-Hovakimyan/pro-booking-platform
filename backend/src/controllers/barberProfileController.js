@@ -245,7 +245,11 @@ export const getBarberCardSummary = async (req, res) => {
       chainToArray(BarberProfile.find({ barberId: { $in: barberIds } })),
       chainToArray(Salon.find({ _id: { $in: [...allSalonIds] } })),
       Service.find({ barberId: { $in: barberIds } })
-        .populate("customCategoryId", "_id name ownerType ownerId active sortOrder")
+        .populate({
+          path: "customCategoryId",
+          match: { active: true },
+          select: "_id name ownerType ownerId sortOrder",
+        })
         .lean(),
       chainToArray(Review.find({ barberId: { $in: barberIds } })),
       chainToArray(

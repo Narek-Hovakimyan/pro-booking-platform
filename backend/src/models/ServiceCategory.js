@@ -64,6 +64,20 @@ serviceCategorySchema.index(
   }
 );
 
+// Unique key for system categories — prevents duplicate seed inserts.
+// Only applies when source="system" and key is a non-empty string,
+// so custom categories (key: "") are not affected.
+serviceCategorySchema.index(
+  { key: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      source: "system",
+      key: { $type: "string", $ne: "" },
+    },
+  }
+);
+
 // Fast lookup of system categories
 serviceCategorySchema.index({ source: 1, active: 1, sortOrder: 1 });
 

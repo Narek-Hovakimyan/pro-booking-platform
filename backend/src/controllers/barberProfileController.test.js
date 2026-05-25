@@ -456,3 +456,39 @@ test("public barber event certificates include issued safe certificate data only
   assert.equal(res.body[0].email, undefined);
   assert.equal(res.body[0].phone, undefined);
 });
+
+test("card summary populate uses active-only match for customCategoryId", async () => {
+  const res = createResponse();
+  const barberId = "64b000000000000000000001";
+
+  User.find = () => ({
+    select: () => ({
+      then: (resolve) =>
+        resolve([
+          { _id: barberId, role: "barber", salons: [], createdAt: new Date("2024-01-01") },
+        ]),
+    }),
+  });
+  BarberProfile.find = () => createFindChain([]);
+  Salon.find = () => createFindChain([]);
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([]);
+
+  let capturedPopulate;
+  Service.find = () => ({
+    populate(opts) {
+      capturedPopulate = opts;
+      return { lean: async () => [] };
+    },
+  });
+
+  await getBarberCardSummary({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(capturedPopulate, "populate must be called on services");
+  assert.equal(capturedPopulate.path, "customCategoryId");
+  assert.equal(capturedPopulate.match?.active, true);
+  // active is excluded from select
+  assert.equal(capturedPopulate.select?.includes("active"), false);
+});
