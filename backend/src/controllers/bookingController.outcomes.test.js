@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
+import { __bookingTestHooks } from "./bookingController.js";
 import {
-  __bookingTestHooks,
   markLateCancel,
   markNoShow,
-} from "./bookingController.js";
+} from "./bookingOutcomeController.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Schedule from "../models/Schedule.js";

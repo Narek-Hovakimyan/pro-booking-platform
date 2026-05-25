@@ -6,10 +6,7 @@ import { Button } from "@/shared/components/ui/button";
 import EmptyState from "@/shared/components/common/EmptyState";
 import api from "@/shared/api/axios";
 import { setServices } from "@/store/slices/servicesSlice";
-import {
-  defaultPersonalSchedule,
-  getDayScheduleFromDefaultSchedule,
-} from "@/shared/data/schedule";
+import { getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
 import { cn } from "@/shared/lib/utils";
 import {
   formatDateKey,
@@ -24,83 +21,16 @@ import ScheduleOverridesList from "@/barber/components/schedule/ScheduleOverride
 import ScheduleDateOverrideEditor from "@/barber/components/schedule/ScheduleDateOverrideEditor";
 import ScheduleNonWorkingDaysSection from "@/barber/components/schedule/ScheduleNonWorkingDaysSection";
 import AvailabilityDebugPanel from "@/barber/components/schedule/AvailabilityDebugPanel";
-
-const getSalonNameFromEntry = (entry) => {
-  if (!entry) return "Salon";
-  if (entry.salon?.name) return entry.salon.name;
-  if (entry.name) return entry.name;
-  return "Salon";
-};
-
-const getSalonDataFromEntry = (entry) => entry?.salon || entry;
-
-const getSalonAddressFromEntry = (entry) => {
-  const salon = getSalonDataFromEntry(entry);
-  return [salon?.address, salon?.city].filter(Boolean).join(", ");
-};
-
-const normalizeManageableSalonEntries = (data) => {
-  const salonList = Array.isArray(data) ? data : data?.salons || [];
-
-  return salonList.map((salon) => ({
-    ...salon,
-    salon,
-    status: salon?.status || "approved",
-  }));
-};
-
-const getSalonListFromResponse = (data) =>
-  Array.isArray(data) ? data : data?.salons || [];
-
-const normalizeSchedule = (data) => {
-  const rawDefault = data?.defaultSchedule || {};
-  return {
-    ...data,
-    defaultSchedule: {
-      startTime: rawDefault.startTime || "09:00",
-      endTime: rawDefault.endTime || "18:00",
-      hasBreak: rawDefault.hasBreak || false,
-      breakStart: rawDefault.breakStart || "",
-      breakEnd: rawDefault.breakEnd || "",
-    },
-  };
-};
-
-const areSchedulesEqual = (left, right) =>
-  JSON.stringify(left || null) === JSON.stringify(right || null);
-
-const normalizeDefaultScheduleDraft = (defaultSchedule = {}) => ({
-  startTime: defaultSchedule.startTime || defaultPersonalSchedule.startTime,
-  endTime: defaultSchedule.endTime || defaultPersonalSchedule.endTime,
-  hasBreak: Boolean(defaultSchedule.hasBreak),
-  breakStart: defaultSchedule.hasBreak ? defaultSchedule.breakStart || "" : "",
-  breakEnd: defaultSchedule.hasBreak ? defaultSchedule.breakEnd || "" : "",
-});
-
-function SkeletonBlock({ className = "" }) {
-  return (
-    <div
-      className={`animate-pulse rounded-xl bg-neutral-100 ${className}`}
-    />
-  );
-}
-
-function ScheduleSkeleton() {
-  return (
-    <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
-      <CardContent className="space-y-5 p-4 sm:p-6">
-        <SkeletonBlock className="h-8 w-40" />
-        <SkeletonBlock className="h-4 w-72" />
-        <SkeletonBlock className="h-12 w-full rounded-2xl" />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <SkeletonBlock className="h-48 w-full rounded-2xl" />
-          <SkeletonBlock className="h-48 w-full rounded-2xl" />
-        </div>
-        <SkeletonBlock className="h-32 w-full rounded-2xl" />
-      </CardContent>
-    </Card>
-  );
-}
+import ScheduleSkeleton from "@/barber/components/ScheduleSkeleton";
+import {
+  getSalonNameFromEntry,
+  getSalonAddressFromEntry,
+  normalizeManageableSalonEntries,
+  getSalonListFromResponse,
+  normalizeSchedule,
+  areSchedulesEqual,
+  normalizeDefaultScheduleDraft,
+} from "@/barber/utils/scheduleHelpers";
 
 const timeInputClass = (hasError) =>
   cn(

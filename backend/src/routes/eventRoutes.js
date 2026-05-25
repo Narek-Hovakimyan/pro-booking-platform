@@ -6,6 +6,11 @@ import {
   createEvent,
   updateEvent,
   cancelEvent,
+  checkInRegistration,
+  updateAttendance,
+  issueCertificates,
+} from "../controllers/eventController.js";
+import {
   registerForEvent,
   cancelRegistration,
   getMyRegistrations,
@@ -13,10 +18,7 @@ import {
   approveRegistration,
   rejectRegistration,
   waitlistRegistration,
-  checkInRegistration,
-  updateAttendance,
-  issueCertificates,
-} from "../controllers/eventController.js";
+} from "../controllers/eventRegistrationController.js";
 import { issueEventRegistrationCertificate, issueEventRegistrationCertificateUpload } from "../controllers/certificateController.js";
 import {
   createEventReview,

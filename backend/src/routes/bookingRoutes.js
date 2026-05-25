@@ -3,17 +3,23 @@ import {
   acceptRescheduleRequest,
   createBooking,
   createRescheduleRequest,
-  debugBookingAvailability,
-  getBarberBookings,
-  getBarberMonthlyIncome,
-  getClientBookings,
-  getClientReliability,
   delayBooking,
-  markLateCancel,
-  markNoShow,
   rejectRescheduleRequest,
   updateBooking,
 } from "../controllers/bookingController.js";
+import {
+  getBarberBookings,
+  getClientBookings,
+} from "../controllers/bookingReadController.js";
+import {
+  markLateCancel,
+  markNoShow,
+} from "../controllers/bookingOutcomeController.js";
+import {
+  debugBookingAvailability,
+  getBarberMonthlyIncome,
+  getClientReliability,
+} from "../controllers/bookingAnalyticsController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

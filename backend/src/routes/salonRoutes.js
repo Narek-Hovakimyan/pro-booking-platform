@@ -1,21 +1,25 @@
 import express from "express";
 import {
-  cancelJoinRequest,
   createSalon,
-  decideJoinRequest,
-  demoteAdmin,
   listManageableSalons,
   getMySalonStatus,
-  getOwnerJoinRequests,
-  getSalonAdmins,
   getSalonProfile,
-  getSalonStaff,
-  leaveSalon,
   listSalons,
+} from "../controllers/salonController.js";
+import {
+  cancelJoinRequest,
+  decideJoinRequest,
+  getOwnerJoinRequests,
+  leaveSalon,
+  requestToJoinSalon,
+} from "../controllers/salonMembershipController.js";
+import {
+  demoteAdmin,
+  getSalonAdmins,
+  getSalonStaff,
   promoteToAdmin,
   removeBarberFromSalon,
-  requestToJoinSalon,
-} from "../controllers/salonController.js";
+} from "../controllers/salonStaffController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 

@@ -18,6 +18,16 @@ import {
   canUserManageSalon,
   getApprovedUserSalonIds,
 } from "./salon/salonMembershipService.js";
+import {
+  OPEN_WAITLIST_STATUSES,
+  CANCELLABLE_WAITLIST_STATUSES,
+  getIdString,
+  getWaitlistCreationLockKey,
+  validatePreferredWindow,
+  validateWaitlistDate,
+  throwDuplicateWaitlistEntryError,
+  createWaitlistActionError,
+} from "./waitlistValidation.js";
 
 const waitlistCreationLocks = new Map();
 const waitlistDisplayPopulate = [
@@ -27,8 +37,6 @@ const waitlistDisplayPopulate = [
   { path: "serviceId", select: "name" },
   { path: "convertedBooking", select: "bookingDate time status" },
 ];
-const OPEN_WAITLIST_STATUSES = ["active", "notified", "offered"];
-const CANCELLABLE_WAITLIST_STATUSES = ["active", "notified"];
 
 /**
  * Populate display fields on a single waitlist entry so action responses
@@ -40,34 +48,6 @@ const populateWaitlistEntry = async (entry) => {
 };
 
 const convertibleWaitlistStatuses = ["active", "notified"];
-
-const getIdString = (value) => {
-  if (!value) return "";
-  if (value._id) return String(value._id);
-  if (value.id) return String(value.id);
-  return String(value);
-};
-
-const getWaitlistCreationLockKey = ({
-  clientId,
-  barberId,
-  salonId,
-  serviceId,
-  date,
-  preferredStartTime,
-  preferredEndTime,
-}) =>
-  [
-    clientId,
-    barberId,
-    salonId || "",
-    serviceId,
-    date,
-    preferredStartTime || "",
-    preferredEndTime || "",
-  ]
-    .map((value) => String(value))
-    .join(":");
 
 const withWaitlistCreationLock = async (lockKey, task) => {
   const previousLock = waitlistCreationLocks.get(lockKey) || Promise.resolve();
@@ -90,41 +70,6 @@ const withWaitlistCreationLock = async (lockKey, task) => {
       waitlistCreationLocks.delete(lockKey);
     }
   }
-};
-
-const validatePreferredWindow = ({ preferredStartTime, preferredEndTime }) => {
-  const startMinutes = preferredStartTime ? timeToMinutes(preferredStartTime) : null;
-  const endMinutes = preferredEndTime ? timeToMinutes(preferredEndTime) : null;
-
-  if (preferredStartTime && startMinutes === null) {
-    return "preferredStartTime must be HH:mm";
-  }
-
-  if (preferredEndTime && endMinutes === null) {
-    return "preferredEndTime must be HH:mm";
-  }
-
-  if (startMinutes !== null && endMinutes !== null && startMinutes > endMinutes) {
-    return "preferredStartTime must be before or equal to preferredEndTime";
-  }
-
-  return "";
-};
-
-const validateWaitlistDate = (date) => {
-  if (!isDateKey(date)) {
-    return "date must be a valid YYYY-MM-DD calendar date";
-  }
-
-  if (date < getArmeniaDateKey(new Date())) {
-    return "date cannot be in the past";
-  }
-
-  if (isBeyondBookingHorizon(date)) {
-    return "date is too far in the future";
-  }
-
-  return "";
 };
 
 const validateWaitlistRelationships = async ({ barberId, salonId, serviceId }) => {
@@ -172,20 +117,6 @@ const sendNotificationSafe = async (payload) => {
   } catch (err) {
     console.warn("Waitlist notification failed (non-fatal):", err.message);
   }
-};
-
-const throwDuplicateWaitlistEntryError = () => {
-  const error = new Error(
-    "You already have an active waitlist entry for this barber, service, date, and time window"
-  );
-  error.code = "DUPLICATE_WAITLIST_ENTRY";
-  throw error;
-};
-
-const createWaitlistActionError = (message, code) => {
-  const error = new Error(message);
-  error.code = code;
-  return error;
 };
 
 const getActionableWaitlistEntry = async (entryId, barberId) => {

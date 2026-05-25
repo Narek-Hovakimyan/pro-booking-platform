@@ -4,9 +4,9 @@ import { afterEach, test } from "node:test";
 import {
   __bookingTestHooks,
   createBooking,
-  getBarberBookings,
   updateBooking,
 } from "./bookingController.js";
+import { getBarberBookings } from "./bookingReadController.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";

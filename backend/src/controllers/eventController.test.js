@@ -2,19 +2,21 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
-  approveRegistration,
   cancelEvent,
-  cancelRegistration,
   checkInRegistration,
   createEvent,
   getEvents,
-  getEventRegistrations,
   getMyEvents,
+} from "./eventController.js";
+import {
+  approveRegistration,
+  cancelRegistration,
+  getEventRegistrations,
   getMyRegistrations,
   registerForEvent,
   rejectRegistration,
   waitlistRegistration,
-} from "./eventController.js";
+} from "./eventRegistrationController.js";
 import Event from "../models/Event.js";
 import EventCertificate from "../models/EventCertificate.js";
 import EventRegistration from "../models/EventRegistration.js";

@@ -10,26 +10,9 @@ import {
   getPrimaryApprovedSalonId,
 } from "../services/salon/salonMembershipService.js";
 import {
-  authorizeDebugAccess,
-  debugAvailability,
-  validateDebugRequest,
-} from "../services/availabilityDebugService.js";
-import {
   normalizeScheduleForAvailability,
   serializeDefaultSchedule,
 } from "../utils/scheduleUtils.js";
-import {
-  getAccessibleClientReliabilitySummary,
-} from "../services/clientReliabilityService.js";
-import { getBarberMonthlyIncomeSummary } from "../services/bookingAnalyticsService.js";
-import {
-  markBookingLateCancel,
-  markBookingNoShow,
-} from "../services/bookingOutcomeService.js";
-import {
-  getBarberBookingsForRequester,
-  getClientBookingsForRequester,
-} from "../services/bookingReadService.js";
 import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
@@ -62,6 +45,7 @@ import {
   normalizeBookingStatus,
   slotOverlaps,
 } from "../utils/bookingUtils.js";
+import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
 
 const bookingCreationLocks = new Map();
 
@@ -146,9 +130,6 @@ const createNotificationNonFatal = async (payload) => {
     console.error("Booking reschedule notification error:", error.message);
   }
 };
-
-const getBookingNotificationData = (booking) =>
-  booking?._id ? { bookingId: booking._id } : undefined;
 
 const resolveBookingSalon = async ({ barberId, salonId }) => {
   const barber = await User.findById(barberId).select(
@@ -1127,160 +1108,6 @@ export const delayBooking = async (req, res) => {
   } catch (error) {
     return res.status(400).json({
       message: error.message || "Could not delay booking",
-    });
-  }
-};
-
-export const getClientBookings = async (req, res) => {
-  try {
-    const bookings = await getClientBookingsForRequester({
-      clientId: req.params.clientId,
-      requester: req.user,
-    });
-
-    return res.json(bookings);
-  } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch client bookings",
-    });
-  }
-};
-
-export const getBarberBookings = async (req, res) => {
-  try {
-    const bookings = await getBarberBookingsForRequester({
-      barberId: req.params.barberId,
-      requester: req.user,
-    });
-
-    return res.json(bookings);
-  } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch barber bookings",
-    });
-  }
-};
-
-export const markNoShow = async (req, res) => {
-  try {
-    const updatedBooking = await markBookingNoShow({
-      bookingId: req.params.id,
-      requester: req.user,
-    });
-
-    // Notify client
-    if (updatedBooking.clientId) {
-      await createNotification({
-        userId: updatedBooking.clientId,
-        type: "booking_no_show",
-        message: "Your booking was marked as no-show.",
-        data: getBookingNotificationData(updatedBooking),
-      });
-    }
-
-    notifyWaitlistForReleasedBookingSlot(updatedBooking);
-
-    emitBookingUpdated(updatedBooking, "updated");
-
-    return res.json(updatedBooking);
-  } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not mark no-show",
-    });
-  }
-};
-
-export const markLateCancel = async (req, res) => {
-  try {
-    const updatedBooking = await markBookingLateCancel({
-      bookingId: req.params.id,
-      requester: req.user,
-    });
-
-    // Notify client
-    if (updatedBooking.clientId) {
-      await createNotification({
-        userId: updatedBooking.clientId,
-        type: "booking_late_cancelled",
-        message: "Your booking was marked as late cancellation.",
-        data: getBookingNotificationData(updatedBooking),
-      });
-    }
-
-    notifyWaitlistForReleasedBookingSlot(updatedBooking);
-
-    emitBookingUpdated(updatedBooking, "updated");
-
-    return res.json(updatedBooking);
-  } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not mark late cancellation",
-    });
-  }
-};
-
-export const getBarberMonthlyIncome = async (req, res) => {
-  try {
-    const summary = await getBarberMonthlyIncomeSummary({
-      barberId: req.params.barberId,
-      year: req.query.year,
-      month: req.query.month,
-      requester: req.user,
-    });
-
-    return res.json(summary);
-  } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch barber income",
-    });
-  }
-};
-
-export const getClientReliability = async (req, res) => {
-  try {
-    const { clientId } = req.params;
-    const summary = await getAccessibleClientReliabilitySummary({
-      clientId,
-      requester: req.user,
-    });
-
-    return res.json(summary);
-  } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch client reliability summary",
-    });
-  }
-};
-
-export const debugBookingAvailability = async (req, res) => {
-  try {
-    const { barberId, salonId, date, time, serviceId } = req.body;
-
-    // Validate required fields
-    const validation = validateDebugRequest({ barberId, salonId, date, time, serviceId });
-
-    if (!validation.valid) {
-      return res.status(validation.status).json({ message: validation.message });
-    }
-
-    // Authorize access
-    const auth = await authorizeDebugAccess({ requester: req.user, barberId, salonId });
-
-    if (!auth.allowed) {
-      return res.status(auth.status).json({ message: auth.message });
-    }
-
-    // Run diagnostics
-    const result = await debugAvailability({ barberId, salonId, date, time, serviceId });
-
-    if (result.status) {
-      return res.status(result.status).json({ message: result.message });
-    }
-
-    return res.json(result);
-  } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not debug availability",
     });
   }
 };

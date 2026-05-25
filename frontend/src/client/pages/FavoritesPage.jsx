@@ -10,6 +10,16 @@ import {
   getEntityId,
   sortBookingsDescending,
 } from "@/client/utils/bookingStatusUtils";
+import {
+  AVAILABILITY_STATUS,
+  uniqueById,
+  getStartingPrice,
+  getBarberId,
+  mapByBarberId,
+  getReviewStatsFromReviews,
+  getActiveServicesForBarber,
+  getUniqueCategories,
+} from "@/client/utils/favoriteHelpers";
 
 import api from "@/shared/api/axios";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
@@ -30,77 +40,6 @@ import {
 import { fetchClientBookings } from "@/store/slices/bookingsSlice";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { getMediaUrl } from "@/shared/utils/media";
-
-const uniqueById = (items) => {
-  const seenIds = new Set();
-
-  return items.filter((item) => {
-    const itemId = item?.id || item?._id;
-
-    if (!itemId) return false;
-    if (seenIds.has(String(itemId))) return false;
-
-    seenIds.add(String(itemId));
-    return true;
-  });
-};
-
-function getStartingPrice(services, barberId) {
-  const prices = services
-    .filter(
-      (service) =>
-        String(service.barberId) === String(barberId) && service.active
-    )
-    .map((service) => Number(service.price))
-    .filter(Number.isFinite);
-
-  return prices.length > 0 ? Math.min(...prices) : null;
-}
-
-const AVAILABILITY_STATUS = {
-  LOADING: "loading",
-  READY: "ready",
-  UNAVAILABLE: "unavailable",
-};
-
-function getBarberId(barber) {
-  return barber?.id || barber?._id;
-}
-
-function mapByBarberId(items = []) {
-  return Object.fromEntries(
-    items
-      .map((item) => [String(item?.barberId || ""), item])
-      .filter(([barberId]) => Boolean(barberId))
-  );
-}
-
-function getReviewStatsFromReviews(reviews, barberId) {
-  const barberReviews = (reviews || []).filter(
-    (review) => String(review?.barberId) === String(barberId)
-  );
-  const total = barberReviews.reduce(
-    (sum, review) => sum + Number(review?.rating || 0),
-    0
-  );
-  return {
-    average: barberReviews.length > 0 ? total / barberReviews.length : 0,
-    count: barberReviews.length,
-  };
-}
-
-function getActiveServicesForBarber(services, barberId) {
-  return (services || []).filter(
-    (service) =>
-      String(service?.barberId) === String(barberId) && service?.active
-  );
-}
-
-function getUniqueCategories(services) {
-  return Array.from(
-    new Set(services.map((service) => service?.category || "other"))
-  );
-}
 
 export default function FavoritesPage() {
   const dispatch = useDispatch();
