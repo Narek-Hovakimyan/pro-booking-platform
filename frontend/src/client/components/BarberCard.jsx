@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import SalonListModal from "@/client/components/SalonListModal";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
+import { getUniqueDisplayCategoryEntries } from "@/client/utils/favoriteHelpers";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { formatAvailabilityLabel, getAvailabilityTone } from "@/shared/utils/availability";
 import { getMediaUrl } from "@/shared/utils/media";
@@ -67,10 +67,14 @@ export default function BarberCard({
     (service) => String(service?.barberId) === String(barberId) && service?.active
   );
   const mainServices = activeServices.slice(0, 3);
-  const uniqueCategories = Array.from(
-    new Set(activeServices.map((service) => service?.category || "other"))
+
+  // Category chips: use display category entries (handles both system and custom categories)
+  const displayCategoryEntries = getUniqueDisplayCategoryEntries(activeServices);
+  const nonOtherEntries = displayCategoryEntries.filter(
+    ([key]) => !key.startsWith("system:other")
   );
-  const showCategoryChips = uniqueCategories.length > 1;
+  const showCategoryChips = nonOtherEntries.length > 0;
+
   const hasBookableServices = activeServices.length > 0;
   const barberAvatarUrl = getBarberAvatarUrl(barber);
   const availabilityTone =
@@ -279,19 +283,17 @@ export default function BarberCard({
           </div>
         )}
 
+        {/* Category chips — handles both system and custom categories */}
         {showCategoryChips && (
           <div className="flex flex-wrap gap-1.5" aria-label="Service categories">
-            {uniqueCategories
-              .filter((c) => c !== "other")
-              .slice(0, 3)
-              .map((category) => (
-                <span
-                  className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
-                  key={category}
-                >
-                  {getServiceCategoryLabel(category)}
-                </span>
-              ))}
+            {nonOtherEntries.slice(0, 3).map(([key, label]) => (
+              <span
+                className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                key={key}
+              >
+                {label}
+              </span>
+            ))}
           </div>
         )}
 

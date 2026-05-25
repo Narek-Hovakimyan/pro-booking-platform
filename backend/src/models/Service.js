@@ -13,6 +13,23 @@ export const SERVICE_CATEGORIES = [
   "other",
 ];
 
+/**
+ * Display labels corresponding to SERVICE_CATEGORIES.
+ * Used to prevent custom category names from colliding with system labels.
+ */
+export const SERVICE_CATEGORY_LABELS = [
+  "Haircut",
+  "Hair color",
+  "Styling",
+  "Beard",
+  "Nails",
+  "Makeup",
+  "Cosmetology",
+  "Lashes & brows",
+  "Massage",
+  "Other",
+];
+
 const serviceSchema = new mongoose.Schema(
   {
     barberId: {
@@ -45,6 +62,11 @@ const serviceSchema = new mongoose.Schema(
       enum: SERVICE_CATEGORIES,
       default: "other",
     },
+    customCategoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceCategory",
+      default: null,
+    },
     tags: {
       type: [String],
       default: [],
@@ -56,6 +78,8 @@ const serviceSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+serviceSchema.index({ barberId: 1, customCategoryId: 1 });
 
 const Service = mongoose.model("Service", serviceSchema);
 

@@ -1,3 +1,5 @@
+import { getServiceDisplayCategory, getServiceDisplayCategoryKey } from "@/shared/data/serviceCategories";
+
 export const AVAILABILITY_STATUS = {
   LOADING: "loading",
   READY: "ready",
@@ -66,5 +68,25 @@ export function getActiveServicesForBarber(services, barberId) {
 export function getUniqueCategories(services) {
   return Array.from(
     new Set(services.map((service) => service?.category || "other"))
+  );
+}
+
+/**
+ * Get unique display category entries for a list of services.
+ *
+ * Returns an array of [key, label] pairs, deduped, suitable for rendering
+ * category chips / badges. Handles both system and custom categories.
+ *
+ * @param {Array} services
+ * @returns {Array<[string, string]>}
+ */
+export function getUniqueDisplayCategoryEntries(services) {
+  return Array.from(
+    new Map(
+      (services || []).map((service) => [
+        getServiceDisplayCategoryKey(service),
+        getServiceDisplayCategory(service),
+      ])
+    ).entries()
   );
 }

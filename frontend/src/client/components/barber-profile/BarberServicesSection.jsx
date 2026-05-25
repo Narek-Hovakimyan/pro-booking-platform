@@ -4,12 +4,62 @@ import { Link } from "react-router-dom";
 
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import {
+  getServiceDisplayCategory,
+  groupServicesByDisplayCategory,
+} from "@/shared/data/serviceCategories";
+
+function ServiceCard({ service, barber, profileBarberId }) {
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-all hover:border-neutral-300 hover:shadow-md">
+      <div className="absolute left-0 top-0 h-full w-1 bg-emerald-500" />
+      <div className="flex items-start justify-between gap-4 pl-4">
+        <div className="min-w-0 flex-1 py-4">
+          <div className="font-semibold text-neutral-950">
+            {service?.name || "Service"}
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
+            <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+              {getServiceDisplayCategory(service)}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5" />
+              {service?.duration || 20} min
+            </span>
+          </div>
+          {service?.description && (
+            <p className="mt-1.5 text-xs leading-relaxed text-neutral-400">
+              {service.description}
+            </p>
+          )}
+        </div>
+        <div className="shrink-0 py-4 pr-4 text-right">
+          <div className="text-xl font-bold text-neutral-950">
+            {Number(service?.price || 0).toLocaleString()}
+          </div>
+          <div className="text-xs text-neutral-400">դրամ</div>
+          <Button
+            as={Link}
+            className="mt-2"
+            size="sm"
+            state={{ barber }}
+            to={`/booking/${profileBarberId}`}
+          >
+            Book
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BarberServicesSection({
   barber,
   barberServices,
   profileBarberId,
 }) {
+  const groupedServices = groupServicesByDisplayCategory(barberServices);
+
   return (
     <Card className="rounded-2xl sm:rounded-3xl">
       <CardContent className="space-y-4 p-5 sm:p-7">
@@ -32,45 +82,21 @@ export default function BarberServicesSection({
             <p className="text-xs text-neutral-400">Check back later for available services.</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {barberServices.map((service) => (
-              <div
-                className="group relative overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-all hover:border-neutral-300 hover:shadow-md"
-                key={service.id || service._id}
-              >
-                <div className="absolute left-0 top-0 h-full w-1 bg-emerald-500" />
-                <div className="flex items-start justify-between gap-4 pl-4">
-                  <div className="min-w-0 flex-1 py-4">
-                    <div className="font-semibold text-neutral-950">
-                      {service?.name || "Service"}
-                    </div>
-                    <div className="mt-1 flex items-center gap-3 text-xs text-neutral-500">
-                      <span className="inline-flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5" />
-                        {service?.duration || 20} min
-                      </span>
-                    </div>
-                    {service?.description && (
-                      <p className="mt-1.5 text-xs leading-relaxed text-neutral-400">
-                        {service.description}
-                      </p>
-                    )}
-                  </div>
-                  <div className="shrink-0 py-4 pr-4 text-right">
-                    <div className="text-xl font-bold text-neutral-950">
-                      {Number(service?.price || 0).toLocaleString()}
-                    </div>
-                    <div className="text-xs text-neutral-400">դրամ</div>
-                    <Button
-                      as={Link}
-                      className="mt-2"
-                      size="sm"
-                      state={{ barber }}
-                      to={`/booking/${profileBarberId}`}
-                    >
-                      Book
-                    </Button>
-                  </div>
+          <div className="space-y-6">
+            {groupedServices.map((group) => (
+              <div key={group.key}>
+                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+                  {group.label}
+                </h3>
+                <div className="space-y-3">
+                  {group.services.map((service) => (
+                    <ServiceCard
+                      key={service.id || service._id}
+                      barber={barber}
+                      profileBarberId={profileBarberId}
+                      service={service}
+                    />
+                  ))}
                 </div>
               </div>
             ))}

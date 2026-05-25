@@ -93,6 +93,7 @@ const createProfileWithCert = (certOverrides = {}) => {
 
 const createFindChain = (result) => ({
   select: () => createFindChain(result),
+  populate: () => createFindChain(result),
   lean: async () => result,
   then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
 });

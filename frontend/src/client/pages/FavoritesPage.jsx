@@ -18,7 +18,6 @@ import {
   mapByBarberId,
   getReviewStatsFromReviews,
   getActiveServicesForBarber,
-  getUniqueCategories,
 } from "@/client/utils/favoriteHelpers";
 
 import api from "@/shared/api/axios";
@@ -29,7 +28,7 @@ import {
 } from "@/shared/components/LoadingSkeletons";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
+import { getUniqueDisplayCategoryEntries } from "@/client/utils/favoriteHelpers";
 import { formatAvailabilityLabel, getAvailabilityTone } from "@/shared/utils/availability";
 import {
   removeFavorite,
@@ -376,8 +375,11 @@ export default function FavoritesPage() {
             const showBookAgain = Boolean(eligibleBooking);
             const barberActiveServices = getActiveServicesForBarber(favServices, barberId);
             const mainServices = barberActiveServices.slice(0, 3);
-            const uniqueCategories = getUniqueCategories(barberActiveServices);
-            const showCategoryChips = uniqueCategories.length > 1;
+            const displayCategoryEntries = getUniqueDisplayCategoryEntries(barberActiveServices);
+            const nonOtherEntries = displayCategoryEntries.filter(
+              ([key]) => !key.startsWith("system:other")
+            );
+            const showCategoryChips = nonOtherEntries.length > 0;
             const hasBookableServices = barberActiveServices.length > 0;
             const reviewStats = summaryReviewStatsByBarberId[bid] || getReviewStatsFromReviews(reviews, barberId);
             const availabilitySlot = firstAvailableSlotByBarberId[String(barberId)];
@@ -486,20 +488,17 @@ export default function FavoritesPage() {
                     </div>
                   )}
 
-                  {/* Category chips */}
+                  {/* Category chips — handles both system and custom categories */}
                   {showCategoryChips && (
                     <div className="flex flex-wrap gap-1.5" aria-label="Service categories">
-                      {uniqueCategories
-                        .filter((c) => c !== "other")
-                        .slice(0, 3)
-                        .map((category) => (
-                          <span
-                            className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
-                            key={category}
-                          >
-                            {getServiceCategoryLabel(category)}
-                          </span>
-                        ))}
+                      {nonOtherEntries.slice(0, 3).map(([key, label]) => (
+                        <span
+                          className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                          key={key}
+                        >
+                          {label}
+                        </span>
+                      ))}
                     </div>
                   )}
 

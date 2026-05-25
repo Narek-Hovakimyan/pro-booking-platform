@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSelector } from "react-redux";
 import {
   Plus,
   Pencil,
@@ -11,6 +12,8 @@ import {
   Scissors,
   Eye,
   EyeOff,
+  Loader2,
+  FolderPlus,
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -18,6 +21,10 @@ import {
   getServiceCategoryLabel,
   serviceCategories,
 } from "@/shared/data/serviceCategories";
+import {
+  fetchServiceCategories,
+  createServiceCategory,
+} from "@/shared/api/serviceCategories";
 
 const emptyForm = {
   name: "",
@@ -26,10 +33,23 @@ const emptyForm = {
   description: "",
   category: "other",
   tags: "",
+  categoryType: "system",
+  customCategoryId: "",
 };
 
 function formatPrice(price) {
   return Number(price).toLocaleString();
+}
+
+/**
+ * Look up the display name for a custom category from a loaded list.
+ */
+function getCustomCategoryName(customCategories, customCategoryId) {
+  if (!customCategoryId || !Array.isArray(customCategories)) return null;
+  const cat = customCategories.find(
+    (c) => String(c._id || c.id) === String(customCategoryId)
+  );
+  return cat?.name || null;
 }
 
 export default function ServicesManager({
@@ -41,20 +61,80 @@ export default function ServicesManager({
   isSaving = false,
   error = "",
 }) {
+  const { currentUser } = useSelector((state) => state.auth);
+  const barberId = currentUser?.id || currentUser?._id;
+
+  /* ── Custom categories state ── */
+  const [allCategories, setAllCategories] = useState([]); // system + custom
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesError, setCategoriesError] = useState("");
+
+  /* ── Modal state ── */
   const [showModal, setShowModal] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [modalError, setModalError] = useState("");
+
+  /* ── Delete confirmation ── */
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
+  /* ── Inline create category state ── */
+  const [showCreateCategory, setShowCreateCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [createCategoryError, setCreateCategoryError] = useState("");
+
+  /* ── Load categories on mount ── */
+  useEffect(() => {
+    if (!barberId) return;
+
+    let cancelled = false;
+
+    async function loadCategories() {
+      setCategoriesLoading(true);
+      setCategoriesError("");
+
+      try {
+        const cats = await fetchServiceCategories(barberId);
+        if (!cancelled) {
+          setAllCategories(cats);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCategoriesError(
+            err.response?.data?.message || "Could not load categories"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setCategoriesLoading(false);
+        }
+      }
+    }
+
+    loadCategories();
+    return () => {
+      cancelled = true;
+    };
+  }, [barberId]);
+
+  /* ── Separate custom categories for dropdown ── */
+  const customCategories = allCategories.filter((c) => c.source === "custom");
+
+  /* ── Modal open/close ── */
   const openAddModal = () => {
     setEditingService(null);
     setForm(emptyForm);
     setModalError("");
+    setShowCreateCategory(false);
+    setNewCategoryName("");
+    setCreateCategoryError("");
     setShowModal(true);
   };
 
   const openEditModal = (service) => {
+    const hasCustomCategory = Boolean(service.customCategoryId);
+
     setEditingService(service);
     setForm({
       name: service.name || "",
@@ -63,8 +143,15 @@ export default function ServicesManager({
       description: service.description || "",
       category: service.category || "other",
       tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
+      categoryType: hasCustomCategory ? "custom" : "system",
+      customCategoryId: hasCustomCategory
+        ? String(service.customCategoryId)
+        : "",
     });
     setModalError("");
+    setShowCreateCategory(false);
+    setNewCategoryName("");
+    setCreateCategoryError("");
     setShowModal(true);
   };
 
@@ -73,12 +160,48 @@ export default function ServicesManager({
     setEditingService(null);
     setForm(emptyForm);
     setModalError("");
+    setShowCreateCategory(false);
+    setNewCategoryName("");
+    setCreateCategoryError("");
   };
 
   const handleFieldChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  /* ── Create custom category inline ── */
+  const handleCreateCategory = async () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) {
+      setCreateCategoryError("Category name is required");
+      return;
+    }
+
+    setCreatingCategory(true);
+    setCreateCategoryError("");
+
+    try {
+      const created = await createServiceCategory(trimmed, barberId);
+
+      // Append new category to the list
+      setAllCategories((prev) => [...prev, created]);
+
+      // Auto-select newly created category
+      handleFieldChange("customCategoryId", String(created._id || created.id));
+
+      // Close the inline form
+      setShowCreateCategory(false);
+      setNewCategoryName("");
+    } catch (err) {
+      setCreateCategoryError(
+        err.response?.data?.message || "Could not create category"
+      );
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  /* ── Save service ── */
   const handleSave = async () => {
     const name = form.name.trim();
     const price = Number(form.price);
@@ -101,18 +224,34 @@ export default function ServicesManager({
       return;
     }
 
+    // Require selected category when custom mode is active
+    if (form.categoryType === "custom" && !form.customCategoryId) {
+      setModalError("Please select a custom category or add a new one.");
+      return;
+    }
+
     setModalError("");
+
+    // Build payload based on category type
+    const basePayload = {
+      name,
+      price,
+      duration,
+      description: form.description.trim(),
+      tags,
+    };
+
+    if (form.categoryType === "custom") {
+      basePayload.category = "other"; // backward-compatible fallback
+      basePayload.customCategoryId = form.customCategoryId || null;
+    } else {
+      basePayload.category = form.category;
+      basePayload.customCategoryId = null; // explicitly clear
+    }
 
     if (editingService) {
       try {
-        await updateService(editingService.id, {
-          name,
-          price,
-          duration,
-          description: form.description.trim(),
-          category: form.category,
-          tags,
-        });
+        await updateService(editingService.id, basePayload);
         closeModal();
       } catch (err) {
         setModalError(
@@ -120,15 +259,14 @@ export default function ServicesManager({
         );
       }
     } else {
-      await addService({
-        name,
-        price: Number(price),
-        duration: Number(duration),
-        description: form.description.trim(),
-        category: form.category,
-        tags,
-      });
-      closeModal();
+      try {
+        await addService(basePayload);
+        closeModal();
+      } catch (err) {
+        setModalError(
+          err.response?.data?.message || "Could not create service."
+        );
+      }
     }
   };
 
@@ -139,6 +277,28 @@ export default function ServicesManager({
 
   const handleToggleActive = async (service) => {
     await updateService(service.id, { active: !service.active });
+  };
+
+  /* ── Category display helper for cards ── */
+  const renderCategoryLabel = (service) => {
+    if (service.customCategoryId) {
+      const customName = getCustomCategoryName(
+        customCategories,
+        service.customCategoryId
+      );
+      if (customName) {
+        return (
+          <span className="mt-1 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-600">
+            {customName}
+          </span>
+        );
+      }
+    }
+    return (
+      <span className="mt-1 inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">
+        {getServiceCategoryLabel(service.category || "other")}
+      </span>
+    );
   };
 
   return (
@@ -186,7 +346,9 @@ export default function ServicesManager({
                 <Scissors className="h-7 w-7 text-neutral-500" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-neutral-700">No services yet</p>
+                <p className="text-lg font-semibold text-neutral-700">
+                  No services yet
+                </p>
                 <p className="mt-1 text-sm text-neutral-500">
                   Add your first service to start accepting bookings.
                 </p>
@@ -221,7 +383,9 @@ export default function ServicesManager({
                   <div
                     key={s.id}
                     className={`group relative overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:shadow-md ${
-                      !s.active ? "border-dashed border-neutral-300 bg-neutral-50/50" : "border-neutral-200"
+                      !s.active
+                        ? "border-dashed border-neutral-300 bg-neutral-50/50"
+                        : "border-neutral-200"
                     }`}
                   >
                     {/* Active/inactive indicator bar */}
@@ -236,7 +400,9 @@ export default function ServicesManager({
                         <div className="flex items-center gap-2">
                           <span
                             className={`font-semibold ${
-                              s.active ? "text-neutral-950" : "text-neutral-400"
+                              s.active
+                                ? "text-neutral-950"
+                                : "text-neutral-400"
                             }`}
                           >
                             {s.name}
@@ -248,9 +414,8 @@ export default function ServicesManager({
                             </span>
                           )}
                         </div>
-                        <span className="mt-1 inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">
-                          {getServiceCategoryLabel(s.category || "other")}
-                        </span>
+
+                        {renderCategoryLabel(s)}
 
                         <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
                           <span className="inline-flex items-center gap-1 text-neutral-600">
@@ -447,22 +612,159 @@ export default function ServicesManager({
                 </label>
               </div>
 
+              {/* ── Category type toggle ── */}
               <label className="grid gap-1.5 text-sm font-semibold">
-                Category
-                <select
-                  className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                  disabled={isSaving}
-                  value={form.category}
-                  onChange={(e) => handleFieldChange("category", e.target.value)}
-                >
-                  {serviceCategories.map((category) => (
-                    <option key={category.value} value={category.value}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
+                Category type
               </label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => handleFieldChange("categoryType", "system")}
+                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                    form.categoryType === "system"
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                  }`}
+                >
+                  System category
+                </button>
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => handleFieldChange("categoryType", "custom")}
+                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                    form.categoryType === "custom"
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                  }`}
+                >
+                  Custom category
+                </button>
+              </div>
 
+              {/* ── System category dropdown ── */}
+              {form.categoryType === "system" && (
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Category
+                  <select
+                    className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                    disabled={isSaving}
+                    value={form.category}
+                    onChange={(e) =>
+                      handleFieldChange("category", e.target.value)
+                    }
+                  >
+                    {serviceCategories.map((category) => (
+                      <option key={category.value} value={category.value}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {/* ── Custom category dropdown ── */}
+              {form.categoryType === "custom" && (
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Custom category
+                  {categoriesLoading ? (
+                    <div className="flex items-center gap-2 rounded-2xl border border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-400">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading categories...
+                    </div>
+                  ) : categoriesError ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                      {categoriesError}
+                    </div>
+                  ) : (
+                    <select
+                      className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                      disabled={isSaving}
+                      value={form.customCategoryId}
+                      onChange={(e) =>
+                        handleFieldChange("customCategoryId", e.target.value)
+                      }
+                    >
+                      <option value="">Select a custom category</option>
+                      {customCategories.map((cat) => (
+                        <option
+                          key={cat._id || cat.id}
+                          value={String(cat._id || cat.id)}
+                        >
+                          {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!categoriesLoading && !categoriesError && (
+                    <button
+                      type="button"
+                      disabled={isSaving || categoriesLoading}
+                      onClick={() => {
+                        setShowCreateCategory(true);
+                        setCreateCategoryError("");
+                        setNewCategoryName("");
+                      }}
+                      className="mt-1.5 flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 transition-colors"
+                    >
+                      <FolderPlus className="h-4 w-4" />
+                      + Add custom category
+                    </button>
+                  )}
+                </label>
+              )}
+
+              {/* ── Inline create category form ── */}
+              {showCreateCategory && form.categoryType === "custom" && (
+                <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 space-y-2">
+                  {createCategoryError && (
+                    <p className="text-xs text-red-600">{createCategoryError}</p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="flex-1 rounded-xl border border-indigo-300 bg-white p-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      placeholder="Category name"
+                      disabled={creatingCategory}
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleCreateCategory();
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      disabled={creatingCategory || !newCategoryName.trim()}
+                      onClick={handleCreateCategory}
+                      className="bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"
+                    >
+                      {creatingCategory ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Create"
+                      )}
+                    </Button>
+                    <button
+                      type="button"
+                      disabled={creatingCategory}
+                      onClick={() => {
+                        setShowCreateCategory(false);
+                        setCreateCategoryError("");
+                        setNewCategoryName("");
+                      }}
+                      className="rounded-full p-1.5 text-neutral-400 hover:text-neutral-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Tags ── */}
               <label className="grid gap-1.5 text-sm font-semibold">
                 Tags
                 <span className="text-xs font-normal text-neutral-400">
@@ -477,6 +779,7 @@ export default function ServicesManager({
                 />
               </label>
 
+              {/* ── Description ── */}
               <label className="grid gap-1.5 text-sm font-semibold">
                 Description
                 <span className="text-xs font-normal text-neutral-400">
@@ -525,7 +828,13 @@ export default function ServicesManager({
                 >
                   Չեղարկել
                 </Button>
-                <Button disabled={isSaving} onClick={handleSave}>
+                <Button
+                  disabled={
+                    isSaving ||
+                    (form.categoryType === "custom" && !form.customCategoryId)
+                  }
+                  onClick={handleSave}
+                >
                   {isSaving
                     ? "Saving..."
                     : editingService

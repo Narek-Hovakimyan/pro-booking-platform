@@ -1,9 +1,17 @@
+import mongoose from "mongoose";
+
+import Salon from "../models/Salon.js";
 import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
+import ServiceCategory from "../models/ServiceCategory.js";
 import { createCrudController } from "./crudController.js";
+import { canManageSalonRequest } from "../utils/salonPermissions.js";
 
 export const serviceController = createCrudController(Service, "Service");
 
 const isBarber = (user) => user?.role === "barber";
+
+const hasOwnBodyField = (body, field) =>
+  Object.prototype.hasOwnProperty.call(body || {}, field);
 
 const isBlankNumberInput = (value) =>
   value === null || (typeof value === "string" && !value.trim());
@@ -108,9 +116,53 @@ const validateServicePayload = (body, { partial = false } = {}) => {
   return { value: next };
 };
 
+const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
+  if (customCategoryId === null || customCategoryId === "") {
+    return { value: null };
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(customCategoryId)) {
+    return { error: "Invalid custom category", code: 400 };
+  }
+
+  const category = await ServiceCategory.findById(customCategoryId);
+
+  if (!category || !category.active) {
+    return { error: "Invalid custom category", code: 400 };
+  }
+
+  if (category.source !== "custom") {
+    return {
+      error: "customCategoryId must reference a custom category",
+      code: 400,
+    };
+  }
+
+  if (category.ownerType === "barber") {
+    if (String(category.ownerId) !== String(barberId)) {
+      return { error: "Not authorized to use this custom category", code: 403 };
+    }
+
+    return { value: category._id };
+  }
+
+  if (category.ownerType === "salon") {
+    const salon = await Salon.findById(category.ownerId);
+
+    if (!salon || !canManageSalonRequest(salon, barberId)) {
+      return { error: "Not authorized to use this custom category", code: 403 };
+    }
+
+    return { value: category._id };
+  }
+
+  return { error: "Invalid custom category", code: 400 };
+};
+
 export const getServicesByBarber = async (req, res) => {
   try {
-    const services = await Service.find({ barberId: req.params.barberId });
+    const services = await Service.find({ barberId: req.params.barberId })
+      .populate("customCategoryId", "_id name ownerType ownerId active sortOrder");
     return res.json(services);
   } catch (error) {
     return res.status(500).json({
@@ -135,6 +187,21 @@ export const createService = async (req, res) => {
     const { value, error } = validateServicePayload(req.body);
     if (error) {
       return res.status(400).json({ message: error });
+    }
+
+    if (hasOwnBodyField(req.body, "customCategoryId")) {
+      const customCategoryResult = await validateCustomCategoryForBarber(
+        req.body.customCategoryId,
+        req.user._id
+      );
+
+      if (customCategoryResult.error) {
+        return res
+          .status(customCategoryResult.code)
+          .json({ message: customCategoryResult.error });
+      }
+
+      value.customCategoryId = customCategoryResult.value;
     }
 
     const service = await Service.create({
@@ -169,6 +236,21 @@ export const updateService = async (req, res) => {
     const { value, error } = validateServicePayload(req.body, { partial: true });
     if (error) {
       return res.status(400).json({ message: error });
+    }
+
+    if (hasOwnBodyField(req.body, "customCategoryId")) {
+      const customCategoryResult = await validateCustomCategoryForBarber(
+        req.body.customCategoryId,
+        req.user._id
+      );
+
+      if (customCategoryResult.error) {
+        return res
+          .status(customCategoryResult.code)
+          .json({ message: customCategoryResult.error });
+      }
+
+      value.customCategoryId = customCategoryResult.value;
     }
 
     Object.assign(service, value);
