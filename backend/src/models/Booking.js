@@ -262,6 +262,23 @@ const bookingSchema = new mongoose.Schema(
         default: "",
       },
     },
+    treatmentRecord: {
+      colorFormula: { type: String, trim: true, default: "" },
+      tonerFormula: { type: String, trim: true, default: "" },
+      developer: { type: String, trim: true, default: "" },
+      processingTime: { type: String, trim: true, default: "" },
+      productsUsed: { type: String, trim: true, default: "" },
+      techniqueNotes: { type: String, trim: true, default: "" },
+      outcomeNotes: { type: String, trim: true, default: "" },
+      reactionNotes: { type: String, trim: true, default: "" },
+      recordedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      recordedAt: { type: Date, default: null },
+      updatedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

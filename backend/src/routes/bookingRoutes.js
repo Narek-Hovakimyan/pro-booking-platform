@@ -4,6 +4,7 @@ import {
   delayBooking,
   getReferenceImage,
   updateBooking,
+  updateTreatmentRecord,
 } from "../controllers/bookingController.js";
 import { handleReferenceImageUpload } from "../middleware/uploadMiddleware.js";
 import {
@@ -42,5 +43,6 @@ router.patch("/:id/delay", protect, delayBooking);
 router.get("/:bookingId/reference-images/:imageName", protect, getReferenceImage);
 router.patch("/:id/no-show", protect, markNoShow);
 router.patch("/:id/late-cancel", protect, markLateCancel);
+router.put("/:id/treatment-record", protect, updateTreatmentRecord);
 
 export default router;

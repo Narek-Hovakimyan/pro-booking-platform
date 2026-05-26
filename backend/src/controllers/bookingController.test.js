@@ -8,6 +8,7 @@ import {
   createBooking,
   getReferenceImage,
   updateBooking,
+  updateTreatmentRecord,
 } from "./bookingController.js";
 import { getBarberBookings } from "./bookingReadController.js";
 import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
@@ -1935,4 +1936,340 @@ test("FormData: malformed consent JSON string with uploaded file returns 400 and
   assert.equal(res.body.message, "Invalid consent JSON");
   assert.equal(fs.existsSync(filePath), false);
   assert.equal(createdBookings.length, 0);
+});
+
+// ── Treatment Record Tests ─────────────────────────────────────────
+
+test("assigned barber creates treatmentRecord for accepted booking", async () => {
+  const booking = createMutableBooking({ _id: barberId, status: "accepted" });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: {
+        colorFormula: "6.3 gold blonde",
+        tonerFormula: "9.1 ice toner",
+        developer: "20 vol",
+        processingTime: "35 min",
+        productsUsed: "Wella Koleston, Olaplex",
+        techniqueNotes: "Balayage with foils",
+        outcomeNotes: "Good lift, even tone",
+        reactionNotes: "No irritation",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.treatmentRecord);
+  assert.equal(res.body.treatmentRecord.colorFormula, "6.3 gold blonde");
+  assert.equal(res.body.treatmentRecord.tonerFormula, "9.1 ice toner");
+  assert.equal(res.body.treatmentRecord.developer, "20 vol");
+  assert.equal(res.body.treatmentRecord.processingTime, "35 min");
+  assert.equal(res.body.treatmentRecord.productsUsed, "Wella Koleston, Olaplex");
+  assert.equal(res.body.treatmentRecord.techniqueNotes, "Balayage with foils");
+  assert.equal(res.body.treatmentRecord.outcomeNotes, "Good lift, even tone");
+  assert.equal(res.body.treatmentRecord.reactionNotes, "No irritation");
+  assert.equal(String(res.body.treatmentRecord.recordedBy), barberId);
+  assert.ok(res.body.treatmentRecord.recordedAt instanceof Date);
+  assert.ok(res.body.treatmentRecord.updatedAt instanceof Date);
+  assert.equal(booking.saveCalled, true);
+});
+
+test("assigned barber updates treatmentRecord for completed booking", async () => {
+  const previousRecordedAt = new Date("2026-01-01T00:00:00.000Z");
+  const booking = createMutableBooking({
+    _id: barberId,
+    status: "completed",
+    treatmentRecord: {
+      colorFormula: "old color",
+      tonerFormula: "",
+      developer: "",
+      processingTime: "",
+      productsUsed: "",
+      techniqueNotes: "",
+      outcomeNotes: "",
+      reactionNotes: "",
+      recordedBy: barberId,
+      recordedAt: previousRecordedAt,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: {
+        colorFormula: "7.1 ash blonde",
+        outcomeNotes: "Client very satisfied",
+        productsUsed: "Schwarzkopf, Redken",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.treatmentRecord.colorFormula, "7.1 ash blonde");
+  assert.equal(res.body.treatmentRecord.outcomeNotes, "Client very satisfied");
+  assert.equal(res.body.treatmentRecord.productsUsed, "Schwarzkopf, Redken");
+  // Preserved from previous
+  assert.equal(res.body.treatmentRecord.tonerFormula, "");
+  assert.equal(res.body.treatmentRecord.developer, "");
+  assert.equal(res.body.treatmentRecord.processingTime, "");
+  assert.equal(res.body.treatmentRecord.techniqueNotes, "");
+  assert.equal(res.body.treatmentRecord.reactionNotes, "");
+  // recordedBy and recordedAt preserved
+  assert.equal(String(res.body.treatmentRecord.recordedBy), barberId);
+  assert.equal(res.body.treatmentRecord.recordedAt.getTime(), previousRecordedAt.getTime());
+  assert.ok(res.body.treatmentRecord.updatedAt > previousRecordedAt);
+});
+
+test("unrelated barber gets 403 for treatmentRecord", async () => {
+  const unrelatedBarber = { _id: "64b000000000000000000099", role: "barber" };
+  const booking = createMutableBooking({ _id: barberId, status: "accepted", salonId: null });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateTreatmentRecord(
+    {
+      user: unrelatedBarber,
+      params: { id: booking._id },
+      body: { colorFormula: "test" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(booking.saveCalled, false);
+});
+
+test("client gets 403 for treatmentRecord", async () => {
+  const booking = createMutableBooking({ _id: barberId, status: "accepted", salonId: null });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateTreatmentRecord(
+    {
+      user: client,
+      params: { id: booking._id },
+      body: { colorFormula: "test" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(booking.saveCalled, false);
+});
+
+test("salon owner can update treatmentRecord for booking in their salon", async () => {
+  const ownerId = "64b000000000000000000031";
+  const booking = createMutableBooking({ _id: barberId, status: "accepted", salonId });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+  Salon.findById = () => ({
+    select: () => ({
+      lean: async () => ({ _id: salonId, ownerId, admins: [] }),
+    }),
+  });
+
+  await updateTreatmentRecord(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { id: booking._id },
+      body: { techniqueNotes: "Salon owner notes" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.treatmentRecord.techniqueNotes, "Salon owner notes");
+  assert.equal(booking.saveCalled, true);
+});
+
+test("wrong-salon owner/admin gets 403 for treatmentRecord", async () => {
+  const wrongOwnerId = "64b000000000000000000032";
+  const wrongAdminId = "64b000000000000000000033";
+  const booking = createMutableBooking({ _id: barberId, status: "accepted", salonId });
+  Booking.findById = async () => booking;
+  Salon.findById = () => ({
+    select: () => ({
+      lean: async () => ({
+        _id: salonId,
+        ownerId: "64b000000000000000000034",
+        admins: ["64b000000000000000000035"],
+      }),
+    }),
+  });
+
+  for (const userId of [wrongOwnerId, wrongAdminId]) {
+    const res = createResponse();
+    await updateTreatmentRecord(
+      {
+        user: { _id: userId, role: "barber" },
+        params: { id: booking._id },
+        body: { techniqueNotes: "Should not save" },
+      },
+      res
+    );
+    assert.equal(res.statusCode, 403);
+  }
+});
+
+test("pending booking returns 400 for treatmentRecord", async () => {
+  const booking = createMutableBooking({ _id: barberId, status: "pending" });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { colorFormula: "test" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("accepted or completed"));
+  assert.equal(booking.saveCalled, false);
+});
+
+test("cancelled/rejected booking returns 400 for treatmentRecord", async () => {
+  for (const status of ["cancelled", "rejected", "no_show", "late_cancelled", "expired"]) {
+    const booking = createMutableBooking({ _id: barberId, status });
+    const res = createResponse();
+
+    Booking.findById = async () => booking;
+
+    await updateTreatmentRecord(
+      {
+        user: barber,
+        params: { id: booking._id },
+        body: { colorFormula: "test" },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.body.message.includes("accepted or completed"));
+    assert.equal(booking.saveCalled, false);
+  }
+});
+
+test("malformed booking id returns 400 for treatmentRecord", async () => {
+  const res = createResponse();
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      params: { id: "not-a-valid-id" },
+      body: { colorFormula: "test" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid booking ID");
+});
+
+test("unsafe fields from client are ignored in treatmentRecord", async () => {
+  const booking = createMutableBooking({ _id: barberId, status: "accepted" });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: {
+        colorFormula: "valid formula",
+        recordedBy: "64b000000000000000000099",
+        recordedAt: "2020-01-01T00:00:00.000Z",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+        clientId: "should-be-ignored",
+        barberId: "should-be-ignored",
+        status: "completed",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  // Color formula was provided on whitelist - should persist
+  assert.equal(res.body.treatmentRecord.colorFormula, "valid formula");
+  // Unsafe fields must be set server-side, not from client
+  assert.equal(String(res.body.treatmentRecord.recordedBy), barberId);
+  assert.ok(res.body.treatmentRecord.recordedAt instanceof Date);
+  assert.ok(res.body.treatmentRecord.recordedAt > new Date("2020-01-01T00:00:00.000Z"));
+  assert.equal(booking.status, "accepted"); // status should not have changed
+  assert.equal(booking.saveCalled, true);
+});
+
+test("booking not found returns 404 for treatmentRecord", async () => {
+  const res = createResponse();
+
+  Booking.findById = async () => null;
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      params: { id: "64b000000000000000000099" },
+      body: { colorFormula: "test" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+});
+
+test("client booking read excludes treatmentRecord", async () => {
+  const { getClientBookingsForRequester } = await import("../services/bookingReadService.js");
+
+  const booking = createMutableBooking({
+    treatmentRecord: { colorFormula: "secret", recordedBy: barberId, recordedAt: new Date() },
+  });
+
+  // Mock Booking.find to return a chainable with .select()
+  Booking.find = () => ({
+    select: async (fields) => {
+      assert.equal(fields, "-treatmentRecord");
+      // Mongoose select removes fields; simulate by deleting treatmentRecord
+      const result = { ...booking };
+      delete result.treatmentRecord;
+      return [result];
+    },
+  });
+
+  const result = await getClientBookingsForRequester({
+    clientId,
+    requester: client,
+  });
+
+  assert.equal(Array.isArray(result), true);
+  assert.equal(result.length, 1);
+  // treatmentRecord should not appear in the returned client booking
+  assert.equal(result[0].treatmentRecord, undefined);
+});
+
+test("public/non-owner serialized booking excludes treatmentRecord", async () => {
+  const booking = createMutableBooking({
+    treatmentRecord: { colorFormula: "trade-secret", recordedBy: barberId, recordedAt: new Date() },
+  });
+
+  const serialized = serializeAvailabilityBooking(booking, "unrelated-viewer");
+
+  assert.equal(serialized.treatmentRecord, undefined);
 });

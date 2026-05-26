@@ -813,6 +813,81 @@ export const delayBooking = async (req, res) => {
   }
 };
 
+const treatmentRecordAllowedFields = [
+  "colorFormula",
+  "tonerFormula",
+  "developer",
+  "processingTime",
+  "productsUsed",
+  "techniqueNotes",
+  "outcomeNotes",
+  "reactionNotes",
+];
+
+export const updateTreatmentRecord = async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid booking ID" });
+    }
+
+    const booking = await Booking.findById(req.params.id);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Authorization: assigned barber OR salon owner/admin
+    const isAssignedBarber =
+      req.user?.role === "barber" && sameId(req.user._id, booking.barberId);
+    const isSalonManager =
+      !isAssignedBarber && (await canManageBookingSalon(booking, req.user._id));
+
+    if (!isAssignedBarber && !isSalonManager) {
+      return res.status(403).json({ message: "Not authorized to modify treatment record" });
+    }
+
+    // Status restriction: only accepted or completed
+    if (booking.status !== "accepted" && booking.status !== "completed") {
+      return res.status(400).json({
+        message: `Treatment record can only be added to accepted or completed bookings, not ${booking.status}`,
+      });
+    }
+
+    // Build treatment record from whitelisted fields only
+    const treatmentRecord = {};
+
+    for (const field of treatmentRecordAllowedFields) {
+      if (req.body[field] !== undefined) {
+        treatmentRecord[field] = String(req.body[field]).trim();
+      } else if (booking.treatmentRecord?.[field]) {
+        treatmentRecord[field] = booking.treatmentRecord[field];
+      } else {
+        treatmentRecord[field] = "";
+      }
+    }
+
+    // Server-side timestamps and recordedBy
+    if (booking.treatmentRecord?.recordedAt) {
+      treatmentRecord.recordedAt = booking.treatmentRecord.recordedAt;
+      treatmentRecord.recordedBy = booking.treatmentRecord.recordedBy;
+    } else {
+      treatmentRecord.recordedAt = new Date();
+      treatmentRecord.recordedBy = req.user._id;
+    }
+
+    treatmentRecord.updatedAt = new Date();
+
+    booking.treatmentRecord = treatmentRecord;
+    await booking.save();
+
+    return res.json(booking);
+  } catch (error) {
+    return res.status(400).json({
+      message: error.message || "Could not update treatment record",
+    });
+  }
+};
+
 export const getReferenceImage = async (req, res) => {
   try {
     const { bookingId, imageName } = req.params;

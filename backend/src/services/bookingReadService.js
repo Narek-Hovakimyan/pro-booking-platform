@@ -14,7 +14,7 @@ export const getClientBookingsForRequester = async ({ clientId, requester }) => 
     throw new BookingReadError(403, "You can fetch only your own bookings");
   }
 
-  return Booking.find({ clientId });
+  return Booking.find({ clientId }).select("-treatmentRecord");
 };
 
 export const getBarberBookingsForRequester = async ({ barberId, requester }) => {

@@ -40,10 +40,12 @@ test("client can fetch own bookings with original shape and order", async () => 
   const secondBooking = createBooking({ _id: "booking-2", time: "11:00" });
   const storedBookings = [firstBooking, secondBooking];
 
-  Booking.find = async (query) => {
-    assert.deepEqual(query, { clientId });
-    return storedBookings;
-  };
+  Booking.find = (query) => ({
+    select: async () => {
+      assert.deepEqual(query, { clientId });
+      return storedBookings;
+    },
+  });
 
   const bookings = await getClientBookingsForRequester({
     clientId,
