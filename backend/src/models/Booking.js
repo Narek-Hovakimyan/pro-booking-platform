@@ -186,6 +186,19 @@ const bookingSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    consultation: {
+      hairType: { type: String, trim: true, default: "" },
+      chemicalTreatments: { type: String, trim: true, default: "" },
+      allergies: { type: String, trim: true, default: "" },
+      scalpSensitivity: { type: String, trim: true, default: "" },
+      desiredOutcome: { type: String, trim: true, default: "" },
+      notes: { type: String, trim: true, default: "" },
+    },
+    consent: {
+      accepted: { type: Boolean, default: false },
+      acceptedAt: { type: Date, default: null },
+      textVersion: { type: String, trim: true, default: "" },
+    },
     rescheduleRequest: {
       status: {
         type: String,

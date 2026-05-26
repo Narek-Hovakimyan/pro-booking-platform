@@ -12,6 +12,8 @@ export default function BookingConfirmationModal({
   canConfirm = false,
   isSubmitting = false,
   error = "",
+  consultation = null,
+  consent = null,
 }) {
   if (!isOpen) return null;
 
@@ -76,6 +78,67 @@ export default function BookingConfirmationModal({
             </span>
           </div>
         </div>
+
+        {consultation && (
+          <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 p-4 text-sm">
+            <div className="font-semibold text-violet-900">Hair Consultation</div>
+            {consultation.hairType && (
+              <div className="mt-2 text-violet-800">
+                <span className="font-medium">Hair type:</span> {consultation.hairType}
+              </div>
+            )}
+            {consultation.chemicalTreatments && (
+              <div className="mt-1 text-violet-800">
+                <span className="font-medium">Chemical treatments:</span> {consultation.chemicalTreatments}
+              </div>
+            )}
+            {consultation.allergies && (
+              <div className="mt-1 text-violet-800">
+                <span className="font-medium">Allergies:</span> {consultation.allergies}
+              </div>
+            )}
+            {consultation.scalpSensitivity && (
+              <div className="mt-1 text-violet-800">
+                <span className="font-medium">Scalp sensitivity:</span> {consultation.scalpSensitivity}
+              </div>
+            )}
+            {consultation.desiredOutcome && (
+              <div className="mt-1 text-violet-800">
+                <span className="font-medium">Desired outcome:</span> {consultation.desiredOutcome}
+              </div>
+            )}
+            {consultation.notes && (
+              <div className="mt-1 text-violet-800">
+                <span className="font-medium">Notes:</span> {consultation.notes}
+              </div>
+            )}
+          </div>
+        )}
+
+        {consent && consent.accepted && (
+          <div className="mt-3 flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
+            <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <span className="font-semibold">Photo consent given</span>
+              {consent.textVersion && (
+                <p className="mt-0.5 text-emerald-700 text-xs">
+                  Version: {consent.textVersion}
+                </p>
+              )}
+              {consent.acceptedAt && (
+                <p className="mt-0.5 text-emerald-700">
+                  Consented on {new Date(consent.acceptedAt).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {error && (
           <p className="mt-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">

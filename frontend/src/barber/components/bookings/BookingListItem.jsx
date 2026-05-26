@@ -78,6 +78,69 @@ export default function BookingListItem({
         </div>
       )}
 
+      {/* Consultation summary for barbers */}
+      {booking?.consultation && (
+        <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50 p-3 text-sm text-violet-900">
+          <div className="font-semibold">Hair Consultation</div>
+          {booking.consultation.hairType && (
+            <p className="mt-1 text-violet-800">
+              <span className="font-medium">Type:</span> {booking.consultation.hairType}
+            </p>
+          )}
+          {booking.consultation.chemicalTreatments && (
+            <p className="mt-0.5 text-violet-800">
+              <span className="font-medium">Chemical treatments:</span> {booking.consultation.chemicalTreatments}
+            </p>
+          )}
+          {booking.consultation.allergies && (
+            <p className="mt-0.5 text-violet-800">
+              <span className="font-medium">Allergies:</span> {booking.consultation.allergies}
+            </p>
+          )}
+          {booking.consultation.scalpSensitivity && (
+            <p className="mt-0.5 text-violet-800">
+              <span className="font-medium">Scalp sensitivity:</span> {booking.consultation.scalpSensitivity}
+            </p>
+          )}
+          {booking.consultation.desiredOutcome && (
+            <p className="mt-0.5 text-violet-800">
+              <span className="font-medium">Desired outcome:</span> {booking.consultation.desiredOutcome}
+            </p>
+          )}
+          {booking.consultation.notes && (
+            <p className="mt-0.5 text-violet-800">
+              <span className="font-medium">Notes:</span> {booking.consultation.notes}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Consent status */}
+      {booking?.consent && booking.consent.accepted && (
+        <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>
+            Photo consent given
+            {booking.consent.textVersion && (
+              <span className="ml-1 text-emerald-500 text-xs">
+                · v{booking.consent.textVersion}
+              </span>
+            )}
+            {booking.consent.acceptedAt && (
+              <span className="ml-1 text-emerald-600">
+                ({new Date(booking.consent.acceptedAt).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })})
+              </span>
+            )}
+          </span>
+        </div>
+      )}
+
       {status === "rejected" && booking?.rejectionReason && (
         <p className="mt-3 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
           Reason: {booking.rejectionReason}

@@ -80,9 +80,7 @@ export default function BookingDetailsModal({
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold sm:text-2xl">Booking details</h2>
-            <p className="mt-1 text-sm text-neutral-500">
-              {serviceName}
-            </p>
+            <p className="mt-1 text-sm text-neutral-500">{serviceName}</p>
           </div>
 
           <Button
@@ -103,14 +101,17 @@ export default function BookingDetailsModal({
         ) : (
           <>
             <div className="mt-5 space-y-3">
-              <DetailRow label="Specialist" value={bookingBarber?.name || "Specialist"} />
+              <DetailRow
+                label="Specialist"
+                value={bookingBarber?.name || "Specialist"}
+              />
               {salonName && <DetailRow label="Salon" value={salonName} />}
               <DetailRow label="Service" value={serviceName} />
               <DetailRow
                 label="Price"
                 value={
                   servicePrice !== undefined && servicePrice !== null
-                    ? `${Number(servicePrice || 0).toLocaleString()} դրամ`
+                    ? `${Number(servicePrice || 0).toLocaleString()} \u0564\u0580\u0561\u0574`
                     : ""
                 }
               />
@@ -127,6 +128,88 @@ export default function BookingDetailsModal({
               {createdDate && <DetailRow label="Created" value={createdDate} />}
             </div>
 
+            {/* Consultation summary */}
+            {booking?.consultation && (
+              <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 p-4 text-sm text-violet-900">
+                <div className="font-semibold">Hair Consultation</div>
+                {booking.consultation.hairType && (
+                  <p className="mt-1 text-violet-800">
+                    <span className="font-medium">Type:</span>{" "}
+                    {booking.consultation.hairType}
+                  </p>
+                )}
+                {booking.consultation.chemicalTreatments && (
+                  <p className="mt-0.5 text-violet-800">
+                    <span className="font-medium">Chemical treatments:</span>{" "}
+                    {booking.consultation.chemicalTreatments}
+                  </p>
+                )}
+                {booking.consultation.allergies && (
+                  <p className="mt-0.5 text-violet-800">
+                    <span className="font-medium">Allergies:</span>{" "}
+                    {booking.consultation.allergies}
+                  </p>
+                )}
+                {booking.consultation.scalpSensitivity && (
+                  <p className="mt-0.5 text-violet-800">
+                    <span className="font-medium">Scalp sensitivity:</span>{" "}
+                    {booking.consultation.scalpSensitivity}
+                  </p>
+                )}
+                {booking.consultation.desiredOutcome && (
+                  <p className="mt-0.5 text-violet-800">
+                    <span className="font-medium">Desired outcome:</span>{" "}
+                    {booking.consultation.desiredOutcome}
+                  </p>
+                )}
+                {booking.consultation.notes && (
+                  <p className="mt-0.5 text-violet-800">
+                    <span className="font-medium">Notes:</span>{" "}
+                    {booking.consultation.notes}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Consent status */}
+            {booking?.consent && booking.consent.accepted && (
+              <div className="mt-3 flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
+                <svg
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <span className="font-semibold">Photo consent given</span>
+                  {booking.consent.textVersion && (
+                    <p className="mt-0.5 text-emerald-700 text-xs">
+                      Version: {booking.consent.textVersion}
+                    </p>
+                  )}
+                  {booking.consent.acceptedAt && (
+                    <p className="mt-0.5 text-emerald-700">
+                      Consented on{" "}
+                      {new Date(
+                        booking.consent.acceptedAt
+                      ).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {booking.status === "rejected" && booking.rejectionReason && (
               <p className="mt-5 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
                 Reason: {booking.rejectionReason}
@@ -141,7 +224,8 @@ export default function BookingDetailsModal({
 
             {booking.status === "expired" && (
               <p className="mt-5 rounded-xl border border-orange-100 bg-orange-50 p-3 text-sm text-orange-700">
-                {booking.expiredReason || "Specialist did not confirm this booking in time"}
+                {booking.expiredReason ||
+                  "Specialist did not confirm this booking in time"}
               </p>
             )}
 

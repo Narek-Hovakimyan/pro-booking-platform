@@ -47,6 +47,8 @@ export default function ClientBooking({
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
   const [salonSelectorOpen, setSalonSelectorOpen] = useState(false);
   const [referenceFiles, setReferenceFiles] = useState([]);
+  const [consultation, setConsultation] = useState(null);
+  const [consent, setConsent] = useState(null);
   const previousSalonIdRef = useRef(externalSelectedSalonId);
   const todayKey = formatDateKey(new Date());
   const selectedBarberId = barber?._id || barber?.id || "";
@@ -119,6 +121,8 @@ export default function ClientBooking({
     setSelectedDayKey(initialDateOption?.dayKey || "");
     setClient({ name: "", phone: "", note: "" });
     setReferenceFiles([]);
+    setConsultation(null);
+    setConsent(null);
   };
 
   const rebookServiceSummary = isRebooking && selectedService && (
@@ -252,6 +256,14 @@ export default function ClientBooking({
 
       if (referenceFiles.length > 0) {
         bookingPayload.files = referenceFiles;
+      }
+
+      if (consultation) {
+        bookingPayload.consultation = consultation;
+      }
+
+      if (consent) {
+        bookingPayload.consent = consent;
       }
 
       await createBooking(bookingPayload);
@@ -500,6 +512,10 @@ export default function ClientBooking({
             rebookSummary={rebookServiceSummary}
             referenceFiles={referenceFiles}
             onReferenceFilesChange={setReferenceFiles}
+            consultation={consultation}
+            onConsultationChange={setConsultation}
+            consent={consent}
+            onConsentChange={setConsent}
           />
         )}
 
@@ -575,6 +591,8 @@ export default function ClientBooking({
           canConfirm={canConfirmBooking}
           isSubmitting={isSaving}
           error={error}
+          consultation={consultation}
+          consent={consent}
         />
 
         {showWaitlistForm && selectedBarberId && selectedService && selectedDate && (

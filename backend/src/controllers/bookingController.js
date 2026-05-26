@@ -193,6 +193,44 @@ export const createBooking = async (req, res) => {
     const clientPhone = (req.body.clientPhone || req.body.phone || "").trim();
     const status = isManualBooking ? "accepted" : "pending";
 
+    // ── Consultation / Consent ──
+    // JSON-stringified values arrive from multipart/FormData (when referenceImages included)
+    let consultation = req.body.consultation || {};
+    let consent = req.body.consent || {};
+    const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    try {
+      if (typeof consultation === "string") consultation = JSON.parse(consultation);
+    } catch {
+      cleanup();
+      return res.status(400).json({ message: "Invalid consultation JSON" });
+    }
+    if (!isPlainObject(consultation)) {
+      cleanup();
+      return res.status(400).json({ message: "Invalid consultation JSON" });
+    }
+    try {
+      if (typeof consent === "string") consent = JSON.parse(consent);
+    } catch {
+      cleanup();
+      return res.status(400).json({ message: "Invalid consent JSON" });
+    }
+    if (!isPlainObject(consent)) {
+      cleanup();
+      return res.status(400).json({ message: "Invalid consent JSON" });
+    }
+    if (consent.accepted === true) {
+      if (!consent.textVersion || !consent.textVersion.trim()) {
+        cleanup();
+        return res.status(400).json({
+          message: "Consent requires a non-empty textVersion",
+        });
+      }
+      consent.acceptedAt = new Date(); // server-side only
+    } else {
+      consent.accepted = false;
+      consent.acceptedAt = null;
+    }
+
     if (!barberId || !serviceId || (!isManualBooking && !clientId)) {
       cleanup();
       return res.status(400).json({
@@ -306,6 +344,8 @@ export const createBooking = async (req, res) => {
         duration: bookingDuration,
         price: bookingPrice,
         status,
+        consultation,
+        consent,
       });
 
       return { booking };

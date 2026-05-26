@@ -10,6 +10,7 @@ import {
   updateBooking,
 } from "./bookingController.js";
 import { getBarberBookings } from "./bookingReadController.js";
+import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
@@ -593,6 +594,152 @@ test("booking only accepts active services owned by the selected barber", async 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Service is not available for this barber");
   assert.deepEqual(serviceQuery, { _id: serviceId, barberId, active: true });
+  assert.equal(createdBookings.length, 0);
+});
+
+// ── Plain object validation tests ──────────────────────────────────
+
+test("FormData: consultation JSON string 'null' returns 400 and cleans uploaded file", async () => {
+  const filename = "cons-null-cleanup.jpg";
+  const filePath = path.resolve(process.cwd(), "uploads", "booking-references", filename);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "cleanup test", "utf8");
+
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: JSON.stringify(null),
+        consent: JSON.stringify({ accepted: false }),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid consultation JSON");
+  assert.equal(fs.existsSync(filePath), false);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("FormData: consultation JSON string '[]' returns 400 and cleans uploaded file", async () => {
+  const filename = "cons-array-cleanup.jpg";
+  const filePath = path.resolve(process.cwd(), "uploads", "booking-references", filename);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "cleanup test", "utf8");
+
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: JSON.stringify([]),
+        consent: JSON.stringify({ accepted: false }),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid consultation JSON");
+  assert.equal(fs.existsSync(filePath), false);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("FormData: consent JSON string 'true' returns 400 and cleans uploaded file", async () => {
+  const filename = "sent-true-cleanup.jpg";
+  const filePath = path.resolve(process.cwd(), "uploads", "booking-references", filename);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "cleanup test", "utf8");
+
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: JSON.stringify({ hairType: "straight" }),
+        consent: JSON.stringify(true),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid consent JSON");
+  assert.equal(fs.existsSync(filePath), false);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("FormData: consent JSON string '[]' returns 400 and cleans uploaded file", async () => {
+  const filename = "sent-array-cleanup.jpg";
+  const filePath = path.resolve(process.cwd(), "uploads", "booking-references", filename);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "cleanup test", "utf8");
+
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: JSON.stringify({ hairType: "straight" }),
+        consent: JSON.stringify([]),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid consent JSON");
+  assert.equal(fs.existsSync(filePath), false);
   assert.equal(createdBookings.length, 0);
 });
 
@@ -1205,4 +1352,587 @@ test("GET reference image not listed on booking returns 404", async () => {
   );
 
   assert.equal(res.statusCode, 404);
+});
+
+// ── Consultation / Consent Tests ────────────────────────────────────
+
+test("create booking with consultation data saves consultation", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: {
+          hairType: "curly",
+          chemicalTreatments: "bleach",
+          allergies: "none",
+          scalpSensitivity: "mild",
+          desiredOutcome: "short layers",
+          notes: "prefer natural look",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepStrictEqual(createdBookings[0].consultation, {
+    hairType: "curly",
+    chemicalTreatments: "bleach",
+    allergies: "none",
+    scalpSensitivity: "mild",
+    desiredOutcome: "short layers",
+    notes: "prefer natural look",
+  });
+});
+
+test("create booking with consent accepted and textVersion saves accepted=true and server-side acceptedAt", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+  const clientAcceptedAt = "2020-01-01T00:00:00.000Z";
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consent: {
+          accepted: true,
+          acceptedAt: clientAcceptedAt,
+          textVersion: "v1.0",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].consent.accepted, true);
+  assert.equal(createdBookings[0].consent.textVersion, "v1.0");
+  // Client-provided acceptedAt must be replaced by server-side Date
+  assert.notEqual(createdBookings[0].consent.acceptedAt, clientAcceptedAt);
+  assert.ok(createdBookings[0].consent.acceptedAt instanceof Date);
+});
+
+test("create booking with consent accepted but missing textVersion returns 400", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consent: {
+          accepted: true,
+          textVersion: "",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Consent requires a non-empty textVersion");
+  assert.equal(createdBookings.length, 0);
+});
+
+test("client-provided consent.acceptedAt is ignored and replaced server-side", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consent: {
+          accepted: true,
+          acceptedAt: "2019-06-15T12:00:00.000Z",
+          textVersion: "v1.0",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.notEqual(
+    String(createdBookings[0].consent.acceptedAt),
+    "2019-06-15T12:00:00.000Z"
+  );
+});
+
+test("public/non-owner serialized booking does not include consultation", async () => {
+  const booking = createMutableBooking({
+    consultation: {
+      hairType: "coily",
+      chemicalTreatments: "color",
+      allergies: "sulfates",
+    },
+    consent: {
+      accepted: true,
+      acceptedAt: new Date(),
+      textVersion: "v1.0",
+    },
+  });
+
+  const serialized = serializeAvailabilityBooking(booking, "unrelated-user");
+
+  assert.equal(serialized.consultation, undefined);
+  assert.equal(serialized.consent, undefined);
+});
+
+test("public/non-owner serialized booking does not include consent", async () => {
+  const booking = createMutableBooking({
+    consent: {
+      accepted: true,
+      acceptedAt: new Date(),
+      textVersion: "v2.0",
+    },
+  });
+
+  const serialized = serializeAvailabilityBooking(booking, null);
+
+  assert.equal(serialized.consent, undefined);
+});
+
+test("existing reference image create tests still pass after consultation/consent changes", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [
+        { filename: "existing-ref-a.jpg" },
+        { filename: "existing-ref-b.jpg" },
+      ],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: { hairType: "fine" },
+        consent: { accepted: true, textVersion: "v1.0" },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(createdBookings[0].referenceImages, [
+    "uploads/booking-references/existing-ref-a.jpg",
+    "uploads/booking-references/existing-ref-b.jpg",
+  ]);
+  assert.deepEqual(createdBookings[0].consultation, { hairType: "fine" });
+  assert.equal(createdBookings[0].consent.accepted, true);
+  assert.equal(createdBookings[0].consent.textVersion, "v1.0");
+});
+
+// ── Contract/integration tests: frontend-shaped payload ──────────────
+
+test("contract: frontend-shaped consultation payload persists all canonical fields", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  // This payload matches what the frontend ClientDetailsStep now sends
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: {
+          hairType: "curly",
+          chemicalTreatments: "bleach + color",
+          allergies: "sulfates",
+          scalpSensitivity: "mild",
+          desiredOutcome: "soft layers with volume",
+          notes: "prefer natural look",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  const saved = createdBookings[0].consultation;
+  assert.equal(saved.hairType, "curly");
+  assert.equal(saved.chemicalTreatments, "bleach + color");
+  assert.equal(saved.allergies, "sulfates");
+  assert.equal(saved.scalpSensitivity, "mild");
+  assert.equal(saved.desiredOutcome, "soft layers with volume");
+  assert.equal(saved.notes, "prefer natural look");
+});
+
+test("contract: frontend-shaped consent payload persists accepted and textVersion, acceptedAt is server-side", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  // This payload matches what the frontend ClientDetailsStep now sends
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consent: {
+          accepted: true,
+          textVersion: "v1.0",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].consent.accepted, true);
+  assert.equal(createdBookings[0].consent.textVersion, "v1.0");
+  // acceptedAt must be set server-side (a Date, not undefined/null)
+  assert.ok(createdBookings[0].consent.acceptedAt instanceof Date);
+  // consentDate must NOT exist (frontend no longer sends it)
+  assert.equal(createdBookings[0].consent.consentDate, undefined);
+});
+
+test("contract: consent accepted without textVersion returns 400", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consent: {
+          accepted: true,
+          textVersion: "",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Consent requires a non-empty textVersion");
+  assert.equal(createdBookings.length, 0);
+});
+
+test("contract: consentDate extra field does not break booking creation", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  // Old frontend shape — must not break; the extra consentDate field
+  // passes through in test mocks but is stripped by Mongoose strict mode in prod
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consent: {
+          accepted: true,
+          textVersion: "v1.0",
+          consentDate: "2026-05-26T09:00:00.000Z", // extra field (legacy)
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].consent.accepted, true);
+  // Server must always set acceptedAt (ignoring client's consentDate)
+  assert.ok(createdBookings[0].consent.acceptedAt instanceof Date);
+  // acceptedAt must NOT equal the client-provided consentDate
+  assert.notEqual(
+    String(createdBookings[0].consent.acceptedAt),
+    "2026-05-26T09:00:00.000Z"
+  );
+  // The frontend canonical shape does NOT use consentDate
+  // (Mongoose strict:true strips it in production)
+  // Test: frontend display uses acceptedAt, not consentDate
+  assert.ok(createdBookings[0].consent.textVersion, "v1.0");
+});
+
+test("contract: consent without accepted defaults to false", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        // No consent at all
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].consent.accepted, false);
+  assert.equal(createdBookings[0].consent.acceptedAt, null);
+});
+
+test("contract: reference images + full consultation + consent still works", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [
+        { filename: "ref-a.jpg" },
+        { filename: "ref-b.jpg" },
+      ],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: {
+          hairType: "wavy",
+          chemicalTreatments: "perm",
+          allergies: "none",
+          scalpSensitivity: "normal",
+          desiredOutcome: "beachy waves",
+          notes: "keep length",
+        },
+        consent: {
+          accepted: true,
+          textVersion: "v1.0",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  const saved = createdBookings[0];
+  assert.deepEqual(saved.referenceImages, [
+    "uploads/booking-references/ref-a.jpg",
+    "uploads/booking-references/ref-b.jpg",
+  ]);
+  assert.equal(saved.consultation.hairType, "wavy");
+  assert.equal(saved.consultation.chemicalTreatments, "perm");
+  assert.equal(saved.consultation.allergies, "none");
+  assert.equal(saved.consultation.scalpSensitivity, "normal");
+  assert.equal(saved.consultation.desiredOutcome, "beachy waves");
+  assert.equal(saved.consultation.notes, "keep length");
+  assert.equal(saved.consent.accepted, true);
+  assert.equal(saved.consent.textVersion, "v1.0");
+  assert.ok(saved.consent.acceptedAt instanceof Date);
+});
+
+// ── FormData multipart serialization tests ─────────────────────────
+
+test("FormData: JSON-stringified consultation + consent + referenceImages all persist correctly", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [
+        { filename: "multipart-before.jpg" },
+        { filename: "multipart-after.jpg" },
+      ],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        // Simulates what the browser FormData sends after frontend JSON.stringify
+        consultation: JSON.stringify({
+          hairType: "curly",
+          chemicalTreatments: "bleach",
+          allergies: "none",
+          scalpSensitivity: "mild",
+          desiredOutcome: "short layers",
+          notes: "prefer natural look",
+        }),
+        consent: JSON.stringify({
+          accepted: true,
+          textVersion: "v2.0",
+        }),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  const saved = createdBookings[0];
+  assert.deepEqual(saved.referenceImages, [
+    "uploads/booking-references/multipart-before.jpg",
+    "uploads/booking-references/multipart-after.jpg",
+  ]);
+  assert.equal(saved.consultation.hairType, "curly");
+  assert.equal(saved.consultation.chemicalTreatments, "bleach");
+  assert.equal(saved.consultation.allergies, "none");
+  assert.equal(saved.consultation.scalpSensitivity, "mild");
+  assert.equal(saved.consultation.desiredOutcome, "short layers");
+  assert.equal(saved.consultation.notes, "prefer natural look");
+  assert.equal(saved.consent.accepted, true);
+  assert.equal(saved.consent.textVersion, "v2.0");
+  assert.ok(saved.consent.acceptedAt instanceof Date);
+});
+
+test("FormData: malformed consultation JSON string with uploaded file returns 400 and cleans up", async () => {
+  const filename = "malformed-consultation-cleanup.jpg";
+  const filePath = path.resolve(process.cwd(), "uploads", "booking-references", filename);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "cleanup test", "utf8");
+
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: "{broken json",
+        consent: JSON.stringify({ accepted: false }),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid consultation JSON");
+  assert.equal(fs.existsSync(filePath), false);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("FormData: malformed consent JSON string with uploaded file returns 400 and cleans up", async () => {
+  const filename = "malformed-consent-cleanup.jpg";
+  const filePath = path.resolve(process.cwd(), "uploads", "booking-references", filename);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "cleanup test", "utf8");
+
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        consultation: JSON.stringify({ hairType: "straight" }),
+        consent: "{broken json",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid consent JSON");
+  assert.equal(fs.existsSync(filePath), false);
+  assert.equal(createdBookings.length, 0);
 });

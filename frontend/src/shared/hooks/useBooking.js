@@ -21,7 +21,13 @@ export function useBooking() {
       const formData = new FormData();
       for (const [key, value] of Object.entries(bookingData)) {
         if (key === "files") continue;
-        formData.append(key, value);
+        // Objects must be JSON-stringified for multipart/form-data
+        // Otherwise the browser serializes them as "[object Object]"
+        if (key === "consultation" || key === "consent") {
+          formData.append(key, JSON.stringify(value || {}));
+        } else {
+          formData.append(key, value);
+        }
       }
       for (const file of bookingData.files) {
         formData.append("referenceImages", file);
