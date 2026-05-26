@@ -13,8 +13,29 @@ export function useBooking() {
   const bookings = useSelector((state) => state.bookings);
 
   const createBooking = async (bookingData) => {
-    const { data } = await api.post("/bookings", bookingData);
-    const action = dispatch(addBooking(data));
+    // If referenceImages (File[]) are included, send as FormData
+    const hasFiles = bookingData.files && bookingData.files.length > 0;
+    let payload;
+
+    if (hasFiles) {
+      const formData = new FormData();
+      for (const [key, value] of Object.entries(bookingData)) {
+        if (key === "files") continue;
+        formData.append(key, value);
+      }
+      for (const file of bookingData.files) {
+        formData.append("referenceImages", file);
+      }
+      const { data } = await api.post("/bookings", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      payload = data;
+    } else {
+      const { data } = await api.post("/bookings", bookingData);
+      payload = data;
+    }
+
+    const action = dispatch(addBooking(payload));
     await Promise.all([
       dispatch(fetchClientBookings(bookingData.clientId)),
       dispatch(fetchBarberBookings(bookingData.barberId)),

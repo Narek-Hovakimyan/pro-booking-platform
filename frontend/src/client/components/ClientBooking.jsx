@@ -46,6 +46,7 @@ export default function ClientBooking({
   const [showWaitlistForm, setShowWaitlistForm] = useState(false);
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
   const [salonSelectorOpen, setSalonSelectorOpen] = useState(false);
+  const [referenceFiles, setReferenceFiles] = useState([]);
   const previousSalonIdRef = useRef(externalSelectedSalonId);
   const todayKey = formatDateKey(new Date());
   const selectedBarberId = barber?._id || barber?.id || "";
@@ -117,6 +118,7 @@ export default function ClientBooking({
     setSelectedDate(initialDateOption?.value || "");
     setSelectedDayKey(initialDateOption?.dayKey || "");
     setClient({ name: "", phone: "", note: "" });
+    setReferenceFiles([]);
   };
 
   const rebookServiceSummary = isRebooking && selectedService && (
@@ -231,7 +233,7 @@ export default function ClientBooking({
     try {
       const salonId = getSalonId(selectedSalon) || externalSelectedSalonId || "";
 
-      await createBooking({
+      const bookingPayload = {
         barberId: selectedBarberId,
         clientId: currentUser.id || currentUser._id,
         serviceId: selectedServiceEntityId,
@@ -246,7 +248,13 @@ export default function ClientBooking({
         phone: client.phone,
         note: client.note,
         salonId,
-      });
+      };
+
+      if (referenceFiles.length > 0) {
+        bookingPayload.files = referenceFiles;
+      }
+
+      await createBooking(bookingPayload);
 
       resetBookingFlow();
       navigate("/success");
@@ -490,6 +498,8 @@ export default function ClientBooking({
             onBack={() => setStep(3)}
             onContinue={() => setShowConfirmation(true)}
             rebookSummary={rebookServiceSummary}
+            referenceFiles={referenceFiles}
+            onReferenceFilesChange={setReferenceFiles}
           />
         )}
 

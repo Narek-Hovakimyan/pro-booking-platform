@@ -1,4 +1,11 @@
 import { Button } from "@/shared/components/ui/button";
+import { ImagePlus, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+const MAX_REFERENCE_FILES = 5;
+const MAX_FILE_SIZE_MB = 5;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export default function ClientDetailsStep({
   client = { name: "", phone: "", note: "" },
@@ -8,9 +15,66 @@ export default function ClientDetailsStep({
   canConfirm = false,
   error = "",
   rebookSummary = null,
+  referenceFiles = [],
+  onReferenceFilesChange,
 }) {
+  const [fileError, setFileError] = useState("");
+  const previewUrls = useMemo(
+    () => referenceFiles.map((file) => URL.createObjectURL(file)),
+    [referenceFiles]
+  );
+
+  useEffect(() => (
+    () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    }
+  ), [previewUrls]);
+
   const handleChange = (field, value) => {
     onChange?.({ ...client, [field]: value });
+  };
+
+  const handleFileSelect = (e) => {
+    if (!onReferenceFilesChange) return;
+
+    const selectedFiles = Array.from(e.target.files || []);
+    const currentCount = referenceFiles.length;
+    const maxNewCount = MAX_REFERENCE_FILES - currentCount;
+
+    if (selectedFiles.length > maxNewCount) {
+      setFileError(`You can add up to ${maxNewCount} more file(s).`);
+      e.target.value = "";
+      return;
+    }
+
+    // Validate each file
+    const validFiles = [];
+    for (const file of selectedFiles) {
+      if (!ALLOWED_TYPES.has(file.type)) {
+        setFileError(`${file.name} is not a supported image type. Use JPEG, PNG, or WEBP.`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        setFileError(`${file.name} exceeds ${MAX_FILE_SIZE_MB}MB limit.`);
+        continue;
+      }
+      validFiles.push(file);
+    }
+
+    if (validFiles.length === 0) {
+      e.target.value = "";
+      return;
+    }
+
+    onReferenceFilesChange([...referenceFiles, ...validFiles]);
+    setFileError("");
+    e.target.value = "";
+  };
+
+  const removeFile = (index) => {
+    if (!onReferenceFilesChange) return;
+    const updated = referenceFiles.filter((_, i) => i !== index);
+    onReferenceFilesChange(updated);
   };
 
   return (
@@ -61,6 +125,67 @@ export default function ClientDetailsStep({
           onChange={(e) => handleChange("note", e.target.value)}
         />
       </label>
+
+      {onReferenceFilesChange && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-neutral-600">
+              Reference Photos (optional)
+            </span>
+            <span className="text-xs text-neutral-400">
+              {referenceFiles.length}/{MAX_REFERENCE_FILES}
+            </span>
+          </div>
+
+          {/* Preview thumbnails */}
+          {referenceFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {referenceFiles.map((file, index) => (
+                <div key={index} className="relative h-20 w-20 overflow-hidden rounded-xl border">
+                  <img
+                    src={previewUrls[index]}
+                    alt={`Reference ${index + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeFile(index)}
+                    className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                    aria-label={`Remove reference image ${index + 1}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add button */}
+          {referenceFiles.length < MAX_REFERENCE_FILES && (
+            <label className="flex cursor-pointer items-center gap-2 rounded-2xl border border-dashed border-neutral-300 p-3 text-sm text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700">
+              <ImagePlus className="h-5 w-5" />
+              <span>Add reference photos</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </label>
+          )}
+
+          <p className="text-xs text-neutral-400">
+            JPEG, PNG, or WEBP. Max {MAX_FILE_SIZE_MB}MB each. Up to {MAX_REFERENCE_FILES} images.
+          </p>
+
+          {fileError && (
+            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {fileError}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid gap-2 sm:flex sm:items-center">
         <Button className="w-full sm:w-auto" variant="outline" onClick={onBack}>

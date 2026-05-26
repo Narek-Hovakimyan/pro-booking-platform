@@ -1,3 +1,4 @@
+import path from "path";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import mongoose from "mongoose";
@@ -15,6 +16,7 @@ import {
 } from "../services/bookingSideEffectsService.js";
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
+import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import {
   getBookingDateTime,
   getDayKeyFromDate,
@@ -135,6 +137,22 @@ const getClientName = async (booking, fallbackUser) => {
   return client?.name || "Client";
 };
 
+const sameId = (left, right) =>
+  String(left || "") === String(right || "");
+
+const canManageBookingSalon = async (booking, userId) => {
+  if (!booking?.salonId || !userId) return false;
+
+  const salon = await Salon.findById(booking.salonId).select("ownerId admins").lean();
+  if (!salon) return false;
+
+  return (
+    sameId(salon.ownerId, userId) ||
+    (Array.isArray(salon.admins) &&
+      salon.admins.some((adminId) => sameId(adminId, userId)))
+  );
+};
+
 export const __bookingTestHooks = {
   allowedBookingDelayMinutes,
   blockingBookingStatuses,
@@ -144,7 +162,22 @@ export const __bookingTestHooks = {
   withBookingCreationLock,
 };
 
+const collectReferenceImagePaths = (req) => {
+  if (!req.files || !Array.isArray(req.files)) return [];
+  return req.files.map((file) => `uploads/booking-references/${file.filename}`);
+};
+
+const cleanupReferenceImages = (paths) => {
+  if (!paths || !paths.length) return;
+  paths.forEach(deleteUploadedFile);
+};
+
 export const createBooking = async (req, res) => {
+  // Capture reference image paths before any validation returns
+  const referenceImages = collectReferenceImagePaths(req);
+
+  const cleanup = () => cleanupReferenceImages(referenceImages);
+
   try {
     const {
       barberId,
@@ -161,18 +194,21 @@ export const createBooking = async (req, res) => {
     const status = isManualBooking ? "accepted" : "pending";
 
     if (!barberId || !serviceId || (!isManualBooking && !clientId)) {
+      cleanup();
       return res.status(400).json({
         message: "Select service first",
       });
     }
 
     if (!barberId || !bookingDate || !time) {
+      cleanup();
       return res.status(400).json({
         message: "barberId, bookingDate, and time are required",
       });
     }
 
     if (isManualBooking && !clientName) {
+      cleanup();
       return res.status(400).json({ message: "Client name is required" });
     }
 
@@ -180,6 +216,7 @@ export const createBooking = async (req, res) => {
       !isManualBooking &&
       (req.user?.role !== "client" || String(req.user._id) !== String(clientId))
     ) {
+      cleanup();
       return res.status(403).json({
         message: "You can create bookings only for yourself",
       });
@@ -189,6 +226,7 @@ export const createBooking = async (req, res) => {
       isManualBooking &&
       (req.user?.role !== "barber" || String(req.user.id) !== String(barberId))
     ) {
+      cleanup();
       return res.status(403).json({
         message: "You can create bookings only for your own barber calendar",
       });
@@ -197,6 +235,7 @@ export const createBooking = async (req, res) => {
     const service = await Service.findOne({ _id: serviceId, barberId, active: true });
 
     if (!service) {
+      cleanup();
       return res.status(400).json({
         message: "Service is not available for this barber",
       });
@@ -210,6 +249,7 @@ export const createBooking = async (req, res) => {
     });
 
     if (salonResolution.message) {
+      cleanup();
       return res.status(400).json({
         message: salonResolution.message,
       });
@@ -226,6 +266,7 @@ export const createBooking = async (req, res) => {
     });
 
     if (slotValidation.message) {
+      cleanup();
       return res.status(400).json({
         message: slotValidation.message,
       });
@@ -256,6 +297,7 @@ export const createBooking = async (req, res) => {
         phone: isManualBooking ? clientPhone : req.body.phone,
         createdBy: isManualBooking ? "barber" : "client",
         note: req.body.note || "",
+        referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
         salonId: salonResolution.salonId,
         bookingDate,
         time,
@@ -270,6 +312,8 @@ export const createBooking = async (req, res) => {
     });
 
     if (createResult.message) {
+      // Lock-level failure — cleanup uploaded files
+      cleanup();
       return res.status(400).json({
         message: createResult.message,
       });
@@ -291,6 +335,8 @@ export const createBooking = async (req, res) => {
 
     return res.status(201).json(booking);
   } catch (error) {
+    // DB or unexpected failure — cleanup uploaded files
+    cleanup();
     return res.status(400).json({
       message: error.message || "Could not create booking",
     });
@@ -723,6 +769,66 @@ export const delayBooking = async (req, res) => {
   } catch (error) {
     return res.status(400).json({
       message: error.message || "Could not delay booking",
+    });
+  }
+};
+
+export const getReferenceImage = async (req, res) => {
+  try {
+    const { bookingId, imageName } = req.params;
+
+    if (!isValidObjectId(bookingId)) {
+      return res.status(400).json({ message: "Invalid booking ID" });
+    }
+
+    // Prevent path traversal
+    if (imageName.includes("..") || imageName.includes("/") || imageName.includes("\\")) {
+      return res.status(400).json({ message: "Invalid image name" });
+    }
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Authorize: booking client, assigned barber, or the owner/admin of the
+    // salon tied to this booking.
+    const isBookingClient =
+      booking.clientId &&
+      req.user?._id &&
+      sameId(req.user._id, booking.clientId);
+    const isAssignedBarber =
+      sameId(req.user?._id, booking.barberId);
+    const isSalonManager =
+      !isBookingClient &&
+      !isAssignedBarber &&
+      await canManageBookingSalon(booking, req.user?._id);
+
+    if (!isBookingClient && !isAssignedBarber && !isSalonManager) {
+      return res.status(403).json({ message: "Not authorized to view these images" });
+    }
+
+    // Verify the image is actually listed on this booking
+    const fullPath = `uploads/booking-references/${imageName}`;
+
+    if (!booking.referenceImages || !booking.referenceImages.includes(fullPath)) {
+      return res.status(404).json({ message: "Image not found in booking" });
+    }
+
+    // Resolve path and verify it's still inside uploads/booking-references
+    const absolutePath = path.resolve(process.cwd(), "uploads", "booking-references", imageName);
+    const uploadsDir = path.resolve(process.cwd(), "uploads", "booking-references");
+    const relativeToDir = path.relative(uploadsDir, absolutePath);
+
+    if (relativeToDir.startsWith("..") || path.isAbsolute(relativeToDir)) {
+      return res.status(400).json({ message: "Invalid image path" });
+    }
+
+    return res.sendFile(absolutePath);
+  } catch (error) {
+    return res.status(500).json({
+      message: error.message || "Could not serve reference image",
     });
   }
 };

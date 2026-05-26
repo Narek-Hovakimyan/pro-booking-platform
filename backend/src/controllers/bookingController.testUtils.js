@@ -20,6 +20,7 @@ export const originalMethods = {
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
   notificationCreate: Notification.create,
   salonExists: Salon.exists,
+  salonFindById: Salon.findById,
   scheduleFindOne: Schedule.findOne,
   serviceFindOne: Service.findOne,
   userFindById: User.findById,

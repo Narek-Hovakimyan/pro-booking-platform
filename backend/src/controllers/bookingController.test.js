@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import fs from "fs";
+import path from "path";
 
 import {
   __bookingTestHooks,
   createBooking,
+  getReferenceImage,
   updateBooking,
 } from "./bookingController.js";
 import { getBarberBookings } from "./bookingReadController.js";
@@ -13,6 +16,11 @@ import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
 import User from "../models/User.js";
+import { protect } from "../middleware/authMiddleware.js";
+import {
+  deleteUploadedFile,
+  handleReferenceImageUploadError,
+} from "../middleware/uploadMiddleware.js";
 
 import {
   barber,
@@ -51,9 +59,28 @@ afterEach(() => {
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
   Notification.create = originalMethods.notificationCreate;
   Salon.exists = originalMethods.salonExists;
+  Salon.findById = originalMethods.salonFindById;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
   User.findById = originalMethods.userFindById;
+});
+
+const bookingReferenceDir = path.resolve(process.cwd(), "uploads", "booking-references");
+
+const createReferenceUploadFile = (filename) => {
+  fs.mkdirSync(bookingReferenceDir, { recursive: true });
+  const filePath = path.join(bookingReferenceDir, filename);
+  fs.writeFileSync(filePath, "reference image", "utf8");
+  return filePath;
+};
+
+const createSendFileResponse = () => ({
+  ...createResponse(),
+  sentFile: "",
+  sendFile(filePath) {
+    this.sentFile = filePath;
+    return this;
+  },
 });
 
 test("10:00 60-minute booking blocks 10:20 by overlap", async () => {
@@ -878,4 +905,304 @@ test("simultaneous duplicate booking attempts create only one booking", async ()
     ),
     true
   );
+});
+
+test("booking create with referenceImages saves internal upload paths", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [
+        { filename: "ref-before.jpg" },
+        { filename: "ref-style.webp" },
+      ],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(createdBookings[0].referenceImages, [
+    "uploads/booking-references/ref-before.jpg",
+    "uploads/booking-references/ref-style.webp",
+  ]);
+});
+
+test("reference upload rejects more than five images", () => {
+  const filename = "ref-too-many-cleanup.jpg";
+  const filePath = createReferenceUploadFile(filename);
+  const req = { files: [{ path: filePath }] };
+  const res = createResponse();
+
+  handleReferenceImageUploadError(
+    req,
+    res,
+    { code: "LIMIT_UNEXPECTED_FILE" }
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Unexpected file field");
+  assert.equal(fs.existsSync(filePath), false);
+});
+
+test("reference upload rejects non-image files", () => {
+  const res = createResponse();
+
+  handleReferenceImageUploadError(
+    { files: [] },
+    res,
+    new Error("Image must be a JPEG, PNG, or WEBP image")
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Image must be a JPEG, PNG, or WEBP image");
+});
+
+test("booking create cleans uploaded reference files on validation failure", async () => {
+  const filename = "ref-validation-failure.jpg";
+  const filePath = createReferenceUploadFile(filename);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(fs.existsSync(filePath), false);
+});
+
+test("booking create cleans uploaded reference files on database error", async () => {
+  const filename = "ref-db-error.jpg";
+  const filePath = createReferenceUploadFile(filename);
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Booking.create = async () => {
+    throw new Error("database unavailable");
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "database unavailable");
+  assert.equal(fs.existsSync(filePath), false);
+});
+
+test("GET reference image unauthenticated returns 401", async () => {
+  const res = createResponse();
+  let nextCalled = false;
+
+  await protect(
+    { headers: {} },
+    res,
+    () => {
+      nextCalled = true;
+    }
+  );
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(nextCalled, false);
+});
+
+test("GET reference image by booking client returns 200", async () => {
+  const imageName = "ref-owned.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  const res = createSendFileResponse();
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.sentFile, path.join(bookingReferenceDir, imageName));
+});
+
+test("GET reference image by assigned barber returns 200", async () => {
+  const imageName = "ref-barber.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  const res = createSendFileResponse();
+
+  await getReferenceImage(
+    {
+      user: barber,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.sentFile, path.join(bookingReferenceDir, imageName));
+});
+
+test("GET reference image allows booking salon owner", async () => {
+  const imageName = "ref-salon-owner.jpg";
+  const ownerId = "64b000000000000000000021";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId,
+    });
+  Salon.findById = () => ({
+    select: () => ({
+      lean: async () => ({ _id: salonId, ownerId, admins: [] }),
+    }),
+  });
+  const res = createSendFileResponse();
+
+  await getReferenceImage(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.sentFile, path.join(bookingReferenceDir, imageName));
+});
+
+test("GET reference image denies owner/admin of a different salon", async () => {
+  const imageName = "ref-wrong-salon.jpg";
+  const wrongSalonOwnerId = "64b000000000000000000022";
+  const wrongSalonAdminId = "64b000000000000000000023";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId,
+    });
+  Salon.findById = () => ({
+    select: () => ({
+      lean: async () => ({
+        _id: salonId,
+        ownerId: "64b000000000000000000024",
+        admins: ["64b000000000000000000025"],
+      }),
+    }),
+  });
+
+  for (const userId of [wrongSalonOwnerId, wrongSalonAdminId]) {
+    const res = createResponse();
+
+    await getReferenceImage(
+      {
+        user: { _id: userId, role: "barber" },
+        params: { bookingId: barberId, imageName },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+  }
+});
+
+test("GET reference image by unrelated user returns 403", async () => {
+  const imageName = "ref-unrelated.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  const res = createResponse();
+
+  await getReferenceImage(
+    {
+      user: otherClient,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+});
+
+test("GET reference image with traversal returns 400", async () => {
+  Booking.findById = async () => {
+    throw new Error("should not load booking for invalid image name");
+  };
+  const res = createResponse();
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName: "..\\secret.jpg" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+});
+
+test("GET reference image not listed on booking returns 404", async () => {
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: ["uploads/booking-references/ref-listed.jpg"],
+    });
+  const res = createResponse();
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName: "ref-missing.jpg" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
 });

@@ -2,8 +2,10 @@ import express from "express";
 import {
   createBooking,
   delayBooking,
+  getReferenceImage,
   updateBooking,
 } from "../controllers/bookingController.js";
+import { handleReferenceImageUpload } from "../middleware/uploadMiddleware.js";
 import {
   acceptRescheduleRequest,
   createRescheduleRequest,
@@ -31,12 +33,13 @@ router.get("/client/:clientId/reliability", protect, getClientReliability);
 router.get("/barber/:barberId/income", protect, getBarberMonthlyIncome);
 router.get("/barber/:barberId", protect, getBarberBookings);
 router.post("/availability-debug", protect, debugBookingAvailability);
-router.post("/", protect, createBooking);
+router.post("/", protect, handleReferenceImageUpload, createBooking);
 router.post("/:id/reschedule-request", protect, createRescheduleRequest);
 router.patch("/:id/reschedule-request/accept", protect, acceptRescheduleRequest);
 router.patch("/:id/reschedule-request/reject", protect, rejectRescheduleRequest);
 router.put("/:id", protect, updateBooking);
 router.patch("/:id/delay", protect, delayBooking);
+router.get("/:bookingId/reference-images/:imageName", protect, getReferenceImage);
 router.patch("/:id/no-show", protect, markNoShow);
 router.patch("/:id/late-cancel", protect, markLateCancel);
 

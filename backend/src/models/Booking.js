@@ -97,6 +97,10 @@ const bookingSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    referenceImages: {
+      type: [String],
+      default: [],
+    },
     rejectionReason: {
       type: String,
       trim: true,

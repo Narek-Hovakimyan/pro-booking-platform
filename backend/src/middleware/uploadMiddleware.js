@@ -8,6 +8,7 @@ const certificationUploadDir = path.join(process.cwd(), "uploads", "certificatio
 const eventUploadDir = path.join(process.cwd(), "uploads", "events");
 const certificateFileUploadDir = path.join(process.cwd(), "uploads", "certificate-files");
 const portfolioUploadDir = path.join(process.cwd(), "uploads", "portfolio");
+const bookingReferenceUploadDir = path.join(process.cwd(), "uploads", "booking-references");
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const allowedImageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const allowedCertificateTypes = new Set([
@@ -24,6 +25,7 @@ fs.mkdirSync(certificationUploadDir, { recursive: true });
 fs.mkdirSync(eventUploadDir, { recursive: true });
 fs.mkdirSync(certificateFileUploadDir, { recursive: true });
 fs.mkdirSync(portfolioUploadDir, { recursive: true });
+fs.mkdirSync(bookingReferenceUploadDir, { recursive: true });
 
 const avatarStorage = multer.diskStorage({
   destination: (_req, _file, callback) => {
@@ -80,6 +82,17 @@ const portfolioStorage = multer.diskStorage({
   filename: (_req, file, callback) => {
     const extension = path.extname(file.originalname).toLowerCase();
     const safeName = `portfolio-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+    callback(null, safeName);
+  },
+});
+
+const bookingReferenceStorage = multer.diskStorage({
+  destination: (_req, _file, callback) => {
+    callback(null, bookingReferenceUploadDir);
+  },
+  filename: (_req, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const safeName = `ref-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
     callback(null, safeName);
   },
 });
@@ -234,6 +247,56 @@ export const handlePortfolioImageUpload = (req, res, next) => {
   });
 };
 
+const collectMulterUploadedFiles = (req) => {
+  if (Array.isArray(req.files)) return req.files;
+  if (req.files && typeof req.files === "object") {
+    return Object.values(req.files).flat();
+  }
+  return req.file ? [req.file] : [];
+};
+
+const cleanupMulterUploadedFiles = (req) => {
+  for (const file of collectMulterUploadedFiles(req)) {
+    deleteUploadedFile(file.path);
+  }
+};
+
+export const uploadReferenceImages = multer({
+  storage: bookingReferenceStorage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+});
+
+export const handleReferenceImageUploadError = (req, res, error) => {
+  cleanupMulterUploadedFiles(req);
+
+  if (error.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({
+      message: "Reference image must be 5MB or smaller",
+    });
+  }
+  if (error.code === "LIMIT_UNEXPECTED_FILE") {
+    return res.status(400).json({
+      message: "Unexpected file field",
+    });
+  }
+  return res.status(400).json({
+    message: error.message || "Could not upload reference images",
+  });
+};
+
+export const handleReferenceImageUpload = (req, res, next) => {
+  uploadReferenceImages.array("referenceImages", 5)(req, res, (error) => {
+    if (error) {
+      return handleReferenceImageUploadError(req, res, error);
+    }
+
+    next();
+  });
+};
+
 const isPathInsideUploads = (absolutePath) => {
   const uploadsRoot = path.resolve(process.cwd(), "uploads");
   const relativeToUploads = path.relative(uploadsRoot, absolutePath);
@@ -249,7 +312,10 @@ export const deleteUploadedFile = (filePath) => {
   if (!filePath) return;
 
   const normalizedFilePath = filePath.replace(/^\/+/, "");
-  const absolutePath = path.resolve(process.cwd(), normalizedFilePath);
+  const isUploadRelativeWithLeadingSlash = filePath.startsWith("/uploads/");
+  const absolutePath = path.isAbsolute(filePath) && !isUploadRelativeWithLeadingSlash
+    ? path.resolve(filePath)
+    : path.resolve(process.cwd(), normalizedFilePath);
 
   if (!isPathInsideUploads(absolutePath)) return;
 
@@ -262,4 +328,3 @@ export const deleteUploadedFile = (filePath) => {
     // Silently fail if file doesn't exist
   }
 };
-
