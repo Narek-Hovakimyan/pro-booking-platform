@@ -2,6 +2,7 @@ import StatusBadge from "@/shared/components/StatusBadge";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
 import ClientReliabilitySummary from "@/barber/components/bookings/ClientReliabilitySummary";
+import TreatmentRecordSection from "@/barber/components/bookings/TreatmentRecordSection";
 
 const formatRequestDate = (value) => {
   if (!value) return "";
@@ -140,6 +141,8 @@ export default function BookingListItem({
           </span>
         </div>
       )}
+
+      <TreatmentRecordSection booking={booking} status={status} />
 
       {status === "rejected" && booking?.rejectionReason && (
         <p className="mt-3 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
