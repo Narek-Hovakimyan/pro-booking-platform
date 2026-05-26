@@ -1,6 +1,17 @@
 import api from "./axios";
 
 /**
+ * Fetch public portfolio photos for a given barber.
+ * No auth required. Backend filters: active=true, isPublic=true, consentConfirmed=true.
+ * @param {string} barberId - Barber's user ID
+ * @returns {Promise<Array>} Array of public portfolio photo objects
+ */
+export async function getPublicPortfolio(barberId) {
+  const { data } = await api.get(`/portfolio/barber/${barberId}`);
+  return data;
+}
+
+/**
  * Fetch the authenticated barber's own portfolio photos.
  * @returns {Promise<Array>} Array of portfolio photo objects
  */

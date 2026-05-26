@@ -13,6 +13,7 @@ import {
 } from "@/client/components/barber-profile/BarberProfileStates";
 import BarberServicesSection from "@/client/components/barber-profile/BarberServicesSection";
 import BarberWorkHistorySection from "@/client/components/barber-profile/BarberWorkHistorySection";
+import PortfolioSection from "@/client/components/barber-profile/PortfolioSection";
 import api from "@/shared/api/axios";
 import {
   addFavorite,
@@ -311,6 +312,8 @@ export default function ClientBarberProfilePage() {
                 barber={barber}
                 galleryImages={galleryImages}
               />
+
+              <PortfolioSection barberId={profileBarberId} />
 
               <BarberWorkHistorySection
                 formatMonthYear={formatMonthYear}
