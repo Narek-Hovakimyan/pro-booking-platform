@@ -76,6 +76,36 @@ const makeDoc = (overrides = {}) => ({
   ...overrides,
 });
 
+/**
+ * Return a chainable Mongoose query-like object that
+ * resolves `lean()` to the given result.
+ * Used to stub findOne().sort().select().lean() for sortOrder lookup.
+ */
+const makeChainableSortQuery = (result) => ({
+  sort: () => ({
+    select: () => ({
+      lean: async () => result,
+    }),
+  }),
+});
+
+const chainableNull = makeChainableSortQuery(null);
+
+/**
+ * Create a stub for ServiceCategory.findOne that:
+ * - 1st call: returns null (duplicate name check — no duplicate)
+ * - 2nd call: returns a chainable query resolving to null (sortOrder lookup)
+ * Useful for create tests that don't care about sortOrder value.
+ */
+const makeCreateFindOneStub = () => {
+  let callCount = 0;
+  return (_query) => {
+    callCount++;
+    if (callCount === 1) return null;
+    return chainableNull;
+  };
+};
+
 /* ── listServiceCategories ──────────────────────────────── */
 
 /* PUBLIC: no owner query → system categories only */
@@ -262,11 +292,11 @@ test("listServiceCategories handles DB errors", async () => {
 
 /* ── createServiceCategory ──────────────────────────────── */
 
-test("barber can create their own custom category", async () => {
+test("first custom category for owner gets sortOrder 0", async () => {
   const res = createResponse();
   let createdPayload;
 
-  ServiceCategory.findOne = async () => null;
+  ServiceCategory.findOne = makeCreateFindOneStub();
   ServiceCategory.create = async (payload) => {
     createdPayload = payload;
     return { _id: new mongoose.Types.ObjectId(), ...payload };
@@ -286,13 +316,14 @@ test("barber can create their own custom category", async () => {
   assert.equal(createdPayload.ownerType, "barber");
   assert.equal(String(createdPayload.ownerId), String(barberA._id));
   assert.equal(String(createdPayload.createdBy), String(barberA._id));
+  assert.equal(createdPayload.sortOrder, 0, "first category gets sortOrder 0");
 });
 
 test("create forces source to custom even if client sends system", async () => {
   const res = createResponse();
   let createdPayload;
 
-  ServiceCategory.findOne = async () => null;
+  ServiceCategory.findOne = makeCreateFindOneStub();
   ServiceCategory.create = async (payload) => {
     createdPayload = payload;
     return { _id: new mongoose.Types.ObjectId(), ...payload };
@@ -309,6 +340,7 @@ test("create forces source to custom even if client sends system", async () => {
   assert.equal(res.statusCode, 201);
   // Source is hardcoded to "custom" in the controller, not read from body
   assert.equal(createdPayload.source, "custom");
+  assert.equal(createdPayload.sortOrder, 0, "first category gets sortOrder 0");
 });
 
 test("cannot create category with system key name", async () => {
@@ -464,7 +496,7 @@ test("salon owner can create salon custom category", async () => {
   let createdPayload;
 
   Salon.findById = async () => salonDoc;
-  ServiceCategory.findOne = async () => null;
+  ServiceCategory.findOne = makeCreateFindOneStub();
   ServiceCategory.create = async (payload) => {
     createdPayload = payload;
     return { _id: new mongoose.Types.ObjectId(), ...payload };
@@ -481,14 +513,17 @@ test("salon owner can create salon custom category", async () => {
   assert.equal(res.statusCode, 201);
   assert.equal(createdPayload.ownerType, "salon");
   assert.equal(String(createdPayload.ownerId), String(salonId));
+  assert.equal(createdPayload.sortOrder, 0, "first category for salon gets sortOrder 0");
 });
 
 test("salon admin can create salon custom category", async () => {
   const res = createResponse();
+  let createdPayload;
 
   Salon.findById = async () => salonDoc;
-  ServiceCategory.findOne = async () => null;
+  ServiceCategory.findOne = makeCreateFindOneStub();
   ServiceCategory.create = async (payload) => {
+    createdPayload = payload;
     return { _id: new mongoose.Types.ObjectId(), ...payload };
   };
 
@@ -501,6 +536,7 @@ test("salon admin can create salon custom category", async () => {
   );
 
   assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.sortOrder, 0, "first category for salon gets sortOrder 0");
 });
 
 test("ordinary salon member cannot create salon custom category", async () => {
@@ -577,6 +613,109 @@ test("duplicate active category name returns 409 (case-insensitive)", async () =
 
   assert.equal(res.statusCode, 409);
   assert.equal(createCalled, false);
+});
+
+/* ── sortOrder auto-increment ──────────────────────────── */
+
+test("second custom category for same owner gets sortOrder 1", async () => {
+  const res = createResponse();
+  let createdPayload;
+  let findOneCallCount = 0;
+
+  // 1st call (duplicate check) → null (no duplicate)
+  // 2nd call (sortOrder lookup) → existing category with sortOrder 0
+  ServiceCategory.findOne = (_query) => {
+    findOneCallCount++;
+    if (findOneCallCount === 1) return null;
+    return makeChainableSortQuery({ sortOrder: 0 });
+  };
+  ServiceCategory.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Second Service", ownerType: "barber", ownerId: barberA._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.sortOrder, 1, "second category gets sortOrder 1");
+});
+
+test("different barber owner gets independent sortOrder 0", async () => {
+  const res = createResponse();
+  let createdPayload;
+
+  // BarberB has no categories → sortOrder lookup returns null → 0
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  ServiceCategory.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  await createServiceCategory(
+    {
+      user: barberB,
+      body: { name: "Barber B Cat", ownerType: "barber", ownerId: barberB._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.sortOrder, 0, "different barber starts at 0");
+});
+
+test("different salon owner gets independent sortOrder 0", async () => {
+  const res = createResponse();
+  const salon2Id = new mongoose.Types.ObjectId();
+  const salon2Doc = { _id: salon2Id, ownerId: barberA._id, admins: [] };
+
+  let createdPayload;
+
+  Salon.findById = async () => salon2Doc;
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  ServiceCategory.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Salon 2 Cat", ownerType: "salon", ownerId: salon2Id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.sortOrder, 0, "different salon starts at 0");
+});
+
+test("client-provided sortOrder on create does not override server auto value", async () => {
+  const res = createResponse();
+  let createdPayload;
+
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  ServiceCategory.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  // Client sends sortOrder: 999 — server should ignore it
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Ignore My Sort", ownerType: "barber", ownerId: barberA._id, sortOrder: 999 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.sortOrder, 0, "client-provided sortOrder is ignored");
 });
 
 /* ── updateServiceCategory ──────────────────────────────── */

@@ -240,13 +240,29 @@ export const createServiceCategory = async (req, res) => {
       });
     }
 
-    /* ── Create ── */
+    /* ── Determine next sortOrder for this owner scope ── */
+    const lastCategory = await ServiceCategory.findOne({
+      source: "custom",
+      ownerType,
+      ownerId,
+      active: true,
+    })
+      .sort({ sortOrder: -1 })
+      .select("sortOrder")
+      .lean();
+
+    const nextSortOrder = lastCategory
+      ? Number(lastCategory.sortOrder || 0) + 1
+      : 0;
+
+    /* ── Create (ignore client-provided sortOrder) ── */
     const category = await ServiceCategory.create({
       name: trimmedName,
       source: "custom",
       ownerType,
       ownerId,
       createdBy: req.user._id,
+      sortOrder: nextSortOrder,
     });
 
     return res.status(201).json(category);
