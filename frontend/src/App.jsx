@@ -727,6 +727,10 @@ export default function App() {
               element={renderAdminPage("bookings")}
             />
             <Route
+              path="/admin/portfolio"
+              element={renderAdminPage("portfolio")}
+            />
+            <Route
               path="/admin/waitlist"
               element={renderAdminPage("waitlist")}
             />

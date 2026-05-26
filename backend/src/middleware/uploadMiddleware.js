@@ -7,6 +7,7 @@ const avatarUploadDir = path.join(process.cwd(), "uploads", "avatars");
 const certificationUploadDir = path.join(process.cwd(), "uploads", "certifications");
 const eventUploadDir = path.join(process.cwd(), "uploads", "events");
 const certificateFileUploadDir = path.join(process.cwd(), "uploads", "certificate-files");
+const portfolioUploadDir = path.join(process.cwd(), "uploads", "portfolio");
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const allowedImageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const allowedCertificateTypes = new Set([
@@ -22,6 +23,7 @@ fs.mkdirSync(avatarUploadDir, { recursive: true });
 fs.mkdirSync(certificationUploadDir, { recursive: true });
 fs.mkdirSync(eventUploadDir, { recursive: true });
 fs.mkdirSync(certificateFileUploadDir, { recursive: true });
+fs.mkdirSync(portfolioUploadDir, { recursive: true });
 
 const avatarStorage = multer.diskStorage({
   destination: (_req, _file, callback) => {
@@ -67,6 +69,17 @@ const certificateFileStorage = multer.diskStorage({
     const extension = path.extname(file.originalname).toLowerCase();
     const safeName = `certfile-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
 
+    callback(null, safeName);
+  },
+});
+
+const portfolioStorage = multer.diskStorage({
+  destination: (_req, _file, callback) => {
+    callback(null, portfolioUploadDir);
+  },
+  filename: (_req, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const safeName = `portfolio-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
     callback(null, safeName);
   },
 });
@@ -174,6 +187,14 @@ export const handleEventImageUpload = (req, res, next) => {
   });
 };
 
+export const uploadPortfolioImages = multer({
+  storage: portfolioStorage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+});
+
 export const handleCertificateFileUpload = (req, res, next) => {
   uploadCertificateFile.single("certificateFile")(req, res, (error) => {
     if (!error) {
@@ -187,6 +208,29 @@ export const handleCertificateFileUpload = (req, res, next) => {
           ? "Certificate file must be 10MB or smaller"
           : error.message || "Could not upload certificate file",
     });
+  });
+};
+
+export const handlePortfolioImageUpload = (req, res, next) => {
+  uploadPortfolioImages.fields([
+    { name: "beforeImage", maxCount: 1 },
+    { name: "afterImage", maxCount: 1 },
+  ])(req, res, (error) => {
+    if (error) {
+      if (error.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({
+          message: "Portfolio image must be 10MB or smaller",
+        });
+      }
+      if (error.message) {
+        return res.status(400).json({ message: error.message });
+      }
+      return res.status(400).json({ message: "Could not upload portfolio images" });
+    }
+
+    // Both files are required at the model level, but let the controller
+    // give a more specific error message. Pass through to controller.
+    next();
   });
 };
 

@@ -9,6 +9,7 @@ const ServicesManager = lazy(() => import("./ServicesManager"));
 const ScheduleManager = lazy(() => import("./ScheduleManager"));
 const WaitlistView = lazy(() => import("./WaitlistView"));
 const SalonJobsManager = lazy(() => import("./SalonJobsManager"));
+const PortfolioManager = lazy(() => import("./PortfolioManager"));
 
 export default function AdminPanel({
   bookings,
@@ -65,6 +66,12 @@ export default function AdminPanel({
             error={error}
             isLoading={isLoading}
           />
+        )}
+
+        {section === "portfolio" && (
+          <div className="lg:col-span-3">
+            <PortfolioManager />
+          </div>
         )}
 
         {section === "settings" && (

@@ -24,6 +24,7 @@ import userRoutes from "./routes/userRoutes.js";
 import debugRoutes from "./routes/debugRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import waitlistRoutes from "./routes/waitlistRoutes.js";
+import portfolioPhotoRoutes from "./routes/portfolioPhotoRoutes.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlistExpirationScheduler.js";
@@ -96,6 +97,10 @@ app.use(
   "/uploads/certificate-files",
   express.static(path.join(uploadsRoot, "certificate-files"), uploadStaticOptions)
 );
+app.use(
+  "/uploads/portfolio",
+  express.static(path.join(uploadsRoot, "portfolio"), uploadStaticOptions)
+);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
@@ -118,6 +123,7 @@ if (!isProduction) {
 }
 app.use("/api/events", eventRoutes);
 app.use("/api/waitlist", waitlistRoutes);
+app.use("/api/portfolio", portfolioPhotoRoutes);
 
 const startServer = async () => {
   await connectDB();

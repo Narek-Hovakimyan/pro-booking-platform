@@ -1,0 +1,42 @@
+import api from "./axios";
+
+/**
+ * Fetch the authenticated barber's own portfolio photos.
+ * @returns {Promise<Array>} Array of portfolio photo objects
+ */
+export async function getMyPortfolio() {
+  const { data } = await api.get("/portfolio/me");
+  return data;
+}
+
+/**
+ * Create a new portfolio before/after photo pair.
+ * @param {FormData} formData - Must include beforeImage and afterImage files.
+ *   May include caption, category, tags, isPublic, consentConfirmed.
+ * @returns {Promise<object>} Created portfolio photo object
+ */
+export async function createPortfolioPhoto(formData) {
+  const { data } = await api.post("/portfolio", formData);
+  return data;
+}
+
+/**
+ * Update portfolio photo metadata.
+ * @param {string} id - Portfolio photo ID
+ * @param {object} payload - Fields to update (caption, category, tags, isPublic,
+ *   consentConfirmed, sortOrder, salonId, serviceId)
+ * @returns {Promise<object>} Updated portfolio photo object
+ */
+export async function updatePortfolioPhoto(id, payload) {
+  const { data } = await api.put(`/portfolio/${id}`, payload);
+  return data;
+}
+
+/**
+ * Soft-delete a portfolio photo.
+ * @param {string} id - Portfolio photo ID
+ * @returns {Promise<void>}
+ */
+export async function deletePortfolioPhoto(id) {
+  await api.delete(`/portfolio/${id}`);
+}
