@@ -46,8 +46,12 @@ function formatPrice(price) {
  */
 function getCustomCategoryName(customCategories, customCategoryId) {
   if (!customCategoryId || !Array.isArray(customCategories)) return null;
+  // customCategoryId may be a populated object or a raw string/ObjectId
+  const id = typeof customCategoryId === "object"
+    ? String(customCategoryId._id || customCategoryId.id)
+    : String(customCategoryId);
   const cat = customCategories.find(
-    (c) => String(c._id || c.id) === String(customCategoryId)
+    (c) => String(c._id || c.id) === id
   );
   return cat?.name || null;
 }
@@ -133,7 +137,14 @@ export default function ServicesManager({
   };
 
   const openEditModal = (service) => {
-    const hasCustomCategory = Boolean(service.customCategoryId);
+    // Extract ID whether customCategoryId is a populated object or a raw string
+    const customCategoryIdVal = service.customCategoryId;
+    const hasCustomCategory = Boolean(customCategoryIdVal);
+    const customCategoryIdStr = hasCustomCategory
+      ? typeof customCategoryIdVal === "object"
+        ? String(customCategoryIdVal._id || customCategoryIdVal.id)
+        : String(customCategoryIdVal)
+      : "";
 
     setEditingService(service);
     setForm({
@@ -144,9 +155,7 @@ export default function ServicesManager({
       category: service.category || "other",
       tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
       categoryType: hasCustomCategory ? "custom" : "system",
-      customCategoryId: hasCustomCategory
-        ? String(service.customCategoryId)
-        : "",
+      customCategoryId: customCategoryIdStr,
     });
     setModalError("");
     setShowCreateCategory(false);
