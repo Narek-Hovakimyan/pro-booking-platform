@@ -3,27 +3,21 @@ import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
-import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
-import CalendarTimeline from "@/barber/components/calendar/CalendarTimeline";
+import DayTimelineView from "@/barber/components/calendar/DayTimelineView";
 import { getSocket } from "@/shared/lib/socket";
 import {
   fetchBarberBookings,
   updateBooking,
 } from "@/store/slices/bookingsSlice";
-import { formatDateKey, getDayKeyFromDate, isDateKey, parseDateKey } from "@/shared/utils/dates";
-import { minutesToTime, timeToMinutes } from "@/shared/utils/time";
+import { formatDateKey, isDateKey, parseDateKey } from "@/shared/utils/dates";
 import {
   FALLBACK_DEFAULT_SCHEDULE,
-  TIMELINE_INTERVAL_MINUTES,
   getBookingId,
   getBookingTime,
-  getBookingDuration,
-  getBookingStatus,
   getEffectiveDaySchedule,
-  getTimelineRowType,
 } from "@/barber/utils/calendarHelpers";
 
 function addDays(dateKey, offset) {
@@ -86,73 +80,6 @@ export default function BarberCalendarDayPage() {
         : { selectedDaySchedule: null, isNonWorkingDay: false },
     [barberDefaultSchedule, scheduleEntry, isValidDate, routeDate]
   );
-
-  const timelineRows = useMemo(() => {
-    if (!isValidDate || isNonWorkingDay) return [];
-
-    const startMinutes = timeToMinutes(selectedDaySchedule?.from || "09:00");
-    const endMinutes = timeToMinutes(selectedDaySchedule?.to || "18:00");
-    const breakStartMinutes = timeToMinutes(selectedDaySchedule?.breakFrom || "");
-    const breakEndMinutes = timeToMinutes(selectedDaySchedule?.breakTo || "");
-
-    if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
-      return [];
-    }
-
-    const normalizedBookings = dayBookings
-      .map((b) => {
-        const startTime = getBookingTime(b);
-        const bookingStartMinutes = timeToMinutes(startTime);
-        const duration = getBookingDuration(b);
-
-        if (bookingStartMinutes === null) return null;
-
-        return {
-          booking: b,
-          id: String(getBookingId(b)),
-          startTime,
-          startMinutes: bookingStartMinutes,
-          endMinutes: bookingStartMinutes + duration,
-          duration,
-          status: getBookingStatus(b),
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.startMinutes - b.startMinutes);
-
-    return Array.from(
-      { length: Math.ceil((endMinutes - startMinutes) / TIMELINE_INTERVAL_MINUTES) },
-      (_, index) => {
-        const slotMinutes = startMinutes + index * TIMELINE_INTERVAL_MINUTES;
-        const slotTime = minutesToTime(slotMinutes);
-        const bookingStartingAtSlot =
-          normalizedBookings.find((entry) => entry.startMinutes === slotMinutes) || null;
-        const overlappingBooking =
-          normalizedBookings.find(
-            (entry) =>
-              slotMinutes >= entry.startMinutes && slotMinutes < entry.endMinutes
-          ) || null;
-
-        return {
-          slotTime,
-          slotMinutes,
-          rowType: getTimelineRowType({
-            slotMinutes,
-            breakStartMinutes,
-            breakEndMinutes,
-            bookingStartingAtSlot,
-            overlappingBooking,
-          }),
-          bookingEntry: bookingStartingAtSlot,
-          overlappingBooking,
-          breakRange:
-            breakStartMinutes !== null && breakEndMinutes !== null
-              ? `${minutesToTime(breakStartMinutes)} - ${minutesToTime(breakEndMinutes)}`
-              : "",
-        };
-      }
-    );
-  }, [isValidDate, isNonWorkingDay, dayBookings, selectedDaySchedule]);
 
   const fetchBookings = useCallback(
     async ({
@@ -306,20 +233,18 @@ export default function BarberCalendarDayPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Calendar</h1>
         </div>
-        <Card className="rounded-2xl sm:rounded-3xl">
-          <CardContent className="p-6 text-center">
-            <p className="text-lg font-semibold text-neutral-900">Invalid calendar date</p>
-            <p className="mt-2 text-sm text-neutral-500">
-              The date "{routeDate}" is not a valid date format. Dates must be YYYY-MM-DD.
-            </p>
-            <Link
-              to="/admin/calendar"
-              className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
-            >
-              <ArrowLeft className="h-4 w-4" /> Back to month calendar
-            </Link>
-          </CardContent>
-        </Card>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center sm:rounded-3xl">
+          <p className="text-lg font-semibold text-neutral-900">Invalid calendar date</p>
+          <p className="mt-2 text-sm text-neutral-500">
+            The date "{routeDate}" is not a valid date format. Dates must be YYYY-MM-DD.
+          </p>
+          <Link
+            to="/admin/calendar"
+            className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to month calendar
+          </Link>
+        </div>
       </div>
     );
   }
@@ -327,7 +252,6 @@ export default function BarberCalendarDayPage() {
   // --- Valid date state ---
   const prevDate = addDays(routeDate, -1);
   const nextDate = addDays(routeDate, 1);
-  const dayKey = getDayKeyFromDate(dateObject);
 
   const dateLabel = dateObject.toLocaleDateString("en-US", {
     weekday: "long",
@@ -336,10 +260,14 @@ export default function BarberCalendarDayPage() {
     year: "numeric",
   });
 
-  const workingHoursLabel =
-    selectedDaySchedule?.from && selectedDaySchedule?.to
-      ? `${selectedDaySchedule.from} - ${selectedDaySchedule.to}`
-      : "09:00 - 18:00";
+  let workingHoursLabel = "No schedule set";
+  if (isNonWorkingDay) {
+    workingHoursLabel = "Non-working day";
+  } else if (selectedDaySchedule?.from && selectedDaySchedule?.to) {
+    workingHoursLabel = `${selectedDaySchedule.from} - ${selectedDaySchedule.to}`;
+  } else if (selectedDaySchedule?.working) {
+    workingHoursLabel = "No schedule set";
+  }
 
   const handleDateInputChange = (event) => {
     const val = event.target.value;
@@ -347,6 +275,10 @@ export default function BarberCalendarDayPage() {
       navigate(`/admin/calendar/day/${val}`);
     }
   };
+
+  const handleAccept = (booking) => updateBookingStatus(booking, "accepted");
+  const handleReject = (booking) => openRejectBookingModal(booking);
+  const handleComplete = (booking) => updateBookingStatus(booking, "completed");
 
   return (
     <div className="space-y-5">
@@ -372,9 +304,6 @@ export default function BarberCalendarDayPage() {
             )}
           </h1>
           <div className="mt-2 flex flex-wrap gap-2 text-sm text-neutral-500">
-            <span className="rounded-full bg-neutral-100 px-3 py-1">
-              {dayKey.toUpperCase()}
-            </span>
             <span className="rounded-full bg-neutral-100 px-3 py-1">
               Working hours: {workingHoursLabel}
             </span>
@@ -432,24 +361,19 @@ export default function BarberCalendarDayPage() {
         </p>
       )}
 
-      {/* Timeline - always shows full timeline by default */}
-      <Card className="rounded-2xl sm:rounded-3xl">
-        <CardContent className="space-y-4 p-4 sm:p-6">
-          <CalendarTimeline
-            timelineRows={timelineRows}
-            isLoading={isLoading && dayBookings.length === 0}
-            isNonWorkingDay={isNonWorkingDay}
-            isEmpty={!isLoading && !isNonWorkingDay && dayBookings.length === 0}
-            showFullTimeline={true}
-            onToggleFullTimeline={undefined}
-            onAccept={(booking) => updateBookingStatus(booking, "accepted")}
-            onReject={(booking) => openRejectBookingModal(booking)}
-            onComplete={(booking) => updateBookingStatus(booking, "completed")}
-            onNoShow={(booking) => updateBookingNoShow(booking)}
-            onLateCancel={(booking) => updateBookingLateCancel(booking)}
-          />
-        </CardContent>
-      </Card>
+      {/* New Google Calendar-style day timeline */}
+      <DayTimelineView
+        dateKey={routeDate}
+        isNonWorkingDay={isNonWorkingDay}
+        bookings={dayBookings}
+        isLoading={isLoading}
+        selectedDaySchedule={selectedDaySchedule}
+        onAccept={handleAccept}
+        onReject={handleReject}
+        onComplete={handleComplete}
+        onNoShow={updateBookingNoShow}
+        onLateCancel={updateBookingLateCancel}
+      />
 
       {rejectingBooking && (
         <RejectBookingModal

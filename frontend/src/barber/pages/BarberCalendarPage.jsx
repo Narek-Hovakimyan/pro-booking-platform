@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import CalendarMonthNav from "@/barber/components/calendar/CalendarMonthNav";
 import CalendarGrid from "@/barber/components/calendar/CalendarGrid";
+import WeeklyCalendarView from "@/barber/components/calendar/WeeklyCalendarView";
 import { getSocket } from "@/shared/lib/socket";
 import { fetchBarberBookings } from "@/store/slices/bookingsSlice";
 import { formatDateKey } from "@/shared/utils/dates";
@@ -11,6 +12,14 @@ import {
   FALLBACK_DEFAULT_SCHEDULE,
   getMonthDays,
 } from "@/barber/utils/calendarHelpers";
+
+function getSundayOfWeek(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  d.setDate(d.getDate() - day);
+  return d;
+}
 
 export default function BarberCalendarPage() {
   const dispatch = useDispatch();
@@ -25,8 +34,10 @@ export default function BarberCalendarPage() {
 
   // Calendar navigation state
   const today = useMemo(() => new Date(), []);
+  const [viewMode, setViewMode] = useState("month"); // "month" | "week"
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [weekStart, setWeekStart] = useState(() => getSundayOfWeek(new Date()));
 
   const barberBookings = useMemo(
     () =>
@@ -118,6 +129,7 @@ export default function BarberCalendarPage() {
     };
   }, [currentUserId, fetchBookings]);
 
+  // ─── Month navigation ───
   const goToPrevMonth = () => {
     if (viewMonth === 0) {
       setViewYear(viewYear - 1);
@@ -136,7 +148,7 @@ export default function BarberCalendarPage() {
     }
   };
 
-  const goToToday = () => {
+  const goToTodayMonth = () => {
     const now = new Date();
     setViewYear(now.getFullYear());
     setViewMonth(now.getMonth());
@@ -158,13 +170,51 @@ export default function BarberCalendarPage() {
     navigate(`/admin/calendar/day/${dateStr}`);
   };
 
+  const handleBookingClick = (booking) => {
+    // Navigate to day detail page for this booking's date
+    const date = booking.bookingDate;
+    if (date) {
+      navigate(`/admin/calendar/day/${date}`);
+    }
+  };
+
+  // ─── View toggle button styles ───
+  const viewToggleActive = "bg-neutral-900 text-white";
+  const viewToggleInactive = "bg-white text-neutral-600 hover:bg-neutral-100";
+
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Calendar</h1>
-        <p className="mt-2 text-neutral-500">
-          Pick a day to see your working timeline and bookings hour by hour.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Calendar</h1>
+          <p className="mt-2 text-neutral-500">
+            {viewMode === "month"
+              ? "Pick a day to see your working timeline and bookings hour by hour."
+              : "View your weekly schedule at a glance."}
+          </p>
+        </div>
+
+        {/* View toggle */}
+        <div className="flex rounded-lg border border-neutral-200 p-0.5">
+          <button
+            type="button"
+            onClick={() => setViewMode("month")}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+              viewMode === "month" ? viewToggleActive : viewToggleInactive
+            }`}
+          >
+            Month
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("week")}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+              viewMode === "week" ? viewToggleActive : viewToggleInactive
+            }`}
+          >
+            Week
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -173,33 +223,50 @@ export default function BarberCalendarPage() {
         </p>
       )}
 
-      <CalendarMonthNav
-        monthLabel={monthLabel}
-        onPrevMonth={goToPrevMonth}
-        onNextMonth={goToNextMonth}
-        onGoToToday={goToToday}
-      />
+      {/* ─── Month View ─── */}
+      {viewMode === "month" && (
+        <>
+          <CalendarMonthNav
+            monthLabel={monthLabel}
+            onPrevMonth={goToPrevMonth}
+            onNextMonth={goToNextMonth}
+            onGoToToday={goToTodayMonth}
+          />
 
-      <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
-        <p className="font-medium text-neutral-800">
-          Click any day to open the full day timeline.
-        </p>
-        <p className="mt-1 text-neutral-500">
-          Booking labels show the first appointments for each day.
-        </p>
-      </div>
+          <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+            <p className="font-medium text-neutral-800">
+              Click any day to open the full day timeline.
+            </p>
+            <p className="mt-1 text-neutral-500">
+              Booking labels show the first appointments for each day.
+            </p>
+          </div>
 
-      <CalendarGrid
-        monthDays={monthDays}
-        viewYear={viewYear}
-        viewMonth={viewMonth}
-        todayKey={todayKey}
-        selectedDateKey=""
-        bookingsByDate={bookingsByDate}
-        scheduleEntry={scheduleEntry}
-        barberDefaultSchedule={barberDefaultSchedule}
-        onDayClick={handleDayClick}
-      />
+          <CalendarGrid
+            monthDays={monthDays}
+            viewYear={viewYear}
+            viewMonth={viewMonth}
+            todayKey={todayKey}
+            selectedDateKey=""
+            bookingsByDate={bookingsByDate}
+            scheduleEntry={scheduleEntry}
+            barberDefaultSchedule={barberDefaultSchedule}
+            onDayClick={handleDayClick}
+          />
+        </>
+      )}
+
+      {/* ─── Week View ─── */}
+      {viewMode === "week" && (
+        <WeeklyCalendarView
+          weekStart={weekStart}
+          bookings={barberBookings}
+          scheduleEntry={scheduleEntry}
+          barberDefaultSchedule={barberDefaultSchedule}
+          onWeekChange={setWeekStart}
+          onBookingClick={handleBookingClick}
+        />
+      )}
     </div>
   );
 }

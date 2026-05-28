@@ -1,3 +1,4 @@
+import { timeToMinutes } from "@/shared/utils/time";
 import { getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
 
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -9,6 +10,78 @@ export const FALLBACK_DEFAULT_SCHEDULE = {
   breakStart: "",
   breakEnd: "",
 };
+
+// Default visible range when no schedule data exists
+const FALLBACK_VISIBLE_START = "08:00";
+const FALLBACK_VISIBLE_END = "22:00";
+
+/**
+ * Compute the visible time range for a calendar view.
+ *
+ * @param {object} options
+ * @param {Array<{from?:string, to?:string}>} options.schedules – day schedule objects (each has from/to)
+ * @param {Array} options.bookings – booking objects (uses getBookingTime/getBookingDuration)
+ * @param {string} [options.fallbackStart="08:00"] – fallback start time when no schedules
+ * @param {string} [options.fallbackEnd="22:00"]   – fallback end time when no schedules
+ * @returns {{ start: number, end: number, hours: number }}
+ */
+export function getVisibleTimeRange({
+  schedules = [],
+  bookings = [],
+  fallbackStart = FALLBACK_VISIBLE_START,
+  fallbackEnd = FALLBACK_VISIBLE_END,
+} = {}) {
+  let startMin, endMin;
+
+  if (schedules.length > 0) {
+    // Use schedule as base — start from extremes, contract to actual range
+    startMin = Infinity;
+    endMin = -Infinity;
+    for (const s of schedules) {
+      if (s?.from && s?.to) {
+        const f = timeToMinutes(s.from);
+        const t = timeToMinutes(s.to);
+        if (f !== null && t !== null && f < t) {
+          if (f < startMin) startMin = f;
+          if (t > endMin) endMin = t;
+        }
+      }
+    }
+    // If all schedules were invalid, fall back
+    if (!Number.isFinite(startMin) || !Number.isFinite(endMin)) {
+      startMin = timeToMinutes(fallbackStart);
+      endMin = timeToMinutes(fallbackEnd);
+      if (startMin === null) startMin = 8 * 60;
+      if (endMin === null) endMin = 22 * 60;
+    }
+  } else {
+    // No schedules — use fallback
+    startMin = timeToMinutes(fallbackStart);
+    endMin = timeToMinutes(fallbackEnd);
+    if (startMin === null) startMin = 8 * 60;
+    if (endMin === null) endMin = 22 * 60;
+  }
+
+  // Expand range to include all bookings (start + duration)
+  for (const b of bookings) {
+    const bStart = timeToMinutes(getBookingTime(b));
+    if (bStart !== null) {
+      startMin = Math.min(startMin, bStart);
+      endMin = Math.max(endMin, bStart + getBookingDuration(b));
+    }
+  }
+
+  // Round to nearest hour
+  startMin = Math.max(0, Math.floor(startMin / 60) * 60);
+  endMin = Math.min(24 * 60, Math.ceil(endMin / 60) * 60);
+
+  // Enforce minimum range (at least 2 hours)
+  if (endMin - startMin < 120) {
+    endMin = startMin + 120;
+  }
+
+  return { start: startMin, end: endMin, hours: (endMin - startMin) / 60 };
+}
 
 export function getMonthDays(year, month) {
   const firstDay = new Date(year, month, 1);

@@ -14,6 +14,7 @@ import { getBarberBookings } from "./bookingReadController.js";
 import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
+import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
@@ -2272,4 +2273,559 @@ test("public/non-owner serialized booking excludes treatmentRecord", async () =>
   const serialized = serializeAvailabilityBooking(booking, "unrelated-viewer");
 
   assert.equal(serialized.treatmentRecord, undefined);
+});
+
+// ── Review Request Automation Tests ────────────────────────────────
+
+test("completing accepted booking creates one review_request notification for client", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, "completed");
+
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 1);
+  assert.equal(reviewRequests[0].userId, clientId);
+  assert.equal(reviewRequests[0].message, "How was your visit? Leave a review for your specialist.");
+  assert.ok(reviewRequests[0].data.bookingId);
+  assert.ok(reviewRequests[0].data.barberId);
+});
+
+test("completion does not create review_request if booking.reviewed === true", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted", reviewed: true });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 0);
+});
+
+test("completion does not create review_request if Review.exists returns true", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => true;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 0);
+});
+
+test("completion does not create duplicate review_request if notification already exists", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => ({ _id: "existing-notification" });
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 0);
+});
+
+test("non-completion status changes do not create review_request", async () => {
+  const notifications = [];
+  let notificationFindOneCallCount = 0;
+
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => {
+    notificationFindOneCallCount++;
+    return null;
+  };
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  for (const statusChange of [
+    { from: "pending", to: "accepted" },
+    { from: "pending", to: "rejected", rejectionReason: "Unavailable" },
+    { from: "accepted", to: "rejected", rejectionReason: "Unavailable" },
+  ]) {
+    const booking = createMutableBooking({ status: statusChange.from });
+    const res = createResponse();
+    Booking.findById = async () => booking;
+
+    await updateBooking(
+      {
+        user: barber,
+        params: { id: booking._id },
+        body: { status: statusChange.to, ...(statusChange.rejectionReason ? { rejectionReason: statusChange.rejectionReason } : {}) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+  }
+
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 0);
+  // Non-completion paths should not query Notification.findOne for review_request
+  assert.equal(notificationFindOneCallCount, 0);
+});
+
+test("re-sending completed status when already completed does not create duplicate request", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  // Start with already completed booking — status won't change
+  // Controller returns 400: "Only accepted bookings can be completed"
+  const booking = createMutableBooking({ status: "completed", completedAt: new Date() });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Only accepted bookings can be completed");
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 0);
+});
+
+test("review_request notification data contains only safe fields: bookingId, barberId", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const reviewRequest = notifications.find((n) => n.type === "review_request");
+  assert.ok(reviewRequest);
+  const dataKeys = Object.keys(reviewRequest.data);
+  assert.equal(dataKeys.length, 2);
+  assert.ok(dataKeys.includes("bookingId"));
+  assert.ok(dataKeys.includes("barberId"));
+  // Ensure no private fields leaked
+  assert.equal(dataKeys.includes("clientName"), false);
+  assert.equal(dataKeys.includes("clientPhone"), false);
+  assert.equal(dataKeys.includes("phone"), false);
+  assert.equal(dataKeys.includes("consultation"), false);
+  assert.equal(dataKeys.includes("consent"), false);
+  assert.equal(dataKeys.includes("referenceImages"), false);
+  assert.equal(dataKeys.includes("treatmentRecord"), false);
+});
+
+test("existing completion/status tests still pass after review_request addition", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  // Test: barber accepts a booking
+  const acceptBooking = createMutableBooking({ status: "pending" });
+  const acceptRes = createResponse();
+  Booking.findById = async () => acceptBooking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: acceptBooking._id },
+      body: { status: "accepted" },
+    },
+    acceptRes
+  );
+
+  assert.equal(acceptRes.statusCode, 200);
+  assert.equal(acceptRes.body.status, "accepted");
+
+  // Test: barber completes the accepted booking
+  const completeBooking = createMutableBooking({ status: "accepted" });
+  const completeRes = createResponse();
+  Booking.findById = async () => completeBooking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: completeBooking._id },
+      body: { status: "completed" },
+    },
+    completeRes
+  );
+
+  assert.equal(completeRes.statusCode, 200);
+  assert.equal(completeRes.body.status, "completed");
+  assert.ok(completeRes.body.completedAt);
+
+  // Test: barber rejects a pending booking
+  const rejectBooking = createMutableBooking({ status: "pending" });
+  const rejectRes = createResponse();
+  Booking.findById = async () => rejectBooking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: rejectBooking._id },
+      body: { status: "rejected", rejectionReason: "Unavailable" },
+    },
+    rejectRes
+  );
+
+  assert.equal(rejectRes.statusCode, 200);
+  assert.equal(rejectRes.body.status, "rejected");
+  assert.equal(rejectRes.body.rejectionReason, "Unavailable");
+});
+
+// =========================================================================
+// Phase 8 — Book again retention automation
+// =========================================================================
+
+test("completing accepted booking creates one book_again_reminder notification for client", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const bookAgainReminders = notifications.filter((n) => n.type === "book_again_reminder");
+  assert.equal(bookAgainReminders.length, 1);
+});
+
+test("completion does not create duplicate book_again_reminder if one already exists", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async (query) => {
+    if (query.type === "book_again_reminder") return { _id: "existing-reminder" };
+    return null;
+  };
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const bookAgainReminders = notifications.filter((n) => n.type === "book_again_reminder");
+  assert.equal(bookAgainReminders.length, 0);
+});
+
+test("non-completion status changes do not create book_again_reminder", async () => {
+  const notifications = [];
+  let notificationFindOneCallCount = 0;
+
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => {
+    notificationFindOneCallCount++;
+    return null;
+  };
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  for (const statusChange of [
+    { from: "pending", to: "accepted" },
+    { from: "pending", to: "rejected", rejectionReason: "Unavailable" },
+    { from: "accepted", to: "rejected", rejectionReason: "Unavailable" },
+  ]) {
+    const booking = createMutableBooking({ status: statusChange.from });
+    const res = createResponse();
+    Booking.findById = async () => booking;
+
+    await updateBooking(
+      {
+        user: barber,
+        params: { id: booking._id },
+        body: { status: statusChange.to, ...(statusChange.rejectionReason ? { rejectionReason: statusChange.rejectionReason } : {}) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+  }
+
+  const bookAgainReminders = notifications.filter((n) => n.type === "book_again_reminder");
+  assert.equal(bookAgainReminders.length, 0);
+  // Non-completion paths should not query Notification.findOne for book_again_reminder
+  assert.equal(notificationFindOneCallCount, 0);
+});
+
+test("re-sending completed status when already completed does not create duplicate reminder", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  // Start with already completed booking — status won't change
+  // Controller returns 400: "Only accepted bookings can be completed"
+  const booking = createMutableBooking({ status: "completed", completedAt: new Date() });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Only accepted bookings can be completed");
+  const bookAgainReminders = notifications.filter((n) => n.type === "book_again_reminder");
+  assert.equal(bookAgainReminders.length, 0);
+});
+
+test("book_again_reminder notification payload contains only safe fields: bookingId, barberId, salonId", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const reminder = notifications.find((n) => n.type === "book_again_reminder");
+  assert.ok(reminder);
+  const dataKeys = Object.keys(reminder.data);
+  assert.ok(dataKeys.includes("bookingId"));
+  assert.ok(dataKeys.includes("barberId"));
+  assert.ok(dataKeys.includes("salonId"));
+  // Ensure no private fields leaked
+  assert.equal(dataKeys.includes("clientName"), false);
+  assert.equal(dataKeys.includes("clientPhone"), false);
+  assert.equal(dataKeys.includes("phone"), false);
+  assert.equal(dataKeys.includes("consultation"), false);
+  assert.equal(dataKeys.includes("consent"), false);
+  assert.equal(dataKeys.includes("referenceImages"), false);
+  assert.equal(dataKeys.includes("treatmentRecord"), false);
+});
+
+test("existing Phase 7 review_request tests still pass after book_again_reminder addition", async () => {
+  let notificationCounter = 0;
+  const notifications = [];
+  Notification.create = async (payload) => {
+    const doc = { _id: `notif-${++notificationCounter}`, ...payload };
+    notifications.push(doc);
+    return doc;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  // Test: barber completes the accepted booking
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(booking.status, "completed");
+  assert.ok(booking.completedAt);
+
+  // review_request still created
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 1);
+
+  // book_again_reminder also created
+  const bookAgainReminders = notifications.filter((n) => n.type === "book_again_reminder");
+  assert.equal(bookAgainReminders.length, 1);
+
+  // Ensure they are independent notifications
+  assert.notEqual(reviewRequests[0]._id, bookAgainReminders[0]._id);
+
+  // Test: barber rejects a pending booking (should not create any notification)
+  const rejectBooking = createMutableBooking({ status: "pending" });
+  const rejectRes = createResponse();
+  Booking.findById = async () => rejectBooking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: rejectBooking._id },
+      body: { status: "rejected", rejectionReason: "Unavailable" },
+    },
+    rejectRes
+  );
+
+  assert.equal(rejectRes.statusCode, 200);
+  assert.equal(rejectRes.body.status, "rejected");
+  assert.equal(rejectRes.body.rejectionReason, "Unavailable");
 });

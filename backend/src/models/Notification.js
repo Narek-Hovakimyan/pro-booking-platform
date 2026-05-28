@@ -7,6 +7,11 @@ const notificationDataSchema = new mongoose.Schema(
       ref: "Booking",
       default: null,
     },
+    barberId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     eventId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Event",

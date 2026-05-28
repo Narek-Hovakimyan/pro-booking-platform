@@ -2,6 +2,8 @@ import path from "path";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import mongoose from "mongoose";
+import Notification from "../models/Notification.js";
+import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
 import User from "../models/User.js";
@@ -652,6 +654,52 @@ export const updateBooking = async (req, res) => {
 
       if (safeUpdates.status === "rejected" || safeUpdates.status === "cancelled") {
         notifyWaitlistForReleasedBookingSlot(booking);
+      }
+
+      // ── Review request automation ──
+      if (safeUpdates.status === "completed") {
+        if (booking.clientId && !booking.reviewed) {
+          const existingReview = await Review.exists({ bookingId: booking._id });
+          if (!existingReview) {
+            const existingNotification = await Notification.findOne({
+              userId: booking.clientId,
+              type: "review_request",
+              "data.bookingId": booking._id,
+            });
+            if (!existingNotification) {
+              await createNotification({
+                userId: booking.clientId,
+                type: "review_request",
+                message: "How was your visit? Leave a review for your specialist.",
+                data: {
+                  bookingId: booking._id,
+                  barberId: booking.barberId,
+                },
+              });
+            }
+          }
+        }
+
+        // ── Book again retention automation ──
+        if (booking.clientId) {
+          const existingReminder = await Notification.findOne({
+            userId: booking.clientId,
+            type: "book_again_reminder",
+            "data.bookingId": booking._id,
+          });
+          if (!existingReminder) {
+            await createNotification({
+              userId: booking.clientId,
+              type: "book_again_reminder",
+              message: "Book your next appointment with the same specialist.",
+              data: {
+                bookingId: booking._id,
+                barberId: booking.barberId,
+                salonId: booking.salonId || null,
+              },
+            });
+          }
+        }
       }
     }
 
