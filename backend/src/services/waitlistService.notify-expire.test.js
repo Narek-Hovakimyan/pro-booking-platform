@@ -62,6 +62,76 @@ test("notifyMatchingWaitlistEntries notifies matching active entries", async () 
   assert.equal(notificationCreated.type, "waitlist_slot_available");
   assert.ok(notificationCreated.message.includes("John Barber"));
   assert.ok(notificationCreated.message.includes(futureDate));
+
+  // Verify notification data contains only safe fields
+  assert.ok(notificationCreated.data, "notification should have data");
+  assert.equal(
+    String(notificationCreated.data.waitlistId),
+    String(mockEntry._id),
+    "data.waitlistId should match entry._id"
+  );
+  assert.equal(
+    String(notificationCreated.data.barberId),
+    barberId,
+    "data.barberId should match barberId"
+  );
+  assert.equal(
+    String(notificationCreated.data.serviceId),
+    serviceId,
+    "data.serviceId should match serviceId"
+  );
+  assert.equal(notificationCreated.data.salonId, undefined, "salonId should be undefined when entry has none");
+  // Private fields must not be present
+  assert.equal(notificationCreated.data.clientId, undefined);
+  assert.equal(notificationCreated.data.clientName, undefined);
+  assert.equal(notificationCreated.data.clientPhone, undefined);
+  assert.equal(notificationCreated.data.note, undefined);
+  assert.equal(notificationCreated.data.consultation, undefined);
+  assert.equal(notificationCreated.data.treatmentRecord, undefined);
+  assert.equal(notificationCreated.data.referenceImages, undefined);
+});
+
+test("notification data contains only safe fields when entry has salonId", async () => {
+  const mockEntry = createMockEntry({
+    _id: "entry-with-salon",
+    salonId,
+  });
+  let notificationCreated = null;
+
+  WaitlistEntry.find = async () => [mockEntry];
+  mockFindOneAndUpdateForEntries([mockEntry]);
+  User.findById = () => ({
+    select: async () => ({ name: "John Barber" }),
+  });
+  Notification.create = async (payload) => {
+    notificationCreated = payload;
+    return payload;
+  };
+
+  const count = await notifyMatchingWaitlistEntries({
+    barberId,
+    salonId,
+    date: futureDate,
+    serviceId,
+    time: "10:00",
+  });
+
+  assert.equal(count, 1);
+
+  // Verify safe data fields with salon present
+  assert.ok(notificationCreated.data, "notification should have data");
+  assert.equal(String(notificationCreated.data.waitlistId), String(mockEntry._id));
+  assert.equal(String(notificationCreated.data.barberId), barberId);
+  assert.equal(String(notificationCreated.data.salonId), salonId);
+  assert.equal(String(notificationCreated.data.serviceId), serviceId);
+  // Private fields must not be present
+  assert.equal(notificationCreated.data.clientId, undefined);
+  assert.equal(notificationCreated.data.clientName, undefined);
+  assert.equal(notificationCreated.data.clientPhone, undefined);
+  assert.equal(notificationCreated.data.note, undefined);
+  assert.equal(notificationCreated.data.consultation, undefined);
+  assert.equal(notificationCreated.data.treatmentRecord, undefined);
+  assert.equal(notificationCreated.data.referenceImages, undefined);
 });
 
 test("notified entries are not notified twice", async () => {

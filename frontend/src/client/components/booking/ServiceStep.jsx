@@ -48,8 +48,22 @@ export default function ServiceStep({
                       <div className={`font-semibold ${isSelected ? "text-white" : "text-neutral-950"}`}>
                         {service?.name || "Service"}
                       </div>
-                      <div className={`mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${isSelected ? "text-neutral-300" : "text-neutral-500"}`}>
-                        <span>
+                      {service?.type === "package" && (
+                        <div className="mt-1">
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            isSelected ? "bg-violet-500 text-white" : "bg-violet-100 text-violet-700"
+                          }`}>
+                            Package
+                          </span>
+                        </div>
+                      )}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {service?.includedServiceIds?.length > 0 && Array.isArray(service.includedServiceIds) && typeof service.includedServiceIds[0] === "object" && (
+                          <span className={`text-xs ${isSelected ? "text-violet-200" : "text-violet-500"}`}>
+                            {service.includedServiceIds.map((s) => s.name || s.serviceName).filter(Boolean).join(" + ")}
+                          </span>
+                        )}
+                        <span className={`text-sm ${isSelected ? "text-neutral-300" : "text-neutral-500"}`}>
                           {service?.duration || 20} րոպե ·{" "}
                           <span className={`font-semibold ${isSelected ? "text-white" : "text-neutral-800"}`}>
                             {Number(service?.price || 0).toLocaleString()} դրամ

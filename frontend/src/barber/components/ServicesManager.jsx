@@ -33,6 +33,10 @@ const emptyForm = {
   description: "",
   category: "other",
   tags: "",
+  type: "single",
+  includedServiceIds: [],
+  packagePriceMode: "manual",
+  packageDurationMode: "manual",
   categoryType: "system",
   customCategoryId: "",
 };
@@ -154,6 +158,12 @@ export default function ServicesManager({
       description: service.description || "",
       category: service.category || "other",
       tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
+      type: service.type || "single",
+      includedServiceIds: (service.includedServiceIds || []).map((id) =>
+        typeof id === "object" ? String(id._id || id) : String(id)
+      ),
+      packagePriceMode: service.packagePriceMode || "manual",
+      packageDurationMode: service.packageDurationMode || "manual",
       categoryType: hasCustomCategory ? "custom" : "system",
       customCategoryId: customCategoryIdStr,
     });
@@ -249,6 +259,14 @@ export default function ServicesManager({
       description: form.description.trim(),
       tags,
     };
+
+    // Add package fields
+    if (form.type === "package") {
+      basePayload.type = "package";
+      basePayload.includedServiceIds = form.includedServiceIds;
+      basePayload.packagePriceMode = form.packagePriceMode;
+      basePayload.packageDurationMode = form.packageDurationMode;
+    }
 
     if (form.categoryType === "custom") {
       basePayload.category = "other"; // backward-compatible fallback
@@ -805,6 +823,176 @@ export default function ServicesManager({
                   }
                 />
               </label>
+
+              {/* ── Service type toggle ── */}
+              <label className="grid gap-1.5 text-sm font-semibold">
+                Service type
+              </label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => {
+                    handleFieldChange("type", "single");
+                    handleFieldChange("includedServiceIds", []);
+                    handleFieldChange("packagePriceMode", "manual");
+                    handleFieldChange("packageDurationMode", "manual");
+                  }}
+                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                    form.type === "single"
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                  }`}
+                >
+                  Single service
+                </button>
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => handleFieldChange("type", "package")}
+                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                    form.type === "package"
+                      ? "border-violet-500 bg-violet-50 text-violet-700"
+                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                  }`}
+                >
+                  Package
+                </button>
+              </div>
+
+              {/* ── Package fields ── */}
+              {form.type === "package" && (
+                <div className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">
+                    Package settings
+                  </p>
+
+                  {/* Included services multi-select */}
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Included services
+                    <span className="text-xs font-normal text-neutral-400">
+                      Select at least 2 active single services
+                    </span>
+                    <div className="max-h-40 overflow-y-auto rounded-2xl border border-violet-200 bg-white p-1">
+                      {services
+                        .filter((s) => s.active && s.type !== "package")
+                        .map((s) => {
+                          const isSelected = form.includedServiceIds.some(
+                            (id) => String(id) === String(s.id)
+                          );
+                          return (
+                            <label
+                              key={s.id}
+                              className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
+                                isSelected
+                                  ? "bg-violet-100 text-violet-800"
+                                  : "hover:bg-neutral-50"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-neutral-300 text-violet-600 focus:ring-violet-500"
+                                checked={isSelected}
+                                disabled={isSaving}
+                                onChange={() => {
+                                  const current = [...form.includedServiceIds];
+                                  if (isSelected) {
+                                    handleFieldChange(
+                                      "includedServiceIds",
+                                      current.filter(
+                                        (id) => String(id) !== String(s.id)
+                                      )
+                                    );
+                                  } else {
+                                    handleFieldChange("includedServiceIds", [
+                                      ...current,
+                                      s.id,
+                                    ]);
+                                  }
+                                }}
+                              />
+                              <span className="flex-1">{s.name}</span>
+                              <span className="text-xs text-neutral-400">
+                                {s.duration}min · {formatPrice(s.price)}դր
+                              </span>
+                            </label>
+                          );
+                        })}
+                      {services.filter((s) => s.active && s.type !== "package").length === 0 && (
+                        <p className="p-3 text-center text-xs text-neutral-400">
+                          No active single services available
+                        </p>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Price mode */}
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Price mode
+                    <select
+                      className="w-full rounded-2xl border border-violet-200 bg-white p-3 font-normal transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                      disabled={isSaving}
+                      value={form.packagePriceMode}
+                      onChange={(e) =>
+                        handleFieldChange("packagePriceMode", e.target.value)
+                      }
+                    >
+                      <option value="manual">Manual — set price yourself</option>
+                      <option value="sum">
+                        Sum — auto-calculate from included services
+                      </option>
+                    </select>
+                  </label>
+
+                  {/* Duration mode */}
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Duration mode
+                    <select
+                      className="w-full rounded-2xl border border-violet-200 bg-white p-3 font-normal transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                      disabled={isSaving}
+                      value={form.packageDurationMode}
+                      onChange={(e) =>
+                        handleFieldChange("packageDurationMode", e.target.value)
+                      }
+                    >
+                      <option value="manual">Manual — set duration yourself</option>
+                      <option value="sum">
+                        Sum — auto-calculate from included services
+                      </option>
+                    </select>
+                  </label>
+
+                  {/* Computed totals hint */}
+                  {form.packagePriceMode === "sum" && form.includedServiceIds.length > 0 && (
+                    <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
+                      <span className="font-medium">Computed price:</span>{" "}
+                      {formatPrice(
+                        services
+                          .filter((s) =>
+                            form.includedServiceIds.some(
+                              (id) => String(id) === String(s.id)
+                            )
+                          )
+                          .reduce((sum, s) => sum + (s.price || 0), 0)
+                      )}{" "}
+                      դր
+                    </div>
+                  )}
+                  {form.packageDurationMode === "sum" && form.includedServiceIds.length > 0 && (
+                    <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
+                      <span className="font-medium">Computed duration:</span>{" "}
+                      {services
+                        .filter((s) =>
+                          form.includedServiceIds.some(
+                            (id) => String(id) === String(s.id)
+                          )
+                        )
+                        .reduce((sum, s) => sum + (s.duration || 0), 0)}{" "}
+                      min
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Preview */}
               {form.name && (form.price || form.duration) && (

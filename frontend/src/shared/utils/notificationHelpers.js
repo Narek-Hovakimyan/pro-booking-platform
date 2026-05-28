@@ -28,6 +28,7 @@ export function getNotificationGroup(rawType) {
       "booking_no_show",
       "booking_late_cancelled",
       "book_again_reminder",
+      "waitlist_slot_available",
     ].includes(rawType)
   ) {
     return "booking";

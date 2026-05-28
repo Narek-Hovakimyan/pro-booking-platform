@@ -61,28 +61,44 @@ const validateServicePayload = (body, { partial = false } = {}) => {
     next.name = source.name.trim();
   }
 
+  // Price: required for single services; optional for packages using sum mode
   if (!partial || source.price !== undefined) {
-    if (isBlankNumberInput(source.price)) {
-      return { error: "Price must be a non-negative number" };
-    }
+    const isSumPrice =
+      source.type === "package" && source.packagePriceMode === "sum";
 
-    const parsedPrice = Number(source.price);
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      return { error: "Price must be a non-negative number" };
+    if (source.price === undefined && isSumPrice) {
+      // Price will be auto-calculated later — skip validation
+    } else {
+      if (isBlankNumberInput(source.price)) {
+        return { error: "Price must be a non-negative number" };
+      }
+
+      const parsedPrice = Number(source.price);
+      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+        return { error: "Price must be a non-negative number" };
+      }
+      next.price = parsedPrice;
     }
-    next.price = parsedPrice;
   }
 
+  // Duration: required for single services; optional for packages using sum mode
   if (!partial || source.duration !== undefined) {
-    if (isBlankNumberInput(source.duration)) {
-      return { error: "Duration must be a positive number" };
-    }
+    const isSumDuration =
+      source.type === "package" && source.packageDurationMode === "sum";
 
-    const parsedDuration = Number(source.duration);
-    if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
-      return { error: "Duration must be a positive number" };
+    if (source.duration === undefined && isSumDuration) {
+      // Duration will be auto-calculated later — skip validation
+    } else {
+      if (isBlankNumberInput(source.duration)) {
+        return { error: "Duration must be a positive number" };
+      }
+
+      const parsedDuration = Number(source.duration);
+      if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+        return { error: "Duration must be a positive number" };
+      }
+      next.duration = parsedDuration;
     }
-    next.duration = parsedDuration;
   }
 
   if (source.description !== undefined) {
@@ -113,7 +129,65 @@ const validateServicePayload = (body, { partial = false } = {}) => {
     next.active = source.active;
   }
 
+  // ── Package fields ──
+  if (!partial || source.type !== undefined) {
+    if (source.type !== undefined && !["single", "package"].includes(source.type)) {
+      return { error: "Type must be 'single' or 'package'" };
+    }
+    next.type = source.type || "single";
+  }
+
   return { value: next };
+};
+
+const validateAndResolveIncludedServices = async (includedServiceIds, barberId, existingServiceId) => {
+  if (!Array.isArray(includedServiceIds)) {
+    return { error: "includedServiceIds must be an array" };
+  }
+
+  if (includedServiceIds.length < 2) {
+    return { error: "Package must include at least 2 services" };
+  }
+
+  // Deduplicate
+  const uniqueIds = [...new Set(includedServiceIds.map((id) => String(id)))];
+
+  // Validate ObjectIds
+  for (const id of uniqueIds) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return { error: `Invalid included service ID: ${id}` };
+    }
+  }
+
+  // Check self-reference
+  if (existingServiceId && uniqueIds.includes(String(existingServiceId))) {
+    return { error: "Package cannot include itself" };
+  }
+
+  // Fetch all included services
+  const includedServices = await Service.find({
+    _id: { $in: uniqueIds },
+    barberId,
+  });
+
+  if (includedServices.length !== uniqueIds.length) {
+    return { error: "Some included services not found or belong to another barber" };
+  }
+
+  // Verify all are active and type single
+  for (const svc of includedServices) {
+    if (!svc.active) {
+      return { error: `Included service "${svc.name}" is inactive` };
+    }
+    if (svc.type !== "single") {
+      return { error: `Included service "${svc.name}" is a package; packages cannot include packages` };
+    }
+  }
+
+  return {
+    value: includedServices.map((s) => s._id),
+    services: includedServices,
+  };
 };
 
 const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
@@ -193,6 +267,57 @@ export const createService = async (req, res) => {
       return res.status(400).json({ message: error });
     }
 
+    // ── Package handling ──
+    const resolvedType = value.type || "single";
+
+    if (resolvedType === "package") {
+      // Validate and resolve included services
+      const includedResult = await validateAndResolveIncludedServices(
+        req.body.includedServiceIds,
+        req.user._id,
+        null
+      );
+
+      if (includedResult.error) {
+        return res.status(400).json({ message: includedResult.error });
+      }
+
+      value.includedServiceIds = includedResult.value;
+
+      // Resolve price mode
+      if (hasOwnBodyField(req.body, "packagePriceMode")) {
+        if (!["manual", "sum"].includes(req.body.packagePriceMode)) {
+          return res.status(400).json({ message: "packagePriceMode must be 'manual' or 'sum'" });
+        }
+        value.packagePriceMode = req.body.packagePriceMode;
+      }
+
+      // Resolve duration mode
+      if (hasOwnBodyField(req.body, "packageDurationMode")) {
+        if (!["manual", "sum"].includes(req.body.packageDurationMode)) {
+          return res.status(400).json({ message: "packageDurationMode must be 'manual' or 'sum'" });
+        }
+        value.packageDurationMode = req.body.packageDurationMode;
+      }
+
+      // Auto-calculate price if sum mode
+      if (value.packagePriceMode === "sum") {
+        const includedServices = await Service.find({ _id: { $in: value.includedServiceIds } });
+        value.price = includedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+      }
+
+      // Auto-calculate duration if sum mode
+      if (value.packageDurationMode === "sum") {
+        const includedServices = await Service.find({ _id: { $in: value.includedServiceIds } });
+        value.duration = includedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+      }
+    } else {
+      // Single service — clear package fields
+      value.includedServiceIds = [];
+      value.packagePriceMode = "manual";
+      value.packageDurationMode = "manual";
+    }
+
     if (hasOwnBodyField(req.body, "customCategoryId")) {
       const customCategoryResult = await validateCustomCategoryForBarber(
         req.body.customCategoryId,
@@ -255,6 +380,69 @@ export const updateService = async (req, res) => {
       }
 
       value.customCategoryId = customCategoryResult.value;
+    }
+
+    // ── Package handling on update ──
+    const resolvedType = value.type || service.type;
+
+    if (resolvedType === "package") {
+      // If includedServiceIds provided, validate them
+      if (hasOwnBodyField(req.body, "includedServiceIds")) {
+        const includedResult = await validateAndResolveIncludedServices(
+          req.body.includedServiceIds,
+          req.user._id,
+          service._id
+        );
+
+        if (includedResult.error) {
+          return res.status(400).json({ message: includedResult.error });
+        }
+
+        value.includedServiceIds = includedResult.value;
+      }
+
+      // Resolve price mode
+      if (hasOwnBodyField(req.body, "packagePriceMode")) {
+        if (!["manual", "sum"].includes(req.body.packagePriceMode)) {
+          return res.status(400).json({ message: "packagePriceMode must be 'manual' or 'sum'" });
+        }
+        value.packagePriceMode = req.body.packagePriceMode;
+      }
+
+      // Resolve duration mode
+      if (hasOwnBodyField(req.body, "packageDurationMode")) {
+        if (!["manual", "sum"].includes(req.body.packageDurationMode)) {
+          return res.status(400).json({ message: "packageDurationMode must be 'manual' or 'sum'" });
+        }
+        value.packageDurationMode = req.body.packageDurationMode;
+      }
+
+      // Auto-calculate price if sum mode
+      const effectivePackagePriceMode = value.packagePriceMode || service.packagePriceMode || "manual";
+      if (effectivePackagePriceMode === "sum") {
+        const ids = value.includedServiceIds || service.includedServiceIds || [];
+        if (ids.length > 0) {
+          const includedServices = await Service.find({ _id: { $in: ids } });
+          value.price = includedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+        }
+      }
+
+      // Auto-calculate duration if sum mode
+      const effectivePackageDurationMode = value.packageDurationMode || service.packageDurationMode || "manual";
+      if (effectivePackageDurationMode === "sum") {
+        const ids = value.includedServiceIds || service.includedServiceIds || [];
+        if (ids.length > 0) {
+          const includedServices = await Service.find({ _id: { $in: ids } });
+          value.duration = includedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+        }
+      }
+    }
+
+    // If switching to single, clear package fields
+    if (value.type === "single" && service.type !== "single") {
+      value.includedServiceIds = [];
+      value.packagePriceMode = "manual";
+      value.packageDurationMode = "manual";
     }
 
     Object.assign(service, value);

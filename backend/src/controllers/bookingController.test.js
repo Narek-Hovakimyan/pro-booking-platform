@@ -599,6 +599,53 @@ test("booking only accepts active services owned by the selected barber", async 
   assert.equal(createdBookings.length, 0);
 });
 
+test("booking from package service snapshots package name/duration/price on creation", async () => {
+  const createdBookings = [];
+  const packageServiceId = "64b000000000000000000099";
+  const packageService = {
+    _id: packageServiceId,
+    barberId,
+    name: "Hair + Beard Package",
+    duration: 90,
+    price: 200,
+    type: "package",
+    includedServiceIds: [serviceId, "64b000000000000000000098"],
+    packagePriceMode: "sum",
+    packageDurationMode: "sum",
+  };
+
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async (query) => {
+    if (String(query._id) === String(packageServiceId)) return packageService;
+    return null;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId: packageServiceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(String(res.body.serviceId), packageServiceId);
+  assert.equal(res.body.serviceName, packageService.name);
+  assert.equal(res.body.duration, packageService.duration);
+  assert.equal(res.body.price, packageService.price);
+  assert.equal(createdBookings.length, 1);
+});
+
 // ── Plain object validation tests ──────────────────────────────────
 
 test("FormData: consultation JSON string 'null' returns 400 and cleans uploaded file", async () => {

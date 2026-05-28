@@ -739,11 +739,17 @@ export const notifyMatchingWaitlistEntries = async ({
       continue;
     }
 
-    // Create notification for the client
+    // Create notification for the client with safe data only
     await createNotification({
       userId: claimedEntry.clientId,
       type: "waitlist_slot_available",
       message: `A slot may be available with ${barberName} on ${date}.`,
+      data: {
+        waitlistId: claimedEntry._id,
+        barberId: claimedEntry.barberId,
+        salonId: claimedEntry.salonId || undefined,
+        serviceId: claimedEntry.serviceId,
+      },
     });
 
     notificationsSent += 1;

@@ -75,6 +75,25 @@ const serviceSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    type: {
+      type: String,
+      enum: ["single", "package"],
+      default: "single",
+    },
+    includedServiceIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
+      default: [],
+    },
+    packagePriceMode: {
+      type: String,
+      enum: ["manual", "sum"],
+      default: "manual",
+    },
+    packageDurationMode: {
+      type: String,
+      enum: ["manual", "sum"],
+      default: "manual",
+    },
   },
   { timestamps: true }
 );
