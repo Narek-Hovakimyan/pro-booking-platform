@@ -47,6 +47,7 @@ const SalonsPage = lazy(() => import("./client/pages/SalonsPage"));
 const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
 const EventsPage = lazy(() => import("./pages/EventsPage"));
 const CertificatePage = lazy(() => import("./pages/CertificatePage"));
+const RevenuePage = lazy(() => import("./barber/pages/RevenuePage"));
 
 export default function App() {
   const dispatch = useDispatch();
@@ -759,6 +760,14 @@ export default function App() {
               element={
                 <ProtectedRoute role="barber">
                   <BarberProfilePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/revenue"
+              element={
+                <ProtectedRoute role="barber">
+                  <RevenuePage />
                 </ProtectedRoute>
               }
             />
