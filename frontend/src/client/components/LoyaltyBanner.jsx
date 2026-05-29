@@ -5,12 +5,12 @@ import { getMyLoyaltyProgress } from "@/shared/api/loyalty";
 
 export default function LoyaltyBanner() {
   const { currentUser } = useSelector((state) => state.auth);
+  const canViewLoyalty = Boolean(currentUser?.id && currentUser?.role === "client");
   const [progress, setProgress] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser?.id || currentUser?.role !== "client") {
-      setLoading(false);
+    if (!canViewLoyalty) {
       return;
     }
 
@@ -30,9 +30,9 @@ export default function LoyaltyBanner() {
     return () => {
       mounted = false;
     };
-  }, [currentUser?.id, currentUser?.role]);
+  }, [canViewLoyalty]);
 
-  if (loading || progress.length === 0) return null;
+  if (!canViewLoyalty || loading || progress.length === 0) return null;
 
   return (
     <div className="space-y-3">

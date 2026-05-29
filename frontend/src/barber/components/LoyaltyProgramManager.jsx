@@ -5,6 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 
 export default function LoyaltyProgramManager() {
   const { currentUser } = useSelector((state) => state.auth);
+  const canManageLoyalty = Boolean(currentUser?.id && currentUser?.role === "barber");
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -17,23 +18,27 @@ export default function LoyaltyProgramManager() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!currentUser?.id || currentUser?.role !== "barber") {
-      setLoading(false);
+    if (!canManageLoyalty) {
       return;
     }
-    loadPrograms();
-  }, [currentUser?.id, currentUser?.role]);
 
-  const loadPrograms = async () => {
-    try {
-      const { data } = await api.get("/api/loyalty/programs/me");
-      setPrograms(data);
-    } catch {
-      setError("Could not load loyalty programs");
-    } finally {
-      setLoading(false);
-    }
-  };
+    let mounted = true;
+
+    api.get("/api/loyalty/programs/me")
+      .then(({ data }) => {
+        if (mounted) setPrograms(data);
+      })
+      .catch(() => {
+        if (mounted) setError("Could not load loyalty programs");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [canManageLoyalty]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -65,7 +70,7 @@ export default function LoyaltyProgramManager() {
     }
   };
 
-  if (loading) return null;
+  if (!canManageLoyalty || loading) return null;
 
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">

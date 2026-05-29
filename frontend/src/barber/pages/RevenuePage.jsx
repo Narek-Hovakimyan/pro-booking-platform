@@ -229,9 +229,18 @@ export default function RevenuePage() {
   const totalRevenue = revenueData?.totalRevenue ?? 0;
   const completedCount = revenueData?.completedBookingsCount ?? 0;
   const avgValue = revenueData?.averageBookingValue ?? 0;
-  const revenueByDay = revenueData?.revenueByDay ?? [];
-  const topByRevenue = revenueData?.topServicesByRevenue ?? [];
-  const topByCount = revenueData?.topServicesByCount ?? [];
+  const revenueByDay = useMemo(
+    () => revenueData?.revenueByDay ?? [],
+    [revenueData?.revenueByDay]
+  );
+  const topByRevenue = useMemo(
+    () => revenueData?.topServicesByRevenue ?? [],
+    [revenueData?.topServicesByRevenue]
+  );
+  const topByCount = useMemo(
+    () => revenueData?.topServicesByCount ?? [],
+    [revenueData?.topServicesByCount]
+  );
   const statusBreakdown = revenueData?.statusBreakdown ?? {};
 
   const maxDailyRevenue = useMemo(
