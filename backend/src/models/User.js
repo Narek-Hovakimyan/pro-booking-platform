@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+export const MAX_PHONE_LENGTH = 32;
+
 const defaultScheduleSchema = new mongoose.Schema(
   {
     startTime: { type: String, default: "09:00" },
@@ -50,6 +52,7 @@ const userSchema = new mongoose.Schema({
     required: true,
     unique: true,
     trim: true,
+    maxlength: MAX_PHONE_LENGTH,
   },
   email: {
     type: String,

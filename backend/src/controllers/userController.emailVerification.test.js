@@ -877,6 +877,49 @@ test("registerUser – rejects passwords shorter than eight characters", async (
   assert.equal(res.body.message, "Password must be at least 8 characters");
 });
 
+test("registerUser – trims phone before duplicate lookup", async () => {
+  const res = createResponse();
+  let phoneSeen;
+
+  User.findOne = async (filter) => {
+    phoneSeen = filter.phone;
+    return createBaseUser({ phone: filter.phone });
+  };
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        phone: "  +37400000000  ",
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Phone already exists");
+  assert.equal(phoneSeen, "+37400000000");
+});
+
+test("registerUser – rejects phone values over max length", async () => {
+  const res = createResponse();
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        phone: `+${"1".repeat(32)}`,
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Phone must be 32 characters or less");
+});
+
 test("loginUser – still requires phone and does not accept email-only login", async () => {
   const res = createResponse();
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+  ARMENIA_UTC_OFFSET_HOURS,
   getArmeniaDateKey,
   getCurrentMonthKey,
   isBeyondBookingHorizon,
@@ -83,4 +84,8 @@ test("isBeyondBookingHorizon does not validate month/day integrity (caller's job
 
 test("exported MAX_BOOKING_HORIZON_DAYS is 180", () => {
   assert.equal(MAX_BOOKING_HORIZON_DAYS, 180);
+});
+
+test("exported Armenia UTC offset is 4 hours", () => {
+  assert.equal(ARMENIA_UTC_OFFSET_HOURS, 4);
 });

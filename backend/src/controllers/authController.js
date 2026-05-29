@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -36,10 +36,17 @@ const signToken = (userId) => {
 
 export const registerUser = async (req, res) => {
   try {
-    const { name, phone, password, role = "client" } = req.body;
+    const { name, password, role = "client" } = req.body;
+    const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
 
     if (!name || !phone || !password) {
       return res.status(400).json({ message: "Name, phone, and password are required" });
+    }
+
+    if (phone.length > MAX_PHONE_LENGTH) {
+      return res.status(400).json({
+        message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
+      });
     }
 
     if (typeof password !== "string" || password.length < 8) {
@@ -82,7 +89,8 @@ export const registerUser = async (req, res) => {
 
 export const loginUser = async (req, res) => {
   try {
-    const { phone, password } = req.body;
+    const { password } = req.body;
+    const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
 
     if (!phone || !password) {
       return res.status(400).json({ message: "Phone and password are required" });

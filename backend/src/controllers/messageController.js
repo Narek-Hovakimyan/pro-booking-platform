@@ -3,6 +3,7 @@ import { createNotification } from "./notificationController.js";
 import { getIO } from "../socket.js";
 
 const userFields = "name phone role avatarUrl";
+const MAX_MESSAGE_TEXT_LENGTH = 5000;
 
 const parseLimit = (queryLimit) => {
   const limit = Number(queryLimit);
@@ -84,9 +85,16 @@ export const createMessage = async (req, res) => {
   try {
     const { receiverId, text } = req.body;
     const senderId = req.user.id;
+    const messageText = typeof text === "string" ? text.trim() : "";
 
-    if (!receiverId || !text?.trim()) {
+    if (!receiverId || !messageText) {
       return res.status(400).json({ message: "receiverId and text are required" });
+    }
+
+    if (messageText.length > MAX_MESSAGE_TEXT_LENGTH) {
+      return res.status(400).json({
+        message: `Message text must be ${MAX_MESSAGE_TEXT_LENGTH} characters or less`,
+      });
     }
 
     if (String(receiverId) === String(senderId)) {
@@ -96,7 +104,7 @@ export const createMessage = async (req, res) => {
     const message = await Message.create({
       senderId,
       receiverId,
-      text: text.trim(),
+      text: messageText,
     });
 
     const populatedMessage = await Message.findById(message._id)

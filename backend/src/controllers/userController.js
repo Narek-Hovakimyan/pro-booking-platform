@@ -1,7 +1,7 @@
 import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Salon from "../models/Salon.js";
-import User from "../models/User.js";
+import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import {
   createEmailVerificationToken,
   EMAIL_VERIFICATION_EXPIRY_MS,
@@ -33,6 +33,9 @@ const getUserData = (user) => ({
   favoriteSalons: user.favoriteSalons || [],
   createdAt: user.createdAt,
 });
+
+const normalizePhone = (phone) =>
+  typeof phone === "string" ? phone.trim() : "";
 
 const defaultScheduleFallback = {
   startTime: "09:00",
@@ -284,7 +287,21 @@ export const updateMyProfile = async (req, res) => {
     const userUnsets = {};
 
     if (name !== undefined) userUpdates.name = name;
-    if (phone !== undefined) userUpdates.phone = phone;
+    if (phone !== undefined) {
+      const normalizedPhone = normalizePhone(phone);
+
+      if (!normalizedPhone) {
+        return res.status(400).json({ message: "Phone is required" });
+      }
+
+      if (normalizedPhone.length > MAX_PHONE_LENGTH) {
+        return res.status(400).json({
+          message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
+        });
+      }
+
+      userUpdates.phone = normalizedPhone;
+    }
     if (city !== undefined) userUpdates.city = city;
     if (avatarUrl !== undefined || imageUrl !== undefined) {
       userUpdates.avatarUrl = avatarUrl ?? imageUrl;

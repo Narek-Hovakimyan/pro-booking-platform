@@ -2,16 +2,19 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+  createMessage,
   getConversation,
   getMyMessages,
 } from "./messageController.js";
 import Message from "../models/Message.js";
 
 const originalMethods = {
+  messageCreate: Message.create,
   messageFind: Message.find,
 };
 
 afterEach(() => {
+  Message.create = originalMethods.messageCreate;
   Message.find = originalMethods.messageFind;
 });
 
@@ -104,4 +107,28 @@ test("getConversation returns newest limited messages in ascending response orde
     res.body.map((message) => message._id),
     ["middle", "new"]
   );
+});
+
+test("createMessage rejects text over max length before creating message", async () => {
+  let createCalled = false;
+  const res = createResponse();
+
+  Message.create = async () => {
+    createCalled = true;
+  };
+
+  await createMessage(
+    {
+      user: { id: "sender-1" },
+      body: {
+        receiverId: "receiver-1",
+        text: "x".repeat(5001),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Message text must be 5000 characters or less");
+  assert.equal(createCalled, false);
 });

@@ -5,7 +5,7 @@ import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
-import User from "../models/User.js";
+import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { createCrudController } from "./crudController.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
@@ -97,6 +97,9 @@ const getReviewStatsByBarberId = (reviews = []) => {
 
 const normalizeSearchValue = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const normalizePhone = (phone) =>
+  typeof phone === "string" ? phone.trim() : "";
 
 const serviceMatchesDiscoveryFilters = (service, filters) => {
   if (!service?.active) return false;
@@ -462,7 +465,21 @@ export const upsertProfileByBarberId = async (req, res) => {
     };
 
     if (name !== undefined) userUpdates.name = name;
-    if (phone !== undefined) userUpdates.phone = phone;
+    if (phone !== undefined) {
+      const normalizedPhone = normalizePhone(phone);
+
+      if (!normalizedPhone) {
+        return res.status(400).json({ message: "Phone is required" });
+      }
+
+      if (normalizedPhone.length > MAX_PHONE_LENGTH) {
+        return res.status(400).json({
+          message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
+        });
+      }
+
+      userUpdates.phone = normalizedPhone;
+    }
     if (city !== undefined) {
       userUpdates.city = city;
       profileUpdates.city = city;

@@ -2,6 +2,14 @@ const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
 const timeKeyPattern = /^\d{2}:\d{2}$/;
 
+// Armenia stays on UTC+04:00 year-round and does not observe DST.
+export const ARMENIA_UTC_OFFSET_HOURS = 4;
+const ARMENIA_UTC_OFFSET_MINUTES = ARMENIA_UTC_OFFSET_HOURS * 60;
+const ARMENIA_UTC_OFFSET_LABEL = `+${String(ARMENIA_UTC_OFFSET_HOURS).padStart(
+  2,
+  "0"
+)}:00`;
+
 export const formatDateKey = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -60,7 +68,7 @@ export const timeToMinutes = (time) => {
 };
 
 /**
- * Parse a booking's date+time as Armenia/Yerevan (UTC+04:00).
+ * Parse a booking's date+time as Armenia/Yerevan.
  * bookingDate + time strings represent Armenia wall-clock time.
  * Returns a Date (UTC epoch), or null if invalid.
  */
@@ -68,7 +76,9 @@ export const getBookingDateTime = (booking) => {
   if (!booking?.bookingDate || !booking?.time) return null;
   if (!isDateKey(booking.bookingDate) || !isTimeKey(booking.time)) return null;
 
-  const dateTime = new Date(`${booking.bookingDate}T${booking.time}:00+04:00`);
+  const dateTime = new Date(
+    `${booking.bookingDate}T${booking.time}:00${ARMENIA_UTC_OFFSET_LABEL}`
+  );
 
   return Number.isNaN(dateTime.getTime()) ? null : dateTime;
 };
@@ -91,10 +101,11 @@ export const getBookingEndDateTime = (booking) => {
 
 /**
  * Get the current Armenia/Yerevan minutes-of-day (0-1439) from an arbitrary Date.
- * This is server-timezone-independent because it uses UTC methods + 4h offset.
+ * This is server-timezone-independent because it uses UTC methods + Armenia offset.
  */
 export const getArmeniaMinutesOfDay = (date) => {
-  const minutes = date.getUTCHours() * 60 + date.getUTCMinutes() + 4 * 60;
+  const minutes =
+    date.getUTCHours() * 60 + date.getUTCMinutes() + ARMENIA_UTC_OFFSET_MINUTES;
 
   return minutes % (24 * 60);
 };
@@ -104,7 +115,7 @@ export const getArmeniaMinutesOfDay = (date) => {
  * Server-timezone-independent.
  */
 export const getArmeniaDateKey = (date) => {
-  const armeniaMs = date.getTime() + 4 * 60 * 60 * 1000;
+  const armeniaMs = date.getTime() + ARMENIA_UTC_OFFSET_HOURS * 60 * 60 * 1000;
   const armeniaDate = new Date(armeniaMs);
   const year = armeniaDate.getUTCFullYear();
   const month = String(armeniaDate.getUTCMonth() + 1).padStart(2, "0");
