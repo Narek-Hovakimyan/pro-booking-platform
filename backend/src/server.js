@@ -25,6 +25,7 @@ import debugRoutes from "./routes/debugRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import waitlistRoutes from "./routes/waitlistRoutes.js";
 import portfolioPhotoRoutes from "./routes/portfolioPhotoRoutes.js";
+import loyaltyRoutes from "./routes/loyaltyRoutes.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlistExpirationScheduler.js";
@@ -124,6 +125,7 @@ if (!isProduction) {
 app.use("/api/events", eventRoutes);
 app.use("/api/waitlist", waitlistRoutes);
 app.use("/api/portfolio", portfolioPhotoRoutes);
+app.use("/api/loyalty", loyaltyRoutes);
 
 const startServer = async () => {
   await connectDB();

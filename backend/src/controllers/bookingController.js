@@ -4,6 +4,8 @@ import Booking from "../models/Booking.js";
 import mongoose from "mongoose";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
+import LoyaltyProgram from "../models/LoyaltyProgram.js";
+import LoyaltyProgress from "../models/LoyaltyProgress.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
 import User from "../models/User.js";
@@ -698,6 +700,65 @@ export const updateBooking = async (req, res) => {
                 salonId: booking.salonId || null,
               },
             });
+          }
+        }
+
+        // ── Loyalty / punch-card automation ──
+        if (booking.clientId) {
+          const activeProgram = await LoyaltyProgram.findOne({
+            ownerType: "barber",
+            ownerId: booking.barberId,
+            active: true,
+          });
+
+          if (activeProgram) {
+            let progress = await LoyaltyProgress.findOne({
+              programId: activeProgram._id,
+              clientId: booking.clientId,
+            });
+
+            if (!progress) {
+              progress = await LoyaltyProgress.create({
+                programId: activeProgram._id,
+                clientId: booking.clientId,
+                punchBookingIds: [],
+                punchCount: 0,
+                rewardsEarned: 0,
+              });
+            }
+
+            // Prevent duplicate punch for same booking
+            const alreadyPunched = progress.punchBookingIds.some(
+              (id) => String(id) === String(booking._id)
+            );
+
+            if (!alreadyPunched) {
+              progress.punchBookingIds.push(booking._id);
+              progress.punchCount += 1;
+              progress.lastPunchAt = new Date();
+
+              // Compute expected rewards (cumulative, never resets)
+              const expectedRewards = Math.floor(
+                progress.punchCount / activeProgram.requiredVisits
+              );
+
+              if (expectedRewards > progress.rewardsEarned) {
+                progress.rewardsEarned = expectedRewards;
+                await createNotification({
+                  userId: booking.clientId,
+                  type: "loyalty_reward_earned",
+                  message: `You've earned a reward: ${activeProgram.rewardText}`,
+                  data: {
+                    programId: activeProgram._id,
+                    bookingId: booking._id,
+                    barberId: booking.barberId,
+                    salonId: booking.salonId || null,
+                  },
+                });
+              }
+
+              await progress.save();
+            }
           }
         }
       }

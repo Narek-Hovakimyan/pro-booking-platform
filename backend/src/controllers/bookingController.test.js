@@ -15,6 +15,9 @@ import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
+import LoyaltyProgram from "../models/LoyaltyProgram.js";
+import LoyaltyProgress from "../models/LoyaltyProgress.js";
+import mongoose from "mongoose";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
@@ -1617,6 +1620,315 @@ test("existing reference image create tests still pass after consultation/consen
   assert.deepEqual(createdBookings[0].consultation, { hairType: "fine" });
   assert.equal(createdBookings[0].consent.accepted, true);
   assert.equal(createdBookings[0].consent.textVersion, "v1.0");
+});
+
+// =========================================================================
+// Phase 9 — Loyalty / punch-card automation
+// =========================================================================
+
+test("completing accepted booking with active loyalty program creates punch progress for client", async () => {
+  const savedProgresses = [];
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  LoyaltyProgram.findOne = async () => ({
+    _id: "loyalty-prog-1",
+    ownerType: "barber",
+    ownerId: barberId,
+    title: "Frequent Visit",
+    requiredVisits: 5,
+    rewardText: "Free haircut",
+    active: true,
+  });
+  LoyaltyProgress.findOne = async () => null;
+  LoyaltyProgress.create = async (payload) => {
+    const doc = {
+      ...payload,
+      _id: "loyalty-progress-1",
+      async save() { return this; },
+    };
+    savedProgresses.push(doc);
+    return doc;
+  };
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(savedProgresses.length, 1);
+  assert.equal(savedProgresses[0].programId, "loyalty-prog-1");
+  assert.equal(savedProgresses[0].clientId, clientId);
+  assert.equal(savedProgresses[0].punchCount, 1);
+  assert.equal(savedProgresses[0].punchBookingIds.length, 1);
+  assert.equal(String(savedProgresses[0].punchBookingIds[0]), String(booking._id));
+  assert.equal(savedProgresses[0].rewardsEarned, 0);
+});
+
+test("duplicate punch for same booking is skipped (punchBookingIds dedup)", async () => {
+  let savedProgress = {
+    _id: "loyalty-progress-2",
+    programId: "loyalty-prog-1",
+    clientId,
+    punchBookingIds: [new mongoose.Types.ObjectId("000000000000000000000001")],
+    punchCount: 0,
+    rewardsEarned: 0,
+  };
+  let saveCalled = false;
+  const notifications = [];
+
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  LoyaltyProgram.findOne = async () => ({
+    _id: "loyalty-prog-1",
+    ownerType: "barber",
+    ownerId: barberId,
+    title: "Frequent Visit",
+    requiredVisits: 5,
+    rewardText: "Free haircut",
+    active: true,
+  });
+  LoyaltyProgress.findOne = async () => savedProgress;
+  LoyaltyProgress.create = async () => { throw new Error("should not create"); };
+
+  const booking = createMutableBooking({
+    _id: "000000000000000000000001",
+    status: "accepted"
+  });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  // Override save to capture call
+  Object.defineProperty(savedProgress, "save", {
+    value: async function () { saveCalled = true; },
+    writable: true,
+  });
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  // save should not be called because the booking was already punched
+  assert.equal(saveCalled, false);
+  assert.equal(savedProgress.punchCount, 0); // unchanged
+  assert.equal(savedProgress.punchBookingIds.length, 1); // unchanged
+  // No loyalty_reward_earned notification
+  const rewardNotifs = notifications.filter((n) => n.type === "loyalty_reward_earned");
+  assert.equal(rewardNotifs.length, 0);
+});
+
+test("reward notification created when punchCount reaches requiredVisits threshold", async () => {
+  let savedProgress = {
+    _id: "loyalty-progress-3",
+    programId: "loyalty-prog-1",
+    clientId,
+    punchBookingIds: [],
+    punchCount: 4,
+    rewardsEarned: 0,
+    save: async function () { /* mock */ },
+  };
+  const notifications = [];
+
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  LoyaltyProgram.findOne = async () => ({
+    _id: "loyalty-prog-1",
+    ownerType: "barber",
+    ownerId: barberId,
+    title: "Frequent Visit",
+    requiredVisits: 5,
+    rewardText: "Free haircut",
+    active: true,
+  });
+  LoyaltyProgress.findOne = async () => savedProgress;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+
+  const rewardNotifs = notifications.filter((n) => n.type === "loyalty_reward_earned");
+  assert.equal(rewardNotifs.length, 1);
+  assert.equal(rewardNotifs[0].userId, clientId);
+  assert.ok(rewardNotifs[0].message.includes("Free haircut"));
+  assert.ok(rewardNotifs[0].data.programId);
+  assert.ok(rewardNotifs[0].data.bookingId);
+  assert.ok(rewardNotifs[0].data.barberId);
+});
+
+test("no active loyalty program means no loyalty progress or reward notification", async () => {
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  LoyaltyProgram.findOne = async () => null;
+  let progressFindCalled = false;
+  LoyaltyProgress.findOne = async () => {
+    progressFindCalled = true;
+    return null;
+  };
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  // Should not have queried progress at all since no active program
+  assert.equal(progressFindCalled, false);
+  const rewardNotifs = notifications.filter((n) => n.type === "loyalty_reward_earned");
+  assert.equal(rewardNotifs.length, 0);
+});
+
+test("non-completion status changes do not create loyalty progress", async () => {
+  const notifications = [];
+  let loyaltyProgramFindCallCount = 0;
+
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+  LoyaltyProgram.findOne = async () => {
+    loyaltyProgramFindCallCount++;
+    return null;
+  };
+  Review.exists = async () => false;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  for (const statusChange of [
+    { from: "pending", to: "accepted" },
+    { from: "pending", to: "rejected", rejectionReason: "Unavailable" },
+    { from: "accepted", to: "rejected", rejectionReason: "Unavailable" },
+  ]) {
+    const booking = createMutableBooking({ status: statusChange.from });
+    const res = createResponse();
+    Booking.findById = async () => booking;
+
+    await updateBooking(
+      {
+        user: barber,
+        params: { id: booking._id },
+        body: { status: statusChange.to, ...(statusChange.rejectionReason ? { rejectionReason: statusChange.rejectionReason } : {}) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+  }
+
+  // LoyaltyProgram.findOne should not have been called for non-completion changes
+  assert.equal(loyaltyProgramFindCallCount, 0);
+  const rewardNotifs = notifications.filter((n) => n.type === "loyalty_reward_earned");
+  assert.equal(rewardNotifs.length, 0);
+});
+
+test("existing Phase 7 and Phase 8 tests still pass after loyalty punch addition", async () => {
+  let notificationCounter = 0;
+  const notifications = [];
+  Notification.create = async (payload) => {
+    const doc = { _id: `notif-${++notificationCounter}`, ...payload };
+    notifications.push(doc);
+    return doc;
+  };
+  Notification.findOne = async () => null;
+  Review.exists = async () => false;
+  LoyaltyProgram.findOne = async () => null;
+  User.findById = () => ({
+    select: async () => ({ name: "Barber" }),
+  });
+
+  // Test: barber completes the accepted booking
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "completed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(booking.status, "completed");
+  assert.ok(booking.completedAt);
+
+  // review_request still created
+  const reviewRequests = notifications.filter((n) => n.type === "review_request");
+  assert.equal(reviewRequests.length, 1);
+
+  // book_again_reminder still created
+  const bookAgainReminders = notifications.filter((n) => n.type === "book_again_reminder");
+  assert.equal(bookAgainReminders.length, 1);
+
+  // loyalty notifications not created
+  const rewardNotifs = notifications.filter((n) => n.type === "loyalty_reward_earned");
+  assert.equal(rewardNotifs.length, 0);
 });
 
 // ── Contract/integration tests: frontend-shaped payload ──────────────

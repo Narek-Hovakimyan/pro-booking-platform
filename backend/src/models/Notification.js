@@ -37,6 +37,11 @@ const notificationDataSchema = new mongoose.Schema(
       ref: "Salon",
       default: null,
     },
+    programId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LoyaltyProgram",
+      default: null,
+    },
     waitlistId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "WaitlistEntry",

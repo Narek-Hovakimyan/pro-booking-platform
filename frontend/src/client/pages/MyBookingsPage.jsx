@@ -7,6 +7,7 @@ import MyBookingsHeader from "@/client/components/bookings/MyBookingsHeader";
 import MyBookingsModals from "@/client/components/bookings/MyBookingsModals";
 import MyBookingsSections from "@/client/components/bookings/MyBookingsSections";
 import NextBookingSection from "@/client/components/bookings/NextBookingSection";
+import LoyaltyBanner from "@/client/components/LoyaltyBanner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import api from "@/shared/api/axios";
 import { getSocket } from "@/shared/lib/socket";
@@ -626,6 +627,7 @@ export default function MyBookingsPage() {
   return (
     <div className="space-y-5 sm:space-y-6">
       <MyBookingsHeader error={error} />
+      <LoyaltyBanner />
 
       <Card className="rounded-2xl sm:rounded-3xl">
         <CardContent className="space-y-4 p-4 sm:p-6">

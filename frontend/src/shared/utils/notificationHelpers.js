@@ -56,6 +56,10 @@ export function getNotificationGroup(rawType) {
     return "job";
   }
 
+  if (rawType.startsWith("loyalty_")) {
+    return "loyalty";
+  }
+
   // message, review, and others fall back to their raw type or system
   return rawType;
 }
@@ -138,6 +142,12 @@ export const TYPE_CONFIG = {
     label: "Job",
     accent: "border-l-violet-400 bg-violet-50/40",
     dot: "bg-violet-500",
+  },
+  loyalty: {
+    icon: Award,
+    label: "Loyalty",
+    accent: "border-l-pink-400 bg-pink-50/40",
+    dot: "bg-pink-500",
   },
   system: {
     icon: Info,
