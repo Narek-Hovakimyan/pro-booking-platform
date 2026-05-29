@@ -143,6 +143,41 @@ test("completed booking can still be reviewed", async () => {
   assert.equal(res.body.bookingId, bookingId);
 });
 
+test("createReview rejects invalid rating values before DB lookup", async () => {
+  for (const rating of [0, -1, 6, "5", null]) {
+    const res = createResponse();
+    let bookingLookupCount = 0;
+    let createCount = 0;
+
+    Booking.findById = async () => {
+      bookingLookupCount++;
+      return null;
+    };
+    Review.create = async () => {
+      createCount++;
+      return {};
+    };
+
+    await createReview(
+      {
+        user: { _id: clientId },
+        body: {
+          barberId,
+          bookingId,
+          rating,
+          comment: "Great",
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, "Rating must be a number from 1 to 5");
+    assert.equal(bookingLookupCount, 0);
+    assert.equal(createCount, 0);
+  }
+});
+
 // ── Reply tests for barber reviews ──────────────────────────────────
 
 test("barber can add reply to own review", async () => {

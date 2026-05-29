@@ -859,6 +859,24 @@ test("registerUser – still requires phone even if email is supplied", async ()
   assert.equal(res.body.message, "Name, phone, and password are required");
 });
 
+test("registerUser – rejects passwords shorter than eight characters", async () => {
+  const res = createResponse();
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        phone: "+37400000000",
+        password: "secret",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Password must be at least 8 characters");
+});
+
 test("loginUser – still requires phone and does not accept email-only login", async () => {
   const res = createResponse();
 

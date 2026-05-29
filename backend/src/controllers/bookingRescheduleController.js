@@ -139,11 +139,6 @@ export const acceptRescheduleRequest = async (req, res) => {
     const requestedBookingDate = storedDateToDateKey(
       pendingRequest.requestedBookingDate
     );
-    const requestedTime = pendingRequest.requestedTime;
-    const requestedDayKey =
-      pendingRequest.requestedDayKey ||
-      getDayKeyFromDate(requestedBookingDate) ||
-      booking.dayKey;
 
     const acceptResult = await withBookingCreationLock(
       getBookingCreationLockKey({
@@ -151,42 +146,67 @@ export const acceptRescheduleRequest = async (req, res) => {
         bookingDate: requestedBookingDate,
       }),
       async () => {
-        if (!hasPendingRescheduleRequest(booking)) {
+        const lockedBooking = await Booking.findById(req.params.id);
+
+        if (!lockedBooking) {
+          return { statusCode: 404, message: "Booking not found" };
+        }
+
+        if (!isAssignedBarberForBooking(req.user, lockedBooking)) {
+          return {
+            statusCode: 403,
+            message: "Only the assigned barber can accept reschedule request",
+          };
+        }
+
+        if (!hasPendingRescheduleRequest(lockedBooking)) {
           return { message: "No pending reschedule request" };
         }
 
+        const lockedRequest = lockedBooking.rescheduleRequest;
+        const lockedRequestedBookingDate = storedDateToDateKey(
+          lockedRequest.requestedBookingDate
+        );
+        const lockedRequestedTime = lockedRequest.requestedTime;
+        const lockedRequestedDayKey =
+          lockedRequest.requestedDayKey ||
+          getDayKeyFromDate(lockedRequestedBookingDate) ||
+          lockedBooking.dayKey;
+
         const latestSlotValidation = await validateBookingSlot({
-          barberId: booking.barberId,
-          salonId: booking?.salonId || null,
-          bookingDate: requestedBookingDate,
-          dayKey: requestedDayKey,
-          time: requestedTime,
-          duration: booking.duration,
-          ignoreBookingId: booking._id,
+          barberId: lockedBooking.barberId,
+          salonId: lockedBooking?.salonId || null,
+          bookingDate: lockedRequestedBookingDate,
+          dayKey: lockedRequestedDayKey,
+          time: lockedRequestedTime,
+          duration: lockedBooking.duration,
+          ignoreBookingId: lockedBooking._id,
         });
 
         if (latestSlotValidation.message) {
           return { message: latestSlotValidation.message };
         }
 
-        booking.bookingDate = requestedBookingDate;
-        booking.dayKey = latestSlotValidation.effectiveDayKey;
-        booking.time = requestedTime;
-        booking.reminderSentAt = null;
-        booking.reminder24hSentAt = null;
-        booking.reminder2hSentAt = null;
-        booking.rescheduleRequest.status = "accepted";
-        booking.rescheduleRequest.respondedBy = req.user._id;
-        booking.rescheduleRequest.respondedAt = new Date();
+        lockedBooking.bookingDate = lockedRequestedBookingDate;
+        lockedBooking.dayKey = latestSlotValidation.effectiveDayKey;
+        lockedBooking.time = lockedRequestedTime;
+        lockedBooking.reminderSentAt = null;
+        lockedBooking.reminder24hSentAt = null;
+        lockedBooking.reminder2hSentAt = null;
+        lockedBooking.rescheduleRequest.status = "accepted";
+        lockedBooking.rescheduleRequest.respondedBy = req.user._id;
+        lockedBooking.rescheduleRequest.respondedAt = new Date();
 
-        await booking.save();
+        await lockedBooking.save();
 
-        return { booking };
+        return { booking: lockedBooking };
       }
     );
 
     if (acceptResult.message) {
-      return res.status(400).json({ message: acceptResult.message });
+      return res.status(acceptResult.statusCode || 400).json({
+        message: acceptResult.message,
+      });
     }
 
     const updatedBooking = acceptResult.booking;

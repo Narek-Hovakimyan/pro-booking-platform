@@ -20,10 +20,10 @@ export const getMyMessages = async (req, res) => {
     })
       .populate("senderId", userFields)
       .populate("receiverId", userFields)
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(limit);
 
-    return res.json(messages);
+    return res.json([...messages].reverse());
   } catch (error) {
     return res.status(500).json({
       message: error.message || "Could not fetch messages",
@@ -45,10 +45,10 @@ export const getConversation = async (req, res) => {
     })
       .populate("senderId", userFields)
       .populate("receiverId", userFields)
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(limit);
 
-    return res.json(messages);
+    return res.json([...messages].reverse());
   } catch (error) {
     return res.status(500).json({
       message: error.message || "Could not fetch conversation",

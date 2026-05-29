@@ -46,9 +46,20 @@ export const createReview = async (req, res) => {
   try {
     const { barberId, bookingId, rating, comment = "" } = req.body;
 
-    if (!barberId || !bookingId || !rating) {
+    if (!barberId || !bookingId || rating === undefined) {
       return res.status(400).json({
         message: "barberId, bookingId, and rating are required",
+      });
+    }
+
+    if (
+      typeof rating !== "number" ||
+      !Number.isFinite(rating) ||
+      rating < 1 ||
+      rating > 5
+    ) {
+      return res.status(400).json({
+        message: "Rating must be a number from 1 to 5",
       });
     }
 

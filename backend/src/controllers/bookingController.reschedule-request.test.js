@@ -398,6 +398,55 @@ test("accept revalidates requested slot against accepted and confirmed bookings"
   }
 });
 
+test("accept re-fetches inside lock and rejects stale pending state", async () => {
+  const staleBooking = createMutableBooking({
+    status: "accepted",
+    bookingDate,
+    time: "10:00",
+    rescheduleRequest: createPendingRescheduleRequest(),
+  });
+  const freshBooking = createMutableBooking({
+    status: "accepted",
+    bookingDate,
+    time: "10:00",
+    rescheduleRequest: createPendingRescheduleRequest({
+      status: "accepted",
+      respondedBy: barberId,
+      respondedAt: new Date("2099-06-01T09:00:00.000Z"),
+    }),
+  });
+  const res = createResponse();
+  let findByIdCalls = 0;
+  let slotValidationFinds = 0;
+
+  Booking.findById = async () => {
+    findByIdCalls++;
+    return findByIdCalls === 1 ? staleBooking : freshBooking;
+  };
+  mockRescheduleDependencies([]);
+  Booking.find = async () => {
+    slotValidationFinds++;
+    return [];
+  };
+
+  await acceptRescheduleRequest(
+    {
+      user: barber,
+      params: { id: staleBooking._id },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "No pending reschedule request");
+  assert.equal(findByIdCalls, 2);
+  assert.equal(slotValidationFinds, 0);
+  assert.equal(staleBooking.rescheduleRequest.status, "pending");
+  assert.equal(staleBooking.saveCalled, false);
+  assert.equal(freshBooking.saveCalled, false);
+});
+
 test("accept notifies client", async () => {
   const booking = createMutableBooking({
     status: "accepted",

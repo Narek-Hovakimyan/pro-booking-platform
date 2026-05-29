@@ -42,6 +42,12 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "Name, phone, and password are required" });
     }
 
+    if (typeof password !== "string" || password.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters",
+      });
+    }
+
     if (!["client", "barber"].includes(role)) {
       return res.status(400).json({ message: "Role must be client or barber" });
     }
