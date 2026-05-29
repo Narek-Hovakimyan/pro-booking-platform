@@ -6,6 +6,7 @@ import path from "path";
 import {
   __bookingTestHooks,
   createBooking,
+  delayBooking,
   getReferenceImage,
   updateBooking,
   updateTreatmentRecord,
@@ -47,6 +48,8 @@ import {
   serviceId,
 } from "./bookingController.testUtils.js";
 
+const originalConsoleError = console.error;
+
 const oldAutoClosedWeeklySchedule = {
   sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
   mon: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
@@ -69,6 +72,7 @@ afterEach(() => {
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
   User.findById = originalMethods.userFindById;
+  console.error = originalConsoleError;
 });
 
 const bookingReferenceDir = path.resolve(process.cwd(), "uploads", "booking-references");
@@ -1019,6 +1023,143 @@ test("unauthorized user cannot update another user's booking", async () => {
   assert.equal(booking.saveCalled, false);
 });
 
+test("updateBooking unexpected error returns 500", async () => {
+  const res = createResponse();
+  console.error = () => {};
+  Booking.findById = async () => {
+    throw new Error("database unavailable");
+  };
+
+  await updateBooking(
+    {
+      user: client,
+      params: { id: "booking-1" },
+      body: { status: "cancelled", cancelReason: "Plans changed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not update booking");
+});
+
+test("assigned barber can cancel manual booking without clientId", async () => {
+  const booking = createMutableBooking({
+    clientId: null,
+    createdBy: "barber",
+    status: "accepted",
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "cancelled", cancelReason: "Manual booking cancelled" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(booking.status, "cancelled");
+  assert.equal(booking.cancelReason, "Manual booking cancelled");
+  assert.equal(booking.cancelledBy, barberId);
+  assert.equal(booking.saveCalled, true);
+});
+
+test("unrelated barber and client cannot cancel manual booking", async () => {
+  const unrelatedBarber = {
+    _id: "64b000000000000000000009",
+    id: "64b000000000000000000009",
+    role: "barber",
+  };
+
+  for (const user of [unrelatedBarber, client]) {
+    const booking = createMutableBooking({
+      clientId: null,
+      createdBy: "barber",
+      status: "accepted",
+    });
+    const res = createResponse();
+
+    Booking.findById = async () => booking;
+
+    await updateBooking(
+      {
+        user,
+        params: { id: booking._id },
+        body: { status: "cancelled", cancelReason: "Trying to cancel" },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(booking.status, "accepted");
+    assert.equal(booking.saveCalled, false);
+  }
+});
+
+test("delayBooking rejects invalid bookingDate or time before grace bypass", async () => {
+  for (const overrides of [
+    { bookingDate: "not-a-date", expectedMessage: "bookingDate must be YYYY-MM-DD" },
+    { time: "not-a-time", expectedMessage: "Booking time is invalid" },
+  ]) {
+    const booking = createMutableBooking({
+      status: "accepted",
+      ...overrides,
+    });
+    const res = createResponse();
+    let slotValidationFinds = 0;
+    let updateAttempts = 0;
+
+    Booking.findById = async () => booking;
+    Booking.find = async () => {
+      slotValidationFinds++;
+      return [];
+    };
+    Booking.findOneAndUpdate = async () => {
+      updateAttempts++;
+      return booking;
+    };
+
+    await delayBooking(
+      {
+        user: client,
+        params: { id: booking._id },
+        body: { delayMinutes: 10 },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, overrides.expectedMessage);
+    assert.equal(slotValidationFinds, 0);
+    assert.equal(updateAttempts, 0);
+  }
+});
+
+test("delayBooking unexpected error returns 500", async () => {
+  const res = createResponse();
+  console.error = () => {};
+  Booking.findById = async () => {
+    throw new Error("database unavailable");
+  };
+
+  await delayBooking(
+    {
+      user: client,
+      params: { id: "booking-1" },
+      body: { delayMinutes: 10 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not delay booking");
+});
+
 test("overlapping 10:20 booking is rejected against 10:00-11:00 booking", async () => {
   Schedule.findOne = async () => null;
   Booking.find = mockBookingFind([
@@ -1198,6 +1339,7 @@ test("booking create cleans uploaded reference files on database error", async (
   const filePath = createReferenceUploadFile(filename);
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  console.error = () => {};
   Booking.create = async () => {
     throw new Error("database unavailable");
   };
@@ -1221,9 +1363,41 @@ test("booking create cleans uploaded reference files on database error", async (
     res
   );
 
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "database unavailable");
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create booking");
   assert.equal(fs.existsSync(filePath), false);
+});
+
+test("createBooking validation error returns 400", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  console.error = () => {};
+  Booking.create = async () => {
+    const error = new Error("Booking validation failed");
+    error.name = "ValidationError";
+    throw error;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Booking validation failed");
 });
 
 test("GET reference image unauthenticated returns 401", async () => {

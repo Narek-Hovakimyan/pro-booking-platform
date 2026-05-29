@@ -24,6 +24,7 @@ import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import {
   getBookingDateTime,
   getDayKeyFromDate,
+  isDateKey,
   timeToMinutes,
 } from "../utils/bookingDateTime.js";
 import {
@@ -143,6 +144,26 @@ const getClientName = async (booking, fallbackUser) => {
 
 const sameId = (left, right) =>
   String(left || "") === String(right || "");
+
+const getErrorStatusCode = (error) => {
+  if (error?.statusCode) return error.statusCode;
+  if (error?.name === "ValidationError" || error?.name === "CastError") {
+    return 400;
+  }
+
+  return 500;
+};
+
+const sendControllerError = (res, error, fallbackMessage) => {
+  console.error(fallbackMessage, error);
+
+  const statusCode = getErrorStatusCode(error);
+  const message = statusCode === 500
+    ? fallbackMessage
+    : error?.message || fallbackMessage;
+
+  return res.status(statusCode).json({ message });
+};
 
 const canManageBookingSalon = async (booking, userId) => {
   if (!booking?.salonId || !userId) return false;
@@ -381,9 +402,7 @@ export const createBooking = async (req, res) => {
   } catch (error) {
     // DB or unexpected failure — cleanup uploaded files
     cleanup();
-    return res.status(400).json({
-      message: error.message || "Could not create booking",
-    });
+    return sendControllerError(res, error, "Could not create booking");
   }
 };
 
@@ -413,6 +432,7 @@ export const updateBooking = async (req, res) => {
     const isBookingClient =
       req.user?.role === "client" &&
       String(req.user._id) === String(booking.clientId);
+    const isManualBookingCancellation = !booking.clientId && isAssignedBarber;
     const normalizedBookingStatus = normalizeBookingStatus(booking.status);
     const safeUpdates = {};
     let rescheduleSlotRequest = null;
@@ -513,15 +533,12 @@ export const updateBooking = async (req, res) => {
     if (isCancelling) {
       const cancelReason = (req.body.cancelReason || "").trim();
 
-      if (req.user?.role === "barber") {
+      if (!isBookingClient && !isManualBookingCancellation) {
+        const message = booking.clientId
+          ? "Only client can cancel booking"
+          : "Only the assigned barber can cancel booking";
         return res.status(403).json({
-          message: "Only client can cancel booking",
-        });
-      }
-
-      if (!isBookingClient) {
-        return res.status(403).json({
-          message: "Only client can cancel booking",
+          message,
         });
       }
 
@@ -768,9 +785,7 @@ export const updateBooking = async (req, res) => {
 
     return res.json(booking);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not update booking",
-    });
+    return sendControllerError(res, error, "Could not update booking");
   }
 };
 
@@ -808,12 +823,17 @@ export const delayBooking = async (req, res) => {
 
     // Policy: delay only until appointment start + 5 minute grace window (Armenia time)
     const bookingStart = getBookingDateTime(booking);
-    if (bookingStart) {
-      const graceEnd = new Date(bookingStart.getTime() + 5 * 60 * 1000);
-      const now = new Date();
-      if (now > graceEnd) {
-        return res.status(400).json({ message: "This booking can no longer be delayed." });
-      }
+    if (!bookingStart) {
+      const message = isDateKey(booking.bookingDate)
+        ? "Booking time is invalid"
+        : "bookingDate must be YYYY-MM-DD";
+      return res.status(400).json({ message });
+    }
+
+    const graceEnd = new Date(bookingStart.getTime() + 5 * 60 * 1000);
+    const now = new Date();
+    if (now > graceEnd) {
+      return res.status(400).json({ message: "This booking can no longer be delayed." });
     }
 
     const oldStartMinutes = timeToMinutes(booking.time);
@@ -916,9 +936,7 @@ export const delayBooking = async (req, res) => {
 
     return res.json(updatedBooking);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not delay booking",
-    });
+    return sendControllerError(res, error, "Could not delay booking");
   }
 };
 

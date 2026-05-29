@@ -85,6 +85,39 @@ test("future pending booking stays pending", async () => {
   assert.equal(expiredBookings.length, 0);
 });
 
+test("expirePendingBookings queries only date-eligible pending candidates", async () => {
+  let capturedQuery;
+  let capturedLimit;
+
+  Booking.find = (query) => {
+    capturedQuery = query;
+    return {
+      limit(limit) {
+        capturedLimit = limit;
+        return [];
+      },
+    };
+  };
+  Booking.findOneAndUpdate = async () => null;
+  Notification.create = async (payload) => payload;
+
+  const expiredBookings = await expirePendingBookings(
+    new Date("2026-05-07T10:00:00+04:00")
+  );
+
+  assert.equal(expiredBookings.length, 0);
+  assert.equal(capturedQuery.status, "pending");
+  assert.ok(Array.isArray(capturedQuery.$or));
+  assert.notDeepEqual(capturedQuery, { status: "pending" });
+  assert.ok(
+    capturedQuery.$or.some((condition) => condition.bookingDate?.$lte === "2026-05-07")
+  );
+  assert.ok(
+    capturedQuery.$or.some((condition) => condition.dayKey?.$lte === "2026-05-07")
+  );
+  assert.equal(capturedLimit, 1000);
+});
+
 test("accepted past booking does not become expired", async () => {
   const booking = createBooking({ status: "accepted", time: "09:00" });
 
