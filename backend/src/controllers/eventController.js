@@ -22,6 +22,7 @@ import {
   parseEventPayload,
   isEventInPast,
 } from "../utils/eventUtils.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 /**
  * GET /api/events
@@ -346,9 +347,7 @@ export const createEvent = async (req, res) => {
 
     return res.status(201).json(populated);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not create event",
-    });
+    return sendControllerError(res, error, "Could not create event");
   }
 };
 
@@ -404,9 +403,7 @@ export const updateEvent = async (req, res) => {
 
     return res.json(populated);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not update event",
-    });
+    return sendControllerError(res, error, "Could not update event");
   }
 };
 
@@ -451,9 +448,7 @@ export const cancelEvent = async (req, res) => {
 
     return res.json({ message: "Event cancelled" });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not cancel event",
-    });
+    return sendControllerError(res, error, "Could not cancel event");
   }
 };
 
@@ -565,9 +560,7 @@ export const checkInRegistration = async (req, res) => {
       registration: mapRegistrationResponse(registration),
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not check in participant",
-    });
+    return sendControllerError(res, error, "Could not check in participant");
   }
 };
 

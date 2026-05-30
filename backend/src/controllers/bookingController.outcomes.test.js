@@ -34,6 +34,16 @@ afterEach(() => {
   Schedule.findOne = originalMethods.scheduleFindOne;
 });
 
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
 // --- No-show tests ---
 
 test("barber can mark own accepted past booking as no-show", async () => {
@@ -69,6 +79,27 @@ test("barber can mark own accepted past booking as no-show", async () => {
   assert.equal(notifications[0].type, "booking_no_show");
   assert.equal(notifications[0].userId, clientId);
   assert.deepEqual(notifications[0].data, { bookingId: booking._id });
+});
+
+test("markNoShow unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Booking.findById = async () => {
+    throw new Error("raw booking outcome failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await markNoShow(
+      {
+        user: barber,
+        params: { id: "64b000000000000000000005" },
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not mark no-show");
 });
 
 test("barber can mark own accepted past booking as late-cancelled", async () => {

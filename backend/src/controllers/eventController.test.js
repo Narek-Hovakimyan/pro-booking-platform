@@ -88,6 +88,16 @@ const createResponse = () => ({
   },
 });
 
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
 const createQuery = (value) => ({
   populate() {
     return this;
@@ -326,6 +336,62 @@ test("approved salon member can create off-site event without salonId", async ()
   assert.equal(res.statusCode, 201);
   assert.equal(createdPayload.salonId, null);
   assert.equal(createdPayload.location, "Conference Hall");
+});
+
+test("createEvent unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Salon.findById = async () => ({
+    _id: salonAId,
+    ownerId: organizerId,
+    admins: [],
+  });
+  Event.create = async () => {
+    throw new Error("raw event database failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await createEvent(
+      {
+        user: { _id: organizerId, role: "barber" },
+        body: {
+          title: "Advanced Color",
+          instructor: "Educator",
+          date: "2099-08-01",
+          time: "10:00",
+          duration: "90",
+          location: "Second Salon",
+          salonId: salonAId,
+        },
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create event");
+});
+
+test("registerForEvent unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.findById = async () => {
+    throw new Error("raw registration db failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await registerForEvent(
+      {
+        user: { _id: attendeeId, name: "Attendee" },
+        params: { id: eventId },
+        body: {},
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not register for event");
 });
 
 test("duplicate pending registration is blocked", async () => {

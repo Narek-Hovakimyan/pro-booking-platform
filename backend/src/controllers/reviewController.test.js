@@ -44,6 +44,16 @@ const createResponse = () => ({
   },
 });
 
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
 const mockReviewDependencies = ({ bookingStatus = "completed" } = {}) => {
   Booking.findById = async () => ({
     _id: bookingId,
@@ -176,6 +186,32 @@ test("createReview rejects invalid rating values before DB lookup", async () => 
     assert.equal(bookingLookupCount, 0);
     assert.equal(createCount, 0);
   }
+});
+
+test("createReview unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Booking.findById = async () => {
+    throw new Error("raw database failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await createReview(
+      {
+        user: { _id: clientId },
+        body: {
+          barberId,
+          bookingId,
+          rating: 5,
+          comment: "Great",
+        },
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create review");
 });
 
 // ── Reply tests for barber reviews ──────────────────────────────────

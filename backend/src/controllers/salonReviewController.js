@@ -3,6 +3,7 @@ import Salon from "../models/Salon.js";
 import SalonReview from "../models/SalonReview.js";
 import { createNotification } from "./notificationController.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const serializeReply = (reply) => {
   if (!reply || !reply.message) return null;
@@ -265,14 +266,9 @@ export const createSalonReview = async (req, res) => {
 
     return res.status(201).json(serializeSalonReview(populatedReview));
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({
-        message: "You have already reviewed this salon for this booking",
-      });
-    }
-
-    return res.status(400).json({
-      message: error.message || "Could not create salon review",
+    return sendControllerError(res, error, "Could not create salon review", {
+      duplicateKeyMessage: "You have already reviewed this salon for this booking",
+      duplicateKeyStatus: 400,
     });
   }
 };
@@ -320,9 +316,7 @@ export const addReplyToSalonReview = async (req, res) => {
 
     return res.json(serializeSalonReview(review));
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not add reply",
-    });
+    return sendControllerError(res, error, "Could not add reply");
   }
 };
 
@@ -362,8 +356,6 @@ export const deleteReplyFromSalonReview = async (req, res) => {
 
     return res.json(serializeSalonReview(review));
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not delete reply",
-    });
+    return sendControllerError(res, error, "Could not delete reply");
   }
 };

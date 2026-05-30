@@ -1,6 +1,7 @@
 import Booking from "../models/Booking.js";
 import Review from "../models/Review.js";
 import { createCrudController } from "./crudController.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const reviewController = createCrudController(Review, "Review");
 
@@ -111,14 +112,9 @@ export const createReview = async (req, res) => {
 
     return res.status(201).json(serializeReview(populatedReview));
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({
-        message: "This booking has already been reviewed",
-      });
-    }
-
-    return res.status(400).json({
-      message: error.message || "Could not create review",
+    return sendControllerError(res, error, "Could not create review", {
+      duplicateKeyMessage: "This booking has already been reviewed",
+      duplicateKeyStatus: 400,
     });
   }
 };
@@ -159,9 +155,7 @@ export const addReplyToReview = async (req, res) => {
 
     return res.json(serializeReview(populatedReview));
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not add reply",
-    });
+    return sendControllerError(res, error, "Could not add reply");
   }
 };
 
@@ -194,8 +188,6 @@ export const deleteReplyFromReview = async (req, res) => {
 
     return res.json(serializeReview(populatedReview));
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not delete reply",
-    });
+    return sendControllerError(res, error, "Could not delete reply");
   }
 };

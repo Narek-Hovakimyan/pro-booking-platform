@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { approveEntry, createEntry } from "./waitlistController.js";
+import { approveEntry, cancelEntry, createEntry } from "./waitlistController.js";
 import Booking from "../models/Booking.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
@@ -44,6 +44,16 @@ const createResponse = () => ({
     return this;
   },
 });
+
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
 
 const mockValidRelationships = () => {
   Service.findOne = async () => ({ _id: serviceId, barberId });
@@ -136,6 +146,51 @@ test("waitlist POST rejects invalid date without 500", async () => {
   assert.equal(response.statusCode, 400);
   assert.match(response.body.message, /date must be a valid YYYY-MM-DD calendar date/);
   assert.equal(created, false);
+});
+
+test("waitlist POST unexpected DB error returns 500 generic without leaking raw message", async () => {
+  const response = createResponse();
+
+  mockValidRelationships();
+  WaitlistEntry.findOne = async () => null;
+  WaitlistEntry.create = async () => {
+    throw new Error("raw waitlist database failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await createEntry(
+      {
+        user: { _id: clientId, role: "client" },
+        body: {
+          barberId,
+          salonId,
+          serviceId,
+          date: futureDate,
+        },
+      },
+      response
+    );
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.body.message, "Could not create waitlist entry");
+});
+
+test("waitlist cancel preserves known not-found service status", async () => {
+  const response = createResponse();
+
+  WaitlistEntry.findOne = async () => null;
+
+  await cancelEntry(
+    {
+      user: { _id: clientId, role: "client" },
+      params: { id: "waitlist-entry-1" },
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.body.message, "Waitlist entry not found or already cancelled");
 });
 
 test("legacy approve endpoint requires offer flow and creates no booking", async () => {

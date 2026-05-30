@@ -54,6 +54,16 @@ const createResponse = () => ({
   },
 });
 
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
 const mockCreateSalonReviewDependencies = ({
   bookingStatus = "completed",
   bookingSalonId = salonId,
@@ -189,6 +199,35 @@ test("salon review is rejected when salonId does not match booking", async () =>
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Salon review must match the booking salon");
+});
+
+test("createSalonReview unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Salon.findById = async () => {
+    throw new Error("raw salon db failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await createSalonReview(
+      {
+        user: {
+          _id: clientId,
+          name: "Client",
+        },
+        body: {
+          salonId,
+          bookingId,
+          rating: 5,
+          comment: "Great visit",
+        },
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create salon review");
 });
 
 // ── Reply tests for salon reviews ───────────────────────────────────

@@ -10,12 +10,44 @@ import {
   acceptWaitlistOffer,
   declineWaitlistOffer,
 } from "../services/waitlistService.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const getWaitlistActionStatus = (error) => {
   if (error.code === "NOT_FOUND") return 404;
   if (error.code === "FORBIDDEN") return 403;
   if (error.code === "CONFLICT") return 409;
-  return 400;
+  if (error.code === "VALIDATION_ERROR" || error.code === "INVALID_STATUS") return 400;
+  return 500;
+};
+
+const waitlistCreationClientErrorMessages = new Set([
+  "Service is not available for this barber",
+  "Barber not found",
+  "Salon not found",
+  "Barber does not work in selected salon",
+]);
+
+const isWaitlistCreationClientError = (message = "") =>
+  message.includes("date must be") ||
+  message.includes("Preferred start time") ||
+  message.includes("Preferred end time") ||
+  message.includes("Preferred start time must be before preferred end time") ||
+  waitlistCreationClientErrorMessages.has(message);
+
+const sendWaitlistError = (res, error, fallbackMessage) => {
+  if (error.code === "DUPLICATE_WAITLIST_ENTRY") {
+    return res.status(409).json({ message: error.message });
+  }
+
+  const statusCode = getWaitlistActionStatus(error);
+
+  if (statusCode !== 500) {
+    return res.status(statusCode).json({
+      message: error.message || fallbackMessage,
+    });
+  }
+
+  return sendControllerError(res, error, fallbackMessage);
 };
 
 /**
@@ -50,12 +82,13 @@ export const createEntry = async (req, res) => {
 
     return res.status(201).json(entry);
   } catch (error) {
-    if (error.code === "DUPLICATE_WAITLIST_ENTRY") {
-      return res.status(409).json({ message: error.message });
+    if (isWaitlistCreationClientError(error?.message)) {
+      return res.status(400).json({
+        message: error.message || "Could not create waitlist entry",
+      });
     }
-    return res.status(400).json({
-      message: error.message || "Could not create waitlist entry",
-    });
+
+    return sendWaitlistError(res, error, "Could not create waitlist entry");
   }
 };
 
@@ -114,12 +147,7 @@ export const cancelEntry = async (req, res) => {
     const entry = await cancelWaitlistEntry(req.params.id, req.user._id);
     return res.json(entry);
   } catch (error) {
-    if (error.code === "NOT_FOUND") {
-      return res.status(404).json({ message: error.message });
-    }
-    return res.status(400).json({
-      message: error.message || "Could not cancel waitlist entry",
-    });
+    return sendWaitlistError(res, error, "Could not cancel waitlist entry");
   }
 };
 
@@ -153,9 +181,7 @@ export const markNotified = async (req, res) => {
 
     return res.json(entry);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not mark entry as notified",
-    });
+    return sendControllerError(res, error, "Could not mark entry as notified");
   }
 };
 
@@ -187,9 +213,7 @@ export const rejectEntry = async (req, res) => {
 
     return res.json(entry);
   } catch (error) {
-    return res.status(getWaitlistActionStatus(error)).json({
-      message: error.message || "Could not reject waitlist entry",
-    });
+    return sendWaitlistError(res, error, "Could not reject waitlist entry");
   }
 };
 
@@ -212,9 +236,7 @@ export const offerEntry = async (req, res) => {
 
     return res.json(entry);
   } catch (error) {
-    return res.status(getWaitlistActionStatus(error)).json({
-      message: error.message || "Could not offer waitlist time",
-    });
+    return sendWaitlistError(res, error, "Could not offer waitlist time");
   }
 };
 
@@ -235,9 +257,7 @@ export const acceptOfferEntry = async (req, res) => {
 
     return res.json(result);
   } catch (error) {
-    return res.status(getWaitlistActionStatus(error)).json({
-      message: error.message || "Could not accept waitlist offer",
-    });
+    return sendWaitlistError(res, error, "Could not accept waitlist offer");
   }
 };
 
@@ -258,8 +278,6 @@ export const declineOfferEntry = async (req, res) => {
 
     return res.json(entry);
   } catch (error) {
-    return res.status(getWaitlistActionStatus(error)).json({
-      message: error.message || "Could not decline waitlist offer",
-    });
+    return sendWaitlistError(res, error, "Could not decline waitlist offer");
   }
 };

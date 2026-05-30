@@ -8,6 +8,7 @@ import {
   emitBookingUpdated,
   notifyWaitlistForReleasedBookingSlot,
 } from "../services/bookingSideEffectsService.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const markNoShow = async (req, res) => {
   try {
@@ -32,9 +33,7 @@ export const markNoShow = async (req, res) => {
 
     return res.json(updatedBooking);
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not mark no-show",
-    });
+    return sendControllerError(res, error, "Could not mark no-show");
   }
 };
 
@@ -61,8 +60,6 @@ export const markLateCancel = async (req, res) => {
 
     return res.json(updatedBooking);
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not mark late cancellation",
-    });
+    return sendControllerError(res, error, "Could not mark late cancellation");
   }
 };

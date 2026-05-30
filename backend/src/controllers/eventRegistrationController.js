@@ -18,6 +18,7 @@ import {
   mapCertificateResponse,
   mapRegistrationResponse,
 } from "../utils/eventUtils.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const countApprovedRegistrations = async (eventId) =>
   EventRegistration.countDocuments({
@@ -128,11 +129,9 @@ export const registerForEvent = async (req, res) => {
       },
     });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ message: "Registration already pending" });
-    }
-    return res.status(400).json({
-      message: error.message || "Could not register for event",
+    return sendControllerError(res, error, "Could not register for event", {
+      duplicateKeyMessage: "Registration already pending",
+      duplicateKeyStatus: 400,
     });
   }
 };
@@ -194,9 +193,7 @@ export const cancelRegistration = async (req, res) => {
       registrationCount: newCount,
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not cancel registration",
-    });
+    return sendControllerError(res, error, "Could not cancel registration");
   }
 };
 
@@ -386,9 +383,7 @@ export const waitlistRegistration = async (req, res) => {
       registrationCount: await countApprovedRegistrations(event._id),
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not update waiting list",
-    });
+    return sendControllerError(res, error, "Could not update waiting list");
   }
 };
 
@@ -461,9 +456,7 @@ export const approveRegistration = async (req, res) => {
       registrationCount: approvedCount + 1,
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not approve registration",
-    });
+    return sendControllerError(res, error, "Could not approve registration");
   }
 };
 
@@ -531,8 +524,6 @@ export const rejectRegistration = async (req, res) => {
       registrationCount: await countApprovedRegistrations(event._id),
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not reject registration",
-    });
+    return sendControllerError(res, error, "Could not reject registration");
   }
 };
