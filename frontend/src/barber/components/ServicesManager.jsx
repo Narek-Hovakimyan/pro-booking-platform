@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useSelector } from "react-redux";
 import {
   Plus,
@@ -12,8 +12,6 @@ import {
   Scissors,
   Eye,
   EyeOff,
-  Loader2,
-  FolderPlus,
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -21,10 +19,7 @@ import {
   getServiceCategoryLabel,
   serviceCategories,
 } from "@/shared/data/serviceCategories";
-import {
-  fetchServiceCategories,
-  createServiceCategory,
-} from "@/shared/api/serviceCategories";
+import ServiceCategoryManager from "./ServiceCategoryManager";
 
 const emptyForm = {
   name: "",
@@ -72,10 +67,8 @@ export default function ServicesManager({
   const { currentUser } = useSelector((state) => state.auth);
   const barberId = currentUser?.id || currentUser?._id;
 
-  /* ── Custom categories state ── */
-  const [allCategories, setAllCategories] = useState([]); // system + custom
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
-  const [categoriesError, setCategoriesError] = useState("");
+  /* ── Custom categories state (fed by ServiceCategoryManager) ── */
+  const [customCategories, setCustomCategories] = useState([]);
 
   /* ── Modal state ── */
   const [showModal, setShowModal] = useState(false);
@@ -86,57 +79,11 @@ export default function ServicesManager({
   /* ── Delete confirmation ── */
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
-  /* ── Inline create category state ── */
-  const [showCreateCategory, setShowCreateCategory] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [creatingCategory, setCreatingCategory] = useState(false);
-  const [createCategoryError, setCreateCategoryError] = useState("");
-
-  /* ── Load categories on mount ── */
-  useEffect(() => {
-    if (!barberId) return;
-
-    let cancelled = false;
-
-    async function loadCategories() {
-      setCategoriesLoading(true);
-      setCategoriesError("");
-
-      try {
-        const cats = await fetchServiceCategories(barberId);
-        if (!cancelled) {
-          setAllCategories(cats);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setCategoriesError(
-            err.response?.data?.message || "Could not load categories"
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setCategoriesLoading(false);
-        }
-      }
-    }
-
-    loadCategories();
-    return () => {
-      cancelled = true;
-    };
-  }, [barberId]);
-
-  /* ── Separate custom categories for dropdown ── */
-  const customCategories = allCategories.filter((c) => c.source === "custom");
-
   /* ── Modal open/close ── */
   const openAddModal = () => {
     setEditingService(null);
     setForm(emptyForm);
     setModalError("");
-    setShowCreateCategory(false);
-    setNewCategoryName("");
-    setCreateCategoryError("");
     setShowModal(true);
   };
 
@@ -168,9 +115,6 @@ export default function ServicesManager({
       customCategoryId: customCategoryIdStr,
     });
     setModalError("");
-    setShowCreateCategory(false);
-    setNewCategoryName("");
-    setCreateCategoryError("");
     setShowModal(true);
   };
 
@@ -179,45 +123,10 @@ export default function ServicesManager({
     setEditingService(null);
     setForm(emptyForm);
     setModalError("");
-    setShowCreateCategory(false);
-    setNewCategoryName("");
-    setCreateCategoryError("");
   };
 
   const handleFieldChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  /* ── Create custom category inline ── */
-  const handleCreateCategory = async () => {
-    const trimmed = newCategoryName.trim();
-    if (!trimmed) {
-      setCreateCategoryError("Category name is required");
-      return;
-    }
-
-    setCreatingCategory(true);
-    setCreateCategoryError("");
-
-    try {
-      const created = await createServiceCategory(trimmed, barberId);
-
-      // Append new category to the list
-      setAllCategories((prev) => [...prev, created]);
-
-      // Auto-select newly created category
-      handleFieldChange("customCategoryId", String(created._id || created.id));
-
-      // Close the inline form
-      setShowCreateCategory(false);
-      setNewCategoryName("");
-    } catch (err) {
-      setCreateCategoryError(
-        err.response?.data?.message || "Could not create category"
-      );
-    } finally {
-      setCreatingCategory(false);
-    }
   };
 
   /* ── Save service ── */
@@ -691,105 +600,16 @@ export default function ServicesManager({
                 </label>
               )}
 
-              {/* ── Custom category dropdown ── */}
-              {form.categoryType === "custom" && (
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Custom category
-                  {categoriesLoading ? (
-                    <div className="flex items-center gap-2 rounded-2xl border border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-400">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading categories...
-                    </div>
-                  ) : categoriesError ? (
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
-                      {categoriesError}
-                    </div>
-                  ) : (
-                    <select
-                      className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                      disabled={isSaving}
-                      value={form.customCategoryId}
-                      onChange={(e) =>
-                        handleFieldChange("customCategoryId", e.target.value)
-                      }
-                    >
-                      <option value="">Select a custom category</option>
-                      {customCategories.map((cat) => (
-                        <option
-                          key={cat._id || cat.id}
-                          value={String(cat._id || cat.id)}
-                        >
-                          {cat.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {!categoriesLoading && !categoriesError && (
-                    <button
-                      type="button"
-                      disabled={isSaving || categoriesLoading}
-                      onClick={() => {
-                        setShowCreateCategory(true);
-                        setCreateCategoryError("");
-                        setNewCategoryName("");
-                      }}
-                      className="mt-1.5 flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 transition-colors"
-                    >
-                      <FolderPlus className="h-4 w-4" />
-                      + Add custom category
-                    </button>
-                  )}
-                </label>
-              )}
-
-              {/* ── Inline create category form ── */}
-              {showCreateCategory && form.categoryType === "custom" && (
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 space-y-2">
-                  {createCategoryError && (
-                    <p className="text-xs text-red-600">{createCategoryError}</p>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <input
-                      className="flex-1 rounded-xl border border-indigo-300 bg-white p-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                      placeholder="Category name"
-                      disabled={creatingCategory}
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleCreateCategory();
-                        }
-                      }}
-                      autoFocus
-                    />
-                    <Button
-                      size="sm"
-                      disabled={creatingCategory || !newCategoryName.trim()}
-                      onClick={handleCreateCategory}
-                      className="bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"
-                    >
-                      {creatingCategory ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Create"
-                      )}
-                    </Button>
-                    <button
-                      type="button"
-                      disabled={creatingCategory}
-                      onClick={() => {
-                        setShowCreateCategory(false);
-                        setCreateCategoryError("");
-                        setNewCategoryName("");
-                      }}
-                      className="rounded-full p-1.5 text-neutral-400 hover:text-neutral-600"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* ── Custom category dropdown (managed by child) ── */}
+              <ServiceCategoryManager
+                barberId={barberId}
+                form={form}
+                isSaving={isSaving}
+                onCustomCategoriesChange={setCustomCategories}
+                onCustomCategoryIdChange={(id) =>
+                  handleFieldChange("customCategoryId", id)
+                }
+              />
 
               {/* ── Tags ── */}
               <label className="grid gap-1.5 text-sm font-semibold">
