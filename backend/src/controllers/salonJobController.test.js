@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
+import { escapeRegex } from "../utils/controllerError.js";
 import {
   closeSalonJob,
   createSalonJob,
@@ -273,7 +274,7 @@ test("list filters by salonId", async () => {
   assert.equal(res.body[0].salon.id, salonId);
 });
 
-test("list filters by city if implemented", async () => {
+test("list filters by city with escaped regex", async () => {
   const res = createResponse();
   let salonFindQuery = null;
 
@@ -291,8 +292,58 @@ test("list filters by city if implemented", async () => {
   await listSalonJobs({ query: { city: "yer" } }, res);
 
   assert.deepEqual(salonFindQuery, {
-    city: { $regex: "yer", $options: "i" },
+    city: { $regex: escapeRegex("yer"), $options: "i" },
   });
+  assert.equal(res.body.length, 1);
+});
+
+test("list treats regex metacharacters in city as literal text", async () => {
+  const res = createResponse();
+  let salonFindQuery = null;
+
+  Salon.find = (query) => {
+    salonFindQuery = query;
+    return {
+      select: async () => [{ _id: salonId }],
+    };
+  };
+  mockFindJobs({
+    expectedQuery: { status: "active", salonId: { $in: [salonId] } },
+    jobs: [createJob()],
+  });
+
+  await listSalonJobs({ query: { city: "Yerevan." } }, res);
+
+  assert.deepEqual(salonFindQuery, {
+    city: { $regex: escapeRegex("Yerevan."), $options: "i" },
+  });
+  // The dot is escaped, so it matches literal "." not any char
+  assert.notEqual(salonFindQuery.city.$regex, "Yerevan.");
+  assert.equal(salonFindQuery.city.$regex.includes("\\."), true);
+  assert.equal(res.body.length, 1);
+});
+
+test("list rejects city longer than 100 chars with 400", async () => {
+  const res = createResponse();
+  const longCity = "a".repeat(101);
+
+  await listSalonJobs({ query: { city: longCity } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Search term is too long");
+});
+
+test("list with empty/whitespace city does not add city filter", async () => {
+  const res = createResponse();
+
+  mockFindJobs({
+    expectedQuery: { status: "active" },
+    jobs: [createJob()],
+  });
+
+  await listSalonJobs({ query: { city: "   " } }, res);
+
+  assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1);
 });
 
@@ -308,6 +359,23 @@ test("list combines city and salonId filters", async () => {
   });
 
   await listSalonJobs({ query: { city: "yer", salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1);
+});
+
+test("list with city filter also respects role filter", async () => {
+  const res = createResponse();
+
+  Salon.find = () => ({
+    select: async () => [{ _id: salonId }],
+  });
+  mockFindJobs({
+    expectedQuery: { status: "active", role: "barber", salonId: { $in: [salonId] } },
+    jobs: [createJob()],
+  });
+
+  await listSalonJobs({ query: { city: "yerevan", role: "barber" } }, res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1);

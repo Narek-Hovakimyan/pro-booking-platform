@@ -5,7 +5,7 @@ import {
   pickSalonJobFields,
   serializeSalonJob,
 } from "../utils/salonJobUtils.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
 
 const salonJobPopulate = "name city address imageUrl";
 
@@ -81,18 +81,27 @@ export const listSalonJobs = async (req, res) => {
     if (req.query.salonId) filter.salonId = req.query.salonId;
 
     let query = filter;
-    if (req.query.city) {
-      const salons = await Salon.find({
-        city: { $regex: req.query.city, $options: "i" },
-      }).select("_id");
-      const citySalonIds = salons.map((salon) => salon._id);
+    const rawCity = req.query.city;
+    if (rawCity) {
+      const { term, isTooLong } = normalizeSearch(rawCity);
+      if (isTooLong) {
+        return res.status(400).json({ message: "Search term is too long" });
+      }
+      if (!term) {
+        // empty/whitespace-only — skip city filter
+      } else {
+        const salons = await Salon.find({
+          city: { $regex: escapeRegex(term), $options: "i" },
+        }).select("_id");
+        const citySalonIds = salons.map((salon) => salon._id);
 
-      query = {
-        ...filter,
-        salonId: filter.salonId
-          ? { $in: citySalonIds.filter((id) => String(id) === String(filter.salonId)) }
-          : { $in: citySalonIds },
-      };
+        query = {
+          ...filter,
+          salonId: filter.salonId
+            ? { $in: citySalonIds.filter((id) => String(id) === String(filter.salonId)) }
+            : { $in: citySalonIds },
+        };
+      }
     }
 
     const limit = Math.min(Number(req.query.limit) || 50, 100);
