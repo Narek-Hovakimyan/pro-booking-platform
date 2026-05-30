@@ -84,11 +84,15 @@ const createReferenceUploadFile = (filename) => {
   return filePath;
 };
 
-const createSendFileResponse = () => ({
+const createSendFileResponse = ({ sendFileError, headersSent = false } = {}) => ({
   ...createResponse(),
+  headersSent,
   sentFile: "",
-  sendFile(filePath) {
+  sendFile(filePath, callback) {
     this.sentFile = filePath;
+    if (typeof callback === "function") {
+      callback(sendFileError);
+    }
     return this;
   },
 });
@@ -1436,6 +1440,83 @@ test("GET reference image by booking client returns 200", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.sentFile, path.join(bookingReferenceDir, imageName));
+});
+
+test("GET reference image missing on disk returns 404 without leaking path", async () => {
+  const imageName = "ref-missing-on-disk.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  console.error = () => {};
+  const res = createSendFileResponse({
+    sendFileError: Object.assign(
+      new Error(`ENOENT: no such file, open ${path.join(bookingReferenceDir, imageName)}`),
+      { code: "ENOENT" }
+    ),
+  });
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Image file not found");
+  assert.equal(res.body.message.includes(bookingReferenceDir), false);
+});
+
+test("GET reference image sendFile error returns 500 without leaking raw message", async () => {
+  const imageName = "ref-sendfile-error.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  console.error = () => {};
+  const res = createSendFileResponse({
+    sendFileError: new Error(`raw filesystem failure at ${bookingReferenceDir}`),
+  });
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not serve reference image");
+  assert.equal(res.body.message.includes("raw filesystem failure"), false);
+  assert.equal(res.body.message.includes(bookingReferenceDir), false);
+});
+
+test("GET reference image unexpected lookup error returns 500 without leaking raw message", async () => {
+  const imageName = "ref-lookup-error.jpg";
+  Booking.findById = async () => {
+    throw new Error("raw booking lookup failure");
+  };
+  console.error = () => {};
+  const res = createResponse();
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not serve reference image");
+  assert.equal(res.body.message.includes("raw booking lookup failure"), false);
 });
 
 test("GET reference image by assigned barber returns 200", async () => {

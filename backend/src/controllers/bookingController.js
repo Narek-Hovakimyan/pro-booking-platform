@@ -1013,7 +1013,7 @@ export const updateTreatmentRecord = async (req, res) => {
   }
 };
 
-export const getReferenceImage = async (req, res) => {
+export const getReferenceImage = async (req, res, next) => {
   try {
     const { bookingId, imageName } = req.params;
 
@@ -1065,10 +1065,24 @@ export const getReferenceImage = async (req, res) => {
       return res.status(400).json({ message: "Invalid image path" });
     }
 
-    return res.sendFile(absolutePath);
-  } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not serve reference image",
+    return res.sendFile(absolutePath, (error) => {
+      if (!error) return;
+
+      console.error("Could not serve reference image", error);
+
+      if (res.headersSent) {
+        if (typeof next === "function") return next(error);
+        return;
+      }
+
+      if (error.code === "ENOENT") {
+        return res.status(404).json({ message: "Image file not found" });
+      }
+
+      return res.status(500).json({ message: "Could not serve reference image" });
     });
+  } catch (error) {
+    console.error("Could not serve reference image", error);
+    return res.status(500).json({ message: "Could not serve reference image" });
   }
 };
