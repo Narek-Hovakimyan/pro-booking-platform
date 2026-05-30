@@ -4,12 +4,14 @@ import {
   getBarberCardSummary,
   getProfileByBarberId,
   upsertProfileByBarberId,
+} from "../controllers/barberProfileController.js";
+import {
   getCertifications,
   getEventCertificates,
   addCertification,
   updateCertification,
   deleteCertification,
-} from "../controllers/barberProfileController.js";
+} from "../controllers/certificationController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import {
   handleAvatarUpload,

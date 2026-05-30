@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+  getBarberCardSummary,
+} from "./barberProfileController.js";
+import {
   addCertification,
   deleteCertification,
   getEventCertificates,
-  getBarberCardSummary,
   updateCertification,
-} from "./barberProfileController.js";
+} from "./certificationController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import EventCertificate from "../models/EventCertificate.js";
