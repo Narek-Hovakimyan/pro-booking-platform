@@ -99,42 +99,77 @@ import { sanitizeMediaUrl } from "./mediaUrl.js";
 export const getUploadedEventImagePath = (file) =>
   file ? `/uploads/events/${file.filename}` : "";
 
-export const parseEventPayload = (body = {}, file = null) => ({
-  ...body,
-  duration:
-    body.duration === undefined || body.duration === ""
-      ? body.duration
-      : Number(body.duration),
-  price:
-    body.price === undefined || body.price === ""
-      ? 0
-      : Number(body.price),
-  maxParticipants:
-    body.maxParticipants === undefined || body.maxParticipants === ""
-      ? 20
-      : Number(body.maxParticipants),
-  type: EVENT_TYPE_VALUES.includes(body.type) ? body.type : "training",
-  visibility: EVENT_VISIBILITY_VALUES.includes(body.visibility)
-    ? body.visibility
-    : "public",
-  certificatesEnabled: Object.prototype.hasOwnProperty.call(
-    body,
-    "certificatesEnabled"
-  )
-    ? body.certificatesEnabled === true ||
-      body.certificatesEnabled === "true" ||
-      body.certificatesEnabled === "on"
-    : undefined,
-  imageUrl: getUploadedEventImagePath(file) || sanitizeMediaUrl(body.imageUrl) || "",
+const hasOwn = (object, key) =>
+  Object.prototype.hasOwnProperty.call(object || {}, key);
 
-});
+const isEmptyInput = (value) =>
+  value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+
+export const parseEventPayload = (
+  body = {},
+  file = null,
+  { applyDefaults = true } = {}
+) => {
+  const payload = { ...body };
+
+  if (hasOwn(body, "duration")) {
+    payload.duration = isEmptyInput(body.duration)
+      ? applyDefaults
+        ? undefined
+        : Number.NaN
+      : Number(body.duration);
+  }
+
+  if (hasOwn(body, "price")) {
+    payload.price = isEmptyInput(body.price)
+      ? applyDefaults
+        ? 0
+        : Number.NaN
+      : Number(body.price);
+  } else if (applyDefaults) {
+    payload.price = 0;
+  }
+
+  if (hasOwn(body, "maxParticipants")) {
+    payload.maxParticipants = isEmptyInput(body.maxParticipants)
+      ? applyDefaults
+        ? 20
+        : Number.NaN
+      : Number(body.maxParticipants);
+  } else if (applyDefaults) {
+    payload.maxParticipants = 20;
+  }
+
+  if (hasOwn(body, "type") || applyDefaults) {
+    payload.type = EVENT_TYPE_VALUES.includes(body.type) ? body.type : "training";
+  }
+
+  if (hasOwn(body, "visibility") || applyDefaults) {
+    payload.visibility = EVENT_VISIBILITY_VALUES.includes(body.visibility)
+      ? body.visibility
+      : "public";
+  }
+
+  if (hasOwn(body, "certificatesEnabled")) {
+    payload.certificatesEnabled =
+      body.certificatesEnabled === true ||
+      body.certificatesEnabled === "true" ||
+      body.certificatesEnabled === "on";
+  }
+
+  const uploadedImagePath = getUploadedEventImagePath(file);
+  if (uploadedImagePath || hasOwn(body, "imageUrl") || applyDefaults) {
+    payload.imageUrl = uploadedImagePath || sanitizeMediaUrl(body.imageUrl) || "";
+  }
+
+  return payload;
+};
 
 // ─── Date/time helpers ───
 export const getEventDateTime = (event) => {
   if (!event?.date || !event?.time) return null;
 
   const dateTime = new Date(`${event.date}T${event.time}:00+04:00`);
-
 
   return Number.isNaN(dateTime.getTime()) ? null : dateTime;
 };
@@ -143,4 +178,83 @@ export const isEventInPast = (event) => {
   const startsAt = getEventDateTime(event);
 
   return startsAt ? startsAt < new Date() : false;
+};
+
+// ─── Event date/time and numeric validation helpers ───
+
+/**
+ * Validate that a date/time pair can form a valid future DateTime in +04:00.
+ * Returns { isValid: true } or { isValid: false, message }.
+ */
+export const validateEventDateTime = (date, time) => {
+  if (typeof date !== "string" || typeof time !== "string") {
+    return { isValid: false, message: "Invalid date or time" };
+  }
+
+  const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = time.match(/^(\d{2}):(\d{2})$/);
+
+  if (!dateMatch || !timeMatch) {
+    return { isValid: false, message: "Invalid date or time" };
+  }
+
+  const [, yearText, monthText, dayText] = dateMatch;
+  const [, hourText, minuteText] = timeMatch;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    utcDate.getUTCFullYear() !== year ||
+    utcDate.getUTCMonth() !== month - 1 ||
+    utcDate.getUTCDate() !== day ||
+    hour > 23 ||
+    minute > 59
+  ) {
+    return { isValid: false, message: "Invalid date or time" };
+  }
+
+  const parsed = new Date(`${date}T${time}:00+04:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return { isValid: false, message: "Invalid date or time" };
+  }
+  if (parsed < new Date()) {
+    return { isValid: false, message: "Event date/time must be in the future" };
+  }
+  return { isValid: true };
+};
+
+/**
+ * Validate numeric fields for event creation/update.
+ * Only validates fields that are !== undefined.
+ * Returns { isValid: true } or { isValid: false, message }.
+ */
+export const validateEventNumbers = (fields) => {
+  const { duration, price, maxParticipants } = fields;
+
+  if (duration !== undefined) {
+    const num = Number(duration);
+    if (!Number.isFinite(num) || num <= 0) {
+      return { isValid: false, message: "Duration must be a positive number" };
+    }
+  }
+
+  if (price !== undefined) {
+    const num = Number(price);
+    if (!Number.isFinite(num) || num < 0) {
+      return { isValid: false, message: "Price must be a non-negative number" };
+    }
+  }
+
+  if (maxParticipants !== undefined) {
+    const num = Number(maxParticipants);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
+      return { isValid: false, message: "maxParticipants must be a non-negative integer" };
+    }
+  }
+
+  return { isValid: true };
 };

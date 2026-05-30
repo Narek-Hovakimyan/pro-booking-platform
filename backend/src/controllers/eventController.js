@@ -21,6 +21,8 @@ import {
   mapRegistrationResponse,
   parseEventPayload,
   isEventInPast,
+  validateEventDateTime,
+  validateEventNumbers,
 } from "../utils/eventUtils.js";
 import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
 
@@ -298,10 +300,30 @@ export const createEvent = async (req, res) => {
       certificatesEnabled,
     } = parseEventPayload(req.body, req.file);
 
-    if (!title || !instructor || !date || !time || !duration || !location) {
+    if (
+      !title ||
+      !instructor ||
+      !date ||
+      !time ||
+      duration === undefined ||
+      duration === null ||
+      !location
+    ) {
       return res.status(400).json({
         message: "Title, instructor, date, time, duration, and location are required",
       });
+    }
+
+    // Validate date/time
+    const dateTimeResult = validateEventDateTime(date, time);
+    if (!dateTimeResult.isValid) {
+      return res.status(400).json({ message: dateTimeResult.message });
+    }
+
+    // Validate numeric fields
+    const numResult = validateEventNumbers({ duration, price, maxParticipants });
+    if (!numResult.isValid) {
+      return res.status(400).json({ message: numResult.message });
     }
 
     if (req.user?.role !== "barber") {
@@ -337,8 +359,8 @@ export const createEvent = async (req, res) => {
       date,
       time,
       duration: Number(duration),
-      price: Number(price) || 0,
-      maxParticipants: Number(maxParticipants) || 20,
+      price,
+      maxParticipants,
       location,
       salonId: salonId || null,
       organizerId: req.user._id,
@@ -376,7 +398,9 @@ export const updateEvent = async (req, res) => {
       });
     }
 
-    const payload = parseEventPayload(req.body, req.file);
+    const payload = parseEventPayload(req.body, req.file, {
+      applyDefaults: false,
+    });
     const allowedFields = [
       "title",
       "description",
@@ -394,6 +418,26 @@ export const updateEvent = async (req, res) => {
       "status",
       "certificatesEnabled",
     ];
+
+    // Validate date/time if date or time changed
+    if (payload.date !== undefined || payload.time !== undefined) {
+      const effectiveDate = payload.date !== undefined ? payload.date : event.date;
+      const effectiveTime = payload.time !== undefined ? payload.time : event.time;
+      const dateTimeResult = validateEventDateTime(effectiveDate, effectiveTime);
+      if (!dateTimeResult.isValid) {
+        return res.status(400).json({ message: dateTimeResult.message });
+      }
+    }
+
+    // Validate numeric fields if provided
+    const numResult = validateEventNumbers({
+      duration: payload.duration,
+      price: payload.price,
+      maxParticipants: payload.maxParticipants,
+    });
+    if (!numResult.isValid) {
+      return res.status(400).json({ message: numResult.message });
+    }
 
     for (const field of allowedFields) {
       if (payload[field] !== undefined) {

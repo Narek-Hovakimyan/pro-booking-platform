@@ -7,6 +7,7 @@ import {
   createEvent,
   getEvents,
   getMyEvents,
+  updateEvent,
 } from "./eventController.js";
 import {
   approveRegistration,
@@ -1124,4 +1125,501 @@ test("malicious pattern (a+)+aaaaaaaaab does not cause ReDoS — passed as escap
   assert.ok(regexPattern.includes("\\("), "parentheses are escaped");
   assert.ok(regexPattern.includes("\\)"), "parentheses are escaped");
   assert.ok(regexPattern.includes("\\+"), "plus signs are escaped");
+});
+
+// ── Event create/update validation ──
+
+const createEventMocksForOwner = () => {
+  Salon.findById = async (id) => ({
+    _id: id,
+    name: "Test Salon",
+    ownerId: organizerId,
+    admins: [],
+  });
+  User.findById = () => ({
+    select: async () => ({
+      _id: organizerId,
+      salon: null,
+      salonStatus: "none",
+      salons: [{ salon: salonAId, status: "approved" }],
+    }),
+  });
+  SalonJoinRequest.findOne = async () => null;
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  Event.create = async (payload) => ({ _id: "created-event", ...payload });
+  Event.findById = (id) =>
+    createQuery({
+      _id: id,
+      title: "Test Event",
+      instructor: "Educator",
+      date: "2099-08-01",
+      time: "10:00",
+      duration: 90,
+      price: 0,
+      maxParticipants: 20,
+      location: "Yerevan",
+      salonId: { _id: salonAId, name: "Test Salon" },
+      organizerId: { _id: organizerId, name: "Organizer" },
+    });
+};
+
+test("createEvent rejects past date/time", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Past Event",
+        instructor: "Educator",
+        date: "2020-01-01",
+        time: "10:00",
+        duration: "60",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Event date/time must be in the future");
+});
+
+test("createEvent rejects invalid date/time", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Bad Date",
+        instructor: "Educator",
+        date: "not-a-date",
+        time: "10:00",
+        duration: "60",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid date or time");
+});
+
+test("createEvent rejects impossible date/time", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Impossible Date",
+        instructor: "Educator",
+        date: "2099-02-31",
+        time: "10:00",
+        duration: "60",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid date or time");
+});
+
+test("createEvent accepts future date/time", async () => {
+  const res = createResponse();
+  let createdPayload;
+  createEventMocksForOwner();
+  const origCreate = Event.create;
+  Event.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: "created-event", ...payload };
+  };
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Future Event",
+        instructor: "Educator",
+        date: "2099-12-25",
+        time: "10:00",
+        duration: "90",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.date, "2099-12-25");
+  assert.equal(createdPayload.price, 0);
+  assert.equal(createdPayload.maxParticipants, 20);
+  Event.create = origCreate;
+});
+
+test("createEvent rejects duration 0", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Zero Duration",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "0",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Duration must be a positive number");
+});
+
+test("createEvent rejects negative duration", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Neg Duration",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "-30",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Duration must be a positive number");
+});
+
+test("createEvent rejects negative price", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Neg Price",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "60",
+        price: "-10",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Price must be a non-negative number");
+});
+
+test("createEvent rejects negative maxParticipants", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Neg Max",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "60",
+        maxParticipants: "-5",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "maxParticipants must be a non-negative integer");
+});
+
+test("createEvent rejects non-integer maxParticipants", async () => {
+  const res = createResponse();
+  createEventMocksForOwner();
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Float Max",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "60",
+        maxParticipants: "2.5",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "maxParticipants must be a non-negative integer");
+});
+
+test("createEvent allows maxParticipants 0", async () => {
+  const res = createResponse();
+  let createdPayload;
+  createEventMocksForOwner();
+  const origCreate = Event.create;
+  Event.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: "created-event", ...payload };
+  };
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        title: "Unlimited",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "60",
+        maxParticipants: "0",
+        location: "Yerevan",
+        salonId: salonAId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.maxParticipants, 0);
+  Event.create = origCreate;
+});
+
+test("updateEvent rejects provided invalid duration", async () => {
+  const res = createResponse();
+  const event = { ...baseEvent, async save() { return this; } };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: { duration: "0" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Duration must be a positive number");
+});
+
+test("updateEvent rejects provided invalid price", async () => {
+  const res = createResponse();
+  const event = { ...baseEvent, async save() { return this; } };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: { price: "-5" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Price must be a non-negative number");
+});
+
+test("updateEvent rejects provided invalid maxParticipants", async () => {
+  const res = createResponse();
+  const event = { ...baseEvent, async save() { return this; } };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: { maxParticipants: "-1" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "maxParticipants must be a non-negative integer");
+});
+
+test("updateEvent rejects provided non-integer maxParticipants", async () => {
+  const res = createResponse();
+  const event = { ...baseEvent, async save() { return this; } };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: { maxParticipants: "1.5" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "maxParticipants must be a non-negative integer");
+});
+
+test("updateEvent rejects changing date/time into the past", async () => {
+  const res = createResponse();
+  const event = {
+    ...baseEvent,
+    date: "2099-07-01",
+    time: "11:00",
+    async save() { return this; },
+  };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: { date: "2020-01-01" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Event date/time must be in the future");
+});
+
+test("updateEvent accepts valid numeric updates", async () => {
+  const res = createResponse();
+  const event = {
+    ...baseEvent,
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => null;
+  let callCount = 0;
+  Event.findById = (id) => {
+    callCount++;
+    if (callCount === 1) {
+      // First call — updateEvent finds the existing event (plain object, await ok)
+      return event;
+    }
+    // Second call — after save, populate the response (thenable with .populate)
+    return createQuery({
+      _id: id,
+      ...event,
+      salonId: { _id: null, name: undefined },
+      organizerId: { _id: organizerId, name: "Organizer" },
+    });
+  };
+
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: {
+        duration: "120",
+        price: "50",
+        maxParticipants: "10",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(event.duration, 120);
+  assert.equal(event.price, 50);
+  assert.equal(event.maxParticipants, 10);
+});
+
+test("updateEvent does not reject legacy past event when date/time is unchanged", async () => {
+  const res = createResponse();
+  const event = {
+    ...baseEvent,
+    date: "2020-01-01",
+    time: "10:00",
+    duration: 90,
+    price: 25,
+    maxParticipants: 8,
+    async save() {
+      return this;
+    },
+  };
+
+  let callCount = 0;
+  Event.findById = (id) => {
+    callCount++;
+    if (callCount === 1) return event;
+    return createQuery({
+      _id: id,
+      ...event,
+      organizerId: { _id: organizerId, name: "Organizer" },
+    });
+  };
+
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      body: { title: "Updated legacy event" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(event.title, "Updated legacy event");
+  assert.equal(event.price, 25);
+  assert.equal(event.maxParticipants, 8);
 });
