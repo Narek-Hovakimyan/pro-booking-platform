@@ -105,9 +105,7 @@ export const getMyEntries = async (req, res) => {
     const entries = await getClientWaitlistEntries(req.user._id);
     return res.json(entries);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch waitlist entries",
-    });
+    return sendControllerError(res, error, "Could not fetch waitlist entries");
   }
 };
 
@@ -128,9 +126,7 @@ export const getBarberEntries = async (req, res) => {
     const entries = await getBarberWaitlistEntries(barberId);
     return res.json(entries);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch barber waitlist entries",
-    });
+    return sendControllerError(res, error, "Could not fetch barber waitlist entries");
   }
 };
 

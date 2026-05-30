@@ -2,6 +2,7 @@ import Event from "../models/Event.js";
 import EventRegistration from "../models/EventRegistration.js";
 import EventReview from "../models/EventReview.js";
 import { getEventDateTime } from "../utils/eventUtils.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const serializeEventReview = (review) => {
   const plainReview = review.toObject ? review.toObject() : review;
@@ -27,9 +28,7 @@ export const getEventReviews = async (req, res) => {
 
     return res.json(reviews.map(serializeEventReview));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch event reviews",
-    });
+    return sendControllerError(res, error, "Could not fetch event reviews");
   }
 };
 

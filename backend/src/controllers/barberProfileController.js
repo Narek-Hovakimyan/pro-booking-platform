@@ -24,6 +24,7 @@ import {
   isFutureDate,
 } from "../utils/barberProfileUtils.js";
 import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 
 export const barberProfileController = createCrudController(
@@ -378,9 +379,7 @@ export const getBarberCardSummary = async (req, res) => {
       availability: responseAvailability,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch barber card summary",
-    });
+    return sendControllerError(res, error, "Could not fetch barber card summary");
   }
 };
 
@@ -426,9 +425,7 @@ export const getProfileByBarberId = async (req, res) => {
       defaultSchedule: getDefaultSchedule(profile),
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch barber profile",
-    });
+    return sendControllerError(res, error, "Could not fetch barber profile");
   }
 };
 
@@ -564,9 +561,7 @@ export const getCertifications = async (req, res) => {
 
     return res.json(certifications);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch certifications",
-    });
+    return sendControllerError(res, error, "Could not fetch certifications");
   }
 };
 
@@ -582,9 +577,7 @@ export const getEventCertificates = async (req, res) => {
 
     return res.json(certificates.map(getPublicEventCertificatePayload));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch event certificates",
-    });
+    return sendControllerError(res, error, "Could not fetch event certificates");
   }
 };
 
@@ -819,8 +812,6 @@ export const deleteCertification = async (req, res) => {
 
     return res.json({ message: "Certification deleted" });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not delete certification",
-    });
+    return sendControllerError(res, error, "Could not delete certification");
   }
 };

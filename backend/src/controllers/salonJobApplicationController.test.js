@@ -1110,3 +1110,31 @@ test("invalid status is rejected", async () => {
 
   assert.equal(res.statusCode, 400);
 });
+
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
+test("listMySalonJobApplications unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  SalonJobApplication.find = () => {
+    throw new Error("secret job applications db path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await listMySalonJobApplications(
+      { user: { _id: barberId, role: "barber" } },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch your applications");
+});

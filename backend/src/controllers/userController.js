@@ -11,6 +11,7 @@ import {
   normalizeEmail,
 } from "../utils/emailVerification.js";
 import { sendEmailVerification } from "../services/emailService.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -217,9 +218,7 @@ export const getBarbers = async (_req, res) => {
 
     return res.json(enrichedBarbers);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch barbers",
-    });
+    return sendControllerError(res, error, "Could not fetch barbers");
   }
 };
 
@@ -251,9 +250,7 @@ export const getMyProfile = async (req, res) => {
       defaultSchedule: getDefaultSchedule(profile),
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch profile",
-    });
+    return sendControllerError(res, error, "Could not fetch profile");
   }
 };
 
@@ -502,7 +499,7 @@ export const sendEmailVerificationController = async (req, res) => {
 
     return res.json({ message: "Verification email sent" });
   } catch (error) {
-    return res.status(500).json({ message: error.message || "Could not send verification email" });
+    return sendControllerError(res, error, "Could not send verification email");
   }
 };
 
@@ -541,6 +538,6 @@ export const verifyEmailController = async (req, res) => {
       user: getUserData(user),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message || "Verification failed" });
+    return sendControllerError(res, error, "Verification failed");
   }
 };

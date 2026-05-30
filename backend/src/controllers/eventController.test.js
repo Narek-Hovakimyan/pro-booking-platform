@@ -5,8 +5,11 @@ import {
   cancelEvent,
   checkInRegistration,
   createEvent,
+  getEventById,
   getEvents,
   getMyEvents,
+  issueCertificates,
+  updateAttendance,
   updateEvent,
 } from "./eventController.js";
 import {
@@ -490,6 +493,122 @@ test("organizer approves registration", async () => {
     eventId,
     eventRegistrationId: registration._id,
   });
+});
+
+// ── Error leak prevention ──
+
+test("getEvents unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.find = () => {
+    throw new Error("secret events db path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await getEvents({ query: {} }, res);
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch events");
+});
+
+test("getMyEvents unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.find = () => {
+    throw new Error("secret my events db path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await getMyEvents({ user: { _id: organizerId, role: "barber" } }, res);
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch your events");
+});
+
+test("getEventById unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.findById = () => {
+    throw new Error("secret event detail path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await getEventById({ params: { id: eventId }, user: { _id: organizerId } }, res);
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch event");
+});
+
+test("updateAttendance unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.findById = () => {
+    throw new Error("secret attendance path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await updateAttendance(
+      { params: { id: eventId }, user: { _id: organizerId, role: "barber" }, body: { registrations: [] } },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not update attendance");
+});
+
+test("issueCertificates unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.findById = () => {
+    throw new Error("secret certificate path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await issueCertificates(
+      { params: { id: eventId }, user: { _id: organizerId, role: "barber" } },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not issue certificates");
+});
+
+test("getMyRegistrations unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  EventRegistration.find = () => {
+    throw new Error("secret registrations path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await getMyRegistrations({ user: { _id: attendeeId } }, res);
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch registrations");
+});
+
+test("getEventRegistrations unexpected error returns 500 generic without leaking raw message", async () => {
+  const res = createResponse();
+
+  Event.findById = () => {
+    throw new Error("secret event regs path");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await getEventRegistrations(
+      { params: { id: eventId }, user: { _id: organizerId, role: "barber" } },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch registrations");
 });
 
 test("organizer rejects registration with reason", async () => {

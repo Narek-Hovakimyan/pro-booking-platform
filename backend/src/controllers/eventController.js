@@ -111,9 +111,7 @@ export const getEvents = async (req, res) => {
 
     return res.json(result);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch events",
-    });
+    return sendControllerError(res, error, "Could not fetch events");
   }
 };
 
@@ -209,9 +207,7 @@ export const getMyEvents = async (req, res) => {
       }))
     );
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch your events",
-    });
+    return sendControllerError(res, error, "Could not fetch your events");
   }
 };
 
@@ -268,9 +264,7 @@ export const getEventById = async (req, res) => {
       })),
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch event",
-    });
+    return sendControllerError(res, error, "Could not fetch event");
   }
 };
 
@@ -558,9 +552,7 @@ export const updateAttendance = async (req, res) => {
       updated,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not update attendance",
-    });
+    return sendControllerError(res, error, "Could not update attendance");
   }
 };
 
@@ -679,8 +671,6 @@ export const issueCertificates = async (req, res) => {
       errors,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not issue certificates",
-    });
+    return sendControllerError(res, error, "Could not issue certificates");
   }
 };

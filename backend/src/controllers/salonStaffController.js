@@ -18,6 +18,7 @@ import {
 import { getSalonAdminsForSalon } from "../services/salon/salonAdminService.js";
 import { getSalonStaff as getSalonStaffForSalon, SalonStaffError } from "../services/salon/salonStaffService.js";
 import { createNotification } from "./notificationController.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const removeBarberFromSalon = async (req, res) => {
   try {
@@ -212,9 +213,7 @@ export const getSalonAdmins = async (req, res) => {
 
     return res.json(payload);
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch salon admins",
-    });
+    return sendControllerError(res, error, "Could not fetch salon admins");
   }
 };
 
@@ -229,8 +228,6 @@ export const getSalonStaff = async (req, res) => {
       return res.status(error.statusCode).json({ message: error.message });
     }
 
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon staff",
-    });
+    return sendControllerError(res, error, "Could not fetch salon staff");
   }
 };

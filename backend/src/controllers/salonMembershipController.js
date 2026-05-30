@@ -19,6 +19,7 @@ import {
   serializeUser,
 } from "../utils/salonUtils.js";
 import { createNotification } from "./notificationController.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const requestToJoinSalon = async (req, res) => {
   try {
@@ -167,9 +168,7 @@ export const getOwnerJoinRequests = async (req, res) => {
       })
     );
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon requests",
-    });
+    return sendControllerError(res, error, "Could not fetch salon requests");
   }
 };
 

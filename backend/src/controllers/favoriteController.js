@@ -2,6 +2,7 @@ import Favorite from "../models/Favorite.js";
 import SalonFavorite from "../models/SalonFavorite.js";
 import User from "../models/User.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const userFields = "name phone role city salonName imageUrl profession barberType specialty";
 const salonFields = "name city address phone imageUrl";
@@ -27,9 +28,7 @@ export const getClientFavorites = async (req, res) => {
 
     return res.json(favorites);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch favorites",
-    });
+    return sendControllerError(res, error, "Could not fetch favorites");
   }
 };
 
@@ -137,9 +136,7 @@ export const getFavoriteSalons = async (req, res) => {
       })
     );
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch favorite salons",
-    });
+    return sendControllerError(res, error, "Could not fetch favorite salons");
   }
 };
 

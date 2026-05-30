@@ -4,6 +4,7 @@ import SalonJobApplication from "../models/SalonJobApplication.js";
 import { canUserManageSalon } from "../services/salon/salonMembershipService.js";
 import { serializeApplication } from "../utils/salonJobApplicationUtils.js";
 import { createNotification } from "./notificationController.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const getUserId = (user) => String(user?._id || user?.id || "");
 const getId = (value) => {
@@ -206,9 +207,7 @@ export const applyToSalonJob = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
-      message: error.message || "Could not submit application",
-    });
+    return sendControllerError(res, error, "Could not submit application");
   }
 };
 
@@ -232,9 +231,7 @@ export const listJobApplications = async (req, res) => {
 
     return res.json(applications.map(serializeApplication));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch applications",
-    });
+    return sendControllerError(res, error, "Could not fetch applications");
   }
 };
 
@@ -255,9 +252,7 @@ export const listMySalonJobApplications = async (req, res) => {
 
     return res.json(applications.map(serializeApplication));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch your applications",
-    });
+    return sendControllerError(res, error, "Could not fetch your applications");
   }
 };
 
@@ -285,9 +280,7 @@ export const listManagedSalonJobApplications = async (req, res) => {
 
     return res.json(applications.map(serializeApplication));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch managed applications",
-    });
+    return sendControllerError(res, error, "Could not fetch managed applications");
   }
 };
 
@@ -337,8 +330,6 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
 
     return res.json(serializeApplication(populated));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not update application status",
-    });
+    return sendControllerError(res, error, "Could not update application status");
   }
 };

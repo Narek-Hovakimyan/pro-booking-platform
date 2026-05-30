@@ -264,9 +264,7 @@ export const getMyRegistrations = async (req, res) => {
 
     return res.json(result);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch registrations",
-    });
+    return sendControllerError(res, error, "Could not fetch registrations");
   }
 };
 
@@ -316,9 +314,7 @@ export const getEventRegistrations = async (req, res) => {
 
     return res.json(result);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch registrations",
-    });
+    return sendControllerError(res, error, "Could not fetch registrations");
   }
 };
 

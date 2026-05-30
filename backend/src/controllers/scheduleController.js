@@ -125,9 +125,7 @@ export const getScheduleByBarber = async (req, res) => {
       defaultSchedule,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch schedule",
-    });
+    return sendControllerError(res, error, "Could not fetch schedule");
   }
 };
 
