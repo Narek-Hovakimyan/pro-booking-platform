@@ -9,15 +9,12 @@ import { NotificationSkeleton } from "@/shared/components/LoadingSkeletons";
 import NotificationGroup from "@/shared/components/NotificationGroup";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { Button } from "@/shared/components/ui/button";
+import { useEventRegistrationNotificationActions } from "@/shared/hooks/useEventRegistrationNotificationActions";
+import { useJobApplicationNotificationActions } from "@/shared/hooks/useJobApplicationNotificationActions";
 import {
   getBookingId,
-  getEventRegistrationId,
   getIdString,
-  getJobApplicationId,
   getNotificationBookingId,
-  getNotificationEventId,
-  getNotificationEventRegistrationId,
-  getNotificationJobApplicationId,
 } from "@/shared/utils/notificationActionHelpers";
 import {
   getGroupLabel,
@@ -53,8 +50,6 @@ export default function NotificationsPage() {
   const [activeAction, setActiveAction] = useState(null);
   const [rejectingAction, setRejectingAction] = useState(null);
   const [rejectionError, setRejectionError] = useState("");
-  const [eventRegistrations, setEventRegistrations] = useState([]);
-  const [managedJobApplications, setManagedJobApplications] = useState([]);
 
   const actionableNotificationCount = useMemo(
     () =>
@@ -66,32 +61,6 @@ export default function NotificationsPage() {
       ).length,
     [notifications],
   );
-
-  const jobActionableNotificationCount = useMemo(
-    () =>
-      notifications.filter(
-        (notification) =>
-          notification.type === "salon_job_application_submitted" &&
-          getNotificationJobApplicationId(notification),
-      ).length,
-    [notifications],
-  );
-
-  const eventActionableEventIds = useMemo(() => {
-    const eventIds = new Set();
-
-    notifications.forEach((notification) => {
-      if (
-        notification.type === "event_registration_request" &&
-        getNotificationEventId(notification) &&
-        getNotificationEventRegistrationId(notification)
-      ) {
-        eventIds.add(getNotificationEventId(notification));
-      }
-    });
-
-    return [...eventIds];
-  }, [notifications]);
 
   const bookingById = useMemo(() => {
     const nextMap = new Map();
@@ -110,33 +79,31 @@ export default function NotificationsPage() {
     return nextMap;
   }, [bookings, currentUser?.role, currentUserId]);
 
-  const eventRegistrationById = useMemo(() => {
-    const nextMap = new Map();
+  // ---- Extracted hooks ----
 
-    eventRegistrations.forEach((registration) => {
-      const registrationId = getEventRegistrationId(registration);
-
-      if (registrationId) {
-        nextMap.set(registrationId, registration);
-      }
+  const { eventRegistrationById, handleEventAction } =
+    useEventRegistrationNotificationActions({
+      currentUser,
+      currentUserId,
+      notifications,
+      activeAction,
+      setActiveAction,
+      setError,
+      markOneRead,
+      loadNotifications,
     });
 
-    return nextMap;
-  }, [eventRegistrations]);
-
-  const jobApplicationById = useMemo(() => {
-    const nextMap = new Map();
-
-    managedJobApplications.forEach((application) => {
-      const applicationId = getJobApplicationId(application);
-
-      if (applicationId) {
-        nextMap.set(applicationId, application);
-      }
+  const { jobApplicationById, handleJobAction } =
+    useJobApplicationNotificationActions({
+      currentUser,
+      currentUserId,
+      notifications,
+      activeAction,
+      setActiveAction,
+      setError,
+      markOneRead,
+      loadNotifications,
     });
-
-    return nextMap;
-  }, [managedJobApplications]);
 
   // ---- Fetch ----
 
@@ -213,85 +180,6 @@ export default function NotificationsPage() {
       isMounted = false;
     };
   }, [actionableNotificationCount, currentUser?.role, currentUserId, dispatch]);
-
-  useEffect(() => {
-    if (
-      currentUser?.role !== "barber" ||
-      !currentUserId ||
-      eventActionableEventIds.length === 0
-    ) {
-      return undefined;
-    }
-
-    let isMounted = true;
-
-    async function loadEventRegistrations() {
-      try {
-        const responses = await Promise.all(
-          eventActionableEventIds.map((eventId) =>
-            api.get(`/events/${eventId}/registrations`)
-          )
-        );
-        const nextRegistrations = responses.flatMap((response) =>
-          Array.isArray(response.data) ? response.data : []
-        );
-
-        if (isMounted) {
-          setEventRegistrations(nextRegistrations);
-        }
-      } catch (requestError) {
-        if (!isMounted) return;
-
-        setEventRegistrations([]);
-        setError(
-          requestError.response?.data?.message ||
-            "Could not load event registrations for notification actions.",
-        );
-      }
-    }
-
-    loadEventRegistrations();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser?.role, currentUserId, eventActionableEventIds]);
-
-  useEffect(() => {
-    if (
-      currentUser?.role !== "barber" ||
-      !currentUserId ||
-      jobActionableNotificationCount === 0
-    ) {
-      return undefined;
-    }
-
-    let isMounted = true;
-
-    async function loadManagedJobApplications() {
-      try {
-        const { data } = await api.get("/salon-jobs/applications/managed");
-
-        if (isMounted) {
-          setManagedJobApplications(Array.isArray(data) ? data : []);
-        }
-      } catch (requestError) {
-        if (!isMounted) return;
-
-        setManagedJobApplications([]);
-        setError(
-          requestError.response?.data?.message ||
-            "Could not load job applications for notification actions.",
-        );
-      }
-    }
-
-    loadManagedJobApplications();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser?.role, currentUserId, jobActionableNotificationCount]);
 
   // ---- Actions ----
 
@@ -482,120 +370,6 @@ export default function NotificationsPage() {
       }
     },
     [activeAction, finishBookingAction, rejectingAction],
-  );
-
-  const handleEventAction = useCallback(
-    async (notification, action) => {
-      if (activeAction) return;
-
-      const eventId = getNotificationEventId(notification);
-      const eventRegistrationId = getNotificationEventRegistrationId(notification);
-      if (!eventId || !eventRegistrationId) return;
-
-      setError("");
-      setActiveAction({ notificationId: notification.id, action });
-
-      try {
-        let response;
-
-        if (action === "approve-event-registration") {
-          response = await api.patch(
-            `/events/${eventId}/registrations/${eventRegistrationId}/approve`,
-            {},
-          );
-        } else if (action === "reject-event-registration") {
-          response = await api.patch(
-            `/events/${eventId}/registrations/${eventRegistrationId}/reject`,
-            {},
-          );
-        } else {
-          return;
-        }
-
-        const nextRegistration =
-          response.data?.registration ||
-          {
-            _id: eventRegistrationId,
-            status:
-              action === "approve-event-registration" ? "approved" : "rejected",
-          };
-
-        setEventRegistrations((currentRegistrations) =>
-          currentRegistrations.map((registration) =>
-            getEventRegistrationId(registration) === eventRegistrationId
-              ? { ...registration, ...nextRegistration }
-              : registration,
-          ),
-        );
-
-        if (!notification.isRead) {
-          await markOneRead(notification.id);
-        }
-
-        await loadNotifications();
-      } catch (requestError) {
-        setError(
-          requestError.response?.data?.message ||
-            "Could not process event registration. Please try again.",
-        );
-      } finally {
-        setActiveAction(null);
-      }
-    },
-    [activeAction, markOneRead, loadNotifications],
-  );
-
-  const handleJobAction = useCallback(
-    async (notification, application, action) => {
-      if (activeAction) return;
-
-      const applicationId =
-        getJobApplicationId(application) ||
-        getNotificationJobApplicationId(notification);
-      if (!applicationId) return;
-
-      const status =
-        action === "accept-job-application"
-          ? "accepted"
-          : action === "reject-job-application"
-            ? "rejected"
-            : "";
-
-      if (!status) return;
-
-      setError("");
-      setActiveAction({ notificationId: notification.id, action });
-
-      try {
-        const { data } = await api.patch(
-          `/salon-jobs/applications/${applicationId}/status`,
-          { status },
-        );
-        const nextApplication = data || { ...application, status };
-
-        setManagedJobApplications((currentApplications) =>
-          currentApplications.map((currentApplication) =>
-            getJobApplicationId(currentApplication) === applicationId
-              ? nextApplication
-              : currentApplication,
-          ),
-        );
-
-        if (!notification.isRead) {
-          await markOneRead(notification.id);
-        }
-
-        await loadNotifications();
-      } catch (requestError) {
-        setError(
-          requestError.response?.data?.message ||
-            "Could not update job application. Please try again.",
-        );
-      } finally {
-        setActiveAction(null);
-      }
-    },
-    [activeAction, markOneRead, loadNotifications],
   );
 
   // ---- Navigation ----
