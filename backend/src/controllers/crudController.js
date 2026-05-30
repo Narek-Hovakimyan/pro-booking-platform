@@ -1,12 +1,22 @@
+import { sendControllerError } from "../utils/controllerError.js";
+
+const sendCrudError = (res, error, fallbackMessage, resourceName) =>
+  sendControllerError(res, error, fallbackMessage, {
+    duplicateKeyMessage: `${resourceName} already exists`,
+  });
+
 export const createCrudController = (Model, resourceName) => ({
   getAll: async (_req, res) => {
     try {
       const items = await Model.find();
       return res.json(items);
     } catch (error) {
-      return res.status(500).json({
-        message: error.message || `Could not fetch ${resourceName}`,
-      });
+      return sendCrudError(
+        res,
+        error,
+        `Could not fetch ${resourceName}`,
+        resourceName
+      );
     }
   },
 
@@ -20,9 +30,12 @@ export const createCrudController = (Model, resourceName) => ({
 
       return res.json(item);
     } catch (error) {
-      return res.status(500).json({
-        message: error.message || `Could not fetch ${resourceName}`,
-      });
+      return sendCrudError(
+        res,
+        error,
+        `Could not fetch ${resourceName}`,
+        resourceName
+      );
     }
   },
 
@@ -31,9 +44,12 @@ export const createCrudController = (Model, resourceName) => ({
       const item = await Model.create(req.body);
       return res.status(201).json(item);
     } catch (error) {
-      return res.status(400).json({
-        message: error.message || `Could not create ${resourceName}`,
-      });
+      return sendCrudError(
+        res,
+        error,
+        `Could not create ${resourceName}`,
+        resourceName
+      );
     }
   },
 
@@ -50,9 +66,12 @@ export const createCrudController = (Model, resourceName) => ({
 
       return res.json(item);
     } catch (error) {
-      return res.status(400).json({
-        message: error.message || `Could not update ${resourceName}`,
-      });
+      return sendCrudError(
+        res,
+        error,
+        `Could not update ${resourceName}`,
+        resourceName
+      );
     }
   },
 
@@ -66,9 +85,12 @@ export const createCrudController = (Model, resourceName) => ({
 
       return res.json({ message: `${resourceName} deleted` });
     } catch (error) {
-      return res.status(500).json({
-        message: error.message || `Could not delete ${resourceName}`,
-      });
+      return sendCrudError(
+        res,
+        error,
+        `Could not delete ${resourceName}`,
+        resourceName
+      );
     }
   },
 });
