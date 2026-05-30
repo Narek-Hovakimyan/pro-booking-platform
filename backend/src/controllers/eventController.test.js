@@ -40,6 +40,8 @@ const originalMethods = {
   registrationCreate: EventRegistration.create,
   registrationFind: EventRegistration.find,
   registrationFindOne: EventRegistration.findOne,
+  registrationFindOneAndUpdate: EventRegistration.findOneAndUpdate,
+  registrationFindByIdAndUpdate: EventRegistration.findByIdAndUpdate,
   notificationCreate: Notification.create,
   salonFindById: Salon.findById,
   salonFindOne: Salon.findOne,
@@ -68,6 +70,8 @@ afterEach(() => {
   EventRegistration.create = originalMethods.registrationCreate;
   EventRegistration.find = originalMethods.registrationFind;
   EventRegistration.findOne = originalMethods.registrationFindOne;
+  EventRegistration.findOneAndUpdate = originalMethods.registrationFindOneAndUpdate;
+  EventRegistration.findByIdAndUpdate = originalMethods.registrationFindByIdAndUpdate;
   Notification.create = originalMethods.notificationCreate;
   Salon.findById = originalMethods.salonFindById;
   Salon.findOne = originalMethods.salonFindOne;
@@ -195,6 +199,27 @@ const createControllerMocks = ({
   EventReview.find = () => ({
     lean: async () => [],
   });
+  EventRegistration.findOneAndUpdate = async (query, update) => {
+    const reg = registrations.find((r) => {
+      if (String(r._id) !== String(query._id)) return false;
+      if (String(r.eventId) !== String(query.eventId)) return false;
+      if (query.status?.$in && !query.status.$in.includes(r.status)) return false;
+      return true;
+    });
+    if (!reg) return null;
+    if (update.$set) {
+      Object.assign(reg, update.$set);
+    }
+    return reg;
+  };
+  EventRegistration.findByIdAndUpdate = async (id, update) => {
+    const reg = registrations.find((r) => String(r._id) === String(id));
+    if (!reg) return null;
+    if (update.$set) {
+      Object.assign(reg, update.$set);
+    }
+    return reg;
+  };
   Notification.create = async (payload) => payload;
   Salon.findById = async () => null;
 
@@ -1622,4 +1647,176 @@ test("updateEvent does not reject legacy past event when date/time is unchanged"
   assert.equal(event.title, "Updated legacy event");
   assert.equal(event.price, 25);
   assert.equal(event.maxParticipants, 8);
+});
+
+// ── Approve registration capacity / atomicity ──
+
+test("approveRegistration allows approval when maxParticipants is 0 (unlimited)", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "pending" });
+  createControllerMocks({
+    event: { ...baseEvent, maxParticipants: 0 },
+    registrations: [registration],
+  });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.registration.status, "approved");
+  assert.equal(registration.status, "approved");
+});
+
+test("approveRegistration allows approval when maxParticipants is undefined (unlimited)", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "pending" });
+  createControllerMocks({
+    event: { ...baseEvent, maxParticipants: undefined },
+    registrations: [registration],
+  });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.registration.status, "approved");
+});
+
+test("approveRegistration blocks approval when approvedCount >= maxParticipants and maxParticipants > 0", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "pending" });
+  createControllerMocks({
+    event: { ...baseEvent, maxParticipants: 1 },
+    registrations: [
+      createRegistration({ userId: otherUserId, status: "approved" }),
+      registration,
+    ],
+  });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Event is full");
+  assert.equal(registration.status, "pending", "registration was not modified");
+});
+
+test("approveRegistration does not approve cancelled registration", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "cancelled" });
+  createControllerMocks({ registrations: [registration] });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Only pending or waitlisted registrations can be approved");
+});
+
+test("approveRegistration does not approve rejected registration", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "rejected" });
+  createControllerMocks({ registrations: [registration] });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Only pending or waitlisted registrations can be approved");
+});
+
+test("approveRegistration returns 400 if registration was already approved", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "approved" });
+  createControllerMocks({ registrations: [registration] });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Registration is already approved");
+});
+
+test("approveRegistration uses atomic status guard: stale status returns 400 and no notification", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "pending" });
+  createControllerMocks({ registrations: [registration] });
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  // Make findOneAndUpdate return null — as if another request changed the status
+  EventRegistration.findOneAndUpdate = async () => null;
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Registration is no longer pending or waitlisted");
+  assert.equal(registration.status, "pending", "registration was not modified by our request");
+  assert.equal(notifications.length, 0, "no notification was sent");
+});
+
+test("approveRegistration sends notification only after successful approval", async () => {
+  const res = createResponse();
+  const registration = createRegistration({ userId: attendeeId, status: "pending" });
+  createControllerMocks({ registrations: [registration] });
+  const notifications = [];
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "event_registration_approved");
+  assert.deepEqual(notifications[0].data, {
+    eventId,
+    eventRegistrationId: registration._id,
+  });
 });
