@@ -1,5 +1,6 @@
 import Notification from "../models/Notification.js";
 import { createNotification } from "../services/notificationService.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export { createNotification };
 
@@ -20,9 +21,7 @@ export const getMyNotifications = async (req, res) => {
 
     return res.json(notifications);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch notifications",
-    });
+    return sendControllerError(res, error, "Could not fetch notifications");
   }
 };
 

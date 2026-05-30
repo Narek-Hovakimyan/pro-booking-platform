@@ -4,6 +4,7 @@ import Salon from "../models/Salon.js";
 import ServiceCategory from "../models/ServiceCategory.js";
 import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../models/Service.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 /* ── Helpers ────────────────────────────────────────────── */
 
@@ -172,9 +173,7 @@ export const listServiceCategories = async (req, res) => {
       })),
     ]);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch service categories",
-    });
+    return sendControllerError(res, error, "Could not fetch service categories");
   }
 };
 
@@ -435,8 +434,6 @@ export const deleteServiceCategory = async (req, res) => {
 
     return res.json({ message: "Category deleted" });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not delete service category",
-    });
+    return sendControllerError(res, error, "Could not delete service category");
   }
 };

@@ -51,6 +51,16 @@ const createResponse = () => ({
   },
 });
 
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
 const createSalon = (overrides = {}) => ({
   _id: salonId,
   name: "Downtown Salon",
@@ -219,6 +229,22 @@ test("public list returns only active jobs", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].status, "active");
+});
+
+test("listSalonJobs unexpected error returns generic 500 without leaking raw message", async () => {
+  const res = createResponse();
+
+  SalonJobPost.find = () => {
+    throw new Error("raw salon job db failure");
+  };
+
+  await withSilencedConsoleError(async () => {
+    await listSalonJobs({ query: {} }, res);
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not fetch salon job posts");
+  assert.equal(res.body.message.includes("raw salon job db failure"), false);
 });
 
 test("list filters by role", async () => {

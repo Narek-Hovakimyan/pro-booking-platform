@@ -19,6 +19,7 @@ import {
   serializeDefaultSchedule,
   sanitizeWeeklySchedule,
 } from "../utils/scheduleUtils.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const scheduleController = createCrudController(Schedule, "Schedule");
 
@@ -171,10 +172,7 @@ export const getScheduleByBarberAndSalon = async (req, res) => {
       defaultSchedule,
     });
   } catch (error) {
-    console.error("BACKEND ERROR in getScheduleByBarberAndSalon:", error);
-    return res.status(500).json({
-      message: error.message || "Could not fetch schedule",
-    });
+    return sendControllerError(res, error, "Could not fetch schedule");
   }
 };
 
@@ -184,9 +182,7 @@ export const upsertSchedule = async (req, res) => {
       message: "salonId is required. Use PUT /api/schedules/:barberId/:salonId",
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not update schedule",
-    });
+    return sendControllerError(res, error, "Could not update schedule");
   }
 };
 

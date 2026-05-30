@@ -19,6 +19,7 @@ import {
   requireBarber,
   openCurrentWorkHistory,
 } from "../utils/salonHelpers.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 /**
  * Get the primary approved salon for a barber.
@@ -170,9 +171,7 @@ export const listSalons = async (req, res) => {
       })
     );
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salons",
-    });
+    return sendControllerError(res, error, "Could not fetch salons");
   }
 };
 
@@ -186,9 +185,7 @@ export const listManageableSalons = async (req, res) => {
 
     return res.json(salons.map((salon) => serializeSalon(salon)));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not load manageable salons",
-    });
+    return sendControllerError(res, error, "Could not load manageable salons");
   }
 };
 
@@ -226,9 +223,7 @@ export const getSalonProfile = async (req, res) => {
       })
     );
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon",
-    });
+    return sendControllerError(res, error, "Could not fetch salon");
   }
 };
 
@@ -240,9 +235,7 @@ export const getMySalonStatus = async (req, res) => {
 
     return res.json(status);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon status",
-    });
+    return sendControllerError(res, error, "Could not fetch salon status");
   }
 };
 

@@ -9,6 +9,7 @@ import { createNotification } from "./notificationController.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import { getEventDateTime } from "../utils/eventUtils.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const APPROVED_REGISTRATION_STATUS = "approved";
 
@@ -301,9 +302,7 @@ export const getCertificateById = async (req, res) => {
 
     return res.json(getPublicCertificatePayload(certificate));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch certificate",
-    });
+    return sendControllerError(res, error, "Could not fetch certificate");
   }
 };
 
@@ -319,9 +318,7 @@ export const verifyCertificate = async (req, res) => {
 
     return res.json(getPublicCertificatePayload(certificate));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not verify certificate",
-    });
+    return sendControllerError(res, error, "Could not verify certificate");
   }
 };
 
@@ -370,8 +367,6 @@ export const revokeCertificate = async (req, res) => {
       certificate: getPublicCertificatePayload(certificate),
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not revoke certificate",
-    });
+    return sendControllerError(res, error, "Could not revoke certificate");
   }
 };

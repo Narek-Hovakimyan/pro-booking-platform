@@ -5,6 +5,7 @@ import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 import ServiceCategory from "../models/ServiceCategory.js";
 import { createCrudController } from "./crudController.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const serviceController = createCrudController(Service, "Service");
 
@@ -243,9 +244,7 @@ export const getServicesByBarber = async (req, res) => {
       });
     return res.json(services);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch services",
-    });
+    return sendControllerError(res, error, "Could not fetch services");
   }
 };
 
@@ -477,8 +476,6 @@ export const deleteService = async (req, res) => {
 
     return res.json({ message: "Service deleted" });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not delete service",
-    });
+    return sendControllerError(res, error, "Could not delete service");
   }
 };

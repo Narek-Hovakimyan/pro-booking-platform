@@ -48,9 +48,7 @@ export const getMyMessages = async (req, res) => {
 
     return res.json([...messages].reverse());
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch messages",
-    });
+    return sendMessageError(res, error, "Could not fetch messages");
   }
 };
 
@@ -73,9 +71,7 @@ export const getConversation = async (req, res) => {
 
     return res.json([...messages].reverse());
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch conversation",
-    });
+    return sendMessageError(res, error, "Could not fetch conversation");
   }
 };
 
@@ -97,9 +93,7 @@ export const markConversationRead = async (req, res) => {
       modifiedCount: result.modifiedCount,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not mark messages as read",
-    });
+    return sendMessageError(res, error, "Could not mark messages as read");
   }
 };
 

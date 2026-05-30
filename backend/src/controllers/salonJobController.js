@@ -5,6 +5,7 @@ import {
   pickSalonJobFields,
   serializeSalonJob,
 } from "../utils/salonJobUtils.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const salonJobPopulate = "name city address imageUrl";
 
@@ -68,9 +69,7 @@ export const createSalonJob = async (req, res) => {
 
     return res.status(201).json(serializeSalonJob(job));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not create salon job post",
-    });
+    return sendControllerError(res, error, "Could not create salon job post");
   }
 };
 
@@ -103,9 +102,7 @@ export const listSalonJobs = async (req, res) => {
 
     return res.json(jobs.map(serializeSalonJob));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon job posts",
-    });
+    return sendControllerError(res, error, "Could not fetch salon job posts");
   }
 };
 
@@ -121,9 +118,7 @@ export const listMySalonJobs = async (req, res) => {
 
     return res.json(jobs.map(serializeSalonJob));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch your salon job posts",
-    });
+    return sendControllerError(res, error, "Could not fetch your salon job posts");
   }
 };
 
@@ -137,9 +132,7 @@ export const getSalonJobById = async (req, res) => {
 
     return res.json(serializeSalonJob(job));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon job post",
-    });
+    return sendControllerError(res, error, "Could not fetch salon job post");
   }
 };
 
@@ -154,9 +147,7 @@ export const updateSalonJob = async (req, res) => {
     const populatedJob = await loadJobWithSalon(job._id);
     return res.json(serializeSalonJob(populatedJob || job));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not update salon job post",
-    });
+    return sendControllerError(res, error, "Could not update salon job post");
   }
 };
 
@@ -171,8 +162,6 @@ export const closeSalonJob = async (req, res) => {
     const populatedJob = await loadJobWithSalon(job._id);
     return res.json(serializeSalonJob(populatedJob || job));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not close salon job post",
-    });
+    return sendControllerError(res, error, "Could not close salon job post");
   }
 };

@@ -2,6 +2,7 @@ import express from "express";
 import User from "../models/User.js";
 import Salon from "../models/Salon.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 const router = express.Router();
 
@@ -37,9 +38,7 @@ router.get("/barber-salons/:barberId", protect, async (req, res) => {
       rawSalons: JSON.parse(JSON.stringify(barber.salons || [])),
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Debug route error",
-    });
+    return sendControllerError(res, error, "Debug route error");
   }
 });
 
@@ -67,9 +66,7 @@ router.get("/me", protect, async (req, res) => {
       salonStatus: user.salonStatus,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Debug route error",
-    });
+    return sendControllerError(res, error, "Debug route error");
   }
 });
 

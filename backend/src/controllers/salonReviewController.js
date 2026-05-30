@@ -121,9 +121,7 @@ export const checkSalonReview = async (req, res) => {
       review: review ? serializeSalonReview(review) : null,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not check salon review",
-    });
+    return sendControllerError(res, error, "Could not check salon review");
   }
 };
 
@@ -152,9 +150,7 @@ export const getSalonReviews = async (req, res) => {
       totalReviews,
     });
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon reviews",
-    });
+    return sendControllerError(res, error, "Could not fetch salon reviews");
   }
 };
 
@@ -166,9 +162,7 @@ export const getSalonReviewsLegacy = async (req, res) => {
 
     return res.json(reviews.map(serializeSalonReview));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch salon reviews",
-    });
+    return sendControllerError(res, error, "Could not fetch salon reviews");
   }
 };
 

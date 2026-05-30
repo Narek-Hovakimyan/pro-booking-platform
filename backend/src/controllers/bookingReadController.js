@@ -2,6 +2,7 @@ import {
   getBarberBookingsForRequester,
   getClientBookingsForRequester,
 } from "../services/bookingReadService.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const getClientBookings = async (req, res) => {
   try {
@@ -12,9 +13,7 @@ export const getClientBookings = async (req, res) => {
 
     return res.json(bookings);
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch client bookings",
-    });
+    return sendControllerError(res, error, "Could not fetch client bookings");
   }
 };
 
@@ -27,8 +26,6 @@ export const getBarberBookings = async (req, res) => {
 
     return res.json(bookings);
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.message || "Could not fetch barber bookings",
-    });
+    return sendControllerError(res, error, "Could not fetch barber bookings");
   }
 };

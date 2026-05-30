@@ -1,5 +1,6 @@
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
 import LoyaltyProgress from "../models/LoyaltyProgress.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 // ── Barber: get my programs ──
 export const getMyPrograms = async (req, res) => {
@@ -11,9 +12,7 @@ export const getMyPrograms = async (req, res) => {
 
     return res.json(programs);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch loyalty programs",
-    });
+    return sendControllerError(res, error, "Could not fetch loyalty programs");
   }
 };
 
@@ -175,8 +174,6 @@ export const getMyProgress = async (req, res) => {
 
     return res.json(activeProgress);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch loyalty progress",
-    });
+    return sendControllerError(res, error, "Could not fetch loyalty progress");
   }
 };

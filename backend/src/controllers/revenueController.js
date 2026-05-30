@@ -1,4 +1,5 @@
-import { getBarberRevenueSummary, RevenueError } from "../services/revenueService.js";
+import { getBarberRevenueSummary } from "../services/revenueService.js";
+import { sendControllerError } from "../utils/controllerError.js";
 
 export const getMyRevenue = async (req, res) => {
   try {
@@ -12,9 +13,6 @@ export const getMyRevenue = async (req, res) => {
 
     return res.json(summary);
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return res.status(statusCode).json({
-      message: error.message || "Could not fetch revenue summary",
-    });
+    return sendControllerError(res, error, "Could not fetch revenue summary");
   }
 };

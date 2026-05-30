@@ -37,9 +37,7 @@ export const getReviewsByBarber = async (req, res) => {
 
     return res.json(reviews.map(serializeReview));
   } catch (error) {
-    return res.status(500).json({
-      message: error.message || "Could not fetch reviews",
-    });
+    return sendControllerError(res, error, "Could not fetch reviews");
   }
 };
 

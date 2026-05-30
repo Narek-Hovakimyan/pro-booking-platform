@@ -53,6 +53,16 @@ const createResponse = () => ({
   },
 });
 
+const withSilencedConsoleError = async (task) => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+};
+
 const selectable = (value) => ({
   select: async () => value,
 });
@@ -257,6 +267,29 @@ test("non-organizer cannot issue certificate", async () => {
 
   assert.equal(res.statusCode, 403);
   assert.equal(res.body.message, "Only organizer can issue certificates");
+});
+
+test("verifyCertificate unexpected error returns generic 500 without leaking raw message", async () => {
+  const res = createResponse();
+
+  EventCertificate.findOne = () => ({
+    lean: async () => {
+      throw new Error("raw certificate verification failure");
+    },
+  });
+
+  await withSilencedConsoleError(async () => {
+    await verifyCertificate(
+      {
+        params: { verificationCode: "VERIFY123" },
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not verify certificate");
+  assert.equal(res.body.message.includes("raw certificate verification failure"), false);
 });
 
 test("participant cannot issue own certificate", async () => {
