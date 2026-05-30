@@ -1040,3 +1040,88 @@ test("past event data is preserved (no deletion)", async () => {
   assert.equal(res.body[0].type, "training");
   assert.equal(res.body[0].visibility, "public");
 });
+
+// ── ReDoS prevention: event search ──
+
+test("search with regex metacharacters treats them as literal text", async () => {
+  const res = createResponse();
+  let capturedQuery;
+
+  Event.find = (query) => {
+    capturedQuery = query;
+    return createQuery([]);
+  };
+  EventReview.aggregate = async () => [];
+  EventRegistration.aggregate = async () => [];
+  EventReview.find = () => ({ lean: async () => [] });
+
+  await getEvents(
+    { query: { search: ".*+" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(capturedQuery.$or, "search filter was applied");
+  // The escaped term should not match literally ".*+" as a regex pattern
+  const regexPattern = capturedQuery.$or[0].title.$regex;
+  assert.equal(regexPattern, "\\.\\*\\+", "regex metacharacters are escaped");
+});
+
+test("search longer than 100 chars returns 400", async () => {
+  const res = createResponse();
+  const longSearch = "a".repeat(101);
+
+  await getEvents(
+    { query: { search: longSearch } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Search term is too long");
+});
+
+test("empty/whitespace search does not add search filter and still succeeds", async () => {
+  const res = createResponse();
+  let capturedQuery;
+
+  Event.find = (query) => {
+    capturedQuery = query;
+    return createQuery([]);
+  };
+  EventReview.aggregate = async () => [];
+  EventRegistration.aggregate = async () => [];
+  EventReview.find = () => ({ lean: async () => [] });
+
+  await getEvents(
+    { query: { search: "   " } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  // After trimming, search term is empty — no $or added
+  assert.equal(capturedQuery.$or, undefined, "no $or filter for whitespace-only search");
+});
+
+test("malicious pattern (a+)+aaaaaaaaab does not cause ReDoS — passed as escaped literal", async () => {
+  const res = createResponse();
+  let capturedQuery;
+
+  Event.find = (query) => {
+    capturedQuery = query;
+    return createQuery([]);
+  };
+  EventReview.aggregate = async () => [];
+  EventRegistration.aggregate = async () => [];
+  EventReview.find = () => ({ lean: async () => [] });
+
+  await getEvents(
+    { query: { search: "(a+)+aaaaaaaaab" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const regexPattern = capturedQuery.$or[0].title.$regex;
+  assert.ok(regexPattern.includes("\\("), "parentheses are escaped");
+  assert.ok(regexPattern.includes("\\)"), "parentheses are escaped");
+  assert.ok(regexPattern.includes("\\+"), "plus signs are escaped");
+});

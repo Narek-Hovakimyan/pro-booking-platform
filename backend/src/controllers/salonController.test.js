@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { listManageableSalons, updateSalonDefaultSchedule } from "./salonController.js";
+import { listManageableSalons, listSalons, updateSalonDefaultSchedule } from "./salonController.js";
 import { getSalonStaff } from "./salonStaffController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
@@ -455,4 +455,86 @@ test("getSalonStaff — legacy approved salon member also has access", async () 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].name, "Legacy Staff");
+});
+
+// ── ReDoS prevention: salon search ──
+
+test("listSalons search with regex metacharacters treats them as literal text", async () => {
+  const res = createResponse();
+  let capturedQuery;
+
+  Salon.find = (query) => {
+    capturedQuery = query;
+    return { sort: async () => [] };
+  };
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  User.find = () => ({ select: async () => [] });
+  BarberProfile.find = async () => [];
+
+  await listSalons(
+    { query: { search: ".*+" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const regexPattern = capturedQuery.$or[0].name.$regex;
+  assert.equal(regexPattern, "\\.\\*\\+", "regex metacharacters are escaped");
+});
+
+test("listSalons search longer than 100 chars returns 400", async () => {
+  const res = createResponse();
+  const longSearch = "a".repeat(101);
+
+  await listSalons(
+    { query: { search: longSearch } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Search term is too long");
+});
+
+test("listSalons empty/whitespace search does not add search filter and still succeeds", async () => {
+  const res = createResponse();
+  let capturedQuery;
+
+  Salon.find = (query) => {
+    capturedQuery = query;
+    return { sort: async () => [] };
+  };
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  User.find = () => ({ select: async () => [] });
+  BarberProfile.find = async () => [];
+
+  await listSalons(
+    { query: { search: "   " } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(capturedQuery.$or, undefined, "no $or filter for whitespace-only search");
+});
+
+test("listSalons malicious pattern is escaped, not passed raw", async () => {
+  const res = createResponse();
+  let capturedQuery;
+
+  Salon.find = (query) => {
+    capturedQuery = query;
+    return { sort: async () => [] };
+  };
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  User.find = () => ({ select: async () => [] });
+  BarberProfile.find = async () => [];
+
+  await listSalons(
+    { query: { search: "(a+)+aaaaaaaaab" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  const regexPattern = capturedQuery.$or[0].name.$regex;
+  assert.ok(regexPattern.includes("\\("), "parentheses are escaped");
+  assert.ok(regexPattern.includes("\\)"), "parentheses are escaped");
+  assert.ok(regexPattern.includes("\\+"), "plus signs are escaped");
 });

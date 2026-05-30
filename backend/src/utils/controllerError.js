@@ -34,3 +34,23 @@ export const sendControllerError = (
 
   return res.status(statusCode).json({ message });
 };
+
+/**
+ * Escape regex metacharacters so user input is treated as literal text.
+ * Use before passing untrusted search terms to $regex to prevent ReDoS.
+ */
+export const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Normalize a user-provided search term:
+ * - trim whitespace
+ * - cap length at 100 characters
+ * - returns empty string if empty/whitespace only
+ * Returns an object { term, isTooLong }.
+ */
+export const normalizeSearch = (raw) => {
+  const term = String(raw || "").trim().slice(0, 100);
+  const isTooLong = String(raw || "").trim().length > 100;
+  return { term, isTooLong };
+};

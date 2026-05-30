@@ -22,7 +22,7 @@ import {
   parseEventPayload,
   isEventInPast,
 } from "../utils/eventUtils.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
 
 /**
  * GET /api/events
@@ -36,11 +36,18 @@ export const getEvents = async (req, res) => {
 
     if (salonId) filter.salonId = salonId;
     if (search) {
-      filter.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { instructor: { $regex: search, $options: "i" } },
-        { location: { $regex: search, $options: "i" } },
-      ];
+      const { term, isTooLong } = normalizeSearch(search);
+      if (isTooLong) {
+        return res.status(400).json({ message: "Search term is too long" });
+      }
+      if (term) {
+        const escaped = escapeRegex(term);
+        filter.$or = [
+          { title: { $regex: escaped, $options: "i" } },
+          { instructor: { $regex: escaped, $options: "i" } },
+          { location: { $regex: escaped, $options: "i" } },
+        ];
+      }
     }
 
     const events = await Event.find(filter)

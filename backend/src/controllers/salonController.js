@@ -19,7 +19,7 @@ import {
   requireBarber,
   openCurrentWorkHistory,
 } from "../utils/salonHelpers.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
 
 /**
  * Get the primary approved salon for a barber.
@@ -109,11 +109,17 @@ export const listSalons = async (req, res) => {
 
     // Optional search filter
     if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, "i");
-      query.$or = [
-        { name: searchRegex },
-        { city: searchRegex },
-      ];
+      const { term, isTooLong } = normalizeSearch(req.query.search);
+      if (isTooLong) {
+        return res.status(400).json({ message: "Search term is too long" });
+      }
+      if (term) {
+        const escaped = escapeRegex(term);
+        query.$or = [
+          { name: { $regex: escaped, $options: "i" } },
+          { city: { $regex: escaped, $options: "i" } },
+        ];
+      }
     }
 
     const salons = await Salon.find(query).sort({ name: 1 });
