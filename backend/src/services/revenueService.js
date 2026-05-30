@@ -173,10 +173,25 @@ export const getBarberRevenueSummary = async ({
   };
 };
 
+const MAX_DATE_RANGE_DAYS = 366;
+
 function resolveDateRange(rawFrom, rawTo) {
   if (rawFrom && rawTo) {
     if (!DATE_PATTERN.test(rawFrom) || !DATE_PATTERN.test(rawTo)) {
       throw new RevenueError(400, "from/to must use YYYY-MM-DD format");
+    }
+    if (rawFrom > rawTo) {
+      throw new RevenueError(400, "from must be before or equal to to");
+    }
+    const fromDate = new Date(rawFrom + "T00:00:00.000Z");
+    const toDate = new Date(rawTo + "T23:59:59.999Z");
+    const diffMs = toDate.getTime() - fromDate.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays > MAX_DATE_RANGE_DAYS) {
+      throw new RevenueError(
+        400,
+        `Date range must not exceed ${MAX_DATE_RANGE_DAYS} days`
+      );
     }
     return { from: rawFrom, to: rawTo };
   }

@@ -83,7 +83,8 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "Phone already exists" });
     }
 
-    return res.status(500).json({ message: error.message || "Registration failed" });
+    console.error("Registration failed:", error);
+    return res.status(500).json({ message: "Registration failed" });
   }
 };
 
@@ -115,6 +116,7 @@ export const loginUser = async (req, res) => {
       user: getUserData(user),
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message || "Login failed" });
+    console.error("Login failed:", error);
+    return res.status(500).json({ message: "Login failed" });
   }
 };

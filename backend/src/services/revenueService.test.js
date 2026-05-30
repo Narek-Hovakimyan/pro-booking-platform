@@ -348,3 +348,45 @@ test("invalid date format throws 400", async () => {
     "from/to must use YYYY-MM-DD format"
   );
 });
+
+test("from > to throws 400", async () => {
+  await assertRevenueError(
+    getBarberRevenueSummary({
+      barberId,
+      requester: barberRequester,
+      from: "2024-06-30",
+      to: "2024-06-01",
+    }),
+    400,
+    "from must be before or equal to to"
+  );
+});
+
+test("from equal to to does not throw", async () => {
+  Booking.find = mockFind([
+    createBooking({ bookingDate: "2024-06-15", price: 50, serviceName: "Beard Trim" }),
+  ]);
+
+  const summary = await getBarberRevenueSummary({
+    barberId,
+    requester: barberRequester,
+    from: "2024-06-15",
+    to: "2024-06-15",
+  });
+
+  assert.equal(summary.totalRevenue, 50);
+  assert.equal(summary.completedBookingsCount, 1);
+});
+
+test("too-large date range throws 400", async () => {
+  await assertRevenueError(
+    getBarberRevenueSummary({
+      barberId,
+      requester: barberRequester,
+      from: "2024-01-01",
+      to: "2025-06-01",
+    }),
+    400,
+    "Date range must not exceed 366 days"
+  );
+});

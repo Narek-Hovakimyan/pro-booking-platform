@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Booking from "../models/Booking.js";
 import { emitBookingUpdated } from "../services/bookingSideEffectsService.js";
 import { getDayKeyFromDate, isDateKey } from "../utils/bookingDateTime.js";
@@ -10,6 +11,23 @@ import {
 } from "../utils/bookingSlotValidation.js";
 import { normalizeBookingStatus } from "../utils/bookingUtils.js";
 import { createNotification } from "./notificationController.js";
+
+const getRescheduleErrorStatusCode = (error) => {
+  if (error?.statusCode) return error.statusCode;
+  if (error?.name === "ValidationError" || error?.name === "CastError") {
+    return 400;
+  }
+  return 500;
+};
+
+const sendRescheduleError = (res, error, fallbackMessage) => {
+  console.error(fallbackMessage, error);
+  const statusCode = getRescheduleErrorStatusCode(error);
+  const message = statusCode === 500
+    ? fallbackMessage
+    : error?.message || fallbackMessage;
+  return res.status(statusCode).json({ message });
+};
 
 const reschedulableBookingStatuses = new Set(["pending", "accepted"]);
 
@@ -111,9 +129,7 @@ export const createRescheduleRequest = async (req, res) => {
 
     return res.status(201).json(booking);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not request reschedule",
-    });
+    return sendRescheduleError(res, error, "Could not request reschedule");
   }
 };
 
@@ -224,9 +240,7 @@ export const acceptRescheduleRequest = async (req, res) => {
 
     return res.json(updatedBooking);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not accept reschedule request",
-    });
+    return sendRescheduleError(res, error, "Could not accept reschedule request");
   }
 };
 
@@ -272,8 +286,6 @@ export const rejectRescheduleRequest = async (req, res) => {
 
     return res.json(booking);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not reject reschedule request",
-    });
+    return sendRescheduleError(res, error, "Could not reject reschedule request");
   }
 };

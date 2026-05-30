@@ -1,9 +1,31 @@
+import mongoose from "mongoose";
 import Message from "../models/Message.js";
+import User from "../models/User.js";
 import { createNotification } from "./notificationController.js";
 import { getIO } from "../socket.js";
 
 const userFields = "name phone role avatarUrl";
 const MAX_MESSAGE_TEXT_LENGTH = 5000;
+
+const isValidObjectId = (value) =>
+  Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
+
+const getMessageErrorStatusCode = (error) => {
+  if (error?.statusCode) return error.statusCode;
+  if (error?.name === "ValidationError" || error?.name === "CastError") {
+    return 400;
+  }
+  return 500;
+};
+
+const sendMessageError = (res, error, fallbackMessage) => {
+  console.error(fallbackMessage, error);
+  const statusCode = getMessageErrorStatusCode(error);
+  const message = statusCode === 500
+    ? fallbackMessage
+    : error?.message || fallbackMessage;
+  return res.status(statusCode).json({ message });
+};
 
 const parseLimit = (queryLimit) => {
   const limit = Number(queryLimit);
@@ -101,6 +123,16 @@ export const createMessage = async (req, res) => {
       return res.status(400).json({ message: "Cannot send message to yourself" });
     }
 
+    if (!isValidObjectId(receiverId)) {
+      return res.status(400).json({ message: "Invalid receiver ID" });
+    }
+
+    const receiverExists = await User.exists({ _id: receiverId });
+
+    if (!receiverExists) {
+      return res.status(404).json({ message: "Receiver not found" });
+    }
+
     const message = await Message.create({
       senderId,
       receiverId,
@@ -128,8 +160,6 @@ export const createMessage = async (req, res) => {
 
     return res.status(201).json(populatedMessage);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not send message",
-    });
+    return sendMessageError(res, error, "Could not send message");
   }
 };

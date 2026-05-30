@@ -1009,9 +1009,7 @@ export const updateTreatmentRecord = async (req, res) => {
 
     return res.json(booking);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not update treatment record",
-    });
+    return sendControllerError(res, error, "Could not update treatment record");
   }
 };
 
