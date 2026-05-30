@@ -430,18 +430,68 @@ export const approveRegistration = async (req, res) => {
       });
     }
 
-    const approvedCount = await countApprovedRegistrations(event._id);
-    if (approvedCount >= event.maxParticipants) {
-      return res.status(400).json({ message: "Event is full" });
+    const maxParticipants = Number(event.maxParticipants || 0);
+
+    if (maxParticipants > 0) {
+      const approvedCount = await countApprovedRegistrations(event._id);
+      if (approvedCount >= maxParticipants) {
+        return res.status(400).json({ message: "Event is full" });
+      }
     }
 
-    registration.status = APPROVED_REGISTRATION_STATUS;
-    registration.rejectionReason = "";
-    registration.attendanceStatus = "pending";
-    registration.attended = false;
-    registration.checkedInAt = null;
-    registration.reminderSentAt = null;
-    await registration.save();
+    const originalStatus = registration.status;
+    const originalApprovalState = {
+      status: originalStatus,
+      rejectionReason: registration.rejectionReason || "",
+      attendanceStatus: registration.attendanceStatus || "pending",
+      attended: Boolean(registration.attended),
+      checkedInAt: registration.checkedInAt || null,
+      reminderSentAt: registration.reminderSentAt || null,
+    };
+
+    // Atomic approval: only update if still pending or waitlisted
+    const updated = await EventRegistration.findOneAndUpdate(
+      {
+        _id: registration._id,
+        eventId: event._id,
+        status: {
+          $in: [PENDING_REGISTRATION_STATUS, WAITLISTED_REGISTRATION_STATUS],
+        },
+      },
+      {
+        $set: {
+          status: APPROVED_REGISTRATION_STATUS,
+          rejectionReason: "",
+          attendanceStatus: "pending",
+          attended: false,
+          checkedInAt: null,
+          reminderSentAt: null,
+        },
+      },
+      { new: true, returnDocument: "after" }
+    );
+
+    if (!updated) {
+      return res.status(400).json({
+        message: "Registration is no longer pending or waitlisted",
+      });
+    }
+
+    // Post-approval recount guard (minimizes race window)
+    if (maxParticipants > 0) {
+      const newCount = await countApprovedRegistrations(event._id);
+      if (newCount > maxParticipants) {
+        await EventRegistration.findOneAndUpdate(
+          {
+            _id: registration._id,
+            eventId: event._id,
+            status: APPROVED_REGISTRATION_STATUS,
+          },
+          { $set: originalApprovalState }
+        );
+        return res.status(400).json({ message: "Event is full" });
+      }
+    }
 
     await createNotification({
       userId: getRegistrationUserId(registration),
@@ -450,10 +500,12 @@ export const approveRegistration = async (req, res) => {
       data: getEventNotificationData(event, registration),
     });
 
+    const finalCount = await countApprovedRegistrations(event._id);
+
     return res.json({
       message: "Registration approved",
-      registration: mapRegistrationResponse(registration),
-      registrationCount: approvedCount + 1,
+      registration: mapRegistrationResponse(updated),
+      registrationCount: finalCount,
     });
   } catch (error) {
     return sendControllerError(res, error, "Could not approve registration");
