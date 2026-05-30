@@ -1067,6 +1067,119 @@ test("past event data is preserved (no deletion)", async () => {
   assert.equal(res.body[0].visibility, "public");
 });
 
+test("getMyEvents aggregates stats for a past event", async () => {
+  const res = createResponse();
+  const pastEventId = "64b000000000000000000099";
+  const pastEvent = {
+    ...baseEvent,
+    _id: pastEventId,
+    date: "2020-01-01",
+    time: "10:00",
+  };
+
+  Event.find = () => createQuery([{ ...pastEvent }]);
+
+  let aggregateCallCount = 0;
+  EventRegistration.aggregate = async (pipeline) => {
+    aggregateCallCount++;
+    if (aggregateCallCount === 1) {
+      // approved registrations
+      return [{ _id: pastEventId, count: 3 }];
+    }
+    // attended registrations
+    return [{ _id: pastEventId, count: 2 }];
+  };
+  EventCertificate.aggregate = async () => [{ _id: pastEventId, count: 2 }];
+  EventReview.aggregate = async () => [
+    { _id: pastEventId, averageRating: 4.5, reviewsCount: 2 },
+  ];
+  EventRegistration.find = () => createQuery([]);
+  EventCertificate.find = () => createQuery([]);
+  EventReview.find = () => ({ lean: async () => [] });
+  Notification.create = async (payload) => payload;
+  Salon.findById = async () => null;
+
+  await getMyEvents(
+    { user: { _id: organizerId, role: "barber" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1);
+  assert.equal(res.body[0].registrationCount, 3);
+  assert.equal(res.body[0].attendedCount, 2);
+  assert.equal(res.body[0].certificatesCount, 2);
+  assert.equal(res.body[0].reviewsCount, 2);
+  assert.equal(res.body[0].averageRating, 4.5);
+});
+
+test("getMyEvents aggregates stats for upcoming events as before", async () => {
+  const res = createResponse();
+  const upcomingEventId = "64b000000000000000000010";
+  const upcomingEvent = {
+    ...baseEvent,
+    _id: upcomingEventId,
+    date: "2099-12-25",
+  };
+
+  Event.find = () => createQuery([{ ...upcomingEvent }]);
+
+  let aggregateCallCount = 0;
+  EventRegistration.aggregate = async (pipeline) => {
+    aggregateCallCount++;
+    if (aggregateCallCount === 1) {
+      // approved registrations
+      return [{ _id: upcomingEventId, count: 5 }];
+    }
+    // attended registrations
+    return [{ _id: upcomingEventId, count: 4 }];
+  };
+  EventCertificate.aggregate = async () => [{ _id: upcomingEventId, count: 3 }];
+  EventReview.aggregate = async () => [
+    { _id: upcomingEventId, averageRating: 4.2, reviewsCount: 3 },
+  ];
+  EventRegistration.find = () => createQuery([]);
+  EventCertificate.find = () => createQuery([]);
+  EventReview.find = () => ({ lean: async () => [] });
+  Notification.create = async (payload) => payload;
+  Salon.findById = async () => null;
+
+  await getMyEvents(
+    { user: { _id: organizerId, role: "barber" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1);
+  assert.equal(res.body[0].registrationCount, 5);
+  assert.equal(res.body[0].attendedCount, 4);
+  assert.equal(res.body[0].certificatesCount, 3);
+  assert.equal(res.body[0].reviewsCount, 3);
+  assert.equal(res.body[0].averageRating, 4.2);
+});
+
+test("getMyEvents returns [] when organizer has no events", async () => {
+  const res = createResponse();
+
+  Event.find = () => createQuery([]);
+  EventRegistration.aggregate = async () => [];
+  EventCertificate.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+  EventRegistration.find = () => createQuery([]);
+  EventCertificate.find = () => createQuery([]);
+  EventReview.find = () => ({ lean: async () => [] });
+  Notification.create = async (payload) => payload;
+  Salon.findById = async () => null;
+
+  await getMyEvents(
+    { user: { _id: organizerId, role: "barber" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
+});
+
 // ── ReDoS prevention: event search ──
 
 test("search with regex metacharacters treats them as literal text", async () => {

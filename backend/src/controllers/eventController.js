@@ -130,21 +130,19 @@ export const getMyEvents = async (req, res) => {
       .sort({ date: 1, time: 1 })
       .lean();
 
-    // Only aggregate counts for upcoming events to avoid overfetching registration/certificate/review data for past events
-    const upcomingEvents = events.filter((event) => !isEventInPast(event));
-    const upcomingEventIds = upcomingEvents.map((event) => event._id);
+    const eventIds = events.map((event) => event._id);
 
     let regCountMap = new Map();
     let attendedCountMap = new Map();
     let certificatesCountMap = new Map();
     let reviewStatsMap = new Map();
 
-    if (upcomingEvents.length > 0) {
+    if (eventIds.length > 0) {
       const [registrations, attendedRegs, certificates, reviewStats] = await Promise.all([
         EventRegistration.aggregate([
           {
             $match: {
-              eventId: { $in: upcomingEventIds },
+              eventId: { $in: eventIds },
               status: APPROVED_REGISTRATION_STATUS,
             },
           },
@@ -153,7 +151,7 @@ export const getMyEvents = async (req, res) => {
         EventRegistration.aggregate([
           {
             $match: {
-              eventId: { $in: upcomingEventIds },
+              eventId: { $in: eventIds },
               attended: true,
             },
           },
@@ -162,14 +160,14 @@ export const getMyEvents = async (req, res) => {
         EventCertificate.aggregate([
           {
             $match: {
-              eventId: { $in: upcomingEventIds },
+              eventId: { $in: eventIds },
               status: "issued",
             },
           },
           { $group: { _id: "$eventId", count: { $sum: 1 } } },
         ]),
         EventReview.aggregate([
-          { $match: { eventId: { $in: upcomingEventIds } } },
+          { $match: { eventId: { $in: eventIds } } },
           {
             $group: {
               _id: "$eventId",
