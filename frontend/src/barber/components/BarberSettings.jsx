@@ -6,6 +6,7 @@ import { ArrowRight, BriefcaseBusiness, Calendar, Store, Clock, Award } from "lu
 import api from "@/shared/api/axios";
 import CertificationsManager from "@/barber/components/CertificationsManager";
 import TeamSettingsSection from "@/barber/components/TeamSettingsSection";
+import useDefaultSalonScheduleSettings from "@/barber/hooks/useDefaultSalonScheduleSettings";
 import EventCertificatesSection from "@/barber/components/settings/EventCertificatesSection";
 import DefaultScheduleSection from "@/barber/components/settings/DefaultScheduleSection";
 import SalonSettingsSection from "@/barber/components/settings/SalonSettingsSection";
@@ -15,7 +16,6 @@ import ConfirmModal from "@/shared/components/common/ConfirmModal";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { updateBarberProfile } from "@/store/slices/usersSlice";
-import { formatTimeInput, timeToMinutes } from "@/shared/utils/time";
 
 function SettingsHubCard({ title, description, to }) {
   const iconMap = {
@@ -51,13 +51,6 @@ export default function BarberSettings({
   const savedProfile = useSelector((state) =>
     state.users.find((user) => String(user.id) === String(currentUser?.id))
   );
-
-  // Per-salon schedule state (keyed by salonId)
-  const [salonSchedules, setSalonSchedules] = useState({});
-  const [savingSalonId, setSavingSalonId] = useState(null);
-  const [savedSalonId, setSavedSalonId] = useState(null);
-  const [errorSalonId, setErrorSalonId] = useState(null);
-  const [salonScheduleErrors, setSalonScheduleErrors] = useState({});
 
   // Profile state — kept for future settings page reuse; not rendered in any current view
   const [profile, setProfile] = useState({
@@ -234,26 +227,6 @@ export default function BarberSettings({
     };
   }, [currentUser?.id, dispatch]);
 
-  // Initialize salonSchedules from salonStatus data
-  useEffect(() => {
-    if (!salonStatus.salons) return;
-
-    const schedules = {};
-    (salonStatus.salons || []).forEach((entry) => {
-      const salonId = entry?.id || entry?._id;
-      if (salonId) {
-        schedules[salonId] = {
-          startTime: entry.defaultSchedule?.startTime || "09:00",
-          endTime: entry.defaultSchedule?.endTime || "18:00",
-          hasBreak: entry.defaultSchedule?.hasBreak || false,
-          breakStart: entry.defaultSchedule?.breakStart || "",
-          breakEnd: entry.defaultSchedule?.breakEnd || "",
-        };
-      }
-    });
-    setSalonSchedules(schedules);
-  }, [salonStatus.salons]);
-
   // eslint-disable-next-line no-unused-vars
   const updateProfileField = (field, value) => {
     setProfileSaved(false);
@@ -262,31 +235,6 @@ export default function BarberSettings({
       ...currentProfile,
       [field]: value,
     }));
-  };
-
-  const updateSalonSchedule = (salonId, field, value) => {
-    setErrorSalonId(null);
-    setSavedSalonId(null);
-    setSalonScheduleErrors((prev) => ({ ...prev, [salonId]: "" }));
-
-    if (field === "startTime" || field === "endTime" || field === "breakStart" || field === "breakEnd") {
-      const formatted = formatTimeInput(value, salonSchedules[salonId]?.[field] || "");
-      setSalonSchedules((prev) => ({
-        ...prev,
-        [salonId]: {
-          ...prev[salonId],
-          [field]: formatted,
-        },
-      }));
-    } else {
-      setSalonSchedules((prev) => ({
-        ...prev,
-        [salonId]: {
-          ...prev[salonId],
-          [field]: value,
-        },
-      }));
-    }
   };
 
   // eslint-disable-next-line no-unused-vars
@@ -687,6 +635,18 @@ export default function BarberSettings({
   );
   const currentUserId = currentUser?.id || currentUser?._id;
   const [salonAdmins, setSalonAdmins] = useState({});
+  const {
+    salonSchedules,
+    savingSalonId,
+    savedSalonId,
+    errorSalonId,
+    salonScheduleErrors,
+    updateSalonSchedule,
+    saveDefaultSchedule,
+  } = useDefaultSalonScheduleSettings({
+    currentUserId,
+    salonStatusSalons: salonStatus.salons,
+  });
 
   // Fetch admin info for each managed salon
   useEffect(() => {
@@ -732,97 +692,6 @@ export default function BarberSettings({
     const salonId = salon.id || salon._id;
     return !barberConnectedSalonIds.has(String(salonId));
   });
-
-  const saveDefaultSchedule = async (salonId) => {
-    if (!currentUserId || !salonId || savingSalonId) return;
-
-    const schedule = salonSchedules[salonId];
-    if (!schedule) return;
-
-    const startMinutes = timeToMinutes(schedule.startTime);
-    const endMinutes = timeToMinutes(schedule.endTime);
-    const breakStartMinutes = timeToMinutes(schedule.breakStart);
-    const breakEndMinutes = timeToMinutes(schedule.breakEnd);
-
-    if (startMinutes === null || endMinutes === null) {
-      setErrorSalonId(salonId);
-      setSalonScheduleErrors((prev) => ({
-        ...prev,
-        [salonId]: "Default working hours must use HH:mm format.",
-      }));
-      return;
-    }
-
-    if (endMinutes <= startMinutes) {
-      setErrorSalonId(salonId);
-      setSalonScheduleErrors((prev) => ({
-        ...prev,
-        [salonId]: "Default end time must be later than start time.",
-      }));
-      return;
-    }
-
-    if (schedule.hasBreak) {
-      if (breakStartMinutes === null || breakEndMinutes === null) {
-        setErrorSalonId(salonId);
-        setSalonScheduleErrors((prev) => ({
-          ...prev,
-          [salonId]: "Default break time must use HH:mm format.",
-        }));
-        return;
-      }
-
-      if (breakEndMinutes <= breakStartMinutes) {
-        setErrorSalonId(salonId);
-        setSalonScheduleErrors((prev) => ({
-          ...prev,
-          [salonId]: "Default break end must be later than break start.",
-        }));
-        return;
-      }
-
-      if (breakStartMinutes < startMinutes || breakEndMinutes > endMinutes) {
-        setErrorSalonId(salonId);
-        setSalonScheduleErrors((prev) => ({
-          ...prev,
-          [salonId]: "Default break time must be inside working hours.",
-        }));
-        return;
-      }
-    }
-
-    const nextDefaultSchedule = {
-      startTime: schedule.startTime,
-      endTime: schedule.endTime,
-      hasBreak: Boolean(schedule.hasBreak),
-      breakStart: schedule.hasBreak ? schedule.breakStart : "",
-      breakEnd: schedule.hasBreak ? schedule.breakEnd : "",
-    };
-
-    setSavingSalonId(salonId);
-    setErrorSalonId(null);
-    setSalonScheduleErrors((prev) => ({ ...prev, [salonId]: "" }));
-    setSavedSalonId(null);
-
-    try {
-      await api.patch(`/barbers/salons/${salonId}/default-schedule`, nextDefaultSchedule);
-      setSalonSchedules((prev) => ({
-        ...prev,
-        [salonId]: { ...nextDefaultSchedule },
-      }));
-      setSavedSalonId(salonId);
-    } catch (requestError) {
-      setErrorSalonId(salonId);
-      setSalonScheduleErrors((prev) => ({
-        ...prev,
-        [salonId]:
-          requestError.response?.data?.message ||
-          "Could not save default schedule. Please try again.",
-      }));
-    } finally {
-      setSavingSalonId(null);
-    }
-  };
 
   return (
     <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
