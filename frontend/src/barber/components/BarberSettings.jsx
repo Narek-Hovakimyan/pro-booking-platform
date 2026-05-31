@@ -5,11 +5,10 @@ import { ArrowRight, BriefcaseBusiness, Calendar, Store, Clock, Award } from "lu
 
 import api from "@/shared/api/axios";
 import CertificationsManager from "@/barber/components/CertificationsManager";
+import TeamSettingsSection from "@/barber/components/TeamSettingsSection";
 import EventCertificatesSection from "@/barber/components/settings/EventCertificatesSection";
 import DefaultScheduleSection from "@/barber/components/settings/DefaultScheduleSection";
-import ManagedSalonsSection from "@/barber/components/settings/ManagedSalonsSection";
 import SalonSettingsSection from "@/barber/components/settings/SalonSettingsSection";
-import SalonStaffSection from "@/barber/components/settings/SalonStaffSection";
 
 import ConfirmModal from "@/shared/components/common/ConfirmModal";
 
@@ -734,27 +733,6 @@ export default function BarberSettings({
     return !barberConnectedSalonIds.has(String(salonId));
   });
 
-  const managedSalonStaff = managedSalons.map((managedSalon) => {
-    const managedSalonId = managedSalon.id || managedSalon._id;
-    const fullSalon = salons.find(
-      (salon) => String(salon.id || salon._id) === String(managedSalonId)
-    );
-    const ownerId = managedSalon.ownerId || fullSalon?.ownerId;
-    const isOwner = String(ownerId || "") === String(currentUserId || "");
-    const adminData = salonAdmins[managedSalonId] || { admins: [] };
-    const adminIds = (adminData.admins || []).map((a) => String(a.id || a._id));
-    const isAdmin = adminIds.includes(String(currentUserId || ""));
-
-    return {
-      ...managedSalon,
-      ownerId,
-      isOwner,
-      isAdmin,
-      adminIds,
-      barbers: fullSalon?.barbers || [],
-    };
-  });
-
   const saveDefaultSchedule = async (salonId) => {
     if (!currentUserId || !salonId || savingSalonId) return;
 
@@ -919,19 +897,18 @@ export default function BarberSettings({
                   onSelectedSalonChange={setSelectedSalonId}
                   onUpdateSalonDraft={updateSalonDraft}
                 />
-                <ManagedSalonsSection
+                <TeamSettingsSection
+                  approvedSalonEntries={allSalonEntries}
                   currentUserId={currentUserId}
                   isSalonSaving={isSalonSaving}
-                  managedSalonStaff={managedSalonStaff}
+                  managedSalons={managedSalons}
                   ownerRequests={ownerRequests}
                   salonAdmins={salonAdmins}
+                  salons={salons}
                   onDecideSalonRequest={decideSalonRequest}
                   onOpenDemoteConfirmation={openDemoteAdminConfirmation}
                   onOpenPromoteConfirmation={openPromoteAdminConfirmation}
                   onOpenRemoveBarberConfirmation={openRemoveBarberConfirmation}
-                />
-                <SalonStaffSection
-                  approvedSalonEntries={allSalonEntries}
                 />
 
               </>
