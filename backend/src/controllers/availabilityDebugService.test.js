@@ -14,7 +14,7 @@ const serviceId = "64b000000000000000000003";
 const ownerId = "64b000000000000000000020";
 const adminId = "64b000000000000000000021";
 const unrelatedBarberId = "64b000000000000000000010";
-const bookingDate = "2026-06-01";
+const bookingDate = "2026-06-08";
 const oldAutoClosedWeeklySchedule = {
   sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
   mon: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
