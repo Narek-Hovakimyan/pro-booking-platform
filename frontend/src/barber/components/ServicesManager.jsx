@@ -206,15 +206,20 @@ export default function ServicesManager({
 
     setModalError("");
 
-    // Build payload based on category type
+    // Build payload — omit price/duration when auto-calculated via sum mode
     const basePayload = {
       name,
-      price,
-      duration,
       description: form.description.trim(),
       tags,
       type: form.type,
     };
+
+    if (!isPackageSumPrice) {
+      basePayload.price = price;
+    }
+    if (!isPackageSumDuration) {
+      basePayload.duration = duration;
+    }
 
     // Add package fields
     if (form.type === "package") {

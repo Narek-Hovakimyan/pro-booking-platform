@@ -238,16 +238,22 @@ export default function App() {
     const category = serviceData?.category || "other";
     const tags = Array.isArray(serviceData?.tags) ? serviceData.tags : [];
     const type = serviceData?.type || "single";
+    const packagePriceMode = serviceData?.packagePriceMode;
+    const packageDurationMode = serviceData?.packageDurationMode;
+    const isSumPrice = type === "package" && packagePriceMode === "sum";
+    const isSumDuration = type === "package" && packageDurationMode === "sum";
 
     const serviceDuration = Number(duration);
 
-    if (
-      !currentUserId ||
-      !name ||
-      !price ||
-      !Number.isFinite(serviceDuration) ||
-      serviceDuration <= 0
-    ) {
+    if (!currentUserId || !name) return;
+
+    // Validate price: required for single services and manual-mode packages
+    if (!isSumPrice && (!price || !Number.isFinite(Number(price)) || Number(price) < 0)) {
+      return;
+    }
+
+    // Validate duration: required for single services and manual-mode packages
+    if (!isSumDuration && (!Number.isFinite(serviceDuration) || serviceDuration <= 0)) {
       return;
     }
 
@@ -258,14 +264,22 @@ export default function App() {
       const payload = {
         barberId: currentUserId,
         name,
-        price: Number(price),
-        duration: serviceDuration,
         description,
         category,
         tags,
         type,
         active: true,
       };
+
+      // Only include price when not auto-calculated via sum mode
+      if (!isSumPrice) {
+        payload.price = Number(price);
+      }
+
+      // Only include duration when not auto-calculated via sum mode
+      if (!isSumDuration) {
+        payload.duration = serviceDuration;
+      }
 
       if (
         Object.prototype.hasOwnProperty.call(
