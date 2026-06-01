@@ -79,32 +79,6 @@ export default function NotificationsPage() {
     return nextMap;
   }, [bookings, currentUser?.role, currentUserId]);
 
-  // ---- Extracted hooks ----
-
-  const { eventRegistrationById, handleEventAction } =
-    useEventRegistrationNotificationActions({
-      currentUser,
-      currentUserId,
-      notifications,
-      activeAction,
-      setActiveAction,
-      setError,
-      markOneRead,
-      loadNotifications,
-    });
-
-  const { jobApplicationById, handleJobAction } =
-    useJobApplicationNotificationActions({
-      currentUser,
-      currentUserId,
-      notifications,
-      activeAction,
-      setActiveAction,
-      setError,
-      markOneRead,
-      loadNotifications,
-    });
-
   // ---- Fetch ----
 
   const loadNotifications = useCallback(
@@ -273,6 +247,32 @@ export default function NotificationsPage() {
       );
     }
   }, [currentUserId]);
+
+  // ---- Extracted hooks ----
+
+  const { eventRegistrationById, handleEventAction } =
+    useEventRegistrationNotificationActions({
+      currentUser,
+      currentUserId,
+      notifications,
+      activeAction,
+      setActiveAction,
+      setError,
+      markOneRead,
+      loadNotifications,
+    });
+
+  const { jobApplicationById, handleJobAction } =
+    useJobApplicationNotificationActions({
+      currentUser,
+      currentUserId,
+      notifications,
+      activeAction,
+      setActiveAction,
+      setError,
+      markOneRead,
+      loadNotifications,
+    });
 
   const refreshBarberBookings = useCallback(async () => {
     if (currentUser?.role !== "barber" || !currentUserId) return;
