@@ -53,6 +53,7 @@ export default function ScheduleManager({
   const [servicesError, setServicesError] = useState("");
   const [selectedSalonId, setSelectedSalonId] = useState(null);
   const [perSalonSchedule, setPerSalonSchedule] = useState(null);
+  const [loadedScheduleSalonId, setLoadedScheduleSalonId] = useState(null);
   const [isPerSalonLoading, setIsPerSalonLoading] = useState(false);
   const [perSalonError, setPerSalonError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
@@ -61,7 +62,6 @@ export default function ScheduleManager({
   const [isLoadingManageable, setIsLoadingManageable] = useState(false);
   const isMountedRef = useRef(true);
   const hasNoUserRef = useRef(false);
-  const hasSetInitialSalon = useRef(false);
   const servicesFetchAttemptedRef = useRef("");
 
   const getSalonIdFromEntry = useCallback((entry) => {
@@ -159,6 +159,12 @@ export default function ScheduleManager({
     () => (salonEntries || []).filter((s) => s.status === "approved"),
     [salonEntries]
   );
+  const initialSalonId = useMemo(() => {
+    if (approvedSalons.length === 0) return null;
+    const primary = approvedSalons.find((s) => s.isPrimary) || approvedSalons[0];
+    return getSalonIdFromEntry(primary);
+  }, [approvedSalons, getSalonIdFromEntry]);
+  const activeSalonId = selectedSalonId || initialSalonId;
   const barberServices = useMemo(
     () =>
       (services || []).filter(
@@ -169,31 +175,10 @@ export default function ScheduleManager({
   const selectedSalonEntry = useMemo(
     () =>
       approvedSalons.find(
-        (entry) => String(getSalonIdFromEntry(entry)) === String(selectedSalonId)
+        (entry) => String(getSalonIdFromEntry(entry)) === String(activeSalonId)
       ) || null,
-    [approvedSalons, getSalonIdFromEntry, selectedSalonId]
+    [activeSalonId, approvedSalons, getSalonIdFromEntry]
   );
-
-  // Reset initial salon selection when approved salons change
-  useEffect(() => {
-    hasSetInitialSalon.current = false;
-  }, [approvedSalons.length]);
-
-  // Set initial selected salon when data arrives (runs once)
-  useEffect(() => {
-    if (approvedSalons.length > 0 && !hasSetInitialSalon.current) {
-      const primary = approvedSalons.find((s) => s.isPrimary) || approvedSalons[0];
-      const id = getSalonIdFromEntry(primary);
-      if (id) {
-        // Use setTimeout to defer state update outside the effect
-        const timer = setTimeout(() => {
-          setSelectedSalonId(id);
-          hasSetInitialSalon.current = true;
-        }, 0);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [approvedSalons, getSalonIdFromEntry]);
 
   useEffect(() => {
     if (!currentUserId || barberServices.length > 0) return;
@@ -236,9 +221,9 @@ export default function ScheduleManager({
     };
   }, [barberServices.length, currentUserId, dispatch]);
 
-  // Fetch schedule when selectedSalonId changes
+  // Fetch schedule when the active salon changes
   useEffect(() => {
-    if (!currentUserId || !selectedSalonId) return;
+    if (!currentUserId || !activeSalonId) return;
 
     let cancelled = false;
 
@@ -248,7 +233,7 @@ export default function ScheduleManager({
 
       try {
         const { data } = await api.get(
-          `/schedules/${currentUserId}/${selectedSalonId}`
+          `/schedules/${currentUserId}/${activeSalonId}`
         );
 
         const normalized = normalizeSchedule(data);
@@ -259,6 +244,7 @@ export default function ScheduleManager({
               ? currentSchedule
               : normalized
           );
+          setLoadedScheduleSalonId(activeSalonId);
         }
       } catch (requestError) {
         if (!cancelled) {
@@ -277,9 +263,13 @@ export default function ScheduleManager({
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, selectedSalonId]);
+  }, [activeSalonId, currentUserId]);
 
-  const effectiveSchedule = perSalonSchedule || schedule;
+  const activePerSalonSchedule =
+    String(loadedScheduleSalonId) === String(activeSalonId)
+      ? perSalonSchedule
+      : null;
+  const effectiveSchedule = activePerSalonSchedule || schedule;
   const currentDefaultSchedule = useMemo(
     () => normalizeDefaultScheduleDraft(effectiveSchedule.defaultSchedule),
     [effectiveSchedule.defaultSchedule]
@@ -385,7 +375,10 @@ export default function ScheduleManager({
   const canMarkDayOff =
     selectedDateKey >= todayKey &&
     !nonWorkingDays.includes(selectedDateKey);
-  const isSaving = Boolean(isPerSalonLoading && !isLoadingSalons && selectedSalonId);
+  const isSaving = Boolean(isPerSalonLoading && !isLoadingSalons && activeSalonId);
+  const isWaitingForSelectedSalonSchedule = Boolean(
+    activeSalonId && !activePerSalonSchedule && !perSalonError
+  );
 
   const dateStatusMap = useMemo(() => {
     const map = {};
@@ -436,7 +429,7 @@ export default function ScheduleManager({
   }, [selectedDateKey, updateDraft]);
 
   const saveSelectedDateSchedule = async () => {
-    if (!currentUserId || !selectedSalonId) return;
+    if (!currentUserId || !activeSalonId) return;
 
     setSaveSuccess("");
 
@@ -527,7 +520,7 @@ export default function ScheduleManager({
   };
 
   const savePerSalonSchedule = async (updates) => {
-    if (!currentUserId || !selectedSalonId) return;
+    if (!currentUserId || !activeSalonId) return;
 
     setIsPerSalonLoading((current) => (current ? current : true));
     setPerSalonError("");
@@ -535,7 +528,7 @@ export default function ScheduleManager({
 
     try {
       const { data } = await api.put(
-        `/schedules/${currentUserId}/${selectedSalonId}`,
+        `/schedules/${currentUserId}/${activeSalonId}`,
         {
           barberId: currentUserId,
           weeklySchedule: effectiveSchedule.weeklySchedule || {},
@@ -552,6 +545,7 @@ export default function ScheduleManager({
           ? currentSchedule
           : normalized
       );
+      setLoadedScheduleSalonId(activeSalonId);
       setSaveSuccess("Schedule saved successfully!");
     } catch (requestError) {
       setPerSalonError(
@@ -564,7 +558,7 @@ export default function ScheduleManager({
   };
 
   const restoreWorkingDate = async (dateKey) => {
-    if (!currentUserId || !selectedSalonId) return;
+    if (!currentUserId || !activeSalonId) return;
 
     setSaveSuccess("");
 
@@ -584,7 +578,7 @@ export default function ScheduleManager({
   };
 
   const markDayOff = async () => {
-    if (!currentUserId || !selectedSalonId || !canMarkDayOff) return;
+    if (!currentUserId || !activeSalonId || !canMarkDayOff) return;
 
     setSaveSuccess("");
 
@@ -598,7 +592,7 @@ export default function ScheduleManager({
   };
 
   const removeOverride = async (dateKey) => {
-    if (!currentUserId || !selectedSalonId) return;
+    if (!currentUserId || !activeSalonId) return;
 
     const nextOverrides = { ...scheduleOverrides };
     delete nextOverrides[dateKey];
@@ -636,11 +630,16 @@ export default function ScheduleManager({
   const handleSalonSelect = useCallback((salonId) => {
     setSelectedSalonId(salonId);
     setPerSalonSchedule(null);
+    setLoadedScheduleSalonId(null);
     setIsPerSalonLoading(true);
     setSaveSuccess("");
   }, []);
 
-  const isLoadingEffective = isLoading || isPerSalonLoading || isLoadingSalons;
+  const isLoadingEffective =
+    isLoading ||
+    isPerSalonLoading ||
+    isLoadingSalons ||
+    isWaitingForSelectedSalonSchedule;
   const displayError = error || perSalonError;
 
   // Field-specific error parsing
@@ -689,7 +688,7 @@ export default function ScheduleManager({
   }
 
   // No salon selected
-  if (!selectedSalonId) {
+  if (!activeSalonId) {
     return (
       <>
         <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
@@ -707,7 +706,7 @@ export default function ScheduleManager({
           isOpen={isDrawerOpen}
           onClose={() => setIsDrawerOpen(false)}
           salons={manageableSalons}
-          selectedId={selectedSalonId}
+          selectedId={activeSalonId}
           onSelect={handleSalonSelect}
           isLoading={isLoadingManageable}
         />
@@ -720,7 +719,7 @@ export default function ScheduleManager({
   const isScheduleEmpty = hasNoScheduleData && !isLoadingEffective;
 
   return (
-    <div className={cn("space-y-6", approvedSalons.length > 0 && selectedSalonId ? "lg:col-span-3" : "")}>
+    <div className={cn("space-y-6", approvedSalons.length > 0 && activeSalonId ? "lg:col-span-3" : "")}>
       {/* ─── Header ─── */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
@@ -794,7 +793,7 @@ export default function ScheduleManager({
             sortedOverrides={sortedOverrides}
             sortedNonWorkingDays={sortedNonWorkingDays}
             currentUserId={currentUserId}
-            selectedSalonId={selectedSalonId}
+            selectedSalonId={activeSalonId}
             barberServices={barberServices}
             isLoadingServices={isLoadingServices}
             servicesError={servicesError}
@@ -816,7 +815,7 @@ export default function ScheduleManager({
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         salons={manageableSalons}
-        selectedId={selectedSalonId}
+        selectedId={activeSalonId}
         onSelect={handleSalonSelect}
         isLoading={isLoadingManageable}
       />
