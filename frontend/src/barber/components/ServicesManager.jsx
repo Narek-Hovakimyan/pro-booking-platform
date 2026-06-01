@@ -42,13 +42,20 @@ function formatPrice(price) {
 
 /**
  * Look up the display name for a custom category from a loaded list.
+ * If customCategoryId is a populated object with .name, returns it directly.
  */
 function getCustomCategoryName(customCategories, customCategoryId) {
-  if (!customCategoryId || !Array.isArray(customCategories)) return null;
-  // customCategoryId may be a populated object or a raw string/ObjectId
-  const id = typeof customCategoryId === "object"
-    ? String(customCategoryId._id || customCategoryId.id)
-    : String(customCategoryId);
+  if (!customCategoryId) return null;
+  // Populated object from backend
+  if (typeof customCategoryId === "object" && customCategoryId.name) {
+    return customCategoryId.name;
+  }
+  // Raw string — look up from loaded list
+  if (!Array.isArray(customCategories)) return null;
+  const id =
+    typeof customCategoryId === "object"
+      ? String(customCategoryId._id || customCategoryId.id)
+      : String(customCategoryId);
   const cat = customCategories.find(
     (c) => String(c._id || c.id) === id
   );
@@ -78,6 +85,20 @@ export default function ServicesManager({
 
   /* ── Delete confirmation ── */
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+
+  /* ── Derived: is package with sum mode? ── */
+  const isPackageSumPrice =
+    form.type === "package" && form.packagePriceMode === "sum";
+  const isPackageSumDuration =
+    form.type === "package" && form.packageDurationMode === "sum";
+
+  /* ── Available services for package inclusion ── */
+  const availablePackageServices = services.filter(
+    (service) =>
+      service.active &&
+      service.type !== "package" &&
+      (!editingService || String(service.id) !== String(editingService.id))
+  );
 
   /* ── Modal open/close ── */
   const openAddModal = () => {
@@ -143,13 +164,21 @@ export default function ServicesManager({
       setModalError("Service name is required.");
       return;
     }
-    if (!Number.isFinite(price) || price < 0) {
-      setModalError("Price must be a non-negative number.");
-      return;
+
+    // Price: required for single; for package, only required when manual mode
+    if (!isPackageSumPrice) {
+      if (!Number.isFinite(price) || price < 0) {
+        setModalError("Price must be a non-negative number.");
+        return;
+      }
     }
-    if (!Number.isFinite(duration) || duration <= 0) {
-      setModalError("Duration must be a positive number.");
-      return;
+
+    // Duration: required for single; for package, only required when manual mode
+    if (!isPackageSumDuration) {
+      if (!Number.isFinite(duration) || duration <= 0) {
+        setModalError("Duration must be a positive number.");
+        return;
+      }
     }
 
     // Require selected category when custom mode is active
@@ -167,11 +196,11 @@ export default function ServicesManager({
       duration,
       description: form.description.trim(),
       tags,
+      type: form.type,
     };
 
     // Add package fields
     if (form.type === "package") {
-      basePayload.type = "package";
       basePayload.includedServiceIds = form.includedServiceIds;
       basePayload.packagePriceMode = form.packagePriceMode;
       basePayload.packageDurationMode = form.packageDurationMode;
@@ -452,9 +481,9 @@ export default function ServicesManager({
             if (e.target === e.currentTarget) closeModal();
           }}
         >
-          <div className="w-full max-w-md animate-in rounded-3xl bg-white p-6 shadow-2xl">
-            {/* Modal header */}
-            <div className="mb-5 flex items-center justify-between">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col animate-in rounded-3xl bg-white shadow-2xl">
+            {/* Modal header — sticky top */}
+            <div className="flex items-center justify-between border-b border-neutral-100 p-6 pb-4">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100">
                   {editingService ? (
@@ -484,219 +513,87 @@ export default function ServicesManager({
               </button>
             </div>
 
-            {/* Modal error */}
-            {modalError && (
-              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            {/* Modal form */}
-            <div className="space-y-4">
-              <label className="grid gap-1.5 text-sm font-semibold">
-                Service name
-                <input
-                  className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                  placeholder="e.g. Haircut, Beard Trim"
-                  disabled={isSaving}
-                  value={form.name}
-                  onChange={(e) => handleFieldChange("name", e.target.value)}
-                  autoFocus
-                />
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Price (դր)
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
-                      դր
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-neutral-300 p-3 pl-10 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                      placeholder="0"
-                      type="number"
-                      min="0"
-                      disabled={isSaving}
-                      value={form.price}
-                      onChange={(e) =>
-                        handleFieldChange("price", e.target.value)
-                      }
-                    />
-                  </div>
-                </label>
-
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Duration
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
-                      min
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-neutral-300 p-3 pl-12 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                      placeholder="30"
-                      type="number"
-                      min="1"
-                      disabled={isSaving}
-                      value={form.duration}
-                      onChange={(e) =>
-                        handleFieldChange("duration", e.target.value)
-                      }
-                    />
-                  </div>
-                </label>
-              </div>
-
-              {/* ── Category type toggle ── */}
-              <label className="grid gap-1.5 text-sm font-semibold">
-                Category type
-              </label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => handleFieldChange("categoryType", "system")}
-                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                    form.categoryType === "system"
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                  }`}
-                >
-                  System category
-                </button>
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => handleFieldChange("categoryType", "custom")}
-                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                    form.categoryType === "custom"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                  }`}
-                >
-                  Custom category
-                </button>
-              </div>
-
-              {/* ── System category dropdown ── */}
-              {form.categoryType === "system" && (
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Category
-                  <select
-                    className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                    disabled={isSaving}
-                    value={form.category}
-                    onChange={(e) =>
-                      handleFieldChange("category", e.target.value)
-                    }
-                  >
-                    {serviceCategories.map((category) => (
-                      <option key={category.value} value={category.value}>
-                        {category.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+            {/* Modal body — scrollable */}
+            <div className="flex-1 overflow-y-auto p-6 pt-4">
+              {/* Modal error */}
+              {modalError && (
+                <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{modalError}</span>
+                </div>
               )}
 
-              {/* ── Custom category dropdown (managed by child) ── */}
-              <ServiceCategoryManager
-                barberId={barberId}
-                form={form}
-                isSaving={isSaving}
-                onCustomCategoriesChange={setCustomCategories}
-                onCustomCategoryIdChange={(id) =>
-                  handleFieldChange("customCategoryId", id)
-                }
-              />
+              <div className="space-y-4">
+                {/* Service name */}
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Service name
+                  <input
+                    className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                    placeholder="e.g. Haircut, Beard Trim"
+                    disabled={isSaving}
+                    value={form.name}
+                    onChange={(e) => handleFieldChange("name", e.target.value)}
+                    autoFocus
+                  />
+                </label>
 
-              {/* ── Tags ── */}
-              <label className="grid gap-1.5 text-sm font-semibold">
-                Tags
-                <span className="text-xs font-normal text-neutral-400">
-                  Optional comma-separated search terms
-                </span>
-                <input
-                  className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                  placeholder="e.g. manicure, gel, bridal"
-                  disabled={isSaving}
-                  value={form.tags}
-                  onChange={(e) => handleFieldChange("tags", e.target.value)}
-                />
-              </label>
+                {/* ── Service type toggle ── */}
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Service type
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => {
+                      handleFieldChange("type", "single");
+                      handleFieldChange("includedServiceIds", []);
+                      handleFieldChange("packagePriceMode", "manual");
+                      handleFieldChange("packageDurationMode", "manual");
+                    }}
+                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                      form.type === "single"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                    }`}
+                  >
+                    Single service
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => handleFieldChange("type", "package")}
+                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                      form.type === "package"
+                        ? "border-violet-500 bg-violet-50 text-violet-700"
+                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                    }`}
+                  >
+                    Package
+                  </button>
+                </div>
 
-              {/* ── Description ── */}
-              <label className="grid gap-1.5 text-sm font-semibold">
-                Description
-                <span className="text-xs font-normal text-neutral-400">
-                  Optional — briefly describe what this service includes
-                </span>
-                <textarea
-                  className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                  placeholder="e.g. Includes wash, cut, and styling"
-                  rows={3}
-                  disabled={isSaving}
-                  value={form.description}
-                  onChange={(e) =>
-                    handleFieldChange("description", e.target.value)
-                  }
-                />
-              </label>
+                {/* ── Price & Duration ── */}
+                {/* For package services, show computed hint when sum mode */}
+                {form.type === "package" ? (
+                  <div className="space-y-3 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">
+                      Package pricing & duration
+                    </p>
+                    <p className="text-xs text-neutral-500">
+                      Configure how the package total price and duration are
+                      determined. When "Sum" is selected, values are
+                      auto-calculated from included services.
+                    </p>
 
-              {/* ── Service type toggle ── */}
-              <label className="grid gap-1.5 text-sm font-semibold">
-                Service type
-              </label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => {
-                    handleFieldChange("type", "single");
-                    handleFieldChange("includedServiceIds", []);
-                    handleFieldChange("packagePriceMode", "manual");
-                    handleFieldChange("packageDurationMode", "manual");
-                  }}
-                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                    form.type === "single"
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                  }`}
-                >
-                  Single service
-                </button>
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => handleFieldChange("type", "package")}
-                  className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                    form.type === "package"
-                      ? "border-violet-500 bg-violet-50 text-violet-700"
-                      : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                  }`}
-                >
-                  Package
-                </button>
-              </div>
-
-              {/* ── Package fields ── */}
-              {form.type === "package" && (
-                <div className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">
-                    Package settings
-                  </p>
-
-                  {/* Included services multi-select */}
-                  <label className="grid gap-1.5 text-sm font-semibold">
-                    Included services
-                    <span className="text-xs font-normal text-neutral-400">
-                      Select at least 2 active single services
-                    </span>
-                    <div className="max-h-40 overflow-y-auto rounded-2xl border border-violet-200 bg-white p-1">
-                      {services
-                        .filter((s) => s.active && s.type !== "package")
-                        .map((s) => {
+                    {/* Included services multi-select */}
+                    <label className="grid gap-1.5 text-sm font-semibold">
+                      Included services
+                      <span className="text-xs font-normal text-neutral-400">
+                        Select at least 2 active single services
+                      </span>
+                      <div className="max-h-40 overflow-y-auto rounded-2xl border border-violet-200 bg-white p-1">
+                        {availablePackageServices.map((s) => {
                           const isSelected = form.includedServiceIds.some(
                             (id) => String(id) === String(s.id)
                           );
@@ -715,7 +612,9 @@ export default function ServicesManager({
                                 checked={isSelected}
                                 disabled={isSaving}
                                 onChange={() => {
-                                  const current = [...form.includedServiceIds];
+                                  const current = [
+                                    ...form.includedServiceIds,
+                                  ];
                                   if (isSelected) {
                                     handleFieldChange(
                                       "includedServiceIds",
@@ -738,127 +637,305 @@ export default function ServicesManager({
                             </label>
                           );
                         })}
-                      {services.filter((s) => s.active && s.type !== "package").length === 0 && (
-                        <p className="p-3 text-center text-xs text-neutral-400">
-                          No active single services available
-                        </p>
-                      )}
-                    </div>
-                  </label>
+                        {availablePackageServices.length === 0 && (
+                          <p className="p-3 text-center text-xs text-neutral-400">
+                            No active single services available
+                          </p>
+                        )}
+                      </div>
+                    </label>
 
-                  {/* Price mode */}
-                  <label className="grid gap-1.5 text-sm font-semibold">
-                    Price mode
-                    <select
-                      className="w-full rounded-2xl border border-violet-200 bg-white p-3 font-normal transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                      disabled={isSaving}
-                      value={form.packagePriceMode}
-                      onChange={(e) =>
-                        handleFieldChange("packagePriceMode", e.target.value)
-                      }
-                    >
-                      <option value="manual">Manual — set price yourself</option>
-                      <option value="sum">
-                        Sum — auto-calculate from included services
-                      </option>
-                    </select>
-                  </label>
-
-                  {/* Duration mode */}
-                  <label className="grid gap-1.5 text-sm font-semibold">
-                    Duration mode
-                    <select
-                      className="w-full rounded-2xl border border-violet-200 bg-white p-3 font-normal transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                      disabled={isSaving}
-                      value={form.packageDurationMode}
-                      onChange={(e) =>
-                        handleFieldChange("packageDurationMode", e.target.value)
-                      }
-                    >
-                      <option value="manual">Manual — set duration yourself</option>
-                      <option value="sum">
-                        Sum — auto-calculate from included services
-                      </option>
-                    </select>
-                  </label>
-
-                  {/* Computed totals hint */}
-                  {form.packagePriceMode === "sum" && form.includedServiceIds.length > 0 && (
-                    <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
-                      <span className="font-medium">Computed price:</span>{" "}
-                      {formatPrice(
-                        services
-                          .filter((s) =>
-                            form.includedServiceIds.some(
-                              (id) => String(id) === String(s.id)
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {/* Price mode */}
+                      <label className="grid gap-1.5 text-sm font-semibold">
+                        Price mode
+                        <select
+                          className="w-full rounded-2xl border border-violet-200 bg-white p-3 font-normal transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                          disabled={isSaving}
+                          value={form.packagePriceMode}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              "packagePriceMode",
+                              e.target.value
                             )
-                          )
-                          .reduce((sum, s) => sum + (s.price || 0), 0)
-                      )}{" "}
-                      դր
-                    </div>
-                  )}
-                  {form.packageDurationMode === "sum" && form.includedServiceIds.length > 0 && (
-                    <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
-                      <span className="font-medium">Computed duration:</span>{" "}
-                      {services
-                        .filter((s) =>
-                          form.includedServiceIds.some(
-                            (id) => String(id) === String(s.id)
-                          )
-                        )
-                        .reduce((sum, s) => sum + (s.duration || 0), 0)}{" "}
-                      min
-                    </div>
-                  )}
-                </div>
-              )}
+                          }
+                        >
+                          <option value="manual">
+                            Manual — set price yourself
+                          </option>
+                          <option value="sum">
+                            Sum — auto-calculate from included services
+                          </option>
+                        </select>
+                      </label>
 
-              {/* Preview */}
-              {form.name && (form.price || form.duration) && (
-                <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                    Preview
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-neutral-900">
-                        {form.name || "Service name"}
-                      </p>
-                      <p className="text-sm text-neutral-500">
-                        {form.duration || "?"} min ·{" "}
-                        {form.price
-                          ? `${formatPrice(form.price)} դր`
-                          : "? դր"}
-                      </p>
+                      {/* Duration mode */}
+                      <label className="grid gap-1.5 text-sm font-semibold">
+                        Duration mode
+                        <select
+                          className="w-full rounded-2xl border border-violet-200 bg-white p-3 font-normal transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                          disabled={isSaving}
+                          value={form.packageDurationMode}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              "packageDurationMode",
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option value="manual">
+                            Manual — set duration yourself
+                          </option>
+                          <option value="sum">
+                            Sum — auto-calculate from included services
+                          </option>
+                        </select>
+                      </label>
                     </div>
+
+                    {/* Manual price/duration for package */}
+                    {form.packagePriceMode === "manual" && (
+                      <label className="grid gap-1.5 text-sm font-semibold">
+                        Package price (դր)
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                            դր
+                          </span>
+                          <input
+                            className="w-full rounded-2xl border border-neutral-300 p-3 pl-10 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                            placeholder="0"
+                            type="number"
+                            min="0"
+                            disabled={isSaving}
+                            value={form.price}
+                            onChange={(e) =>
+                              handleFieldChange("price", e.target.value)
+                            }
+                          />
+                        </div>
+                      </label>
+                    )}
+                    {form.packageDurationMode === "manual" && (
+                      <label className="grid gap-1.5 text-sm font-semibold">
+                        Package duration (min)
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                            min
+                          </span>
+                          <input
+                            className="w-full rounded-2xl border border-neutral-300 p-3 pl-12 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                            placeholder="30"
+                            type="number"
+                            min="1"
+                            disabled={isSaving}
+                            value={form.duration}
+                            onChange={(e) =>
+                              handleFieldChange("duration", e.target.value)
+                            }
+                          />
+                        </div>
+                      </label>
+                    )}
+
+                    {/* Computed totals hint */}
+                    {isPackageSumPrice &&
+                      form.includedServiceIds.length > 0 && (
+                        <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
+                          <span className="font-medium">Computed price:</span>{" "}
+                          {formatPrice(
+                            services
+                              .filter((s) =>
+                                form.includedServiceIds.some(
+                                  (id) => String(id) === String(s.id)
+                                )
+                              )
+                              .reduce((sum, s) => sum + (s.price || 0), 0)
+                          )}{" "}
+                          դր
+                        </div>
+                      )}
+                    {isPackageSumDuration &&
+                      form.includedServiceIds.length > 0 && (
+                        <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
+                          <span className="font-medium">
+                            Computed duration:
+                          </span>{" "}
+                          {services
+                            .filter((s) =>
+                              form.includedServiceIds.some(
+                                (id) => String(id) === String(s.id)
+                              )
+                            )
+                            .reduce((sum, s) => sum + (s.duration || 0), 0)}{" "}
+                          min
+                        </div>
+                      )}
                   </div>
-                </div>
-              )}
+                ) : (
+                  /* ── Single service: price & duration side by side ── */
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="grid gap-1.5 text-sm font-semibold">
+                      Price (դր)
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                          դր
+                        </span>
+                        <input
+                          className="w-full rounded-2xl border border-neutral-300 p-3 pl-10 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                          placeholder="0"
+                          type="number"
+                          min="0"
+                          disabled={isSaving}
+                          value={form.price}
+                          onChange={(e) =>
+                            handleFieldChange("price", e.target.value)
+                          }
+                        />
+                      </div>
+                    </label>
 
-              {/* Modal actions */}
-              <div className="flex justify-end gap-3 border-t border-neutral-100 pt-4">
-                <Button
-                  variant="ghost"
-                  disabled={isSaving}
-                  onClick={closeModal}
-                >
-                  Չեղարկել
-                </Button>
-                <Button
-                  disabled={
-                    isSaving ||
-                    (form.categoryType === "custom" && !form.customCategoryId)
+                    <label className="grid gap-1.5 text-sm font-semibold">
+                      Duration
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                          min
+                        </span>
+                        <input
+                          className="w-full rounded-2xl border border-neutral-300 p-3 pl-12 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                          placeholder="30"
+                          type="number"
+                          min="1"
+                          disabled={isSaving}
+                          value={form.duration}
+                          onChange={(e) =>
+                            handleFieldChange("duration", e.target.value)
+                          }
+                        />
+                      </div>
+                    </label>
+                  </div>
+                )}
+
+                {/* ── Category type toggle ── */}
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Category type
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => handleFieldChange("categoryType", "system")}
+                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                      form.categoryType === "system"
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                    }`}
+                  >
+                    System category
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => handleFieldChange("categoryType", "custom")}
+                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                      form.categoryType === "custom"
+                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                    }`}
+                  >
+                    Custom category
+                  </button>
+                </div>
+
+                {/* ── System category dropdown ── */}
+                {form.categoryType === "system" && (
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Category
+                    <select
+                      className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                      disabled={isSaving}
+                      value={form.category}
+                      onChange={(e) =>
+                        handleFieldChange("category", e.target.value)
+                      }
+                    >
+                      {serviceCategories.map((category) => (
+                        <option key={category.value} value={category.value}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {/* ── Custom category dropdown (managed by child) ── */}
+                <ServiceCategoryManager
+                  barberId={barberId}
+                  form={form}
+                  isSaving={isSaving}
+                  onCustomCategoriesChange={setCustomCategories}
+                  onCustomCategoryIdChange={(id) =>
+                    handleFieldChange("customCategoryId", id)
                   }
-                  onClick={handleSave}
-                >
-                  {isSaving
-                    ? "Saving..."
-                    : editingService
-                      ? "Պահպանել"
-                      : "Ավելացնել"}
-                </Button>
+                />
+
+                {/* ── Tags ── */}
+                <label className="grid gap-1 text-sm font-semibold">
+                  Tags
+                  <span className="text-xs font-normal text-neutral-400">
+                    Optional comma-separated search terms
+                  </span>
+                  <input
+                    className="w-full rounded-2xl border border-neutral-300 p-2.5 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                    placeholder="e.g. manicure, gel, bridal"
+                    disabled={isSaving}
+                    value={form.tags}
+                    onChange={(e) => handleFieldChange("tags", e.target.value)}
+                  />
+                </label>
+
+                {/* ── Description ── */}
+                <label className="grid gap-1 text-sm font-semibold">
+                  Description
+                  <span className="text-xs font-normal text-neutral-400">
+                    Optional — briefly describe what this service includes
+                  </span>
+                  <textarea
+                    className="w-full rounded-2xl border border-neutral-300 p-2.5 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                    placeholder="e.g. Includes wash, cut, and styling"
+                    rows={2}
+                    disabled={isSaving}
+                    value={form.description}
+                    onChange={(e) =>
+                      handleFieldChange("description", e.target.value)
+                    }
+                  />
+                </label>
               </div>
+            </div>
+
+            {/* Modal footer — sticky bottom */}
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-100 px-6 py-4">
+              <Button
+                variant="ghost"
+                disabled={isSaving}
+                onClick={closeModal}
+              >
+                Չեղարկել
+              </Button>
+              <Button
+                disabled={
+                  isSaving ||
+                  (form.categoryType === "custom" && !form.customCategoryId)
+                }
+                onClick={handleSave}
+              >
+                {isSaving
+                  ? "Saving..."
+                  : editingService
+                    ? "Պահպանել"
+                    : "Ավելացնել"}
+              </Button>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { FolderPlus, Loader2, X } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -25,7 +25,10 @@ export default function ServiceCategoryManager({
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [createCategoryError, setCreateCategoryError] = useState("");
 
-  const customCategories = allCategories.filter((c) => c.source === "custom");
+  const customCategories = useMemo(
+    () => allCategories.filter((c) => c.source === "custom"),
+    [allCategories]
+  );
 
   /* ── Load categories on mount ── */
   useEffect(() => {

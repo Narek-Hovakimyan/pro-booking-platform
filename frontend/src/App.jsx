@@ -237,6 +237,7 @@ export default function App() {
     const description = serviceData?.description || "";
     const category = serviceData?.category || "other";
     const tags = Array.isArray(serviceData?.tags) ? serviceData.tags : [];
+    const type = serviceData?.type || "single";
 
     const serviceDuration = Number(duration);
 
@@ -254,7 +255,7 @@ export default function App() {
     setDataError("");
 
     try {
-      const { data } = await api.post("/services", {
+      const payload = {
         barberId: currentUserId,
         name,
         price: Number(price),
@@ -262,8 +263,26 @@ export default function App() {
         description,
         category,
         tags,
+        type,
         active: true,
-      });
+      };
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          serviceData || {},
+          "customCategoryId"
+        )
+      ) {
+        payload.customCategoryId = serviceData.customCategoryId;
+      }
+
+      if (type === "package") {
+        payload.includedServiceIds = serviceData.includedServiceIds;
+        payload.packagePriceMode = serviceData.packagePriceMode;
+        payload.packageDurationMode = serviceData.packageDurationMode;
+      }
+
+      const { data } = await api.post("/services", payload);
 
       dispatch(addServiceAction(data));
 
