@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSelector } from "react-redux";
 import {
   Plus,
@@ -19,6 +19,7 @@ import {
   getServiceCategoryLabel,
   serviceCategories,
 } from "@/shared/data/serviceCategories";
+import { fetchServiceCategories } from "@/shared/api/serviceCategories";
 import ServiceCategoryManager from "./ServiceCategoryManager";
 
 const emptyForm = {
@@ -74,8 +75,24 @@ export default function ServicesManager({
   const { currentUser } = useSelector((state) => state.auth);
   const barberId = currentUser?.id || currentUser?._id;
 
-  /* ── Custom categories state (fed by ServiceCategoryManager) ── */
+  /* ── Custom categories state (for card labels after navigation) ── */
   const [customCategories, setCustomCategories] = useState([]);
+
+  /* ── Load custom categories on mount ── */
+  useEffect(() => {
+    if (!barberId) return;
+    let cancelled = false;
+    fetchServiceCategories(barberId)
+      .then((cats) => {
+        if (!cancelled) {
+          setCustomCategories(Array.isArray(cats) ? cats.filter((c) => c.source === "custom") : []);
+        }
+      })
+      .catch(() => {
+        // Silently fail — custom categories not critical for page load
+      });
+    return () => { cancelled = true; };
+  }, [barberId]);
 
   /* ── Modal state ── */
   const [showModal, setShowModal] = useState(false);
@@ -247,6 +264,15 @@ export default function ServicesManager({
   /* ── Category display helper for cards ── */
   const renderCategoryLabel = (service) => {
     if (service.customCategoryId) {
+      // If customCategoryId is a populated object, use name directly
+      if (typeof service.customCategoryId === "object" && service.customCategoryId.name) {
+        return (
+          <span className="mt-1 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-600">
+            {service.customCategoryId.name}
+          </span>
+        );
+      }
+      // Try to resolve from loaded custom categories
       const customName = getCustomCategoryName(
         customCategories,
         service.customCategoryId
@@ -258,7 +284,14 @@ export default function ServicesManager({
           </span>
         );
       }
+      // customCategoryId exists but not yet resolved — show safe placeholder
+      return (
+        <span className="mt-1 inline-flex rounded-full bg-indigo-100/50 px-2 py-0.5 text-xs font-medium text-indigo-400">
+          Custom
+        </span>
+      );
     }
+    // No custom category — show system label
     return (
       <span className="mt-1 inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">
         {getServiceCategoryLabel(service.category || "other")}
