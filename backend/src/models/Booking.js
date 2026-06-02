@@ -279,6 +279,16 @@ const bookingSchema = new mongoose.Schema(
       recordedAt: { type: Date, default: null },
       updatedAt: { type: Date, default: null },
     },
+    voucherId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Voucher",
+      default: null,
+    },
+    voucherDiscount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { timestamps: true }
 );

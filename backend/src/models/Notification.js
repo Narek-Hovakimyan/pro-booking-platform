@@ -52,6 +52,11 @@ const notificationDataSchema = new mongoose.Schema(
       ref: "Service",
       default: null,
     },
+    voucherId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Voucher",
+      default: null,
+    },
   },
   { _id: false }
 );
