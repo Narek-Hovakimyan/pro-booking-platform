@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { Button } from "@/shared/components/ui/button";
-import { CheckCircle2, ImagePlus, X } from "lucide-react";
+import { CheckCircle2, ImagePlus, X, Gift, LoaderCircle, Tag } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 const MAX_REFERENCE_FILES = 5;
@@ -46,6 +46,15 @@ export default function ClientDetailsStep({
   consultation = null,
   onConsultationChange,
   onConsentChange,
+  /* ── Voucher props ── */
+  voucherCode = "",
+  voucherPreview = null,
+  discountPreview = 0,
+  voucherError = "",
+  voucherLoading = false,
+  onVoucherCodeChange,
+  onApplyVoucher,
+  onRemoveVoucher,
 }) {
   const [showConsultation, setShowConsultation] = useState(false);
   const [localConsultation, setLocalConsultation] = useState(
@@ -156,6 +165,10 @@ export default function ClientDetailsStep({
     }
   }, [showConsultation, onConsultationChange, applyConsultation]);
 
+  /* ── Voucher input state ── */
+  const [showVoucherInput, setShowVoucherInput] = useState(false);
+  const [localCode, setLocalCode] = useState(voucherCode || "");
+
   return (
     <div className="space-y-5">
       <div>
@@ -206,6 +219,116 @@ export default function ClientDetailsStep({
           onChange={(e) => handleChange("note", e.target.value)}
         />
       </label>
+
+      {/* ── Voucher section ── */}
+      <div className="rounded-2xl border border-amber-100 bg-white">
+        <button
+          type="button"
+          onClick={() => setShowVoucherInput(!showVoucherInput)}
+          className="flex w-full items-center justify-between p-4 text-left"
+        >
+          <div>
+            <span className="font-semibold text-amber-700">
+              <Gift className="-mt-0.5 mr-1.5 inline-block h-4 w-4" />
+              Discount / Gift Voucher
+            </span>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Enter a voucher code to get a discount
+            </p>
+          </div>
+          <svg
+            className={`h-5 w-5 text-amber-400 transition-transform ${
+              showVoucherInput ? "rotate-180" : ""
+            }`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+
+        {showVoucherInput && (
+          <div className="border-t border-amber-100 px-4 pb-4 pt-3">
+            {!voucherPreview ? (
+              <div className="flex items-center gap-2">
+                <input
+                  className="flex-1 rounded-2xl border border-neutral-300 p-3 font-normal uppercase placeholder:normal-case transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                  placeholder="Enter code"
+                  disabled={voucherLoading}
+                  maxLength={20}
+                  value={localCode}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setLocalCode(val);
+                    if (voucherCode && val !== voucherCode) {
+                      onVoucherCodeChange?.();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && localCode.trim()) {
+                      onApplyVoucher?.(localCode.trim());
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={voucherLoading || !localCode.trim()}
+                  onClick={() => onApplyVoucher?.(localCode.trim())}
+                  className="inline-flex h-12 w-24 shrink-0 items-center justify-center gap-1.5 rounded-2xl bg-amber-600 px-3 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {voucherLoading ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Tag className="h-4 w-4" />
+                  )}
+                  Apply
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-medium text-emerald-800">
+                        {voucherPreview.title || "Voucher applied"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-emerald-700">
+                        Code: {voucherPreview.code}
+                        {discountPreview > 0 && (
+                          <span className="ml-2 font-semibold">
+                            -{Number(discountPreview).toLocaleString()} դր
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={voucherLoading}
+                    onClick={() => onRemoveVoucher?.()}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {voucherError && (
+              <p className="mt-2 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">
+                {voucherError}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Hair Consultation Section */}
       <div className="rounded-2xl border border-violet-100 bg-white">

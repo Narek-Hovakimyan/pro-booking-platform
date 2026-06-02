@@ -14,6 +14,8 @@ export default function BookingConfirmationModal({
   error = "",
   consultation = null,
   consent = null,
+  voucherCode = "",
+  discountPreview = 0,
 }) {
   if (!isOpen) return null;
 
@@ -68,12 +70,18 @@ export default function BookingConfirmationModal({
               {selectedTime}
             </span>
           </div>
+          {discountPreview > 0 && voucherCode && (
+            <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+              <span className="font-medium">Discount (voucher: {voucherCode})</span>
+              <span className="font-semibold">
+                -{Number(discountPreview).toLocaleString()} դր
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
             <span className="font-medium">Total</span>
             <span className="text-lg font-bold">
-              {(selectedService?.price?.toLocaleString?.() ||
-                selectedService?.price ||
-                0)}{" "}
+              {(Number(selectedService?.price || 0) - discountPreview).toLocaleString()}{" "}
               դրամ
             </span>
           </div>

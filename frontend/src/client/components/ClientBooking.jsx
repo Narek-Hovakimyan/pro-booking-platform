@@ -9,6 +9,7 @@ import ClientDetailsStep from "@/client/components/booking/ClientDetailsStep";
 import BookingConfirmationModal from "@/client/components/booking/BookingConfirmationModal";
 import WaitlistForm from "@/client/components/waitlist/WaitlistForm";
 import { useBooking } from "@/shared/hooks/useBooking";
+import api from "@/shared/api/axios";
 import { formatDateKey, getDayKeyFromDate, parseDateKey } from "@/shared/utils/dates";
 
 export default function ClientBooking({
@@ -49,6 +50,13 @@ export default function ClientBooking({
   const [referenceFiles, setReferenceFiles] = useState([]);
   const [consultation, setConsultation] = useState(null);
   const [consent, setConsent] = useState(null);
+  /* ── Voucher state ── */
+  const [voucherCode, setVoucherCode] = useState("");
+  const [voucherPreview, setVoucherPreview] = useState(null);
+  const [discountPreview, setDiscountPreview] = useState(0);
+  const [voucherError, setVoucherError] = useState("");
+  const [voucherLoading, setVoucherLoading] = useState(false);
+  const previousServiceIdRef = useRef(selectedServiceEntityId);
   const previousSalonIdRef = useRef(externalSelectedSalonId);
   const todayKey = formatDateKey(new Date());
   const selectedBarberId = barber?._id || barber?.id || "";
@@ -123,6 +131,7 @@ export default function ClientBooking({
     setReferenceFiles([]);
     setConsultation(null);
     setConsent(null);
+    removeVoucher();
   };
 
   const rebookServiceSummary = isRebooking && selectedService && (
@@ -178,6 +187,61 @@ export default function ClientBooking({
 
     return () => window.clearTimeout(resetId);
   }, [externalSelectedSalonId, selectedBarberId, selectedDate, selectedServiceEntityId]);
+
+  /* ── Voucher validation ── */
+  const applyVoucher = async (code) => {
+    setVoucherLoading(true);
+    setVoucherError("");
+    try {
+      const salonId = getSalonId(selectedSalon) || externalSelectedSalonId || "";
+      const { data } = await api.post("/vouchers/validate", {
+        code,
+        barberId: selectedBarberId,
+        salonId,
+        serviceId: selectedServiceEntityId,
+      });
+      if (data.valid) {
+        setVoucherCode(code);
+        setVoucherPreview(data.voucher);
+        setDiscountPreview(data.discountPreview);
+        setVoucherError("");
+      }
+    } catch (err) {
+      setVoucherPreview(null);
+      setDiscountPreview(0);
+      setVoucherCode("");
+      setVoucherError(
+        err.response?.data?.message || "Invalid or expired voucher code"
+      );
+    } finally {
+      setVoucherLoading(false);
+    }
+  };
+
+  const removeVoucher = () => {
+    setVoucherCode("");
+    setVoucherPreview(null);
+    setDiscountPreview(0);
+    setVoucherError("");
+  };
+
+  /* ── Clear voucher when service changes ── */
+  useEffect(() => {
+    if (
+      previousServiceIdRef.current &&
+      previousServiceIdRef.current !== selectedServiceEntityId
+    ) {
+      removeVoucher();
+    }
+    previousServiceIdRef.current = selectedServiceEntityId;
+  }, [selectedServiceEntityId]);
+
+  const voucherCodeChange = () => {
+    // Called when user starts editing the code field after a code was applied
+    if (voucherCode) {
+      removeVoucher();
+    }
+  };
 
   // Reset date/time only when the selected salon actually changes.
   useEffect(() => {
@@ -264,6 +328,10 @@ export default function ClientBooking({
 
       if (consent) {
         bookingPayload.consent = consent;
+      }
+
+      if (voucherCode) {
+        bookingPayload.voucherCode = voucherCode;
       }
 
       await createBooking(bookingPayload);
@@ -516,6 +584,14 @@ export default function ClientBooking({
             onConsultationChange={setConsultation}
             consent={consent}
             onConsentChange={setConsent}
+            voucherCode={voucherCode}
+            voucherPreview={voucherPreview}
+            discountPreview={discountPreview}
+            voucherError={voucherError}
+            voucherLoading={voucherLoading}
+            onVoucherCodeChange={voucherCodeChange}
+            onApplyVoucher={applyVoucher}
+            onRemoveVoucher={removeVoucher}
           />
         )}
 
@@ -593,6 +669,8 @@ export default function ClientBooking({
           error={error}
           consultation={consultation}
           consent={consent}
+          voucherCode={voucherCode}
+          discountPreview={discountPreview}
         />
 
         {showWaitlistForm && selectedBarberId && selectedService && selectedDate && (
