@@ -9,6 +9,7 @@ import LoyaltyProgress from "../models/LoyaltyProgress.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
 import User from "../models/User.js";
+import Voucher from "../models/Voucher.js";
 import {
   getApprovedUserSalonIds,
   getPrimaryApprovedSalonId,
@@ -142,9 +143,6 @@ const getClientName = async (booking, fallbackUser) => {
   return client?.name || "Client";
 };
 
-const sameId = (left, right) =>
-  String(left || "") === String(right || "");
-
 const getErrorStatusCode = (error) => {
   if (error?.statusCode) return error.statusCode;
   if (error?.name === "ValidationError" || error?.name === "CastError") {
@@ -178,6 +176,132 @@ const canManageBookingSalon = async (booking, userId) => {
   );
 };
 
+const sameId = (left, right) =>
+  String(left || "") === String(right || "");
+
+/* ── Voucher helpers ──────────────────────────────────────────── */
+
+/**
+ * Validate and atomically claim a voucher use before booking creation.
+ *
+ * Steps:
+ * 1. Find voucher by code (active + not expired + not overused).
+ * 2. Validate owner scope against barberId/salonId.
+ * 3. Validate service match if voucher is service-specific.
+ * 4. Atomically increment currentUses via findOneAndUpdate with guard.
+ * 5. Return { voucher, voucherDiscount, finalPrice } or throw.
+ *
+ * If atomic claim fails (concurrency/overuse), throws descriptive error.
+ */
+const claimVoucherForBooking = async ({
+  voucherCode: rawCode,
+  barberId,
+  salonId,
+  serviceId,
+  servicePrice,
+}) => {
+  const code = String(rawCode || "").toUpperCase().trim();
+  if (!code) return null;
+
+  // 1. Find active, non-expired, not-overused voucher
+  const voucher = await Voucher.findOne({ code });
+  if (!voucher) {
+    throw Object.assign(new Error("Invalid voucher code"), { statusCode: 400 });
+  }
+  if (!voucher.active) {
+    throw Object.assign(new Error("This voucher is no longer active"), { statusCode: 400 });
+  }
+  if (voucher.expiresAt && new Date() > new Date(voucher.expiresAt)) {
+    throw Object.assign(new Error("This voucher has expired"), { statusCode: 400 });
+  }
+  if (voucher.currentUses >= voucher.maxUses) {
+    throw Object.assign(new Error("This voucher has been fully redeemed"), { statusCode: 400 });
+  }
+
+  // 2. Owner scope validation
+  if (voucher.ownerType === "barber") {
+    if (!sameId(voucher.ownerId, barberId)) {
+      throw Object.assign(new Error("This voucher does not apply to this barber"), { statusCode: 400 });
+    }
+  }
+  if (voucher.ownerType === "salon") {
+    if (!salonId || !sameId(voucher.ownerId, salonId)) {
+      throw Object.assign(new Error("This voucher does not apply to this salon"), { statusCode: 400 });
+    }
+  }
+
+  // 3. Service-specific match
+  if (voucher.serviceId) {
+    if (!sameId(voucher.serviceId, serviceId)) {
+      throw Object.assign(new Error("This voucher does not apply to this service"), { statusCode: 400 });
+    }
+  }
+
+  // 4. Atomically claim a use — guard: currentUses < maxUses AND still active
+  const claimFilter = {
+    _id: voucher._id,
+    active: true,
+    currentUses: { $lt: voucher.maxUses },
+  };
+  if (voucher.expiresAt) {
+    claimFilter.expiresAt = { $gt: new Date() };
+  }
+
+  const claimed = await Voucher.findOneAndUpdate(
+    claimFilter,
+    { $inc: { currentUses: 1 } },
+    { new: false } // return pre-update doc to inspect before state changed
+  );
+
+  if (!claimed) {
+    throw Object.assign(new Error("This voucher is no longer available"), { statusCode: 400 });
+  }
+
+  // 5. Compute discount
+  const preUseUses = Number(claimed.currentUses) + 1; // what it became
+  const voucherAmount = Number(claimed.amount);
+  const voucherDiscount = Math.min(voucherAmount, servicePrice);
+  const finalPrice = Math.max(0, servicePrice - voucherDiscount);
+
+  return { voucher: claimed, voucherDiscount, finalPrice };
+};
+
+/**
+ * Rollback a voucher claim if booking creation fails after the claim.
+ */
+const rollbackVoucherClaim = async (voucherId) => {
+  if (!voucherId) return;
+  await Voucher.findByIdAndUpdate(voucherId, {
+    $inc: { currentUses: -1 },
+  }).catch(() => {});
+};
+
+/**
+ * Push booking ID into voucher's redemptionBookingIds after booking exists.
+ */
+const recordVoucherRedemption = async (voucherId, bookingId) => {
+  if (!voucherId || !bookingId) return;
+  await Voucher.findByIdAndUpdate(voucherId, {
+    $addToSet: { redemptionBookingIds: bookingId },
+  }).catch(() => {});
+};
+
+/**
+ * Restore voucher use when a booking with voucherDiscount is cancelled/rejected.
+ * Only restores once — guards against double-rollback by checking that
+ * the booking was not already in a cancelled/rejected state before this update.
+ */
+const restoreVoucherOnCancel = async (booking, previousStatus) => {
+  if (!booking.voucherId || !booking.voucherDiscount) return;
+  const terminalStatuses = new Set(["cancelled", "rejected"]);
+  if (terminalStatuses.has(previousStatus)) return; // already in terminal state — no double restore
+
+  await Voucher.findByIdAndUpdate(booking.voucherId, {
+    $inc: { currentUses: -1 },
+    $pull: { redemptionBookingIds: booking._id },
+  }).catch(() => {});
+};
+
 export const __bookingTestHooks = {
   allowedBookingDelayMinutes,
   blockingBookingStatuses,
@@ -185,6 +309,10 @@ export const __bookingTestHooks = {
   slotOverlaps,
   validateBookingSlot,
   withBookingCreationLock,
+  claimVoucherForBooking,
+  rollbackVoucherClaim,
+  recordVoucherRedemption,
+  restoreVoucherOnCancel,
 };
 
 const collectReferenceImagePaths = (req) => {
@@ -351,27 +479,69 @@ export const createBooking = async (req, res) => {
         return { message: latestSlotValidation.message };
       }
 
-      const booking = await Booking.create({
-        barberId,
-        serviceId,
-        clientId: isManualBooking ? null : clientId,
-        clientName: isManualBooking ? clientName : req.body.clientName,
-        clientPhone,
-        phone: isManualBooking ? clientPhone : req.body.phone,
-        createdBy: isManualBooking ? "barber" : "client",
-        note: req.body.note || "",
-        referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
-        salonId: salonResolution.salonId,
-        bookingDate,
-        time,
-        dayKey: latestSlotValidation.effectiveDayKey,
-        serviceName: service.name,
-        duration: bookingDuration,
-        price: bookingPrice,
-        status,
-        consultation,
-        consent,
-      });
+      // ── Voucher claim ──
+      let voucherClaim = null;
+      const rawVoucherCode = req.body.voucherCode || req.body.voucher_code;
+      if (rawVoucherCode) {
+        try {
+          voucherClaim = await claimVoucherForBooking({
+            voucherCode: rawVoucherCode,
+            barberId,
+            salonId: salonResolution.salonId,
+            serviceId,
+            servicePrice: bookingPrice,
+          });
+        } catch (voucherError) {
+          return { message: voucherError.message, cleanup: true };
+        }
+      }
+
+      const effectivePrice = voucherClaim ? voucherClaim.finalPrice : bookingPrice;
+
+      let booking;
+      try {
+        booking = await Booking.create({
+          barberId,
+          serviceId,
+          clientId: isManualBooking ? null : clientId,
+          clientName: isManualBooking ? clientName : req.body.clientName,
+          clientPhone,
+          phone: isManualBooking ? clientPhone : req.body.phone,
+          createdBy: isManualBooking ? "barber" : "client",
+          note: req.body.note || "",
+          referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+          salonId: salonResolution.salonId,
+          bookingDate,
+          time,
+          dayKey: latestSlotValidation.effectiveDayKey,
+          serviceName: service.name,
+          duration: bookingDuration,
+          price: effectivePrice,
+          status,
+          consultation,
+          consent,
+          // Voucher fields (if applicable)
+          ...(voucherClaim
+            ? {
+                voucherId: voucherClaim.voucher._id,
+                voucherCode: rawVoucherCode.toUpperCase().trim(),
+                voucherDiscount: voucherClaim.voucherDiscount,
+                finalPrice: voucherClaim.finalPrice,
+              }
+            : {}),
+        });
+      } catch (createErr) {
+        // If voucher was claimed but Booking.create failed, roll back the claim
+        if (voucherClaim) {
+          await rollbackVoucherClaim(voucherClaim.voucher._id).catch(() => {});
+        }
+        throw createErr; // rethrow so outer catch handles it
+      }
+
+      // Record redemption after successful booking creation
+      if (voucherClaim) {
+        await recordVoucherRedemption(voucherClaim.voucher._id, booking._id);
+      }
 
       return { booking };
     });
@@ -673,6 +843,7 @@ export const updateBooking = async (req, res) => {
 
       if (safeUpdates.status === "rejected" || safeUpdates.status === "cancelled") {
         notifyWaitlistForReleasedBookingSlot(booking);
+        restoreVoucherOnCancel(booking, previousStatus);
       }
 
       // ── Review request automation ──

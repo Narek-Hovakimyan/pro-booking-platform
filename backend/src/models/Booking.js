@@ -289,6 +289,16 @@ const bookingSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    voucherCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    finalPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { timestamps: true }
 );
