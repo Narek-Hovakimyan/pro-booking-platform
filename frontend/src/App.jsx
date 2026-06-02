@@ -773,6 +773,10 @@ export default function App() {
               element={renderAdminPage("jobs")}
             />
             <Route
+              path="/admin/vouchers"
+              element={renderAdminPage("vouchers")}
+            />
+            <Route
               path="/admin/calendar"
               element={
                 <ProtectedRoute role="barber">

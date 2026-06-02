@@ -10,6 +10,7 @@ const getMenuGroups = (canShowManageHiring) => [
       ...(canShowManageHiring
         ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
         : []),
+      { label: "Vouchers", to: "/admin/vouchers" },
       { label: "Revenue", to: "/admin/revenue" },
       { label: "Portfolio", to: "/admin/portfolio" },
       { label: "Waitlist", to: "/admin/waitlist" },

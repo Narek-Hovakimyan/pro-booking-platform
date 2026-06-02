@@ -11,6 +11,7 @@ const WaitlistView = lazy(() => import("./WaitlistView"));
 const SalonJobsManager = lazy(() => import("./SalonJobsManager"));
 const PortfolioManager = lazy(() => import("./PortfolioManager"));
 const LoyaltyProgramManager = lazy(() => import("./LoyaltyProgramManager"));
+const VoucherManager = lazy(() => import("./VoucherManager"));
 
 export default function AdminPanel({
   bookings,
@@ -78,6 +79,12 @@ export default function AdminPanel({
         {section === "loyalty" && (
           <div className="lg:col-span-3">
             <LoyaltyProgramManager />
+          </div>
+        )}
+
+        {section === "vouchers" && (
+          <div className="lg:col-span-3">
+            <VoucherManager />
           </div>
         )}
 
