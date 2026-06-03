@@ -22,6 +22,9 @@ afterEach(() => {
 const matchesQuery = (booking, query) =>
   Object.entries(query).every(([key, value]) => {
     if (value === null) return booking[key] == null;
+    if (value && typeof value === "object" && Array.isArray(value.$in)) {
+      return value.$in.includes(booking[key]);
+    }
     return booking[key] === value;
   });
 
@@ -543,6 +546,157 @@ test("concurrent runs do not duplicate 24h reminders", async () => {
     notifications.filter((notification) => notification.type === "booking_reminder_24h").length,
     2
   );
+});
+
+// --- Confirmed booking tests ---
+
+test("confirmed booking gets 24h reminder", async () => {
+  const booking = createBooking({
+    bookingDate: "2026-05-08",
+    time: "10:00",
+    status: "confirmed",
+    barberName: "John Barber",
+    clientName: "Jane Client",
+  });
+  const notifications = [];
+
+  setBookings([booking]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
+
+  assert.equal(result.remindersSent, 1);
+  assert.ok(booking.reminder24hSentAt instanceof Date);
+  assert.equal(notifications.length, 2);
+
+  const clientNotif = notifications.find((n) => n.userId === booking.clientId);
+  const barberNotif = notifications.find((n) => n.userId === booking.barberId);
+  assert.ok(clientNotif);
+  assert.equal(clientNotif.type, "booking_reminder_24h");
+  assert.equal(
+    clientNotif.message,
+    "Reminder: your appointment with John Barber is tomorrow at 10:00."
+  );
+  assert.ok(barberNotif);
+  assert.equal(barberNotif.type, "booking_reminder_24h");
+  assert.equal(
+    barberNotif.message,
+    "Reminder: you have an appointment with Jane Client tomorrow at 10:00."
+  );
+});
+
+test("confirmed booking gets 2h reminder", async () => {
+  const booking = createBooking({
+    bookingDate: "2026-05-08",
+    time: "10:00",
+    status: "confirmed",
+  });
+  const notifications = [];
+
+  setBookings([booking]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
+
+  assert.equal(result.remindersSent, 1);
+  assert.ok(booking.reminder2hSentAt instanceof Date);
+  assert.equal(notifications.length, 2);
+
+  const clientNotif = notifications.find((n) => n.userId === booking.clientId);
+  const barberNotif = notifications.find((n) => n.userId === booking.barberId);
+  assert.ok(clientNotif);
+  assert.equal(clientNotif.type, "booking_reminder_2h");
+  assert.equal(clientNotif.message, "Your appointment starts in 2 hours.");
+  assert.ok(barberNotif);
+  assert.equal(barberNotif.type, "booking_reminder_2h");
+});
+
+test("confirmed booking does not get duplicate 24h reminder", async () => {
+  const booking = createBooking({
+    bookingDate: "2026-05-08",
+    time: "10:00",
+    status: "confirmed",
+    reminder24hSentAt: new Date("2026-05-07T09:00:00+04:00"),
+  });
+  const notifications = [];
+
+  setBookings([booking]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
+
+  assert.equal(result.remindersSent, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test("confirmed booking does not get duplicate 2h reminder", async () => {
+  const booking = createBooking({
+    bookingDate: "2026-05-08",
+    time: "10:00",
+    status: "confirmed",
+    reminder2hSentAt: new Date("2026-05-08T07:00:00+04:00"),
+  });
+  const notifications = [];
+
+  setBookings([booking]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
+
+  assert.equal(result.remindersSent, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test("no_show booking does not get reminders", async () => {
+  const booking = createBooking({
+    status: "no_show",
+    bookingDate: "2026-05-08",
+    time: "10:00",
+  });
+  const notifications = [];
+
+  setBookings([booking]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
+
+  assert.equal(result.remindersSent, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test("late_cancelled booking does not get reminders", async () => {
+  const booking = createBooking({
+    status: "late_cancelled",
+    bookingDate: "2026-05-08",
+    time: "10:00",
+  });
+  const notifications = [];
+
+  setBookings([booking]);
+  Notification.create = async (payload) => {
+    notifications.push(payload);
+    return payload;
+  };
+
+  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
+
+  assert.equal(result.remindersSent, 0);
+  assert.equal(notifications.length, 0);
 });
 
 test("concurrent runs do not duplicate 2h reminders", async () => {

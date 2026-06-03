@@ -8,7 +8,7 @@ const claimReminder = async (booking, field, now, extraQuery = {}) => {
       _id: booking._id,
       bookingDate: booking.bookingDate,
       time: booking.time,
-      status: "accepted",
+      status: { $in: ["accepted", "confirmed"] },
       [field]: null,
       ...extraQuery,
     },
@@ -65,14 +65,14 @@ export const runBookingReminders = async (now = new Date()) => {
   const acceptedBookings = await Booking.find({
     bookingDate: { $ne: "", $lte: maxDateStr },
     time: { $ne: "" },
-    status: "accepted",
+    status: { $in: ["accepted", "confirmed"] },
   });
 
   let remindersSent = 0;
 
   for (const booking of acceptedBookings) {
-    // Defensive guard — skip if status is not accepted (mock safety)
-    if (booking.status !== "accepted") continue;
+    // Defensive guard — skip if status is not accepted or confirmed (mock safety)
+    if (booking.status !== "accepted" && booking.status !== "confirmed") continue;
 
     const startsAt = getBookingDateTime(booking);
 
