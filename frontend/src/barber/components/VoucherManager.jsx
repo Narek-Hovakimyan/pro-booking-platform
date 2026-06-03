@@ -69,7 +69,7 @@ export default function VoucherManager() {
     if (!canManage) return;
 
     api
-      .get(`/api/vouchers/owner/barber/${barberId}`)
+      .get(`/vouchers/owner/barber/${barberId}`)
       .then(({ data }) => {
         setVouchers(Array.isArray(data) ? data : []);
         setError("");
@@ -186,7 +186,7 @@ export default function VoucherManager() {
           expiresAt,
           active: editingVoucher.active,
         };
-        await api.put(`/api/vouchers/${editingVoucher._id}`, payload);
+        await api.put(`/vouchers/${editingVoucher._id}`, payload);
         flashSuccess("Voucher updated successfully.");
       } else {
         const payload = {
@@ -200,7 +200,7 @@ export default function VoucherManager() {
           expiresAt,
         };
         if (code) payload.code = code;
-        await api.post("/api/vouchers", payload);
+        await api.post("/vouchers", payload);
         flashSuccess("Voucher created successfully.");
       }
       closeModal();
@@ -219,7 +219,7 @@ export default function VoucherManager() {
   /* ── Toggle active ── */
   const handleToggleActive = async (voucher) => {
     try {
-      await api.put(`/api/vouchers/${voucher._id}`, {
+      await api.put(`/vouchers/${voucher._id}`, {
         active: !voucher.active,
       });
       flashSuccess(
@@ -236,7 +236,7 @@ export default function VoucherManager() {
   /* ── Delete (soft) ── */
   const handleDelete = async (voucher) => {
     try {
-      await api.delete(`/api/vouchers/${voucher._id}`);
+      await api.delete(`/vouchers/${voucher._id}`);
       flashSuccess("Voucher deleted.");
       setLoading(true);
       loadVouchers();
