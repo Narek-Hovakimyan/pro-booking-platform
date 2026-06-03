@@ -72,7 +72,7 @@ export default function BookingConfirmationModal({
           </div>
           {discountPreview > 0 && voucherCode && (
             <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-              <span className="font-medium">Discount (voucher: {voucherCode})</span>
+              <span className="font-medium">Discount (code: {voucherCode})</span>
               <span className="font-semibold">
                 -{Number(discountPreview).toLocaleString()} դր
               </span>

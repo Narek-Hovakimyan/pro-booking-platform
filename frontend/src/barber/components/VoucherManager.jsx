@@ -256,10 +256,10 @@ export default function VoucherManager() {
         <div className="mb-5">
           <h2 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
             <Gift className="h-6 w-6 text-neutral-700" />
-            Vouchers & Gift Cards
+            Promo Codes & Discounts
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            {vouchers.length} voucher{vouchers.length !== 1 ? "s" : ""}
+            {vouchers.length} promo code{vouchers.length !== 1 ? "s" : ""}
           </p>
         </div>
 
@@ -302,10 +302,10 @@ export default function VoucherManager() {
             </div>
             <div>
               <p className="text-lg font-semibold text-neutral-700">
-                No vouchers yet
+                No promo codes yet
               </p>
               <p className="mt-1 text-sm text-neutral-500">
-                Create vouchers and gift cards to offer discounts to your
+                Create promo codes to offer discounts to your
                 clients.
               </p>
             </div>
@@ -467,8 +467,8 @@ export default function VoucherManager() {
                   </h3>
                   <p className="text-xs text-neutral-500">
                     {editingVoucher
-                      ? "Update the voucher details"
-                      : "Create a new discount voucher or gift card"}
+                      ? "Update the promo code details"
+                      : "Create a new discount promo code"}
                   </p>
                 </div>
               </div>

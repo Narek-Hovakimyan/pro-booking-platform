@@ -230,10 +230,10 @@ export default function ClientDetailsStep({
           <div>
             <span className="font-semibold text-amber-700">
               <Gift className="-mt-0.5 mr-1.5 inline-block h-4 w-4" />
-              Discount / Gift Voucher
+              Discount / Promo Code
             </span>
             <p className="mt-0.5 text-xs text-neutral-500">
-              Enter a voucher code to get a discount
+              Enter a promo code to get a discount
             </p>
           </div>
           <svg
@@ -297,7 +297,7 @@ export default function ClientDetailsStep({
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                     <div>
                       <p className="text-sm font-medium text-emerald-800">
-                        {voucherPreview.title || "Voucher applied"}
+                        {voucherPreview.title || "Promo code applied"}
                       </p>
                       <p className="mt-0.5 text-xs text-emerald-700">
                         Code: {voucherPreview.code}
