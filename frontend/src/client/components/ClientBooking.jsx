@@ -56,11 +56,11 @@ export default function ClientBooking({
   const [discountPreview, setDiscountPreview] = useState(0);
   const [voucherError, setVoucherError] = useState("");
   const [voucherLoading, setVoucherLoading] = useState(false);
+  const selectedBarberId = barber?._id || barber?.id || "";
+  const selectedServiceEntityId = selectedService?._id || selectedService?.id || "";
   const previousServiceIdRef = useRef(selectedServiceEntityId);
   const previousSalonIdRef = useRef(externalSelectedSalonId);
   const todayKey = formatDateKey(new Date());
-  const selectedBarberId = barber?._id || barber?.id || "";
-  const selectedServiceEntityId = selectedService?._id || selectedService?.id || "";
   const safeServices = services || [];
   const activeServices = safeServices.filter((service) => service?.active);
   const hasActiveServices = activeServices.length > 0;
@@ -94,6 +94,22 @@ export default function ClientBooking({
       currentUser &&
       !isSaving
   );
+
+  /* ── Public vouchers ── */
+  const [publicVouchers, setPublicVouchers] = useState([]);
+
+  useEffect(() => {
+    if (!selectedBarberId) return;
+    api
+      .get(`/vouchers/public/barber/${selectedBarberId}`)
+      .then(({ data }) => {
+        setPublicVouchers(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        // Public vouchers are optional — no error state needed
+        setPublicVouchers([]);
+      });
+  }, [selectedBarberId]);
 
   const handleContinueAfterService = () => {
     if (hasMultipleSalons && !externalSelectedSalonId) {
@@ -584,6 +600,7 @@ export default function ClientBooking({
             onConsultationChange={setConsultation}
             consent={consent}
             onConsentChange={setConsent}
+            publicVouchers={publicVouchers}
             voucherCode={voucherCode}
             voucherPreview={voucherPreview}
             discountPreview={discountPreview}

@@ -16,6 +16,9 @@ import {
   Hash,
   CheckCircle2,
   Ban,
+  Copy,
+  Globe,
+  Lock,
 } from "lucide-react";
 
 const emptyForm = {
@@ -26,6 +29,7 @@ const emptyForm = {
   maxUses: "1",
   expiresAt: "",
   code: "",
+  visibility: "private",
 };
 
 function formatDate(date) {
@@ -62,7 +66,27 @@ export default function VoucherManager() {
   const [modalError, setModalError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const [copiedId, setCopiedId] = useState(null);
   const [successMsg, setSuccessMsg] = useState("");
+
+  /* ── Copy code ── */
+  const copyCode = async (voucher) => {
+    try {
+      await navigator.clipboard.writeText(voucher.code);
+      setCopiedId(voucher._id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = voucher.code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopiedId(voucher._id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
 
   /* ── Load vouchers ── */
   const loadVouchers = useCallback(() => {
@@ -112,6 +136,7 @@ export default function VoucherManager() {
         ? new Date(voucher.expiresAt).toISOString().slice(0, 10)
         : "",
       code: "",
+      visibility: voucher.visibility || "private",
     });
     setModalError("");
     setShowModal(true);
@@ -185,6 +210,7 @@ export default function VoucherManager() {
           serviceId: form.type === "service" ? form.serviceId : null,
           expiresAt,
           active: editingVoucher.active,
+          visibility: form.visibility,
         };
         await api.put(`/vouchers/${editingVoucher._id}`, payload);
         flashSuccess("Voucher updated successfully.");
@@ -198,6 +224,7 @@ export default function VoucherManager() {
           serviceId: form.type === "service" ? form.serviceId : null,
           maxUses,
           expiresAt,
+          visibility: form.visibility,
         };
         if (code) payload.code = code;
         await api.post("/vouchers", payload);
@@ -361,6 +388,17 @@ export default function VoucherManager() {
                         >
                           {v.code}
                         </span>
+                        <button
+                          onClick={() => copyCode(v)}
+                          className="inline-flex items-center justify-center rounded-md p-1 text-neutral-400 hover:bg-neutral-100 hover:text-blue-600"
+                          title="Copy code"
+                        >
+                          {copiedId === v._id ? (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
                         {!v.active && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-600">
                             <Ban className="h-3 w-3" />
@@ -369,6 +407,20 @@ export default function VoucherManager() {
                         )}
                         <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                           {v.type === "service" ? "Service" : "Amount"}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                            v.visibility === "public"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-neutral-100 text-neutral-500"
+                          }`}
+                        >
+                          {v.visibility === "public" ? (
+                            <Globe className="h-3 w-3" />
+                          ) : (
+                            <Lock className="h-3 w-3" />
+                          )}
+                          {v.visibility === "public" ? "Public" : "Private"}
                         </span>
                       </div>
 
@@ -596,6 +648,42 @@ export default function VoucherManager() {
                     </select>
                   </label>
                 )}
+
+                {/* Visibility */}
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Visibility
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleField("visibility", "private")}
+                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                      form.visibility === "private"
+                        ? "border-neutral-500 bg-neutral-100 text-neutral-800"
+                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                    }`}
+                  >
+                    <Lock className="h-4 w-4" />
+                    Private
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleField("visibility", "public")}
+                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                      form.visibility === "public"
+                        ? "border-amber-500 bg-amber-50 text-amber-700"
+                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                    }`}
+                  >
+                    <Globe className="h-4 w-4" />
+                    Public
+                  </button>
+                </div>
+                <p className="-mt-2 text-xs text-neutral-400">
+                  Public vouchers are visible to clients during booking.
+                </p>
 
                 {/* Max uses */}
                 <label className="grid gap-1.5 text-sm font-semibold">

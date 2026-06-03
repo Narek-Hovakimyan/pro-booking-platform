@@ -47,6 +47,7 @@ export default function ClientDetailsStep({
   onConsultationChange,
   onConsentChange,
   /* ── Voucher props ── */
+  publicVouchers = [],
   voucherCode = "",
   voucherPreview = null,
   discountPreview = 0,
@@ -325,6 +326,31 @@ export default function ClientDetailsStep({
               <p className="mt-2 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">
                 {voucherError}
               </p>
+            )}
+
+            {!voucherPreview && publicVouchers.length > 0 && !localCode.trim() && (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-medium text-neutral-500">
+                  Available promo codes
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {publicVouchers.map((pv, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      disabled={voucherLoading}
+                      onClick={() => {
+                        setLocalCode(pv.code);
+                        onApplyVoucher?.(pv.code);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+                    >
+                      <Tag className="h-3 w-3" />
+                      {pv.code}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
