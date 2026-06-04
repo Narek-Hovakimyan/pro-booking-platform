@@ -5,6 +5,7 @@ import {
   getProfileByBarberId,
   upsertProfileByBarberId,
 } from "../controllers/barberProfileController.js";
+import { getMyBarberClients } from "../controllers/barberClientController.js";
 import {
   getCertifications,
   getEventCertificates,
@@ -23,6 +24,7 @@ const router = express.Router();
 
 router.get("/", barberProfileController.getAll);
 router.get("/card-summary", getBarberCardSummary);
+router.get("/me/clients", protect, getMyBarberClients);
 router.get("/profile/:barberId", getProfileByBarberId);
 router.put(
   "/profile/:barberId",

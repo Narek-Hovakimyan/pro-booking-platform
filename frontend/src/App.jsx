@@ -27,6 +27,7 @@ const AdminPage = lazy(() => import("./barber/pages/AdminPage"));
 const BarberCalendarPage = lazy(() => import("./barber/pages/BarberCalendarPage"));
 const BarberCalendarDayPage = lazy(() => import("./barber/pages/BarberCalendarDayPage"));
 const BarberProfilePage = lazy(() => import("./barber/pages/BarberProfilePage"));
+const ClientsPage = lazy(() => import("./barber/pages/ClientsPage"));
 const BarbersPage = lazy(() => import("./client/pages/BarbersPage"));
 const BookingPage = lazy(() => import("./client/pages/BookingPage"));
 const ClientBarberProfilePage = lazy(() => import("./client/pages/ClientBarberProfilePage"));
@@ -759,6 +760,14 @@ export default function App() {
             <Route
               path="/admin/bookings"
               element={renderAdminPage("bookings")}
+            />
+            <Route
+              path="/admin/clients"
+              element={
+                <ProtectedRoute role="barber">
+                  <ClientsPage />
+                </ProtectedRoute>
+              }
             />
             <Route
               path="/admin/portfolio"
