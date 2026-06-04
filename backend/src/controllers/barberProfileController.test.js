@@ -17,6 +17,8 @@ import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 
 const originalMethods = {
@@ -29,6 +31,8 @@ const originalMethods = {
   salonFind: Salon.find,
   scheduleFind: Schedule.find,
   serviceFind: Service.find,
+  subscriptionFind: Subscription.find,
+  subscriptionSeatFind: SubscriptionSeat.find,
   userFind: User.find,
 };
 
@@ -45,6 +49,8 @@ afterEach(() => {
   Salon.find = originalMethods.salonFind;
   Schedule.find = originalMethods.scheduleFind;
   Service.find = originalMethods.serviceFind;
+  Subscription.find = originalMethods.subscriptionFind;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   User.find = originalMethods.userFind;
 });
 
@@ -99,6 +105,12 @@ const createFindChain = (result) => ({
   lean: async () => result,
   then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
 });
+
+const mockPaidAccessForAllBarbers = (barberIds) => {
+  Subscription.find = () =>
+    createFindChain(barberIds.map((barberId) => ({ ownerId: barberId })));
+  SubscriptionSeat.find = () => createFindChain([]);
+};
 
 test("clients cannot add, update, or delete barber certifications", async () => {
   let findOneCalled = false;
@@ -263,6 +275,7 @@ test("card summary returns barber card data without per-barber requests", async 
   Review.find = () => createFindChain([{ barberId, rating: 5 }]);
   Booking.find = () => createFindChain([]);
   Schedule.find = () => createFindChain([]);
+  mockPaidAccessForAllBarbers([barberId]);
 
   await getBarberCardSummary({}, res);
 
@@ -349,6 +362,7 @@ test("card summary filters specialists by active service category and tags", asy
   Review.find = () => createFindChain([]);
   Booking.find = () => createFindChain([]);
   Schedule.find = () => createFindChain([]);
+  mockPaidAccessForAllBarbers([nailBarberId, hairBarberId]);
 
   await getBarberCardSummary({ query: { category: "nails", serviceName: "gel" } }, res);
 
@@ -476,6 +490,7 @@ test("card summary populate uses active-only match for customCategoryId", async 
   Review.find = () => createFindChain([]);
   Booking.find = () => createFindChain([]);
   Schedule.find = () => createFindChain([]);
+  mockPaidAccessForAllBarbers([barberId]);
 
   let capturedPopulate;
   Service.find = () => ({

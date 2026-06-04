@@ -7,6 +7,8 @@ import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 
 // ── Singleton model-method capture ──────────────────────────────────
@@ -23,6 +25,8 @@ export const originalMethods = {
   salonFindById: Salon.findById,
   scheduleFindOne: Schedule.findOne,
   serviceFindOne: Service.findOne,
+  subscriptionFindOne: Subscription.findOne,
+  subscriptionSeatFindOne: SubscriptionSeat.findOne,
   userFindById: User.findById,
 };
 
@@ -122,6 +126,10 @@ export const mockBookingFind = (bookings) => async (query) =>
 // ── Create-booking dependency mocks ─────────────────────────────────
 
 export const mockCreateBookingDependencies = (createdBookings) => {
+  Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => null,
+  });
   Service.findOne = async () => ({
     _id: serviceId,
     barberId,

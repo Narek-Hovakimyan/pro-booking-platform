@@ -9,6 +9,8 @@ import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 import { handleReferenceImageUploadError } from "../middleware/uploadMiddleware.js";
 
@@ -53,6 +55,8 @@ afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
   console.error = originalConsoleError;
 });
@@ -548,6 +552,73 @@ test("client-created booking ignores accepted status and saves salonId", async (
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].type, "booking_created");
   assert.deepEqual(notifications[0].data, { bookingId: res.body._id });
+});
+
+test("createBooking blocks unpaid target barber with BARBER_UNAVAILABLE", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Subscription.findOne = async () => null;
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => null,
+  });
+
+  let serviceLookedUp = false;
+  Service.findOne = async () => {
+    serviceLookedUp = true;
+    return null;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(serviceLookedUp, false);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("createBooking allows paid target barber", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
 });
 
 test("booking only accepts active services owned by the selected barber", async () => {
