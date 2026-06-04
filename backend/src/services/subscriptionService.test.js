@@ -18,6 +18,7 @@ import {
   expireSubscriptions,
   grantSubscriptionGraceToExistingBarbers,
   grantManualSubscription,
+  extendManualSubscription,
   barberHasPaidAccess,
   createSubscriptionPaymentIntent,
   getPaidAccessByBarberIds,
@@ -26,6 +27,7 @@ import {
   assignSalonSubscriptionSeat,
   revokeSalonSubscriptionSeat,
   updateSalonSubscriptionSeatCount,
+  isManualActivationAvailable,
 } from "./subscriptionService.js";
 
 /* ── Stub state ─────────────────────────────────────────── */
@@ -238,6 +240,191 @@ test("manual barber subscription grants barberHasPaidAccess true", async () => {
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, true);
+});
+
+test("dev grant endpoint disabled in production", async () => {
+  const originalEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  const { devGrantSubscription } = await import("../controllers/subscriptionController.js");
+  let statusCode = 200;
+  let responseBody = null;
+
+  const req = {
+    body: {
+      ownerType: "barber",
+      ownerId: barberId,
+      payerId,
+      seatCount: 1,
+      months: 1,
+    },
+  };
+  const res = {
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(payload) {
+      responseBody = payload;
+      return this;
+    },
+  };
+
+  try {
+    await devGrantSubscription(req, res);
+  } finally {
+    process.env.NODE_ENV = originalEnv;
+  }
+
+  assert.equal(statusCode, 403);
+  assert.equal(responseBody.code, "DEV_SUBSCRIPTION_DISABLED");
+});
+
+test("dev grant barber activates subscription and creates paid PaymentRecord", async () => {
+  let createdSubscription = null;
+  let createdPayment = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => {
+    createdSubscription = {
+      _id: new mongoose.Types.ObjectId(),
+      ...payload,
+    };
+    return createdSubscription;
+  };
+  PaymentRecord.create = async (payload) => {
+    createdPayment = payload;
+    return payload;
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+    seatCount: 1,
+    months: 1,
+  });
+
+  assert.ok(result);
+  assert.equal(result.status, "active");
+  assert.equal(result.ownerType, "barber");
+  assert.equal(result.ownerRefModel, "User");
+  assert.equal(result.seatCount, 1);
+  assert.equal(result.totalPrice, defaultPlanDoc.pricePerSeat);
+  assert.equal(result.provider, "manual");
+  assert.ok(createdPayment);
+  assert.equal(createdPayment.status, "paid");
+  assert.equal(createdPayment.provider, "manual");
+  assert.equal(createdPayment.amount, defaultPlanDoc.pricePerSeat);
+  assert.equal(String(createdPayment.subscriptionId), String(createdSubscription._id));
+});
+
+test("dev grant salon activates subscription with correct totalPrice", async () => {
+  let createdPayment = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => ({
+    _id: new mongoose.Types.ObjectId(),
+    ...payload,
+  });
+  PaymentRecord.create = async (payload) => {
+    createdPayment = payload;
+    return payload;
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId,
+    seatCount: 4,
+    months: 2,
+  });
+
+  assert.equal(result.status, "active");
+  assert.equal(result.ownerRefModel, "Salon");
+  assert.equal(result.seatCount, 4);
+  assert.equal(result.pricePerSeat, defaultPlanDoc.pricePerSeat);
+  assert.equal(result.totalPrice, 20000);
+  assert.equal(createdPayment.amount, 40000);
+  assert.equal(createdPayment.seatCount, 4);
+});
+
+test("extending active subscription extends from currentPeriodEnd, not now", async () => {
+  const currentPeriodEnd = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+  const expectedPeriodEnd = new Date(currentPeriodEnd);
+  expectedPeriodEnd.setMonth(expectedPeriodEnd.getMonth() + 2);
+  const activeSubscription = makeSubDoc({
+    status: "active",
+    currentPeriodEnd,
+  });
+  let createCalls = 0;
+  let createdPayment = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => activeSubscription;
+  Subscription.create = async () => {
+    createCalls++;
+    return makeSubDoc();
+  };
+  PaymentRecord.create = async (payload) => {
+    createdPayment = payload;
+    return payload;
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+    seatCount: 2,
+    months: 2,
+  });
+
+  assert.equal(createCalls, 0);
+  assert.equal(String(result._id), String(activeSubscription._id));
+  assert.equal(result.status, "active");
+  assert.equal(result.totalPrice, 10000);
+  assert.equal(result.currentPeriodStart.getTime(), currentPeriodEnd.getTime());
+  assert.equal(result.currentPeriodEnd.getTime(), expectedPeriodEnd.getTime());
+  assert.equal(createdPayment.periodStart.getTime(), currentPeriodEnd.getTime());
+  assert.equal(createdPayment.periodEnd.getTime(), expectedPeriodEnd.getTime());
+});
+
+test("extending expired subscription starts from now and does not create duplicate subscription", async () => {
+  const before = new Date();
+  const expiredSubscription = makeSubDoc({
+    status: "expired",
+    currentPeriodEnd: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+  });
+  let createCalls = 0;
+  let paymentCalls = 0;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => expiredSubscription;
+  Subscription.create = async () => {
+    createCalls++;
+    return makeSubDoc();
+  };
+  PaymentRecord.create = async () => {
+    paymentCalls++;
+    return {};
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+    seatCount: 1,
+    months: 1,
+  });
+  const after = new Date();
+
+  assert.equal(createCalls, 0);
+  assert.equal(paymentCalls, 1);
+  assert.equal(result.status, "active");
+  assert.ok(result.currentPeriodStart >= before);
+  assert.ok(result.currentPeriodStart <= after);
+  assert.ok(result.currentPeriodEnd > result.currentPeriodStart);
 });
 
 test("manual salon subscription alone does NOT grant access without seat", async () => {
@@ -509,13 +696,12 @@ test("getMySubscriptionAccess returns not-applicable for client", async () => {
   assert.ok(result.message);
 });
 
-test("dev grant endpoint disabled in production", async () => {
+test("manual activation availability helper is false in production", async () => {
   const originalEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
 
   try {
-    const isProduction = process.env.NODE_ENV === "production";
-    assert.equal(isProduction, true);
+    assert.equal(isManualActivationAvailable(), false);
   } finally {
     process.env.NODE_ENV = originalEnv;
   }
@@ -528,6 +714,7 @@ test("no existing barber route is blocked in Phase 1 (smoke test)", async () => 
   assert.ok(subController.getMySubscription);
   assert.ok(subController.getDefaultPlan);
   assert.ok(subController.devGrantSubscription);
+  assert.ok(subController.devExtendSubscription);
   assert.ok(subRoutes.default);
 });
 

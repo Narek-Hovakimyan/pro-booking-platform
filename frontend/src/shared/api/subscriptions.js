@@ -52,3 +52,20 @@ export const createSubscriptionPaymentIntent = async ({
   });
   return data;
 };
+
+export const extendManualSubscription = async ({
+  ownerType,
+  ownerId,
+  payerId,
+  seatCount = 1,
+  months = 1,
+}) => {
+  const { data } = await api.post("/subscriptions/dev/extend", {
+    ownerType,
+    ownerId,
+    payerId,
+    seatCount,
+    months,
+  });
+  return data;
+};

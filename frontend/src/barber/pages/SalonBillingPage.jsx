@@ -1,10 +1,12 @@
 import { Minus, RefreshCw, UserPlus, Users, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
 import {
   assignSalonSeat,
   createSubscriptionPaymentIntent,
+  extendManualSubscription,
   getSalonSubscription,
   revokeSalonSeat,
   updateSalonSeatCount,
@@ -46,16 +48,19 @@ const normalizeError = (error, fallback) =>
   error?.response?.data?.message || fallback;
 
 export default function SalonBillingPage() {
+  const { currentUser } = useSelector((state) => state.auth);
   const [salons, setSalons] = useState([]);
   const [selectedSalonId, setSelectedSalonId] = useState("");
   const [details, setDetails] = useState(null);
   const [seatCountInput, setSeatCountInput] = useState("");
+  const [manualMonths, setManualMonths] = useState("1");
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [loadingSalons, setLoadingSalons] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [saving, setSaving] = useState(false);
   const [paymentIntent, setPaymentIntent] = useState(null);
   const [preparingPayment, setPreparingPayment] = useState(false);
+  const [manualActivating, setManualActivating] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -125,6 +130,8 @@ export default function SalonBillingPage() {
   const revokedSeats = details?.revokedSeats || [];
   const approvedMembers = details?.approvedMembers || [];
   const subscription = details?.subscription || null;
+  const showManualActivationPanel =
+    import.meta.env.DEV || details?.manualActivationAvailable;
   const availableSeatCount = Number(details?.availableSeatCount || 0);
   const activeSeatMemberIds = useMemo(
     () => new Set(activeSeats.map((seat) => getPersonId(seat))),
@@ -225,6 +232,45 @@ export default function SalonBillingPage() {
       setError(normalizeError(requestError, "Could not prepare manual payment."));
     } finally {
       setPreparingPayment(false);
+    }
+  };
+
+  const handleManualActivation = async () => {
+    const nextSeatCount = Number(seatCountInput || subscription?.seatCount || 1);
+    const months = Number(manualMonths);
+
+    if (!selectedSalonId) return;
+
+    if (!Number.isFinite(nextSeatCount) || nextSeatCount < 1) {
+      setError("Seat count must be at least 1.");
+      return;
+    }
+
+    if (!Number.isInteger(months) || months < 1) {
+      setError("Months must be at least 1.");
+      return;
+    }
+
+    setManualActivating(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await extendManualSubscription({
+        ownerType: "salon",
+        ownerId: selectedSalonId,
+        payerId: getIdString(currentUser),
+        seatCount: nextSeatCount,
+        months,
+      });
+      setSuccess("Salon subscription activated manually.");
+      await loadDetails(selectedSalonId, { keepMessage: true });
+    } catch (requestError) {
+      setError(
+        normalizeError(requestError, "Manual activation is not available.")
+      );
+    } finally {
+      setManualActivating(false);
     }
   };
 
@@ -474,6 +520,43 @@ export default function SalonBillingPage() {
                     )}
                   </CardContent>
                 </Card>
+
+                {showManualActivationPanel && (
+                  <Card>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <h2 className="font-semibold text-neutral-950">
+                          Development/MVP manual activation
+                        </h2>
+                        <p className="mt-1 text-sm text-neutral-500">
+                          Activates the salon subscription only. Seats are still
+                          assigned separately.
+                        </p>
+                      </div>
+                      <label className="block">
+                        <span className="text-sm font-medium text-neutral-700">
+                          Months
+                        </span>
+                        <input
+                          className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                          min="1"
+                          onChange={(event) => setManualMonths(event.target.value)}
+                          type="number"
+                          value={manualMonths}
+                        />
+                      </label>
+                      <Button
+                        className="w-full"
+                        disabled={manualActivating || !selectedSalonId}
+                        onClick={handleManualActivation}
+                      >
+                        {manualActivating
+                          ? "Activating..."
+                          : "Activate salon manually"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <Card>
                   <CardContent className="space-y-4">

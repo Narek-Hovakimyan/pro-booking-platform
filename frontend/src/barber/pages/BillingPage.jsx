@@ -1,9 +1,10 @@
 import { CalendarDays, CheckCircle2, Info, WalletCards } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import {
   createSubscriptionPaymentIntent,
+  extendManualSubscription,
   getMySubscription,
 } from "@/shared/api/subscriptions";
 import { Button } from "@/shared/components/ui/button";
@@ -41,40 +42,38 @@ export default function BillingPage() {
   const [paymentIntent, setPaymentIntent] = useState(null);
   const [paymentError, setPaymentError] = useState("");
   const [isPreparingPayment, setIsPreparingPayment] = useState(false);
+  const [manualMonths, setManualMonths] = useState("1");
+  const [manualActivationError, setManualActivationError] = useState("");
+  const [manualActivationSuccess, setManualActivationSuccess] = useState("");
+  const [isActivatingManually, setIsActivatingManually] = useState(false);
   const plan = subscription.defaultPlan;
   const individual = subscription.individualSubscription;
   const isDev = import.meta.env.DEV;
+  const showManualActivationPanel =
+    isDev || subscription.manualActivationAvailable;
   const coveredBySalon =
     subscription.coveredBy === "salon" || subscription.coveredBy === "both";
   const hasIndividualAccess =
     individual && ["active", "trialing"].includes(individual.status);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function refreshSubscription() {
-      dispatch(loadSubscriptionStart());
-      try {
-        const data = await getMySubscription();
-        if (isMounted) dispatch(loadSubscriptionSuccess(data));
-      } catch (error) {
-        if (isMounted) {
-          dispatch(
-            loadSubscriptionFailure(
-              error.response?.data?.message ||
-                "Could not load subscription status."
-            )
-          );
-        }
-      }
+  const refreshSubscription = useCallback(async () => {
+    dispatch(loadSubscriptionStart());
+    try {
+      const data = await getMySubscription();
+      dispatch(loadSubscriptionSuccess(data));
+    } catch (error) {
+      dispatch(
+        loadSubscriptionFailure(
+          error.response?.data?.message ||
+            "Could not load subscription status."
+        )
+      );
     }
-
-    refreshSubscription();
-
-    return () => {
-      isMounted = false;
-    };
   }, [dispatch]);
+
+  useEffect(() => {
+    refreshSubscription();
+  }, [refreshSubscription]);
 
   const preparePayment = async () => {
     const ownerId = currentUser?.id || currentUser?._id;
@@ -98,6 +97,41 @@ export default function BillingPage() {
       );
     } finally {
       setIsPreparingPayment(false);
+    }
+  };
+
+  const activateManually = async () => {
+    const ownerId = currentUser?.id || currentUser?._id;
+    const months = Number(manualMonths);
+
+    if (!ownerId || isActivatingManually) return;
+
+    if (!Number.isInteger(months) || months < 1) {
+      setManualActivationError("Months must be at least 1.");
+      return;
+    }
+
+    setIsActivatingManually(true);
+    setManualActivationError("");
+    setManualActivationSuccess("");
+
+    try {
+      await extendManualSubscription({
+        ownerType: "barber",
+        ownerId,
+        payerId: ownerId,
+        seatCount: 1,
+        months,
+      });
+      setManualActivationSuccess("Manual subscription activated.");
+      await refreshSubscription();
+    } catch (requestError) {
+      setManualActivationError(
+        requestError.response?.data?.message ||
+          "Manual activation is not available."
+      );
+    } finally {
+      setIsActivatingManually(false);
     }
   };
 
@@ -250,6 +284,54 @@ export default function BillingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {showManualActivationPanel && (
+        <Card>
+          <CardContent className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-neutral-950">
+                Development/MVP manual activation
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">
+                This grants access through the protected dev endpoint. It is
+                separate from preparing payment.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="block sm:w-48">
+                <span className="text-sm font-medium text-neutral-700">
+                  Months
+                </span>
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                  min="1"
+                  onChange={(event) => setManualMonths(event.target.value)}
+                  type="number"
+                  value={manualMonths}
+                />
+              </label>
+              <Button
+                disabled={isActivatingManually}
+                onClick={activateManually}
+              >
+                {isActivatingManually
+                  ? "Activating..."
+                  : "Activate manually"}
+              </Button>
+            </div>
+            {manualActivationSuccess && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                {manualActivationSuccess}
+              </div>
+            )}
+            {manualActivationError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {manualActivationError}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

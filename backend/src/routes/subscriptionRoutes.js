@@ -4,6 +4,7 @@ import {
   getMySubscription,
   getDefaultPlan,
   devGrantSubscription,
+  devExtendSubscription,
   createPaymentIntent,
   getSalonSubscription,
   getSalonSubscriptionSeats,
@@ -22,6 +23,9 @@ router.get("/me", protect, getMySubscription);
 
 // POST /api/subscriptions/dev/grant
 router.post("/dev/grant", protect, devGrantSubscription);
+
+// POST /api/subscriptions/dev/extend
+router.post("/dev/extend", protect, devExtendSubscription);
 
 // POST /api/subscriptions/payment-intent
 router.post("/payment-intent", protect, createPaymentIntent);

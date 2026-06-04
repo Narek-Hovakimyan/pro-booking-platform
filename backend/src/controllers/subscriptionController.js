@@ -3,7 +3,7 @@ import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import {
   getOrCreateDefaultSubscriptionPlan,
   getMySubscriptionAccess,
-  grantManualSubscription,
+  extendManualSubscription,
   getSalonSubscriptionDetails,
   assignSalonSubscriptionSeat,
   revokeSalonSubscriptionSeat,
@@ -11,7 +11,7 @@ import {
   createSubscriptionPaymentIntent,
 } from "../services/subscriptionService.js";
 
-const isProduction = process.env.NODE_ENV === "production";
+const isProduction = () => process.env.NODE_ENV === "production";
 
 /**
  * GET /api/subscriptions/me
@@ -48,8 +48,11 @@ export const getDefaultPlan = async (req, res) => {
  * Grants a manual subscription for development/testing.
  */
 export const devGrantSubscription = async (req, res) => {
-  if (isProduction) {
-    return res.status(403).json({ message: "Dev endpoints are disabled in production" });
+  if (isProduction()) {
+    return res.status(403).json({
+      code: "DEV_SUBSCRIPTION_DISABLED",
+      message: "Dev subscription activation is disabled in production",
+    });
   }
 
   try {
@@ -63,7 +66,7 @@ export const devGrantSubscription = async (req, res) => {
       return res.status(400).json({ message: "ownerType must be 'barber' or 'salon'" });
     }
 
-    const subscription = await grantManualSubscription({
+    const subscription = await extendManualSubscription({
       ownerType,
       ownerId,
       payerId,
@@ -74,9 +77,15 @@ export const devGrantSubscription = async (req, res) => {
     return res.status(201).json(subscription);
   } catch (error) {
     console.error("Could not grant subscription", error);
-    return res.status(500).json({ message: "Could not grant subscription" });
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not grant subscription",
+    });
   }
 };
+
+export const devExtendSubscription = devGrantSubscription;
 
 export const createPaymentIntent = async (req, res) => {
   try {

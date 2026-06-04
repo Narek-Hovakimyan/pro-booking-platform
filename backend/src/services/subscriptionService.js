@@ -15,6 +15,7 @@ const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
 const GRACE_DAYS = 30;
 const PAID_SUBSCRIPTION_STATUSES = ["trialing", "active"];
+const MANUAL_PROVIDER = "manual";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -129,6 +130,15 @@ export const createSalonTrialSubscription = async ({
 const addDays = (date, days) =>
   new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 
+const addMonths = (date, months) => {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+};
+
+export const isManualActivationAvailable = () =>
+  process.env.NODE_ENV !== "production";
+
 export const grantSubscriptionGraceToExistingBarbers = async ({
   now = new Date(),
   graceDays = GRACE_DAYS,
@@ -225,48 +235,77 @@ export const grantSubscriptionGraceToExistingBarbers = async ({
 };
 
 /**
- * Grant a manual (dev/test) subscription.
+ * Extend or activate a manual (dev/test) subscription.
  * Creates or updates an active subscription with the given seat count and months.
  * Creates a PaymentRecord with status "paid" and provider "manual".
  */
-export const grantManualSubscription = async ({
+export const extendManualSubscription = async ({
   ownerType,
   ownerId,
   payerId,
   seatCount = 1,
   months = 1,
 }) => {
+  if (!["barber", "salon"].includes(ownerType)) {
+    const error = new Error("ownerType must be 'barber' or 'salon'");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!ownerId || !payerId) {
+    const error = new Error("ownerId and payerId are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedSeatCount = Number(seatCount || 1);
+  const normalizedMonths = Number(months || 1);
+
+  if (!Number.isInteger(normalizedSeatCount) || normalizedSeatCount < 1) {
+    const error = new Error("seatCount must be at least 1");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!Number.isInteger(normalizedMonths) || normalizedMonths < 1) {
+    const error = new Error("months must be at least 1");
+    error.statusCode = 400;
+    throw error;
+  }
+
   const plan = await getOrCreateDefaultSubscriptionPlan();
 
   const now = new Date();
-  const periodEnd = new Date(
-    now.getFullYear(),
-    now.getMonth() + months,
-    now.getDate()
-  );
+  const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
 
-  const totalPrice = plan.pricePerSeat * seatCount;
-
-  // Upsert: find existing active/trialing subscription or create new one
   let subscription = await Subscription.findOne({
     ownerType,
     ownerId,
-    status: { $in: ["trialing", "active"] },
   });
 
+  const isContinuingSubscription =
+    subscription &&
+    ["trialing", "active"].includes(subscription.status) &&
+    subscription.currentPeriodEnd &&
+    new Date(subscription.currentPeriodEnd) > now;
+  const periodStart = isContinuingSubscription
+    ? new Date(subscription.currentPeriodEnd)
+    : now;
+  const periodEnd = addMonths(periodStart, normalizedMonths);
+
   if (subscription) {
-    // Update existing
     subscription.status = "active";
-    subscription.seatCount = seatCount;
+    subscription.seatCount = normalizedSeatCount;
     subscription.pricePerSeat = plan.pricePerSeat;
-    subscription.totalPrice = totalPrice;
-    subscription.currentPeriodStart = now;
+    subscription.totalPrice = monthlyTotal;
+    subscription.currentPeriodStart = periodStart;
     subscription.currentPeriodEnd = periodEnd;
     subscription.lastPaymentAt = now;
     subscription.trialEndsAt = undefined;
+    subscription.cancelledAt = undefined;
     subscription.payerId = payerId;
     subscription.planId = plan._id;
-    subscription.provider = "manual";
+    subscription.provider = MANUAL_PROVIDER;
     await subscription.save();
   } else {
     subscription = await Subscription.create({
@@ -276,34 +315,35 @@ export const grantManualSubscription = async ({
       payerId,
       planId: plan._id,
       status: "active",
-      seatCount,
+      seatCount: normalizedSeatCount,
       pricePerSeat: plan.pricePerSeat,
-      totalPrice,
-      currentPeriodStart: now,
+      totalPrice: monthlyTotal,
+      currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
-      provider: "manual",
+      provider: MANUAL_PROVIDER,
       lastPaymentAt: now,
     });
   }
 
-  // Create payment record
   await PaymentRecord.create({
     subscriptionId: subscription._id,
     payerId,
     ownerType,
     ownerId,
-    amount: totalPrice,
-    currency: "AMD",
-    seatCount,
-    periodStart: now,
+    amount: monthlyTotal * normalizedMonths,
+    currency: plan.currency,
+    seatCount: normalizedSeatCount,
+    periodStart,
     periodEnd,
     status: "paid",
-    provider: "manual",
+    provider: MANUAL_PROVIDER,
     paidAt: now,
   });
 
   return subscription;
 };
+
+export const grantManualSubscription = extendManualSubscription;
 
 /**
  * Check if a barber has paid access to the platform.
@@ -506,6 +546,7 @@ export const getMySubscriptionAccess = async (user) => {
       salonSeatCoverage: null,
       coveredBy: null,
       defaultPlan: null,
+      manualActivationAvailable: isManualActivationAvailable(),
     };
   }
 
@@ -569,6 +610,7 @@ export const getMySubscriptionAccess = async (user) => {
           interval: plan.interval,
         }
       : null,
+    manualActivationAvailable: isManualActivationAvailable(),
   };
 };
 
@@ -681,6 +723,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
     revokedSeats,
     availableSeatCount,
     approvedMembers,
+    manualActivationAvailable: isManualActivationAvailable(),
   };
 };
 
