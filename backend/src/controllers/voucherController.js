@@ -2,6 +2,9 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
+import { calculateServiceDiscountedPrice } from "./serviceController.js";
+
+
 import Voucher from "../models/Voucher.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
 
@@ -97,6 +100,10 @@ const validateCreateInput = async (req) => {
     }
   }
 
+  if (req.body.visibility !== undefined && !["private", "public"].includes(req.body.visibility)) {
+    errors.push("visibility must be 'private' or 'public'");
+  }
+
   return errors;
 };
 
@@ -113,7 +120,7 @@ export const createVoucher = async (req, res) => {
       return res.status(400).json({ message: validationErrors.join("; ") });
     }
 
-    const { ownerType, ownerId, title, type, amount, serviceId, maxUses, expiresAt, code } = req.body;
+    const { ownerType, ownerId, title, type, amount, serviceId, maxUses, expiresAt, code, visibility } = req.body;
 
     // Owner permission check
     const access = await assertOwnerAccess(req, ownerType, ownerId);
@@ -176,6 +183,7 @@ export const createVoucher = async (req, res) => {
       serviceId: type === "service" ? serviceId : null,
       maxUses: maxUses !== undefined ? Number(maxUses) : 1,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
+      visibility: visibility !== undefined ? visibility : "private",
     });
 
     return res.status(201).json(voucher);
@@ -274,7 +282,7 @@ export const updateVoucher = async (req, res) => {
     }
 
     // Allowed mutable fields
-    const { title, amount, serviceId, maxUses, active, expiresAt } = req.body;
+    const { title, amount, serviceId, maxUses, active, expiresAt, visibility } = req.body;
 
     if (title !== undefined) {
       if (!title.trim()) {
@@ -335,6 +343,13 @@ export const updateVoucher = async (req, res) => {
         }
         voucher.expiresAt = expiry;
       }
+    }
+
+    if (visibility !== undefined) {
+      if (!["private", "public"].includes(visibility)) {
+        return res.status(400).json({ message: "visibility must be 'private' or 'public'" });
+      }
+      voucher.visibility = visibility;
     }
 
     await voucher.save();
@@ -448,13 +463,15 @@ export const validateVoucherCode = async (req, res) => {
 
     // Verify the requested service exists and is active
     const service = await Service.findOne({ _id: serviceId, active: true })
-      .select("price")
+      .select("price discountType discountValue")
       .lean();
     if (!service) {
       return res.status(400).json({ message: "Service not found or inactive" });
     }
-    const servicePrice = Number(service.price);
-    const discountPreview = Math.min(Number(voucher.amount), servicePrice);
+    // discountPreview is capped against the service's discounted price (not raw price)
+    const { discountedPrice: serviceDiscountedPrice } = calculateServiceDiscountedPrice(service);
+    const discountPreview = Math.min(Number(voucher.amount), serviceDiscountedPrice);
+
 
     return res.json({
       valid: true,
@@ -476,5 +493,66 @@ export const validateVoucherCode = async (req, res) => {
   } catch (error) {
     console.error("Could not validate voucher", error);
     return res.status(500).json({ message: "Could not validate voucher" });
+  }
+};
+
+/**
+ * GET /api/vouchers/public/:ownerType/:ownerId
+ * Auth: none (public)
+ * Returns only safe fields for public, active, non-expired, non-exhausted vouchers.
+ */
+export const getPublicVouchers = async (req, res) => {
+  try {
+    const { ownerType, ownerId } = req.params;
+
+    if (!["barber", "salon"].includes(ownerType)) {
+      return res.status(400).json({ message: "ownerType must be 'barber' or 'salon'" });
+    }
+
+    if (!isValidObjectId(ownerId)) {
+      return res.status(400).json({ message: "Invalid ownerId" });
+    }
+
+    const now = new Date();
+    const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
+
+    const safeVouchers = await Voucher.aggregate([
+      {
+        $match: {
+          ownerType,
+          ownerId: ownerObjectId,
+          visibility: "public",
+          active: true,
+          $expr: { $lt: ["$currentUses", "$maxUses"] },
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { expiresAt: null },
+            { expiresAt: { $gt: now } },
+          ],
+        },
+      },
+      {
+        $project: {
+          code: 1,
+          title: 1,
+          type: 1,
+          amount: 1,
+          serviceId: 1,
+          expiresAt: 1,
+          maxUses: 1,
+          currentUses: 1,
+          visibility: 1,
+          _id: 0,
+        },
+      },
+    ]);
+
+    return res.json(safeVouchers);
+  } catch (error) {
+    console.error("Could not fetch public vouchers", error);
+    return res.status(500).json({ message: "Could not fetch public vouchers" });
   }
 };

@@ -9,7 +9,36 @@ import { sendControllerError } from "../utils/controllerError.js";
 
 export const serviceController = createCrudController(Service, "Service");
 
+/**
+ * Calculate the discounted price for a service based on its discount settings.
+ *
+ * Rules:
+ * - "none": discount = 0
+ * - "percent": discount = Math.round(price * discountValue / 100)
+ * - "fixed": discount = Math.min(discountValue, price)
+ * - discountedPrice = Math.max(0, price - discountAmount)
+ *
+ * @param {object} service - A Service document or plain object with price, discountType, discountValue.
+ * @returns {{ discountAmount: number, discountedPrice: number }}
+ */
+export const calculateServiceDiscountedPrice = (service) => {
+  const price = Number(service?.price ?? 0);
+  const discountType = service?.discountType || "none";
+  const discountValue = Number(service?.discountValue ?? 0);
+  let discountAmount = 0;
+
+  if (discountType === "percent" && discountValue > 0) {
+    discountAmount = Math.round(price * discountValue / 100);
+  } else if (discountType === "fixed" && discountValue > 0) {
+    discountAmount = Math.min(discountValue, price);
+  }
+
+  const discountedPrice = Math.max(0, price - discountAmount);
+  return { discountAmount, discountedPrice };
+};
+
 const isBarber = (user) => user?.role === "barber";
+
 
 const hasOwnBodyField = (body, field) =>
   Object.prototype.hasOwnProperty.call(body || {}, field);
@@ -130,6 +159,40 @@ const validateServicePayload = (body, { partial = false } = {}) => {
     next.active = source.active;
   }
 
+  // ── Discount fields ──
+  if (!partial || source.discountType !== undefined || source.discountValue !== undefined) {
+    const discountType = source.discountType !== undefined ? source.discountType : "none";
+    const discountValue = source.discountValue !== undefined ? Number(source.discountValue) : 0;
+
+    if (!["none", "percent", "fixed"].includes(discountType)) {
+      return { error: "discountType must be 'none', 'percent', or 'fixed'" };
+    }
+
+    if (discountType === "none") {
+      if (discountValue !== 0) {
+        return { error: "discountValue must be 0 when discountType is 'none'" };
+      }
+    } else if (discountType === "percent") {
+      if (!Number.isFinite(discountValue) || discountValue <= 0 || discountValue > 100) {
+        return { error: "discountValue must be between 1 and 100 for percent discount" };
+      }
+    } else if (discountType === "fixed") {
+      if (!Number.isFinite(discountValue) || discountValue <= 0) {
+        return { error: "discountValue must be greater than 0 for fixed discount" };
+      }
+      // Validate against price — resolved price may come from body or will be validated later
+      const priceForValidation = next.price !== undefined ? next.price : source.price;
+      if (priceForValidation !== undefined && Number(priceForValidation) >= 0) {
+        if (discountValue > Number(priceForValidation)) {
+          return { error: "discountValue cannot exceed the service price for fixed discount" };
+        }
+      }
+    }
+
+    next.discountType = discountType;
+    next.discountValue = discountValue;
+  }
+
   // ── Package fields ──
   if (!partial || source.type !== undefined) {
     if (source.type !== undefined && !["single", "package"].includes(source.type)) {
@@ -139,6 +202,7 @@ const validateServicePayload = (body, { partial = false } = {}) => {
   }
 
   return { value: next };
+
 };
 
 const validateAndResolveIncludedServices = async (includedServiceIds, barberId, existingServiceId) => {

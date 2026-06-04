@@ -10,6 +10,7 @@ import {
   createVoucher,
   deleteVoucher,
   getOwnerVouchers,
+  getPublicVouchers,
   getVoucherById,
   updateVoucher,
   validateVoucherCode,
@@ -21,6 +22,7 @@ const originalVoucherFind = Voucher.find;
 const originalVoucherFindById = Voucher.findById;
 const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
 const originalVoucherCreate = Voucher.create;
+const originalVoucherAggregate = Voucher.aggregate;
 const originalSalonFindById = Salon.findById;
 const originalServiceFindOne = Service.findOne;
 const originalServiceFindById = Service.findById;
@@ -53,6 +55,7 @@ afterEach(() => {
   Voucher.findById = originalVoucherFindById;
   Voucher.findByIdAndUpdate = originalVoucherFindByIdAndUpdate;
   Voucher.create = originalVoucherCreate;
+  Voucher.aggregate = originalVoucherAggregate;
   Salon.findById = originalSalonFindById;
   Service.findOne = originalServiceFindOne;
   Service.findById = originalServiceFindById;
@@ -647,7 +650,7 @@ test("validate rejects inactive requested service", async () => {
   assert.ok(res.body.message.includes("inactive"));
 });
 
-test("validate returns safe payload and capped discountPreview", async () => {
+test("validate returns safe payload and caps discountPreview against discounted service price", async () => {
   const voucherDoc = makeVoucherDoc({ amount: 10000 });
 
   const req = {
@@ -661,7 +664,13 @@ test("validate returns safe payload and capped discountPreview", async () => {
   const res = createResponse();
 
   Voucher.findOne = () => chainableSelect(voucherDoc);
-  Service.findOne = () => chainableSelect({ price: 5000, _id: serviceId, active: true });
+  Service.findOne = () => chainableSelect({
+    price: 12000,
+    discountType: "fixed",
+    discountValue: 7000,
+    _id: serviceId,
+    active: true,
+  });
 
   await validateVoucherCode(req, res);
 
@@ -671,7 +680,212 @@ test("validate returns safe payload and capped discountPreview", async () => {
   assert.equal(res.body.voucher.code, "TESTCODE1");
   assert.equal(res.body.voucher.title, "Test Voucher");
   assert.equal(res.body.voucher.amount, 10000);
-  assert.equal(res.body.discountPreview, 5000); // Math.min(10000 voucher amount, 5000 service price)
+  // discounted service price = 5000, so this must not cap against the raw 12000 price
+  assert.equal(res.body.discountPreview, 5000);
   // Confirm no sensitive fields leaked
   assert.equal(res.body.voucher.redemptionBookingIds, undefined);
+});
+
+/* ── Visibility & createVoucher ─────────────────────────── */
+
+test("create voucher defaults visibility to private", async () => {
+  const req = {
+    user: barberA,
+    body: {
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "Default Private",
+      type: "amount",
+      amount: 1000,
+    },
+  };
+  const res = createResponse();
+
+  Voucher.findOne = () => chainableSelect(null);
+  Voucher.create = async (data) => ({
+    ...data,
+    _id: new mongoose.Types.ObjectId(),
+    currentUses: 0,
+    redemptionBookingIds: [],
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  await createVoucher(req, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.visibility, "private");
+});
+
+test("create voucher accepts public visibility", async () => {
+  const req = {
+    user: barberA,
+    body: {
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "Public Voucher",
+      type: "amount",
+      amount: 1000,
+      visibility: "public",
+    },
+  };
+  const res = createResponse();
+
+  Voucher.findOne = () => chainableSelect(null);
+  Voucher.create = async (data) => ({
+    ...data,
+    _id: new mongoose.Types.ObjectId(),
+    currentUses: 0,
+    redemptionBookingIds: [],
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  await createVoucher(req, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.visibility, "public");
+});
+
+test("create voucher rejects invalid visibility", async () => {
+  const req = {
+    user: barberA,
+    body: {
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "Bad Visibility",
+      type: "amount",
+      amount: 1000,
+      visibility: "invalid",
+    },
+  };
+  const res = createResponse();
+
+  await createVoucher(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("visibility"));
+});
+
+test("updateVoucher can update visibility", async () => {
+  const voucherDoc = makeVoucherDoc({ visibility: "private" });
+  let saved = false;
+  voucherDoc.save = async function () {
+    saved = true;
+    return this;
+  };
+
+  const req = {
+    user: barberA,
+    params: { id: voucherDoc._id },
+    body: { visibility: "public" },
+  };
+  const res = createResponse();
+
+  Voucher.findById = async () => voucherDoc;
+
+  await updateVoucher(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.visibility, "public");
+  assert.ok(saved);
+});
+
+test("updateVoucher rejects invalid visibility", async () => {
+  const voucherDoc = makeVoucherDoc({ visibility: "private" });
+
+  const req = {
+    user: barberA,
+    params: { id: voucherDoc._id },
+    body: { visibility: "secret" },
+  };
+  const res = createResponse();
+
+  Voucher.findById = async () => voucherDoc;
+
+  await updateVoucher(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("visibility"));
+});
+
+/* ── getPublicVouchers ──────────────────────────────────── */
+
+test("getPublicVouchers rejects invalid ownerType", async () => {
+  const req = {
+    params: { ownerType: "invalid", ownerId: barberA._id },
+  };
+  const res = createResponse();
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("ownerType"));
+});
+
+test("getPublicVouchers rejects invalid ownerId", async () => {
+  const req = {
+    params: { ownerType: "barber", ownerId: "not-an-objectid" },
+  };
+  const res = createResponse();
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("ownerId"));
+});
+
+test("getPublicVouchers returns public active voucher list", async () => {
+  const now = new Date();
+  const future = new Date(now.getTime() + 86400000); // +1 day
+
+  const req = {
+    params: { ownerType: "barber", ownerId: barberA._id },
+  };
+  const res = createResponse();
+
+  const fakeResult = [
+    {
+      code: "PUBLIC1",
+      title: "Public Promo",
+      type: "amount",
+      amount: 1000,
+      serviceId: null,
+      expiresAt: future,
+      maxUses: 10,
+      currentUses: 2,
+      visibility: "public",
+    },
+  ];
+
+  Voucher.aggregate = async () => fakeResult;
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(Array.isArray(res.body));
+  assert.equal(res.body.length, 1);
+  assert.equal(res.body[0].code, "PUBLIC1");
+  // Confirm unsafe fields are not present
+  assert.equal(res.body[0].redemptionBookingIds, undefined);
+  assert.equal(res.body[0].ownerId, undefined);
+  assert.equal(res.body[0].active, undefined);
+  assert.equal(res.body[0]._id, undefined);
+});
+
+test("getPublicVouchers returns empty array for private vouchers", async () => {
+  const req = {
+    params: { ownerType: "barber", ownerId: barberA._id },
+  };
+  const res = createResponse();
+
+  Voucher.aggregate = async () => [];
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(Array.isArray(res.body));
+  assert.equal(res.body.length, 0);
 });

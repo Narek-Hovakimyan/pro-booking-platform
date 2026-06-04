@@ -94,6 +94,16 @@ const serviceSchema = new mongoose.Schema(
       enum: ["manual", "sum"],
       default: "manual",
     },
+    discountType: {
+      type: String,
+      enum: ["none", "percent", "fixed"],
+      default: "none",
+    },
+    discountValue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { timestamps: true }
 );

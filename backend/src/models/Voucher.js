@@ -53,6 +53,11 @@ const voucherSchema = new mongoose.Schema(
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Booking" }],
       default: [],
     },
+    visibility: {
+      type: String,
+      enum: ["private", "public"],
+      default: "private",
+    },
     active: {
       type: Boolean,
       default: true,

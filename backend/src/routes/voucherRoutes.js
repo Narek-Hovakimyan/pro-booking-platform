@@ -4,6 +4,7 @@ import {
   createVoucher,
   deleteVoucher,
   getOwnerVouchers,
+  getPublicVouchers,
   getVoucherById,
   updateVoucher,
   validateVoucherCode,
@@ -13,6 +14,9 @@ const router = express.Router();
 
 // POST /api/vouchers/validate — must be before /:id
 router.post("/validate", protect, validateVoucherCode);
+
+// GET /api/vouchers/public/:ownerType/:ownerId — must be before /:id
+router.get("/public/:ownerType/:ownerId", getPublicVouchers);
 
 router.post("/", protect, createVoucher);
 router.get("/owner/:ownerType/:ownerId", protect, getOwnerVouchers);

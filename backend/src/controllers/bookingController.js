@@ -8,6 +8,9 @@ import LoyaltyProgram from "../models/LoyaltyProgram.js";
 import LoyaltyProgress from "../models/LoyaltyProgress.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
+import { calculateServiceDiscountedPrice } from "./serviceController.js";
+
+
 import User from "../models/User.js";
 import Voucher from "../models/Voucher.js";
 import {
@@ -433,7 +436,8 @@ export const createBooking = async (req, res) => {
     }
 
     const bookingDuration = Number(service.duration);
-    const bookingPrice = Number(service.price);
+    const { discountedPrice: bookingPrice } = calculateServiceDiscountedPrice(service);
+
     const salonResolution = await resolveBookingSalon({
       barberId,
       salonId: req.body.salonId,

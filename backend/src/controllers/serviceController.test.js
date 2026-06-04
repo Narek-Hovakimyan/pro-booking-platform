@@ -4,6 +4,7 @@ import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import {
+  calculateServiceDiscountedPrice,
   createService,
   deleteService,
   getServicesByBarber,
@@ -794,7 +795,239 @@ test("GET services by barber with inactive customCategoryId returns null (active
   assert.equal(res.body[0].category, "other");
 });
 
+// ─── Discount tests ───
+
+test("calculateServiceDiscountedPrice applies MVP discount rules", () => {
+  assert.deepEqual(
+    calculateServiceDiscountedPrice({ price: 5000, discountType: "none", discountValue: 0 }),
+    { discountAmount: 0, discountedPrice: 5000 }
+  );
+  assert.deepEqual(
+    calculateServiceDiscountedPrice({ price: 999, discountType: "percent", discountValue: 15 }),
+    { discountAmount: 150, discountedPrice: 849 }
+  );
+  assert.deepEqual(
+    calculateServiceDiscountedPrice({ price: 5000, discountType: "fixed", discountValue: 1200 }),
+    { discountAmount: 1200, discountedPrice: 3800 }
+  );
+  assert.deepEqual(
+    calculateServiceDiscountedPrice({ price: 5000, discountType: "fixed", discountValue: 7000 }),
+    { discountAmount: 5000, discountedPrice: 0 }
+  );
+});
+
+test("create service with percent discount succeeds", async () => {
+  let createdDoc;
+  Service.create = async (doc) => {
+    createdDoc = doc;
+    return { _id: "service-discount", ...doc };
+  };
+  Service.find = async () => [];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Discounted Haircut",
+        price: 5000,
+        duration: 30,
+        category: "haircut",
+        discountType: "percent",
+        discountValue: 20,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdDoc.discountType, "percent");
+  assert.equal(createdDoc.discountValue, 20);
+});
+
+test("create service with fixed discount succeeds", async () => {
+  let createdDoc;
+  Service.create = async (doc) => {
+    createdDoc = doc;
+    return { _id: "service-fixed", ...doc };
+  };
+  Service.find = async () => [];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Fixed Discount Cut",
+        price: 5000,
+        duration: 30,
+        category: "haircut",
+        discountType: "fixed",
+        discountValue: 1000,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdDoc.discountType, "fixed");
+  assert.equal(createdDoc.discountValue, 1000);
+});
+
+test("reject percent discount > 100", async () => {
+  Service.create = async () => { throw new Error("should not be called"); };
+  Service.find = async () => [];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Bad Discount",
+        price: 5000,
+        duration: 30,
+        discountType: "percent",
+        discountValue: 150,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+});
+
+test("reject fixed discount greater than price", async () => {
+  Service.create = async () => { throw new Error("should not be called"); };
+  Service.find = async () => [];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Bad Fixed",
+        price: 5000,
+        duration: 30,
+        discountType: "fixed",
+        discountValue: 6000,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+});
+
+test("reject discountValue > 0 when discountType is none", async () => {
+  Service.create = async () => { throw new Error("should not be called"); };
+  Service.find = async () => [];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "None Discount",
+        price: 5000,
+        duration: 30,
+        discountType: "none",
+        discountValue: 100,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+});
+
+test("reject invalid discountType", async () => {
+  Service.create = async () => { throw new Error("should not be called"); };
+  Service.find = async () => [];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Bad Type",
+        price: 5000,
+        duration: 30,
+        discountType: "invalid",
+        discountValue: 0,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+});
+
+test("update discount on existing service", async () => {
+  const service = {
+    _id: "service-update-discount",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    discountType: "none",
+    discountValue: 0,
+    save: async function save() {
+      return this;
+    },
+  };
+
+  Service.findById = async () => service;
+
+  const res = createResponse();
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { discountType: "percent", discountValue: 15 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.discountType, "percent");
+  assert.equal(res.body.discountValue, 15);
+});
+
+test("remove discount by setting discountType to none", async () => {
+  const service = {
+    _id: "service-remove-discount",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    discountType: "percent",
+    discountValue: 20,
+    save: async function save() {
+      return this;
+    },
+  };
+
+  Service.findById = async () => service;
+
+  const res = createResponse();
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { discountType: "none", discountValue: 0 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.discountType, "none");
+  assert.equal(res.body.discountValue, 0);
+});
+
 // ─── Package tests ───
+
 
 const haircutService = {
   _id: new mongoose.Types.ObjectId("111111111111111111111111"),
