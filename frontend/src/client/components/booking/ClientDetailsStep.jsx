@@ -231,10 +231,10 @@ export default function ClientDetailsStep({
           <div>
             <span className="font-semibold text-amber-700">
               <Gift className="-mt-0.5 mr-1.5 inline-block h-4 w-4" />
-              Discount / Promo Code
+              Promo Code
             </span>
             <p className="mt-0.5 text-xs text-neutral-500">
-              Enter a promo code to get a discount
+              Promo codes apply after any service discount
             </p>
           </div>
           <svg
@@ -304,7 +304,7 @@ export default function ClientDetailsStep({
                         Code: {voucherPreview.code}
                         {discountPreview > 0 && (
                           <span className="ml-2 font-semibold">
-                            -{Number(discountPreview).toLocaleString()} դր
+                            Promo -{Number(discountPreview).toLocaleString()} դր
                           </span>
                         )}
                       </p>

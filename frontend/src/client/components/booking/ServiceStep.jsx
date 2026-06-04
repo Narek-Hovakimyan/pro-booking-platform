@@ -1,5 +1,8 @@
 import { Button } from "@/shared/components/ui/button";
-import { groupServicesByDisplayCategory } from "@/shared/data/serviceCategories";
+import {
+  getServicePriceInfo,
+  groupServicesByDisplayCategory,
+} from "@/shared/data/serviceCategories";
 
 export default function ServiceStep({
   services = [],
@@ -30,6 +33,7 @@ export default function ServiceStep({
               <div className="grid gap-3 sm:grid-cols-2">
                 {group.services.map((service) => {
                   const isSelected = String(selectedServiceId) === String(service?.id || service?._id);
+                  const priceInfo = getServicePriceInfo(service);
                   return (
                     <button
                       key={service?.id || service?._id}
@@ -48,13 +52,22 @@ export default function ServiceStep({
                       <div className={`font-semibold ${isSelected ? "text-white" : "text-neutral-950"}`}>
                         {service?.name || "Service"}
                       </div>
-                      {service?.type === "package" && (
-                        <div className="mt-1">
+                      {(service?.type === "package" || priceInfo.hasDiscount) && (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {priceInfo.hasDiscount && (
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ${
+                              isSelected ? "bg-rose-500 text-white" : "bg-rose-100 text-rose-700"
+                            }`}>
+                              {priceInfo.discountLabel}
+                            </span>
+                          )}
+                          {service?.type === "package" && (
                           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                             isSelected ? "bg-violet-500 text-white" : "bg-violet-100 text-violet-700"
                           }`}>
                             Package
                           </span>
+                          )}
                         </div>
                       )}
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -65,8 +78,15 @@ export default function ServiceStep({
                         )}
                         <span className={`text-sm ${isSelected ? "text-neutral-300" : "text-neutral-500"}`}>
                           {service?.duration || 20} րոպե ·{" "}
-                          <span className={`font-semibold ${isSelected ? "text-white" : "text-neutral-800"}`}>
-                            {Number(service?.price || 0).toLocaleString()} դրամ
+                          <span className="inline-flex items-center gap-1.5">
+                            {priceInfo.hasDiscount && (
+                              <span className={`line-through ${isSelected ? "text-neutral-400" : "text-neutral-400"}`}>
+                                {Number(priceInfo.originalPrice).toLocaleString()} դրամ
+                              </span>
+                            )}
+                            <span className={`font-semibold ${isSelected ? "text-white" : "text-neutral-800"}`}>
+                              {Number(priceInfo.discountedPrice).toLocaleString()} դրամ
+                            </span>
                           </span>
                         </span>
                       </div>

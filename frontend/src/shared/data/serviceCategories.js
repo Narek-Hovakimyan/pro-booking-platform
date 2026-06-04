@@ -18,6 +18,44 @@ export const serviceCategoryLabels = Object.fromEntries(
 export const getServiceCategoryLabel = (category) =>
   serviceCategoryLabels[category] || serviceCategoryLabels.other;
 
+export const getServicePriceInfo = (service) => {
+  const parsedPrice = Number(service?.price ?? 0);
+  const originalPrice = Number.isFinite(parsedPrice)
+    ? Math.max(0, parsedPrice)
+    : 0;
+  const discountType = service?.discountType || "none";
+  const parsedDiscountValue = Number(service?.discountValue ?? 0);
+  const discountValue = Number.isFinite(parsedDiscountValue)
+    ? parsedDiscountValue
+    : 0;
+
+  let serviceDiscountAmount = 0;
+
+  if (discountType === "percent" && discountValue > 0) {
+    serviceDiscountAmount = Math.round((originalPrice * discountValue) / 100);
+  } else if (discountType === "fixed" && discountValue > 0) {
+    serviceDiscountAmount = Math.min(discountValue, originalPrice);
+  }
+
+  const discountedPrice = Math.max(0, originalPrice - serviceDiscountAmount);
+  const hasDiscount =
+    serviceDiscountAmount > 0 && discountedPrice < originalPrice;
+  const discountLabel =
+    hasDiscount && discountType === "percent"
+      ? `${discountValue}% OFF`
+      : hasDiscount
+        ? `-${serviceDiscountAmount} դր`
+        : "";
+
+  return {
+    originalPrice,
+    serviceDiscountAmount,
+    discountedPrice,
+    hasDiscount,
+    discountLabel,
+  };
+};
+
 /**
  * Get the display category name for a service.
  *

@@ -16,6 +16,7 @@ import {
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import {
+  getServicePriceInfo,
   getServiceCategoryLabel,
   serviceCategories,
 } from "@/shared/data/serviceCategories";
@@ -35,6 +36,8 @@ const emptyForm = {
   packageDurationMode: "manual",
   categoryType: "system",
   customCategoryId: "",
+  discountType: "none",
+  discountValue: "0",
 };
 
 function formatPrice(price) {
@@ -108,6 +111,16 @@ export default function ServicesManager({
     form.type === "package" && form.packagePriceMode === "sum";
   const isPackageSumDuration =
     form.type === "package" && form.packageDurationMode === "sum";
+  const selectedPackageServices = services.filter((service) =>
+    form.includedServiceIds.some((id) => String(id) === String(service.id))
+  );
+  const computedPackagePrice = selectedPackageServices.reduce(
+    (sum, service) => sum + Number(service.price || 0),
+    0
+  );
+  const formOriginalPrice = isPackageSumPrice
+    ? computedPackagePrice
+    : Number(form.price);
 
   /* ── Available services for package inclusion ── */
   const availablePackageServices = services.filter(
@@ -151,6 +164,8 @@ export default function ServicesManager({
       packageDurationMode: service.packageDurationMode || "manual",
       categoryType: hasCustomCategory ? "custom" : "system",
       customCategoryId: customCategoryIdStr,
+      discountType: service.discountType || "none",
+      discountValue: String(service.discountValue ?? 0),
     });
     setModalError("");
     setShowModal(true);
@@ -164,7 +179,12 @@ export default function ServicesManager({
   };
 
   const handleFieldChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      if (field === "discountType" && value === "none") {
+        return { ...prev, discountType: value, discountValue: "0" };
+      }
+      return { ...prev, [field]: value };
+    });
   };
 
   /* ── Save service ── */
@@ -172,6 +192,9 @@ export default function ServicesManager({
     const name = form.name.trim();
     const price = Number(form.price);
     const duration = Number(form.duration);
+    const discountType = form.discountType || "none";
+    const discountValue =
+      discountType === "none" ? 0 : Number(form.discountValue);
     const tags = form.tags
       .split(",")
       .map((tag) => tag.trim())
@@ -204,6 +227,37 @@ export default function ServicesManager({
       return;
     }
 
+    if (!["none", "percent", "fixed"].includes(discountType)) {
+      setModalError("Please choose a valid discount type.");
+      return;
+    }
+
+    if (discountType === "percent") {
+      if (
+        !Number.isFinite(discountValue) ||
+        discountValue < 1 ||
+        discountValue > 100
+      ) {
+        setModalError("Percent discount must be between 1 and 100.");
+        return;
+      }
+    }
+
+    if (discountType === "fixed") {
+      if (!Number.isFinite(discountValue) || discountValue <= 0) {
+        setModalError("Fixed discount must be greater than 0.");
+        return;
+      }
+      if (!Number.isFinite(formOriginalPrice) || formOriginalPrice < 0) {
+        setModalError("Enter the service price before adding a fixed discount.");
+        return;
+      }
+      if (discountValue > formOriginalPrice) {
+        setModalError("Fixed discount cannot exceed the original price.");
+        return;
+      }
+    }
+
     setModalError("");
 
     // Build payload — omit price/duration when auto-calculated via sum mode
@@ -212,6 +266,8 @@ export default function ServicesManager({
       description: form.description.trim(),
       tags,
       type: form.type,
+      discountType,
+      discountValue,
     };
 
     if (!isPackageSumPrice) {
@@ -382,129 +438,149 @@ export default function ServicesManager({
               </div>
 
               <div className="space-y-3">
-                {services.map((s) => (
-                  <div
-                    key={s.id}
-                    className={`group relative overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:shadow-md ${
-                      !s.active
-                        ? "border-dashed border-neutral-300 bg-neutral-50/50"
-                        : "border-neutral-200"
-                    }`}
-                  >
-                    {/* Active/inactive indicator bar */}
+                {services.map((s) => {
+                  const priceInfo = getServicePriceInfo(s);
+
+                  return (
                     <div
-                      className={`absolute left-0 top-0 h-full w-1 ${
-                        s.active ? "bg-emerald-500" : "bg-neutral-300"
+                      key={s.id}
+                      className={`group relative overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:shadow-md ${
+                        !s.active
+                          ? "border-dashed border-neutral-300 bg-neutral-50/50"
+                          : "border-neutral-200"
                       }`}
-                    />
+                    >
+                      {/* Active/inactive indicator bar */}
+                      <div
+                        className={`absolute left-0 top-0 h-full w-1 ${
+                          s.active ? "bg-emerald-500" : "bg-neutral-300"
+                        }`}
+                      />
 
-                    <div className="flex items-center justify-between gap-4 p-4 pl-5">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`font-semibold ${
-                              s.active
-                                ? "text-neutral-950"
-                                : "text-neutral-400"
-                            }`}
-                          >
-                            {s.name}
-                          </span>
-                          {!s.active && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-600">
-                              <EyeOff className="h-3 w-3" />
-                              Inactive
+                      <div className="flex items-center justify-between gap-4 p-4 pl-5">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`font-semibold ${
+                                s.active
+                                  ? "text-neutral-950"
+                                  : "text-neutral-400"
+                              }`}
+                            >
+                              {s.name}
                             </span>
-                          )}
-                        </div>
-
-                        {renderCategoryLabel(s)}
-
-                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
-                          <span className="inline-flex items-center gap-1 text-neutral-600">
-                            <Clock className="h-3.5 w-3.5" />
-                            {s.duration} min
-                          </span>
-                          <span className="inline-flex items-center gap-1 font-medium text-neutral-900">
-                            <Wallet className="h-3.5 w-3.5" />
-                            {formatPrice(s.price)} դր
-                          </span>
-                        </div>
-
-                        {s.description && (
-                          <p className="mt-1.5 text-xs leading-relaxed text-neutral-400 line-clamp-2">
-                            {s.description}
-                          </p>
-                        )}
-                        {Array.isArray(s.tags) && s.tags.length > 0 && (
-                          <p className="mt-1 text-xs text-neutral-400">
-                            {s.tags.slice(0, 4).join(", ")}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          disabled={isSaving}
-                          size="icon"
-                          variant="ghost"
-                          className="h-9 w-9 text-neutral-400 hover:text-amber-600"
-                          title={s.active ? "Deactivate" : "Activate"}
-                          onClick={() => handleToggleActive(s)}
-                        >
-                          {s.active ? (
-                            <EyeOff className="h-4 w-4" />
-                          ) : (
-                            <Eye className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          disabled={isSaving}
-                          size="icon"
-                          variant="ghost"
-                          className="h-9 w-9 text-neutral-400 hover:text-blue-600"
-                          title="Edit"
-                          onClick={() => openEditModal(s)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-
-                        {deleteConfirmId === s.id ? (
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              className="h-9 px-3 text-xs"
-                              onClick={() => handleDelete(s.id)}
-                            >
-                              Delete
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-9 px-3 text-xs"
-                              onClick={() => setDeleteConfirmId(null)}
-                            >
-                              Cancel
-                            </Button>
+                            {priceInfo.hasDiscount && (
+                              <span className="inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
+                                {priceInfo.discountLabel}
+                              </span>
+                            )}
+                            {!s.active && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-600">
+                                <EyeOff className="h-3 w-3" />
+                                Inactive
+                              </span>
+                            )}
                           </div>
-                        ) : (
+
+                          {renderCategoryLabel(s)}
+
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
+                            <span className="inline-flex items-center gap-1 text-neutral-600">
+                              <Clock className="h-3.5 w-3.5" />
+                              {s.duration} min
+                            </span>
+                            <span className="inline-flex items-center gap-1 font-medium text-neutral-900">
+                              <Wallet className="h-3.5 w-3.5" />
+                              {priceInfo.hasDiscount ? (
+                                <>
+                                  <span className="text-neutral-400 line-through">
+                                    {formatPrice(priceInfo.originalPrice)} դր
+                                  </span>
+                                  <span className="font-bold text-emerald-700">
+                                    {formatPrice(priceInfo.discountedPrice)} դր
+                                  </span>
+                                </>
+                              ) : (
+                                <span>{formatPrice(priceInfo.originalPrice)} դր</span>
+                              )}
+                            </span>
+                          </div>
+
+                          {s.description && (
+                            <p className="mt-1.5 text-xs leading-relaxed text-neutral-400 line-clamp-2">
+                              {s.description}
+                            </p>
+                          )}
+                          {Array.isArray(s.tags) && s.tags.length > 0 && (
+                            <p className="mt-1 text-xs text-neutral-400">
+                              {s.tags.slice(0, 4).join(", ")}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex shrink-0 items-center gap-1">
                           <Button
                             disabled={isSaving}
                             size="icon"
                             variant="ghost"
-                            className="h-9 w-9 text-neutral-400 hover:text-red-600"
-                            title="Delete"
-                            onClick={() => setDeleteConfirmId(s.id)}
+                            className="h-9 w-9 text-neutral-400 hover:text-amber-600"
+                            title={s.active ? "Deactivate" : "Activate"}
+                            onClick={() => handleToggleActive(s)}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            {s.active ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
                           </Button>
-                        )}
+                          <Button
+                            disabled={isSaving}
+                            size="icon"
+                            variant="ghost"
+                            className="h-9 w-9 text-neutral-400 hover:text-blue-600"
+                            title="Edit"
+                            onClick={() => openEditModal(s)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+
+                          {deleteConfirmId === s.id ? (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-9 px-3 text-xs"
+                                onClick={() => handleDelete(s.id)}
+                              >
+                                Delete
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-9 px-3 text-xs"
+                                onClick={() => setDeleteConfirmId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              disabled={isSaving}
+                              size="icon"
+                              variant="ghost"
+                              className="h-9 w-9 text-neutral-400 hover:text-red-600"
+                              title="Delete"
+                              onClick={() => setDeleteConfirmId(s.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -780,15 +856,7 @@ export default function ServicesManager({
                       form.includedServiceIds.length > 0 && (
                         <div className="rounded-xl bg-violet-100 p-3 text-sm text-violet-800">
                           <span className="font-medium">Computed price:</span>{" "}
-                          {formatPrice(
-                            services
-                              .filter((s) =>
-                                form.includedServiceIds.some(
-                                  (id) => String(id) === String(s.id)
-                                )
-                              )
-                              .reduce((sum, s) => sum + (s.price || 0), 0)
-                          )}{" "}
+                          {formatPrice(computedPackagePrice)}{" "}
                           դր
                         </div>
                       )}
@@ -853,6 +921,64 @@ export default function ServicesManager({
                     </label>
                   </div>
                 )}
+
+                {/* ── Service discount ── */}
+                <div className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/40 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-rose-600">
+                      Service discount
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Optional service-level discount shown before promo codes.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1.5 text-sm font-semibold">
+                      Discount type
+                      <select
+                        className="w-full rounded-2xl border border-rose-200 bg-white p-3 font-normal transition-colors focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-100"
+                        disabled={isSaving}
+                        value={form.discountType}
+                        onChange={(e) =>
+                          handleFieldChange("discountType", e.target.value)
+                        }
+                      >
+                        <option value="none">No discount</option>
+                        <option value="percent">Percent discount</option>
+                        <option value="fixed">Fixed discount</option>
+                      </select>
+                    </label>
+
+                    <label className="grid gap-1.5 text-sm font-semibold">
+                      Discount value
+                      <input
+                        className="w-full rounded-2xl border border-rose-200 bg-white p-3 font-normal transition-colors focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-100 disabled:bg-neutral-100"
+                        disabled={isSaving || form.discountType === "none"}
+                        min={form.discountType === "percent" ? "1" : "0"}
+                        max={
+                          form.discountType === "percent"
+                            ? "100"
+                            : Number.isFinite(formOriginalPrice)
+                              ? String(formOriginalPrice)
+                              : undefined
+                        }
+                        placeholder={
+                          form.discountType === "percent"
+                            ? "1-100"
+                            : form.discountType === "fixed"
+                              ? "Amount in դր"
+                              : "0"
+                        }
+                        type="number"
+                        value={form.discountValue}
+                        onChange={(e) =>
+                          handleFieldChange("discountValue", e.target.value)
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
 
                 {/* ── Category type toggle ── */}
                 <label className="grid gap-1.5 text-sm font-semibold">

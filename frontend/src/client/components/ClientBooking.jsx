@@ -10,6 +10,7 @@ import BookingConfirmationModal from "@/client/components/booking/BookingConfirm
 import WaitlistForm from "@/client/components/waitlist/WaitlistForm";
 import { useBooking } from "@/shared/hooks/useBooking";
 import api from "@/shared/api/axios";
+import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { formatDateKey, getDayKeyFromDate, parseDateKey } from "@/shared/utils/dates";
 
 export default function ClientBooking({
@@ -94,6 +95,7 @@ export default function ClientBooking({
       currentUser &&
       !isSaving
   );
+  const selectedServicePriceInfo = getServicePriceInfo(selectedService);
 
   /* ── Public vouchers ── */
   const [publicVouchers, setPublicVouchers] = useState([]);
@@ -161,7 +163,15 @@ export default function ClientBooking({
             {selectedService.name || "Service"}
           </div>
           <div className="mt-1 text-sm text-neutral-600">
-            {Number(selectedService.price || 0).toLocaleString()} դրամ ·{" "}
+            {selectedServicePriceInfo.hasDiscount && (
+              <span className="mr-1.5 text-neutral-400 line-through">
+                {selectedServicePriceInfo.originalPrice.toLocaleString()} դրամ
+              </span>
+            )}
+            <span className={selectedServicePriceInfo.hasDiscount ? "font-semibold text-emerald-700" : ""}>
+              {selectedServicePriceInfo.discountedPrice.toLocaleString()} դրամ
+            </span>{" "}
+            ·{" "}
             {selectedService.duration || 20} min
           </div>
         </div>
@@ -462,7 +472,15 @@ export default function ClientBooking({
                       {selectedService.name || "Service"}
                     </div>
                     <div className="mt-0.5 text-sm text-neutral-600">
-                      {Number(selectedService.price || 0).toLocaleString()} դրամ ·{" "}
+                      {selectedServicePriceInfo.hasDiscount && (
+                        <span className="mr-1.5 text-neutral-400 line-through">
+                          {selectedServicePriceInfo.originalPrice.toLocaleString()} դրամ
+                        </span>
+                      )}
+                      <span className={selectedServicePriceInfo.hasDiscount ? "font-semibold text-emerald-700" : ""}>
+                        {selectedServicePriceInfo.discountedPrice.toLocaleString()} դրամ
+                      </span>{" "}
+                      ·{" "}
                       {selectedService.duration || 20} min
                     </div>
                   </div>

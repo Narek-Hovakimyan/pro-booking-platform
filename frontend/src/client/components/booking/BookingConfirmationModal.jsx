@@ -1,4 +1,5 @@
 import { Button } from "@/shared/components/ui/button";
+import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 
 export default function BookingConfirmationModal({
   isOpen,
@@ -18,6 +19,10 @@ export default function BookingConfirmationModal({
   discountPreview = 0,
 }) {
   if (!isOpen) return null;
+
+  const priceInfo = getServicePriceInfo(selectedService);
+  const promoDiscount = Math.max(0, Number(discountPreview || 0));
+  const finalTotal = Math.max(0, priceInfo.discountedPrice - promoDiscount);
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
@@ -70,18 +75,42 @@ export default function BookingConfirmationModal({
               {selectedTime}
             </span>
           </div>
-          {discountPreview > 0 && voucherCode && (
+          {priceInfo.hasDiscount ? (
+            <>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-neutral-500">Original price</span>
+                <span className="font-semibold text-neutral-950">
+                  {priceInfo.originalPrice.toLocaleString()} դրամ
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 bg-rose-50 px-4 py-2 text-rose-800">
+                <span className="font-medium">Service discount</span>
+                <span className="font-semibold">
+                  -{priceInfo.serviceDiscountAmount.toLocaleString()} դր
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-neutral-500">
+                  Subtotal after service discount
+                </span>
+                <span className="font-semibold text-neutral-950">
+                  {priceInfo.discountedPrice.toLocaleString()} դրամ
+                </span>
+              </div>
+            </>
+          ) : null}
+          {promoDiscount > 0 && voucherCode && (
             <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-              <span className="font-medium">Discount (code: {voucherCode})</span>
+              <span className="font-medium">Promo code discount ({voucherCode})</span>
               <span className="font-semibold">
-                -{Number(discountPreview).toLocaleString()} դր
+                -{promoDiscount.toLocaleString()} դր
               </span>
             </div>
           )}
           <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
             <span className="font-medium">Total</span>
             <span className="text-lg font-bold">
-              {(Number(selectedService?.price || 0) - discountPreview).toLocaleString()}{" "}
+              {finalTotal.toLocaleString()}{" "}
               դրամ
             </span>
           </div>
