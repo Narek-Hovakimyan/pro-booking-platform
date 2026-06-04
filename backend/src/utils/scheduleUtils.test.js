@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 
 import {
+  cleanCurrentAndFutureDateKeys,
   getTodayKey,
   normalizeAutoClosedWeeklySchedule,
+  normalizeScheduleForAvailability,
   sanitizeDateSchedules,
   sanitizeScheduleOverrides,
   sanitizeWeeklySchedule,
@@ -82,6 +84,67 @@ test("schedule date sanitizers filter dates using Armenia today", () => {
         },
       }
     );
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("cleanCurrentAndFutureDateKeys keeps today and future dates", () => {
+  mock.timers.enable({
+    apis: ["Date"],
+    now: new Date("2026-05-21T20:30:00.000Z"),
+  });
+
+  try {
+    assert.deepEqual(
+      cleanCurrentAndFutureDateKeys([
+        "2026-05-21",
+        "2026-05-22",
+        "2026-05-23",
+        "not-a-date",
+        "2026-05-22",
+      ]),
+      ["2026-05-22", "2026-05-23"]
+    );
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("normalizeScheduleForAvailability removes past date-specific closed days", () => {
+  mock.timers.enable({
+    apis: ["Date"],
+    now: new Date("2026-05-21T20:30:00.000Z"),
+  });
+
+  try {
+    const schedule = {
+      weeklySchedule: {
+        fri: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      },
+      dateSchedules: {
+        "2026-05-21": { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+        "2026-05-22": { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+      },
+      scheduleOverrides: {
+        "2026-05-21": { isWorking: false },
+        "2026-05-22": { isWorking: false },
+      },
+      nonWorkingDays: ["2026-05-21", "2026-05-22"],
+      defaultSchedule: { startTime: "09:00", endTime: "18:00" },
+    };
+
+    assert.deepEqual(normalizeScheduleForAvailability(schedule), {
+      weeklySchedule: schedule.weeklySchedule,
+      dateSchedules: {
+        "2026-05-22": { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+      },
+      scheduleOverrides: {
+        "2026-05-22": { isWorking: false },
+      },
+      nonWorkingDays: ["2026-05-22"],
+      defaultSchedule: schedule.defaultSchedule,
+    });
   } finally {
     mock.timers.reset();
   }

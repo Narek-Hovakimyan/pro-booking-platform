@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 
 import {
   getScheduleByBarber,
@@ -494,6 +494,126 @@ test("salon schedule endpoint cleans old all-days closed weekly schedule in resp
     query: { barberId, salonId: salonAId },
     update: { $set: { weeklySchedule: {} } },
   });
+});
+
+test("salon schedule endpoint removes past non-working days and date overrides", async () => {
+  const res = createResponse();
+  let cleanupUpdate = null;
+
+  mock.timers.enable({
+    apis: ["Date"],
+    now: new Date("2026-06-04T08:00:00.000Z"),
+  });
+
+  try {
+    Schedule.findOne = async () => ({
+      barberId,
+      salonId: salonAId,
+      weeklySchedule: {
+        thu: { working: true, from: "09:00", to: "17:00", breakFrom: "", breakTo: "" },
+      },
+      dateSchedules: {
+        "2026-05-16": { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+        "2026-06-04": { working: true, from: "10:00", to: "15:00", breakFrom: "", breakTo: "" },
+        "2026-06-10": { working: true, from: "11:00", to: "16:00", breakFrom: "", breakTo: "" },
+      },
+      scheduleOverrides: {
+        "2026-05-16": { isWorking: false },
+        "2026-06-04": {
+          isWorking: true,
+          startTime: "10:00",
+          endTime: "15:00",
+          breakStart: "",
+          breakEnd: "",
+        },
+        "2026-06-10": { isWorking: false },
+      },
+      nonWorkingDays: ["2026-05-16", "2026-06-04", "2026-06-10"],
+      defaultSchedule: selectedDefaultSchedule,
+      toObject() {
+        return {
+          barberId: this.barberId,
+          salonId: this.salonId,
+          weeklySchedule: this.weeklySchedule,
+          dateSchedules: this.dateSchedules,
+          scheduleOverrides: this.scheduleOverrides,
+          nonWorkingDays: this.nonWorkingDays,
+          defaultSchedule: this.defaultSchedule,
+        };
+      },
+    });
+    Schedule.findOneAndUpdate = async (query, update) => {
+      cleanupUpdate = { query, update };
+      return {};
+    };
+    User.findById = () =>
+      createQuery({
+        _id: barberId,
+        salons: [{ salon: salonAId, status: "approved" }],
+      });
+
+    await getScheduleByBarberAndSalon(
+      { params: { barberId, salonId: salonAId } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body.weeklySchedule, {
+      thu: { working: true, from: "09:00", to: "17:00", breakFrom: "", breakTo: "" },
+    });
+    assert.deepEqual(res.body.defaultSchedule, selectedDefaultSchedule);
+    assert.deepEqual(res.body.nonWorkingDays, ["2026-06-04", "2026-06-10"]);
+    assert.deepEqual(res.body.scheduleOverrides, {
+      "2026-06-04": {
+        isWorking: true,
+        startTime: "10:00",
+        endTime: "15:00",
+        breakStart: "",
+        breakEnd: "",
+      },
+      "2026-06-10": { isWorking: false },
+    });
+    assert.deepEqual(res.body.dateSchedules, {
+      "2026-06-04": { working: true, from: "10:00", to: "15:00", breakFrom: "", breakTo: "" },
+      "2026-06-10": { working: true, from: "11:00", to: "16:00", breakFrom: "", breakTo: "" },
+    });
+    assert.deepEqual(cleanupUpdate, {
+      query: { barberId, salonId: salonAId },
+      update: {
+        $set: {
+          dateSchedules: {
+            "2026-06-04": {
+              working: true,
+              from: "10:00",
+              to: "15:00",
+              breakFrom: "",
+              breakTo: "",
+            },
+            "2026-06-10": {
+              working: true,
+              from: "11:00",
+              to: "16:00",
+              breakFrom: "",
+              breakTo: "",
+            },
+          },
+          scheduleOverrides: {
+            "2026-06-04": {
+              isWorking: true,
+              startTime: "10:00",
+              endTime: "15:00",
+              breakStart: "",
+              breakEnd: "",
+            },
+            "2026-06-10": { isWorking: false },
+          },
+          nonWorkingDays: ["2026-06-04", "2026-06-10"],
+        },
+      },
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("legacy schedule endpoint returns clean defaultSchedule without mongoose internals", async () => {

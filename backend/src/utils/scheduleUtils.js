@@ -38,6 +38,47 @@ export const isDateKey = (dateKey) => {
   return normalized === dateKey;
 };
 
+export const cleanCurrentAndFutureDateKeys = (
+  dateKeys = [],
+  todayKey = getTodayKey()
+) => {
+  if (!Array.isArray(dateKeys)) return [];
+
+  return Array.from(
+    new Set(
+      dateKeys.filter(
+        (dateKey) => isDateKey(dateKey) && dateKey >= todayKey
+      )
+    )
+  ).sort();
+};
+
+export const cleanCurrentAndFutureDateMap = (
+  dateMap = {},
+  todayKey = getTodayKey()
+) => {
+  const cleaned = {};
+
+  for (const [dateKey, value] of Object.entries(dateMap || {})) {
+    if (!isDateKey(dateKey) || dateKey < todayKey) continue;
+    cleaned[dateKey] = value;
+  }
+
+  return cleaned;
+};
+
+export const cleanPastScheduleDates = (schedule = {}, todayKey = getTodayKey()) => ({
+  dateSchedules: cleanCurrentAndFutureDateMap(schedule?.dateSchedules || {}, todayKey),
+  scheduleOverrides: cleanCurrentAndFutureDateMap(
+    schedule?.scheduleOverrides || {},
+    todayKey
+  ),
+  nonWorkingDays: cleanCurrentAndFutureDateKeys(
+    schedule?.nonWorkingDays || [],
+    todayKey
+  ),
+});
+
 export const isTimeKeyOrEmpty = (time) => {
   if (time === "") return true;
   if (typeof time !== "string" || !timeKeyPattern.test(time)) return false;
@@ -163,14 +204,24 @@ export const normalizeScheduleForAvailability = (schedule) => {
   if (!schedule) return schedule;
 
   const weeklySchedule = normalizeAutoClosedWeeklySchedule(schedule.weeklySchedule);
+  const cleanedScheduleDates = cleanPastScheduleDates(schedule);
 
-  if (weeklySchedule === schedule.weeklySchedule) return schedule;
+  const hasWeeklyScheduleChanged = weeklySchedule !== schedule.weeklySchedule;
+  const hasDateFieldsChanged =
+    JSON.stringify(cleanedScheduleDates.dateSchedules) !==
+      JSON.stringify(schedule.dateSchedules || {}) ||
+    JSON.stringify(cleanedScheduleDates.scheduleOverrides) !==
+      JSON.stringify(schedule.scheduleOverrides || {}) ||
+    JSON.stringify(cleanedScheduleDates.nonWorkingDays) !==
+      JSON.stringify(schedule.nonWorkingDays || []);
+
+  if (!hasWeeklyScheduleChanged && !hasDateFieldsChanged) return schedule;
 
   return {
-    dateSchedules: schedule.dateSchedules,
+    dateSchedules: cleanedScheduleDates.dateSchedules,
     defaultSchedule: schedule.defaultSchedule,
-    nonWorkingDays: schedule.nonWorkingDays,
-    scheduleOverrides: schedule.scheduleOverrides,
+    nonWorkingDays: cleanedScheduleDates.nonWorkingDays,
+    scheduleOverrides: cleanedScheduleDates.scheduleOverrides,
     weeklySchedule,
   };
 };
@@ -197,9 +248,9 @@ export const sanitizeDateSchedules = (dateSchedules = {}) => {
   const todayKey = getTodayKey();
   const sanitized = {};
 
-  for (const [dateKey, daySchedule] of Object.entries(dateSchedules || {})) {
-    if (!isDateKey(dateKey) || dateKey < todayKey) continue;
-
+  for (const [dateKey, daySchedule] of Object.entries(
+    cleanCurrentAndFutureDateMap(dateSchedules, todayKey)
+  )) {
     sanitized[dateKey] = sanitizeDaySchedule(daySchedule);
   }
 
@@ -252,9 +303,9 @@ export const sanitizeScheduleOverrides = (scheduleOverrides = {}) => {
   const todayKey = getTodayKey();
   const sanitized = {};
 
-  for (const [dateKey, override] of Object.entries(scheduleOverrides || {})) {
-    if (!isDateKey(dateKey) || dateKey < todayKey) continue;
-
+  for (const [dateKey, override] of Object.entries(
+    cleanCurrentAndFutureDateMap(scheduleOverrides, todayKey)
+  )) {
     const isWorking = Boolean(override?.isWorking);
 
     if (!isWorking) {

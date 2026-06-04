@@ -38,6 +38,25 @@ const timeInputClass = (hasError) =>
       "border-red-400 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-200"
   );
 
+const isCurrentOrFutureDateKey = (dateKey, todayKey) =>
+  Boolean(parseDateKey(dateKey)) && dateKey >= todayKey;
+
+const filterCurrentScheduleOverrides = (scheduleOverrides = {}, todayKey) =>
+  Object.fromEntries(
+    Object.entries(scheduleOverrides || {}).filter(([dateKey]) =>
+      isCurrentOrFutureDateKey(dateKey, todayKey)
+    )
+  );
+
+const filterCurrentNonWorkingDays = (nonWorkingDays = [], todayKey) =>
+  Array.from(
+    new Set(
+      (Array.isArray(nonWorkingDays) ? nonWorkingDays : []).filter((dateKey) =>
+        isCurrentOrFutureDateKey(dateKey, todayKey)
+      )
+    )
+  );
+
 export default function ScheduleManager({
   schedule,
   isLoading = false,
@@ -277,13 +296,22 @@ export default function ScheduleManager({
 
   const dateOptions = useMemo(() => getNext7Days(), []);
   const [selectedDate, setSelectedDate] = useState(dateOptions[0].value);
+  const todayKey = formatDateKey(new Date());
   const scheduleOverrides = useMemo(
-    () => effectiveSchedule.scheduleOverrides || {},
-    [effectiveSchedule.scheduleOverrides]
+    () =>
+      filterCurrentScheduleOverrides(
+        effectiveSchedule.scheduleOverrides || {},
+        todayKey
+      ),
+    [effectiveSchedule.scheduleOverrides, todayKey]
   );
   const nonWorkingDays = useMemo(
-    () => effectiveSchedule.nonWorkingDays || [],
-    [effectiveSchedule.nonWorkingDays]
+    () =>
+      filterCurrentNonWorkingDays(
+        effectiveSchedule.nonWorkingDays || [],
+        todayKey
+      ),
+    [effectiveSchedule.nonWorkingDays, todayKey]
   );
   const defaultDaySchedule = useMemo(
     () => getDayScheduleFromDefaultSchedule(currentDefaultSchedule),
@@ -358,7 +386,6 @@ export default function ScheduleManager({
     breakToggleState.dateKey === selectedDateKey
       ? breakToggleState.enabled || hasBreakTime
       : hasBreakTime;
-  const todayKey = formatDateKey(new Date());
   const sortedNonWorkingDays = useMemo(
     () => [...nonWorkingDays].sort(),
     [nonWorkingDays]

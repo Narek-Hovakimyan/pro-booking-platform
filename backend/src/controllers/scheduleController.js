@@ -9,9 +9,10 @@ import {
 } from "../services/salon/salonMembershipService.js";
 import { createCrudController } from "./crudController.js";
 import {
+  cleanCurrentAndFutureDateKeys,
+  cleanPastScheduleDates,
   getIdString,
   getTodayKey,
-  isDateKey,
   normalizeAutoClosedWeeklySchedule,
   sanitizeDateSchedules,
   sanitizeDefaultSchedule,
@@ -63,10 +64,43 @@ const canEditSalonSchedule = async ({ barberId, salonId, user }) => {
   };
 };
 
-const maybePersistCleanedWeeklySchedule = async (schedule, query, weeklySchedule) => {
-  if (!schedule || weeklySchedule === schedule.weeklySchedule) return;
+const areDateFieldsEqual = (left, right) =>
+  JSON.stringify(left || {}) === JSON.stringify(right || {});
 
-  await Schedule.findOneAndUpdate(query, { $set: { weeklySchedule } });
+const getCleanedScheduleFields = (schedule = {}) => ({
+  ...cleanPastScheduleDates(schedule),
+  weeklySchedule: normalizeAutoClosedWeeklySchedule(schedule?.weeklySchedule),
+});
+
+const maybePersistCleanedSchedule = async (schedule, query, cleanedFields) => {
+  if (!schedule || !query) return;
+
+  const $set = {};
+
+  if (!areDateFieldsEqual(cleanedFields.weeklySchedule, schedule.weeklySchedule)) {
+    $set.weeklySchedule = cleanedFields.weeklySchedule;
+  }
+
+  if (!areDateFieldsEqual(cleanedFields.dateSchedules, schedule.dateSchedules)) {
+    $set.dateSchedules = cleanedFields.dateSchedules;
+  }
+
+  if (
+    !areDateFieldsEqual(
+      cleanedFields.scheduleOverrides,
+      schedule.scheduleOverrides
+    )
+  ) {
+    $set.scheduleOverrides = cleanedFields.scheduleOverrides;
+  }
+
+  if (!areDateFieldsEqual(cleanedFields.nonWorkingDays, schedule.nonWorkingDays)) {
+    $set.nonWorkingDays = cleanedFields.nonWorkingDays;
+  }
+
+  if (Object.keys($set).length === 0) return;
+
+  await Schedule.findOneAndUpdate(query, { $set });
 };
 
 export const getScheduleByBarber = async (req, res) => {
@@ -108,10 +142,13 @@ export const getScheduleByBarber = async (req, res) => {
       userDefault,
       profile?.defaultSchedule
     );
-    const weeklySchedule =
-      normalizeAutoClosedWeeklySchedule(schedule?.weeklySchedule);
+    const cleanedScheduleFields = getCleanedScheduleFields(schedule);
 
-    await maybePersistCleanedWeeklySchedule(schedule, scheduleQuery, weeklySchedule);
+    await maybePersistCleanedSchedule(
+      schedule,
+      scheduleQuery,
+      cleanedScheduleFields
+    );
 
     return res.json({
       ...(schedule?.toObject() || {
@@ -121,7 +158,7 @@ export const getScheduleByBarber = async (req, res) => {
         scheduleOverrides: {},
         nonWorkingDays: [],
       }),
-      weeklySchedule,
+      ...cleanedScheduleFields,
       defaultSchedule,
     });
   } catch (error) {
@@ -148,13 +185,12 @@ export const getScheduleByBarberAndSalon = async (req, res) => {
     const userDefault = salonEntry?.defaultSchedule;
 
     const defaultSchedule = serializeDefaultSchedule(scheduleDefault, userDefault);
-    const weeklySchedule =
-      normalizeAutoClosedWeeklySchedule(schedule?.weeklySchedule);
+    const cleanedScheduleFields = getCleanedScheduleFields(schedule);
 
-    await maybePersistCleanedWeeklySchedule(
+    await maybePersistCleanedSchedule(
       schedule,
       { barberId, salonId },
-      weeklySchedule
+      cleanedScheduleFields
     );
 
     return res.json({
@@ -166,7 +202,7 @@ export const getScheduleByBarberAndSalon = async (req, res) => {
         scheduleOverrides: {},
         nonWorkingDays: [],
       }),
-      weeklySchedule,
+      ...cleanedScheduleFields,
       defaultSchedule,
     });
   } catch (error) {
@@ -195,12 +231,9 @@ export const upsertScheduleByBarberAndSalon = async (req, res) => {
       defaultSchedule: defaultSchedulePayload,
     } = req.body;
     const todayKey = getTodayKey();
-    const uniqueNonWorkingDays = Array.from(
-      new Set(
-        nonWorkingDays.filter(
-          (dateKey) => isDateKey(dateKey) && dateKey >= todayKey
-        )
-      )
+    const uniqueNonWorkingDays = cleanCurrentAndFutureDateKeys(
+      nonWorkingDays,
+      todayKey
     );
 
     if (!weeklySchedule) {
