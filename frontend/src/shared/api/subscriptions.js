@@ -39,3 +39,16 @@ export const updateSalonSeatCount = async (salonId, seatCount) => {
   );
   return data;
 };
+
+export const createSubscriptionPaymentIntent = async ({
+  ownerType,
+  ownerId,
+  seatCount = 1,
+}) => {
+  const { data } = await api.post("/subscriptions/payment-intent", {
+    ownerType,
+    ownerId,
+    seatCount,
+  });
+  return data;
+};

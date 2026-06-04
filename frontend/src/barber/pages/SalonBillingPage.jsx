@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/shared/api/axios";
 import {
   assignSalonSeat,
+  createSubscriptionPaymentIntent,
   getSalonSubscription,
   revokeSalonSeat,
   updateSalonSeatCount,
@@ -53,6 +54,8 @@ export default function SalonBillingPage() {
   const [loadingSalons, setLoadingSalons] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [paymentIntent, setPaymentIntent] = useState(null);
+  const [preparingPayment, setPreparingPayment] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -195,6 +198,33 @@ export default function SalonBillingPage() {
       setError(normalizeError(requestError, "Could not update seat count."));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePreparePayment = async () => {
+    const nextSeatCount = Number(seatCountInput || subscription?.seatCount || 1);
+
+    if (!selectedSalonId || !Number.isFinite(nextSeatCount) || nextSeatCount < 1) {
+      setError("Seat count must be at least 1.");
+      return;
+    }
+
+    setPreparingPayment(true);
+    setError("");
+    setSuccess("");
+    setPaymentIntent(null);
+
+    try {
+      const data = await createSubscriptionPaymentIntent({
+        ownerType: "salon",
+        ownerId: selectedSalonId,
+        seatCount: nextSeatCount,
+      });
+      setPaymentIntent(data);
+    } catch (requestError) {
+      setError(normalizeError(requestError, "Could not prepare manual payment."));
+    } finally {
+      setPreparingPayment(false);
     }
   };
 
@@ -418,6 +448,30 @@ export default function SalonBillingPage() {
                         Update
                       </Button>
                     </div>
+                    <Button
+                      className="w-full"
+                      disabled={preparingPayment || !selectedSalonId}
+                      onClick={handlePreparePayment}
+                      variant="outline"
+                    >
+                      {preparingPayment ? "Preparing..." : "Prepare payment"}
+                    </Button>
+                    <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
+                      Manual payment / activation required. Preparing payment
+                      does not activate the salon subscription.
+                    </div>
+                    {paymentIntent && (
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                        <div className="font-semibold">
+                          {paymentIntent.message ||
+                            "Manual payment activation is required."}
+                        </div>
+                        <p className="mt-1">
+                          Amount:{" "}
+                          {formatCurrency(paymentIntent.amount, paymentIntent.currency)}
+                        </p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 

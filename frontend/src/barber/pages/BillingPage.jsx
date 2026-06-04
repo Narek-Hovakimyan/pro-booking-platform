@@ -1,8 +1,11 @@
 import { CalendarDays, CheckCircle2, Info, WalletCards } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
-import { getMySubscription } from "@/shared/api/subscriptions";
+import {
+  createSubscriptionPaymentIntent,
+  getMySubscription,
+} from "@/shared/api/subscriptions";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import {
@@ -33,7 +36,11 @@ const getStatusLabel = (subscription) => {
 
 export default function BillingPage() {
   const dispatch = useDispatch();
+  const { currentUser } = useSelector((state) => state.auth);
   const subscription = useSelector((state) => state.subscription);
+  const [paymentIntent, setPaymentIntent] = useState(null);
+  const [paymentError, setPaymentError] = useState("");
+  const [isPreparingPayment, setIsPreparingPayment] = useState(false);
   const plan = subscription.defaultPlan;
   const individual = subscription.individualSubscription;
   const isDev = import.meta.env.DEV;
@@ -68,6 +75,31 @@ export default function BillingPage() {
       isMounted = false;
     };
   }, [dispatch]);
+
+  const preparePayment = async () => {
+    const ownerId = currentUser?.id || currentUser?._id;
+    if (!ownerId || isPreparingPayment) return;
+
+    setIsPreparingPayment(true);
+    setPaymentError("");
+    setPaymentIntent(null);
+
+    try {
+      const data = await createSubscriptionPaymentIntent({
+        ownerType: "barber",
+        ownerId,
+        seatCount: 1,
+      });
+      setPaymentIntent(data);
+    } catch (requestError) {
+      setPaymentError(
+        requestError.response?.data?.message ||
+          "Could not prepare manual payment."
+      );
+    } finally {
+      setIsPreparingPayment(false);
+    }
+  };
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -178,9 +210,32 @@ export default function BillingPage() {
             <div className="text-sm text-neutral-500">
               / {plan?.interval || "month"}
             </div>
-            <Button className="w-full" disabled>
-              Payment integration pending
+            <Button
+              className="w-full"
+              disabled={isPreparingPayment}
+              onClick={preparePayment}
+            >
+              {isPreparingPayment ? "Preparing..." : "Prepare payment"}
             </Button>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
+              Manual payment / activation required. Preparing payment does not
+              activate your subscription.
+            </div>
+            {paymentIntent && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                <div className="font-semibold">
+                  {paymentIntent.message || "Manual payment activation is required."}
+                </div>
+                <p className="mt-1">
+                  Amount: {formatCurrency(paymentIntent.amount, paymentIntent.currency)}
+                </p>
+              </div>
+            )}
+            {paymentError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {paymentError}
+              </div>
+            )}
             {isDev && (
               <div className="rounded-xl bg-neutral-50 p-3 text-xs text-neutral-600">
                 <div className="flex items-center gap-1.5 font-semibold text-neutral-800">

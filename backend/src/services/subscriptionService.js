@@ -9,6 +9,7 @@ import {
   canManageSalonRequest,
   sameId,
 } from "../utils/salonPermissions.js";
+import { getPaymentProvider } from "./payment/paymentProviderFactory.js";
 
 const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
@@ -411,6 +412,81 @@ export const expireSubscriptions = async ({ now = new Date() } = {}) => {
   }
 
   return summary;
+};
+
+export const createSubscriptionPaymentIntent = async ({
+  requester,
+  ownerType,
+  ownerId,
+  seatCount = 1,
+  providerName = "manual",
+}) => {
+  if (!requester?._id) {
+    const error = new Error("Authentication required");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (requester.role !== "barber") {
+    const error = new Error("Only barbers can prepare subscription payments");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (!["barber", "salon"].includes(ownerType)) {
+    const error = new Error("ownerType must be 'barber' or 'salon'");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!ownerId) {
+    const error = new Error("ownerId is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedSeatCount = Number(seatCount || 1);
+  if (!Number.isFinite(normalizedSeatCount) || normalizedSeatCount < 1) {
+    const error = new Error("seatCount must be at least 1");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (ownerType === "barber" && !sameId(requester._id, ownerId)) {
+    const error = new Error("You can only prepare payment for your own subscription");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (ownerType === "salon") {
+    const salon = await Salon.findById(ownerId);
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!canManageSalonRequest(salon, requester._id)) {
+      const error = new Error("Only salon owner or admin can prepare payment");
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
+  const plan = await getOrCreateDefaultSubscriptionPlan();
+  const amount = plan.pricePerSeat * normalizedSeatCount;
+  const provider = getPaymentProvider(providerName);
+
+  return provider.createPaymentIntent({
+    amount,
+    currency: plan.currency,
+    metadata: {
+      ownerType,
+      ownerId: String(ownerId),
+      seatCount: normalizedSeatCount,
+      planCode: plan.code,
+    },
+  });
 };
 
 /**

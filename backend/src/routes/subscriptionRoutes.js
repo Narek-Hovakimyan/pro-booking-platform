@@ -4,6 +4,7 @@ import {
   getMySubscription,
   getDefaultPlan,
   devGrantSubscription,
+  createPaymentIntent,
   getSalonSubscription,
   getSalonSubscriptionSeats,
   assignSeat,
@@ -21,6 +22,9 @@ router.get("/me", protect, getMySubscription);
 
 // POST /api/subscriptions/dev/grant
 router.post("/dev/grant", protect, devGrantSubscription);
+
+// POST /api/subscriptions/payment-intent
+router.post("/payment-intent", protect, createPaymentIntent);
 
 /* ══════════════════════════════════════════════════════════
  *  Phase 2 — Salon seat assignment

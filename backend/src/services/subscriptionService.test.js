@@ -19,6 +19,7 @@ import {
   grantSubscriptionGraceToExistingBarbers,
   grantManualSubscription,
   barberHasPaidAccess,
+  createSubscriptionPaymentIntent,
   getPaidAccessByBarberIds,
   getMySubscriptionAccess,
   getSalonSubscriptionDetails,
@@ -832,6 +833,78 @@ test("expired subscription no longer grants barber access", async () => {
   const hasAccess = await barberHasPaidAccess(barberId);
 
   assert.equal(hasAccess, false);
+});
+
+test("payment intent for barber calculates default plan amount and does not activate subscription", async () => {
+  let subscriptionCreated = false;
+  let paymentCreated = false;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.create = async () => {
+    subscriptionCreated = true;
+    return {};
+  };
+  PaymentRecord.create = async () => {
+    paymentCreated = true;
+    return {};
+  };
+
+  const result = await createSubscriptionPaymentIntent({
+    requester: { _id: barberId, role: "barber" },
+    ownerType: "barber",
+    ownerId: barberId,
+    seatCount: 1,
+  });
+
+  assert.equal(result.provider, "manual");
+  assert.equal(result.requiresManualActivation, true);
+  assert.equal(result.amount, defaultPlanDoc.pricePerSeat);
+  assert.equal(result.currency, defaultPlanDoc.currency);
+  assert.deepEqual(result.metadata, {
+    ownerType: "barber",
+    ownerId: String(barberId),
+    seatCount: 1,
+    planCode: defaultPlanDoc.code,
+  });
+  assert.equal(subscriptionCreated, false);
+  assert.equal(paymentCreated, false);
+});
+
+test("payment intent for salon calculates seatCount times pricePerSeat", async () => {
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => makeSalonDoc({ ownerId: barberId });
+
+  const result = await createSubscriptionPaymentIntent({
+    requester: { _id: barberId, role: "barber" },
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 3,
+  });
+
+  assert.equal(result.amount, defaultPlanDoc.pricePerSeat * 3);
+  assert.deepEqual(result.metadata, {
+    ownerType: "salon",
+    ownerId: String(salonId),
+    seatCount: 3,
+    planCode: defaultPlanDoc.code,
+  });
+});
+
+test("non-owner cannot create salon payment intent", async () => {
+  Salon.findById = async () => makeSalonDoc({ ownerId: otherUserId, admins: [] });
+
+  await assert.rejects(
+    () =>
+      createSubscriptionPaymentIntent({
+        requester: { _id: barberId, role: "barber" },
+        ownerType: "salon",
+        ownerId: salonId,
+        seatCount: 1,
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "Only salon owner or admin can prepare payment"
+  );
 });
 
 test("owner can revoke active seat", async () => {
