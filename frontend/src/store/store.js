@@ -18,6 +18,7 @@ import notificationsReducer, {
 import reviewsReducer from "./slices/reviewsSlice";
 import scheduleReducer from "./slices/scheduleSlice";
 import servicesReducer from "./slices/servicesSlice";
+import subscriptionReducer, { clearSubscription } from "./slices/subscriptionSlice";
 import usersReducer from "./slices/usersSlice";
 
 const listenerMiddleware = createListenerMiddleware();
@@ -82,6 +83,7 @@ listenerMiddleware.startListening({
 listenerMiddleware.startListening({
   actionCreator: logoutUser,
   effect: async (action, listenerApi) => {
+    listenerApi.dispatch(clearSubscription());
     listenerApi.dispatch(
       addNotification({ message: "Logged out", type: "info" })
     );
@@ -97,6 +99,7 @@ export const store = configureStore({
     reviews: reviewsReducer,
     schedule: scheduleReducer,
     services: servicesReducer,
+    subscription: subscriptionReducer,
     users: usersReducer,
   },
   preloadedState: loadState(),

@@ -2,7 +2,7 @@ import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
-const getMenuGroups = (canShowManageHiring) => [
+const getMenuGroups = (canShowManageHiring, canManageSalon) => [
   {
     key: "work",
     label: "Work",
@@ -24,6 +24,10 @@ const getMenuGroups = (canShowManageHiring) => [
     label: "Settings",
     children: [
       { label: "Profile", to: "/admin/profile" },
+      { label: "Billing", to: "/admin/billing" },
+      ...(canManageSalon
+        ? [{ label: "Salon Billing", to: "/admin/salon/billing" }]
+        : []),
       { label: "Settings Hub", to: "/admin/settings" },
       { label: "Salon Settings", to: "/admin/settings/salon" },
       { label: "Default Schedule", to: "/admin/settings/default-schedule" },
@@ -52,6 +56,7 @@ export default function NestedHeaderMenu({
   currentUser,
   onLogout,
   canShowManageHiring = false,
+  canManageSalon = false,
 }) {
   const { pathname } = useLocation();
   const [activeGroup, setActiveGroup] = useState(null);
@@ -125,7 +130,7 @@ export default function NestedHeaderMenu({
         role="menu"
       >
         <div onMouseLeave={handleMenuLeave}>
-          {getMenuGroups(canShowManageHiring).map((group) => (
+          {getMenuGroups(canShowManageHiring, canManageSalon).map((group) => (
             <div key={group.key} className="relative">
               {/* Group header (trigger for submenu) */}
               <button
@@ -182,7 +187,7 @@ export default function NestedHeaderMenu({
   /* ── Mobile render ── */
   return (
     <div className="flex flex-col gap-0.5">
-      {getMenuGroups(canShowManageHiring).map((group) => {
+      {getMenuGroups(canShowManageHiring, canManageSalon).map((group) => {
         const isExpanded = expandedGroup === group.key;
 
         return (

@@ -10,6 +10,7 @@ import BookingConfirmationModal from "@/client/components/booking/BookingConfirm
 import WaitlistForm from "@/client/components/waitlist/WaitlistForm";
 import { useBooking } from "@/shared/hooks/useBooking";
 import api from "@/shared/api/axios";
+import { getFriendlyApiError } from "@/shared/api/errors";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { formatDateKey, getDayKeyFromDate, parseDateKey } from "@/shared/utils/dates";
 
@@ -366,8 +367,10 @@ export default function ClientBooking({
       navigate("/success");
     } catch (requestError) {
       setError(
-        requestError.response?.data?.message ||
+        getFriendlyApiError(
+          requestError,
           "Could not create booking. Please try again."
+        )
       );
     } finally {
       setIsSaving(false);

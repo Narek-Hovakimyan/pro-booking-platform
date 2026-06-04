@@ -6,8 +6,11 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Header from "./shared/components/Header";
 import Notifications from "./shared/components/Notifications";
 import ProtectedRoute from "./shared/components/ProtectedRoute";
+import SubscriptionGuard from "./shared/components/SubscriptionGuard";
 
 import api from "./shared/api/axios";
+import { getFriendlyApiError } from "./shared/api/errors";
+import { getMySubscription } from "./shared/api/subscriptions";
 import { connectSocket, disconnectSocket } from "./shared/lib/socket";
 import {
   addService as addServiceAction,
@@ -20,6 +23,12 @@ import {
   setSchedule,
   updateScheduleField,
 } from "./store/slices/scheduleSlice";
+import {
+  clearSubscription,
+  loadSubscriptionFailure,
+  loadSubscriptionStart,
+  loadSubscriptionSuccess,
+} from "./store/slices/subscriptionSlice";
 import initialSchedule, { defaultPersonalSchedule } from "./shared/data/schedule";
 import { getDayKeyFromDate, parseDateKey } from "./shared/utils/dates";
 
@@ -27,6 +36,7 @@ const AdminPage = lazy(() => import("./barber/pages/AdminPage"));
 const BarberCalendarPage = lazy(() => import("./barber/pages/BarberCalendarPage"));
 const BarberCalendarDayPage = lazy(() => import("./barber/pages/BarberCalendarDayPage"));
 const BarberProfilePage = lazy(() => import("./barber/pages/BarberProfilePage"));
+const BillingPage = lazy(() => import("./barber/pages/BillingPage"));
 const ClientsPage = lazy(() => import("./barber/pages/ClientsPage"));
 const BarbersPage = lazy(() => import("./client/pages/BarbersPage"));
 const BookingPage = lazy(() => import("./client/pages/BookingPage"));
@@ -49,6 +59,7 @@ const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
 const EventsPage = lazy(() => import("./pages/EventsPage"));
 const CertificatePage = lazy(() => import("./pages/CertificatePage"));
 const RevenuePage = lazy(() => import("./barber/pages/RevenuePage"));
+const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
 
 export default function App() {
   const dispatch = useDispatch();
@@ -208,6 +219,39 @@ export default function App() {
   }, [currentUserId, currentUserRole, dispatch]);
 
   useEffect(() => {
+    if (!currentUserId || !token || currentUserRole !== "barber") {
+      dispatch(clearSubscription());
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    async function loadSubscription() {
+      dispatch(loadSubscriptionStart());
+
+      try {
+        const data = await getMySubscription();
+        if (isMounted) dispatch(loadSubscriptionSuccess(data));
+      } catch (requestError) {
+        if (isMounted) {
+          dispatch(
+            loadSubscriptionFailure(
+              requestError.response?.data?.message ||
+                "Could not load subscription status."
+            )
+          );
+        }
+      }
+    }
+
+    loadSubscription();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUserId, currentUserRole, dispatch, token]);
+
+  useEffect(() => {
     if (!currentUserId || !token) {
       disconnectSocket();
       return undefined;
@@ -308,8 +352,10 @@ export default function App() {
       });
     } catch (requestError) {
       setDataError(
-        requestError.response?.data?.message ||
-        "Could not save service. Please try again."
+        getFriendlyApiError(
+          requestError,
+          "Could not save service. Please try again."
+        )
       );
     } finally {
       setIsSaving(false);
@@ -326,8 +372,10 @@ export default function App() {
       dispatch(updateServiceAction(data));
     } catch (requestError) {
       setDataError(
-        requestError.response?.data?.message ||
-        "Could not update service. Please try again."
+        getFriendlyApiError(
+          requestError,
+          "Could not update service. Please try again."
+        )
       );
       throw requestError;
     } finally {
@@ -344,8 +392,10 @@ export default function App() {
       dispatch(removeService(serviceId));
     } catch (requestError) {
       setDataError(
-        requestError.response?.data?.message ||
-        "Could not delete service. Please try again."
+        getFriendlyApiError(
+          requestError,
+          "Could not delete service. Please try again."
+        )
       );
     } finally {
       setIsSaving(false);
@@ -415,8 +465,10 @@ export default function App() {
       );
     } catch (requestError) {
       setDataError(
-        requestError.response?.data?.message ||
-        "Could not save schedule. Please try again."
+        getFriendlyApiError(
+          requestError,
+          "Could not save schedule. Please try again."
+        )
       );
     }
   }, [
@@ -465,8 +517,10 @@ export default function App() {
       );
     } catch (requestError) {
       setDataError(
-        requestError.response?.data?.message ||
-        "Could not save day off. Please try again."
+        getFriendlyApiError(
+          requestError,
+          "Could not save day off. Please try again."
+        )
       );
     }
   }, [
@@ -513,8 +567,10 @@ export default function App() {
       );
     } catch (requestError) {
       setDataError(
-        requestError.response?.data?.message ||
-        "Could not save schedule. Please try again."
+        getFriendlyApiError(
+          requestError,
+          "Could not save schedule. Please try again."
+        )
       );
     }
   }, [
@@ -528,8 +584,8 @@ export default function App() {
   ]);
 
   const renderAdminPage = useCallback(
-    (section) => (
-      <ProtectedRoute role="barber">
+    (section, { requireSubscription = false } = {}) => {
+      const content = (
         <AdminPage
           bookings={barberBookings}
           services={barberServices}
@@ -545,8 +601,18 @@ export default function App() {
           error={dataError}
           section={section}
         />
+      );
+
+      return (
+      <ProtectedRoute role="barber">
+        {requireSubscription ? (
+          <SubscriptionGuard>{content}</SubscriptionGuard>
+        ) : (
+          content
+        )}
       </ProtectedRoute>
-    ),
+      );
+    },
     [
       barberBookings,
       barberServices,
@@ -735,11 +801,11 @@ export default function App() {
             />
             <Route
               path="/admin/services"
-              element={renderAdminPage("services")}
+              element={renderAdminPage("services", { requireSubscription: true })}
             />
             <Route
               path="/admin/schedule"
-              element={renderAdminPage("schedule")}
+              element={renderAdminPage("schedule", { requireSubscription: true })}
             />
             <Route
               path="/admin/settings"
@@ -759,23 +825,25 @@ export default function App() {
             />
             <Route
               path="/admin/bookings"
-              element={renderAdminPage("bookings")}
+              element={renderAdminPage("bookings", { requireSubscription: true })}
             />
             <Route
               path="/admin/clients"
               element={
                 <ProtectedRoute role="barber">
-                  <ClientsPage />
+                  <SubscriptionGuard>
+                    <ClientsPage />
+                  </SubscriptionGuard>
                 </ProtectedRoute>
               }
             />
             <Route
               path="/admin/portfolio"
-              element={renderAdminPage("portfolio")}
+              element={renderAdminPage("portfolio", { requireSubscription: true })}
             />
             <Route
               path="/admin/waitlist"
-              element={renderAdminPage("waitlist")}
+              element={renderAdminPage("waitlist", { requireSubscription: true })}
             />
             <Route
               path="/admin/jobs"
@@ -783,13 +851,15 @@ export default function App() {
             />
             <Route
               path="/admin/vouchers"
-              element={renderAdminPage("vouchers")}
+              element={renderAdminPage("vouchers", { requireSubscription: true })}
             />
             <Route
               path="/admin/calendar"
               element={
                 <ProtectedRoute role="barber">
-                  <BarberCalendarPage />
+                  <SubscriptionGuard>
+                    <BarberCalendarPage />
+                  </SubscriptionGuard>
                 </ProtectedRoute>
               }
             />
@@ -797,7 +867,9 @@ export default function App() {
               path="/admin/calendar/day/:date"
               element={
                 <ProtectedRoute role="barber">
-                  <BarberCalendarDayPage />
+                  <SubscriptionGuard>
+                    <BarberCalendarDayPage />
+                  </SubscriptionGuard>
                 </ProtectedRoute>
               }
             />
@@ -813,7 +885,25 @@ export default function App() {
               path="/admin/revenue"
               element={
                 <ProtectedRoute role="barber">
-                  <RevenuePage />
+                  <SubscriptionGuard>
+                    <RevenuePage />
+                  </SubscriptionGuard>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/billing"
+              element={
+                <ProtectedRoute role="barber">
+                  <BillingPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/salon/billing"
+              element={
+                <ProtectedRoute role="barber">
+                  <SalonBillingPage />
                 </ProtectedRoute>
               }
             />

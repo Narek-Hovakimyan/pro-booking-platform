@@ -106,6 +106,7 @@ export default function Header() {
     { label: "Bookings", to: "/admin/bookings" },
     { label: "Clients", to: "/admin/clients" },
     { label: "Calendar", to: "/admin/calendar" },
+    { label: "Billing", to: "/admin/billing" },
     { label: "Find Jobs", to: "/jobs" },
     { label: "Profile", to: "/admin/profile" },
   ];
@@ -374,6 +375,7 @@ export default function Header() {
                     currentUser={currentUser}
                     onLogout={logout}
                     canShowManageHiring={canShowManageHiring}
+                    canManageSalon={canManageSalon}
                   />
                 </div>
               )}
@@ -472,6 +474,7 @@ export default function Header() {
                 currentUser={currentUser}
                 onLogout={logout}
                 canShowManageHiring={canShowManageHiring}
+                canManageSalon={canManageSalon}
               />
             )}
 
