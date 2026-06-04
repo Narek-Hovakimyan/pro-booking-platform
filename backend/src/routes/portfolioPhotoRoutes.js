@@ -7,6 +7,7 @@ import {
   deletePortfolioPhoto,
 } from "../controllers/portfolioPhotoController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 import { handlePortfolioImageUpload } from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
@@ -16,8 +17,8 @@ router.get("/barber/:barberId", getPortfolioByBarber);
 
 // Protected
 router.get("/me", protect, getMyPortfolio);
-router.post("/", protect, handlePortfolioImageUpload, addPortfolioPhoto);
-router.put("/:id", protect, updatePortfolioPhoto);
-router.delete("/:id", protect, deletePortfolioPhoto);
+router.post("/", protect, requireBarberSubscription, handlePortfolioImageUpload, addPortfolioPhoto);
+router.put("/:id", protect, requireBarberSubscription, updatePortfolioPhoto);
+router.delete("/:id", protect, requireBarberSubscription, deletePortfolioPhoto);
 
 export default router;

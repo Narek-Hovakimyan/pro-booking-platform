@@ -25,6 +25,7 @@ import {
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
+import { barberHasPaidAccess } from "../services/subscriptionService.js";
 import {
   getBookingDateTime,
   getDayKeyFromDate,
@@ -423,6 +424,16 @@ export const createBooking = async (req, res) => {
       cleanup();
       return res.status(403).json({
         message: "You can create bookings only for your own barber calendar",
+      });
+    }
+
+    // Phase 3: Block booking creation for unpaid barbers
+    const barberPaidAccess = await barberHasPaidAccess(barberId);
+    if (!barberPaidAccess) {
+      cleanup();
+      return res.status(403).json({
+        code: "BARBER_UNAVAILABLE",
+        message: "This specialist is not currently accepting bookings.",
       });
     }
 

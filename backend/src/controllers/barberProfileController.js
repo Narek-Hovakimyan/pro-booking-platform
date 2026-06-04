@@ -7,6 +7,7 @@ import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { createCrudController } from "./crudController.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
+import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import {
   sanitizeDefaultSchedule,
@@ -214,11 +215,19 @@ export const getBarberCardSummary = async (req, res) => {
     const barbers = await chainToArray(
       User.find({ role: "barber" }).select("-password")
     );
-    const barberIds = barbers.map((barber) => barber._id).filter(Boolean);
+
+    const paidAccessByBarberId = await getPaidAccessByBarberIds(
+      barbers.map((barber) => barber._id)
+    );
+    const paidBarbers = barbers.filter((barber) =>
+      paidAccessByBarberId.get(getIdString(barber._id))
+    );
+
+    const barberIds = paidBarbers.map((barber) => barber._id).filter(Boolean);
     const todayKey = getArmeniaDateKey(new Date());
 
     const allSalonIds = new Set();
-    barbers.forEach((barber) => {
+    paidBarbers.forEach((barber) => {
       (barber.salons || []).forEach((entry) => {
         const salonId = getIdString(entry?.salon);
 
@@ -270,7 +279,7 @@ export const getBarberCardSummary = async (req, res) => {
     const responseReviewStats = [];
     const responseAvailability = [];
 
-    for (const barber of barbers) {
+    for (const barber of paidBarbers) {
       const barberId = getIdString(barber._id);
       const profile = profilesByBarberId.get(barberId);
       const approvedSalons = getApprovedSalonEntries(barber, salonsById);
@@ -535,4 +544,3 @@ export const upsertProfileByBarberId = async (req, res) => {
     });
   }
 };
-

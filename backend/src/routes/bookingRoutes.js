@@ -26,23 +26,24 @@ import {
   getClientReliability,
 } from "../controllers/bookingAnalyticsController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
 
 router.get("/client/:clientId", protect, getClientBookings);
 router.get("/client/:clientId/reliability", protect, getClientReliability);
-router.get("/barber/:barberId/income", protect, getBarberMonthlyIncome);
+router.get("/barber/:barberId/income", protect, requireBarberSubscription, getBarberMonthlyIncome);
 router.get("/barber/:barberId", protect, getBarberBookings);
 router.post("/availability-debug", protect, debugBookingAvailability);
 router.post("/", protect, handleReferenceImageUpload, createBooking);
 router.post("/:id/reschedule-request", protect, createRescheduleRequest);
 router.patch("/:id/reschedule-request/accept", protect, acceptRescheduleRequest);
 router.patch("/:id/reschedule-request/reject", protect, rejectRescheduleRequest);
-router.put("/:id", protect, updateBooking);
-router.patch("/:id/delay", protect, delayBooking);
+router.put("/:id", protect, requireBarberSubscription, updateBooking);
+router.patch("/:id/delay", protect, requireBarberSubscription, delayBooking);
 router.get("/:bookingId/reference-images/:imageName", protect, getReferenceImage);
-router.patch("/:id/no-show", protect, markNoShow);
-router.patch("/:id/late-cancel", protect, markLateCancel);
-router.put("/:id/treatment-record", protect, updateTreatmentRecord);
+router.patch("/:id/no-show", protect, requireBarberSubscription, markNoShow);
+router.patch("/:id/late-cancel", protect, requireBarberSubscription, markLateCancel);
+router.put("/:id/treatment-record", protect, requireBarberSubscription, updateTreatmentRecord);
 
 export default router;

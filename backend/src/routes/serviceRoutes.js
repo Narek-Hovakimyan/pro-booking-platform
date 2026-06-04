@@ -6,12 +6,13 @@ import {
   updateService,
 } from "../controllers/serviceController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
 
 router.get("/:barberId", getServicesByBarber);
-router.post("/", protect, createService);
-router.put("/:id", protect, updateService);
-router.delete("/:id", protect, deleteService);
+router.post("/", protect, requireBarberSubscription, createService);
+router.put("/:id", protect, requireBarberSubscription, updateService);
+router.delete("/:id", protect, requireBarberSubscription, deleteService);
 
 export default router;

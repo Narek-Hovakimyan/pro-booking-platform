@@ -11,7 +11,7 @@ test("barber client CRM route requires auth before controller", () => {
   assert.ok(route, "expected /me/clients route to be registered");
   assert.deepEqual(
     route.route.stack.map((stackLayer) => stackLayer.name),
-    ["protect", "getMyBarberClients"]
+    ["protect", "requireBarberSubscription", "getMyBarberClients"]
   );
 });
 

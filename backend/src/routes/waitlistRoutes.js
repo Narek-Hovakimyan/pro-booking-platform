@@ -12,6 +12,7 @@ import {
   declineOfferEntry,
 } from "../controllers/waitlistController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
 
@@ -20,9 +21,9 @@ router.get("/me", protect, getMyEntries);
 router.get("/barber/:barberId", protect, getBarberEntries);
 router.patch("/:id/cancel", protect, cancelEntry);
 router.patch("/:id/notify", protect, markNotified);
-router.patch("/:id/approve", protect, approveEntry);
-router.patch("/:id/reject", protect, rejectEntry);
-router.patch("/:id/offer", protect, offerEntry);
+router.patch("/:id/approve", protect, requireBarberSubscription, approveEntry);
+router.patch("/:id/reject", protect, requireBarberSubscription, rejectEntry);
+router.patch("/:id/offer", protect, requireBarberSubscription, offerEntry);
 router.patch("/:id/accept-offer", protect, acceptOfferEntry);
 router.patch("/:id/decline-offer", protect, declineOfferEntry);
 

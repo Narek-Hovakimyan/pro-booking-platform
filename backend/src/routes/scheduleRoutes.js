@@ -6,6 +6,7 @@ import {
   upsertScheduleByBarberAndSalon,
 } from "../controllers/scheduleController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
 
@@ -16,9 +17,9 @@ router.get("/:barberId", getScheduleByBarber);
 router.get("/:barberId/:salonId", getScheduleByBarberAndSalon);
 
 // Legacy route: upsert schedule (kept for backward compatibility)
-router.put("/", protect, upsertSchedule);
+router.put("/", protect, requireBarberSubscription, upsertSchedule);
 
 // Per-salon route: upsert schedule by barber + salon
-router.put("/:barberId/:salonId", protect, upsertScheduleByBarberAndSalon);
+router.put("/:barberId/:salonId", protect, requireBarberSubscription, upsertScheduleByBarberAndSalon);
 
 export default router;

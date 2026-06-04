@@ -12,6 +12,7 @@ import {
 } from "../utils/emailVerification.js";
 import { sendEmailVerification } from "../services/emailService.js";
 import { sendControllerError } from "../utils/controllerError.js";
+import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -101,8 +102,14 @@ const buildSalonsData = async (barber) => {
 export const getBarbers = async (_req, res) => {
   try {
     const barbers = await User.find({ role: "barber" }).select("-password");
+    const paidAccessByBarberId = await getPaidAccessByBarberIds(
+      barbers.map((barber) => barber._id)
+    );
+    const paidBarbers = barbers.filter((barber) =>
+      paidAccessByBarberId.get(String(barber._id))
+    );
     const profiles = await BarberProfile.find({
-      barberId: { $in: barbers.map((barber) => barber._id) },
+      barberId: { $in: paidBarbers.map((barber) => barber._id) },
     });
     const profilesByBarberId = new Map(
       profiles.map((profile) => [String(profile.barberId), profile])
@@ -110,7 +117,7 @@ export const getBarbers = async (_req, res) => {
 
     // Collect all salon IDs from both new salons array and legacy fields
     const allSalonIds = new Set();
-    barbers.forEach((barber) => {
+    paidBarbers.forEach((barber) => {
       if (Array.isArray(barber.salons)) {
         barber.salons.forEach((s) => {
           if (s.salon) allSalonIds.add(String(s.salon));
@@ -125,7 +132,7 @@ export const getBarbers = async (_req, res) => {
     );
 
     const enrichedBarbers = await Promise.all(
-      barbers.map(async (barber) => {
+      paidBarbers.map(async (barber) => {
         const profile = profilesByBarberId.get(String(barber._id));
 
         // Get approved salons from new array

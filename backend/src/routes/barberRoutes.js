@@ -14,6 +14,7 @@ import {
   deleteCertification,
 } from "../controllers/certificationController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 import {
   handleAvatarUpload,
   handleCertificationImageUpload,
@@ -24,7 +25,7 @@ const router = express.Router();
 
 router.get("/", barberProfileController.getAll);
 router.get("/card-summary", getBarberCardSummary);
-router.get("/me/clients", protect, getMyBarberClients);
+router.get("/me/clients", protect, requireBarberSubscription, getMyBarberClients);
 router.get("/profile/:barberId", getProfileByBarberId);
 router.put(
   "/profile/:barberId",
@@ -43,16 +44,18 @@ router.get("/:barberId/event-certificates", getEventCertificates);
 router.post(
   "/certifications",
   protect,
+  requireBarberSubscription,
   handleCertificationImageUpload,
   addCertification
 );
 router.put(
   "/certifications/:certId",
   protect,
+  requireBarberSubscription,
   handleCertificationImageUpload,
   updateCertification
 );
-router.delete("/certifications/:certId", protect, deleteCertification);
+router.delete("/certifications/:certId", protect, requireBarberSubscription, deleteCertification);
 
 // Per-salon default schedule
 router.patch("/salons/:salonId/default-schedule", protect, updateSalonDefaultSchedule);
