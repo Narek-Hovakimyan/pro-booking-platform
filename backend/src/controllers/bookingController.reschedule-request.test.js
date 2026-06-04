@@ -6,6 +6,9 @@ import {
   createRescheduleRequest,
   rejectRescheduleRequest,
 } from "./bookingRescheduleController.js";
+import {
+  __bookingSideEffectsTestHooks,
+} from "../services/bookingSideEffectsService.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Schedule from "../models/Schedule.js";
@@ -74,6 +77,7 @@ afterEach(() => {
   Notification.create = originalMethods.notificationCreate;
   Schedule.findOne = originalMethods.scheduleFindOne;
   User.findById = originalMethods.userFindById;
+  __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries(async () => {});
 });
 
 test("client can create reschedule request for own pending booking", async () => {
@@ -361,8 +365,49 @@ test("accept mutates booking date/time and clears reminder timestamps", async ()
   assert.equal(res.body.reminder2hSentAt, null);
 });
 
+test("accepted reschedule triggers waitlist notification for old slot", async () => {
+  const waitlistCalls = [];
+  const booking = createMutableBooking({
+    status: "accepted",
+    bookingDate,
+    dayKey: "mon",
+    time: "10:00",
+    rescheduleRequest: createPendingRescheduleRequest(),
+  });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+  mockRescheduleDependencies([]);
+  Notification.create = async (payload) => payload;
+  __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries((payload) => {
+    waitlistCalls.push(payload);
+    return Promise.resolve(1);
+  });
+
+  await acceptRescheduleRequest(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(waitlistCalls, [
+    {
+      barberId: booking.barberId,
+      salonId: booking.salonId,
+      date: bookingDate,
+      serviceId: booking.serviceId,
+      time: "10:00",
+    },
+  ]);
+});
+
 test("accept revalidates requested slot against accepted and confirmed bookings", async () => {
   for (const status of ["accepted", "confirmed"]) {
+    const waitlistCalls = [];
     const booking = createMutableBooking({
       status: "accepted",
       bookingDate,
@@ -380,6 +425,10 @@ test("accept revalidates requested slot against accepted and confirmed bookings"
 
     Booking.findById = async () => booking;
     mockRescheduleDependencies([blockingBooking]);
+    __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries((payload) => {
+      waitlistCalls.push(payload);
+      return Promise.resolve(1);
+    });
 
     await acceptRescheduleRequest(
       {
@@ -395,6 +444,7 @@ test("accept revalidates requested slot against accepted and confirmed bookings"
     assert.equal(booking.bookingDate, bookingDate);
     assert.equal(booking.time, "10:00");
     assert.equal(booking.rescheduleRequest.status, "pending");
+    assert.deepEqual(waitlistCalls, []);
   }
 });
 
@@ -573,6 +623,7 @@ test("reject works when request body is missing", async () => {
 
 test("client cannot accept or reject reschedule request", async () => {
   for (const action of [acceptRescheduleRequest, rejectRescheduleRequest]) {
+    const waitlistCalls = [];
     const booking = createMutableBooking({
       status: "accepted",
       rescheduleRequest: createPendingRescheduleRequest(),
@@ -580,6 +631,10 @@ test("client cannot accept or reject reschedule request", async () => {
     const res = createResponse();
 
     Booking.findById = async () => booking;
+    __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries((payload) => {
+      waitlistCalls.push(payload);
+      return Promise.resolve(1);
+    });
 
     await action(
       {
@@ -592,6 +647,7 @@ test("client cannot accept or reject reschedule request", async () => {
 
     assert.equal(res.statusCode, 403);
     assert.equal(booking.rescheduleRequest.status, "pending");
+    assert.deepEqual(waitlistCalls, []);
   }
 });
 

@@ -69,6 +69,10 @@ export function getNotificationGroup(rawType) {
 // ---------------------------------------------------------------------------
 
 export function getViewDestination(group, currentUser, rawType) {
+  if (rawType?.startsWith("waitlist_")) {
+    return "/my-waitlist";
+  }
+
   if (group === "booking" || group === "reschedule") {
     return currentUser?.role === "barber" ? "/admin/bookings" : "/my-bookings";
   }

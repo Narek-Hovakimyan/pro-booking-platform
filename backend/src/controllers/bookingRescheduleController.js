@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
 import Booking from "../models/Booking.js";
-import { emitBookingUpdated } from "../services/bookingSideEffectsService.js";
+import {
+  emitBookingUpdated,
+  notifyWaitlistForReleasedBookingSlot,
+} from "../services/bookingSideEffectsService.js";
 import { getDayKeyFromDate, isDateKey } from "../utils/bookingDateTime.js";
 import { storedDateToDateKey } from "../utils/bookingDateStorage.js";
 import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
@@ -203,6 +206,17 @@ export const acceptRescheduleRequest = async (req, res) => {
           return { message: latestSlotValidation.message };
         }
 
+        const releasedSlot = {
+          barberId: lockedBooking.barberId,
+          salonId: lockedBooking.salonId || null,
+          serviceId: lockedBooking.serviceId,
+          bookingDate: lockedBooking.bookingDate,
+          time: lockedBooking.time,
+        };
+        const movedToNewSlot =
+          String(releasedSlot.bookingDate) !== String(lockedRequestedBookingDate) ||
+          String(releasedSlot.time) !== String(lockedRequestedTime);
+
         lockedBooking.bookingDate = lockedRequestedBookingDate;
         lockedBooking.dayKey = latestSlotValidation.effectiveDayKey;
         lockedBooking.time = lockedRequestedTime;
@@ -215,7 +229,10 @@ export const acceptRescheduleRequest = async (req, res) => {
 
         await lockedBooking.save();
 
-        return { booking: lockedBooking };
+        return {
+          booking: lockedBooking,
+          releasedSlot: movedToNewSlot ? releasedSlot : null,
+        };
       }
     );
 
@@ -226,6 +243,10 @@ export const acceptRescheduleRequest = async (req, res) => {
     }
 
     const updatedBooking = acceptResult.booking;
+
+    if (acceptResult.releasedSlot) {
+      notifyWaitlistForReleasedBookingSlot(acceptResult.releasedSlot);
+    }
 
     if (updatedBooking.clientId) {
       await createNotificationNonFatal({

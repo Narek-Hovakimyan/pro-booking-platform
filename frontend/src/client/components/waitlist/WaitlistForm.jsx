@@ -55,7 +55,7 @@ export default function WaitlistForm({
     <div className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
       <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-5 shadow-xl sm:rounded-3xl sm:p-6">
         <div className="mb-4">
-          <h3 className="text-lg font-bold sm:text-xl">Join Waitlist</h3>
+          <h3 className="text-lg font-bold sm:text-xl">Notify me when a time opens</h3>
           <p className="mt-1 text-sm text-neutral-500">
             We'll notify you if a slot may open.
           </p>
@@ -133,7 +133,7 @@ export default function WaitlistForm({
               disabled={isSubmitting}
               type="submit"
             >
-              {isSubmitting ? "Joining..." : "Join waitlist"}
+              {isSubmitting ? "Saving..." : "Notify me when a time opens"}
             </Button>
           </div>
         </form>

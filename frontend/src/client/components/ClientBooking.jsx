@@ -569,7 +569,7 @@ export default function ClientBooking({
                       <div className="text-center">
                         {waitlistSuccess ? (
                           <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                            You joined the waitlist. We'll notify you if a slot may open.
+                            You'll be notified when a time opens.
                           </p>
                         ) : (
                           <button
@@ -577,7 +577,7 @@ export default function ClientBooking({
                             onClick={() => setShowWaitlistForm(true)}
                             type="button"
                           >
-                            No suitable times? Join waitlist
+                            Notify me when a time opens
                           </button>
                         )}
                       </div>
