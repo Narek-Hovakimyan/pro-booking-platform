@@ -31,6 +31,7 @@ import revenueRoutes from "./routes/revenueRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
+import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlistExpirationScheduler.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
 import { startExpirePendingBookingsCron } from "../cron/expirePendingBookings.js";
@@ -161,6 +162,7 @@ const startServer = async () => {
     console.log(`Server running on port ${PORT}`);
     startBookingReminderScheduler();
     startWaitlistExpirationScheduler();
+    startSubscriptionExpirationScheduler();
   });
 };
 

@@ -12,6 +12,7 @@ import {
 
 const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
+const GRACE_DAYS = 30;
 const PAID_SUBSCRIPTION_STATUSES = ["trialing", "active"];
 
 const getIdString = (value) => {
@@ -110,6 +111,116 @@ export const createTrialSubscription = async ({
   });
 
   return subscription;
+};
+
+export const createSalonTrialSubscription = async ({
+  salonId,
+  payerId,
+  seatCount = 1,
+}) =>
+  createTrialSubscription({
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId,
+    seatCount,
+  });
+
+const addDays = (date, days) =>
+  new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+
+export const grantSubscriptionGraceToExistingBarbers = async ({
+  now = new Date(),
+  graceDays = GRACE_DAYS,
+} = {}) => {
+  const plan = await getOrCreateDefaultSubscriptionPlan();
+  const barbers = await User.find({ role: "barber" }).select("_id").lean();
+  const currentPeriodEnd = addDays(now, graceDays);
+  const summary = {
+    totalBarbersFound: barbers.length,
+    grantedCount: 0,
+    skippedCount: 0,
+    errorsCount: 0,
+    errors: [],
+  };
+
+  for (const barber of barbers) {
+    const barberId = barber._id;
+
+    try {
+      const activeSubscription = await Subscription.findOne({
+        ownerType: "barber",
+        ownerId: barberId,
+        status: { $in: PAID_SUBSCRIPTION_STATUSES },
+      });
+
+      if (activeSubscription) {
+        summary.skippedCount++;
+        continue;
+      }
+
+      let subscription = await Subscription.findOne({
+        ownerType: "barber",
+        ownerId: barberId,
+      });
+
+      if (subscription) {
+        subscription.ownerRefModel = "User";
+        subscription.payerId = barberId;
+        subscription.planId = plan._id;
+        subscription.status = "active";
+        subscription.seatCount = 1;
+        subscription.pricePerSeat = plan.pricePerSeat;
+        subscription.totalPrice = plan.pricePerSeat;
+        subscription.currentPeriodStart = now;
+        subscription.currentPeriodEnd = currentPeriodEnd;
+        subscription.trialEndsAt = undefined;
+        subscription.provider = "manual";
+        subscription.lastPaymentAt = now;
+        await subscription.save();
+      } else {
+        subscription = await Subscription.create({
+          ownerType: "barber",
+          ownerRefModel: "User",
+          ownerId: barberId,
+          payerId: barberId,
+          planId: plan._id,
+          status: "active",
+          seatCount: 1,
+          pricePerSeat: plan.pricePerSeat,
+          totalPrice: plan.pricePerSeat,
+          provider: "manual",
+          currentPeriodStart: now,
+          currentPeriodEnd,
+          lastPaymentAt: now,
+        });
+      }
+
+      await PaymentRecord.create({
+        subscriptionId: subscription._id,
+        payerId: barberId,
+        ownerType: "barber",
+        ownerId: barberId,
+        amount: plan.pricePerSeat,
+        currency: plan.currency,
+        seatCount: 1,
+        periodStart: now,
+        periodEnd: currentPeriodEnd,
+        status: "paid",
+        provider: "manual",
+        paidAt: now,
+      });
+
+      summary.grantedCount++;
+    } catch (error) {
+      summary.errorsCount++;
+      summary.errors.push({
+        barberId: String(barberId),
+        message: error.message,
+      });
+    }
+  }
+
+  return summary;
 };
 
 /**
@@ -268,6 +379,38 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
   }
 
   return accessByBarberId;
+};
+
+export const expireSubscriptions = async ({ now = new Date() } = {}) => {
+  const subscriptions = await Subscription.find({
+    status: { $in: PAID_SUBSCRIPTION_STATUSES },
+    $or: [
+      { currentPeriodEnd: { $lt: now } },
+      { trialEndsAt: { $lt: now } },
+    ],
+  });
+  const summary = {
+    checkedCount: subscriptions.length,
+    expiredCount: 0,
+    errorsCount: 0,
+    errors: [],
+  };
+
+  for (const subscription of subscriptions) {
+    try {
+      subscription.status = "expired";
+      await subscription.save();
+      summary.expiredCount++;
+    } catch (error) {
+      summary.errorsCount++;
+      summary.errors.push({
+        subscriptionId: String(subscription._id),
+        message: error.message,
+      });
+    }
+  }
+
+  return summary;
 };
 
 /**

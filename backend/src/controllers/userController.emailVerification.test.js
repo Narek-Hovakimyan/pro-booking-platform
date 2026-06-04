@@ -10,6 +10,8 @@ import { loginUser, registerUser } from "./authController.js";
 import User from "../models/User.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Salon from "../models/Salon.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import { hashEmailVerificationToken } from "../utils/emailVerification.js";
 import {
   sendEmailVerification,
@@ -19,7 +21,9 @@ import {
 const originalUserMethods = {
   findById: User.findById,
   findByIdAndUpdate: User.findByIdAndUpdate,
+  findByIdAndDelete: User.findByIdAndDelete,
   findOne: User.findOne,
+  create: User.create,
 };
 const originalBarberProfileMethods = {
   findOneAndUpdate: BarberProfile.findOneAndUpdate,
@@ -28,6 +32,15 @@ const originalSalonMethods = {
   find: Salon.find,
   findById: Salon.findById,
 };
+const originalSubscriptionMethods = {
+  findOne: Subscription.findOne,
+  create: Subscription.create,
+};
+const originalSubscriptionPlanMethods = {
+  findOne: SubscriptionPlan.findOne,
+  create: SubscriptionPlan.create,
+};
+const originalJwtSecret = process.env.JWT_SECRET;
 
 const userId = "64c000000000000000000001";
 const otherUserId = "64c000000000000000000002";
@@ -35,11 +48,22 @@ const otherUserId = "64c000000000000000000002";
 afterEach(() => {
   User.findById = originalUserMethods.findById;
   User.findByIdAndUpdate = originalUserMethods.findByIdAndUpdate;
+  User.findByIdAndDelete = originalUserMethods.findByIdAndDelete;
   User.findOne = originalUserMethods.findOne;
+  User.create = originalUserMethods.create;
   BarberProfile.findOneAndUpdate = originalBarberProfileMethods.findOneAndUpdate;
   Salon.find = originalSalonMethods.find;
   Salon.findById = originalSalonMethods.findById;
+  Subscription.findOne = originalSubscriptionMethods.findOne;
+  Subscription.create = originalSubscriptionMethods.create;
+  SubscriptionPlan.findOne = originalSubscriptionPlanMethods.findOne;
+  SubscriptionPlan.create = originalSubscriptionPlanMethods.create;
   setResendClientFactoryForTesting();
+  if (originalJwtSecret === undefined) {
+    delete process.env.JWT_SECRET;
+  } else {
+    process.env.JWT_SECRET = originalJwtSecret;
+  }
 });
 
 const createResponse = () => ({
@@ -918,6 +942,88 @@ test("registerUser – rejects phone values over max length", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Phone must be 32 characters or less");
+});
+
+test("registerUser – new barber receives trial subscription", async () => {
+  const res = createResponse();
+  const barberUser = createBaseUser({
+    _id: userId,
+    role: "barber",
+    phone: "+37400000000",
+  });
+  const plan = {
+    _id: "plan-1",
+    pricePerSeat: 5000,
+    currency: "AMD",
+  };
+  let createdSubscription = null;
+
+  process.env.JWT_SECRET = "test-secret";
+  User.findOne = async () => null;
+  User.create = async (payload) => ({ ...barberUser, ...payload });
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => {
+    createdSubscription = payload;
+    return { _id: "subscription-1", ...payload };
+  };
+
+  await registerUser(
+    {
+      body: {
+        name: "Trial Barber",
+        phone: "+37400000000",
+        password: "secret123",
+        role: "barber",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.user.role, "barber");
+  assert.ok(res.body.token);
+  assert.equal(createdSubscription.ownerType, "barber");
+  assert.equal(createdSubscription.ownerRefModel, "User");
+  assert.equal(String(createdSubscription.ownerId), String(userId));
+  assert.equal(createdSubscription.status, "trialing");
+  assert.equal(createdSubscription.seatCount, 1);
+  assert.equal(createdSubscription.provider, "manual");
+  assert.ok(createdSubscription.trialEndsAt);
+});
+
+test("registerUser – client registration does not create subscription", async () => {
+  const res = createResponse();
+  const clientUser = createBaseUser({
+    _id: userId,
+    role: "client",
+    phone: "+37400000000",
+  });
+  let subscriptionCreateCalled = false;
+
+  process.env.JWT_SECRET = "test-secret";
+  User.findOne = async () => null;
+  User.create = async (payload) => ({ ...clientUser, ...payload });
+  Subscription.create = async () => {
+    subscriptionCreateCalled = true;
+    return {};
+  };
+
+  await registerUser(
+    {
+      body: {
+        name: "Free Client",
+        phone: "+37400000000",
+        password: "secret123",
+        role: "client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.user.role, "client");
+  assert.equal(subscriptionCreateCalled, false);
 });
 
 test("loginUser – still requires phone and does not accept email-only login", async () => {

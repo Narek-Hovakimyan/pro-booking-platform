@@ -112,3 +112,29 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
   );
   assert.equal(res.body.some((barber) => barber.name === "Unpaid Barber"), false);
 });
+
+test("getBarbers returns barber with grace-granted active subscription", async () => {
+  const graceBarber = makeBarber({ name: "Grace Barber" });
+
+  User.find = () => chainableQuery([graceBarber]);
+  Subscription.find = () =>
+    chainableQuery([
+      {
+        ownerId: graceBarber._id,
+        status: "active",
+        provider: "manual",
+      },
+    ]);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  BarberProfile.find = async () => [];
+  Salon.find = async () => [];
+
+  const res = createResponse();
+  await getBarbers({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(
+    res.body.map((barber) => barber.name),
+    ["Grace Barber"]
+  );
+});

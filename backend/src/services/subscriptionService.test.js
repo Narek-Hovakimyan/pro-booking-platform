@@ -14,6 +14,9 @@ import {
   getOrCreateDefaultSubscriptionPlan,
   getSubscriptionByOwner,
   createTrialSubscription,
+  createSalonTrialSubscription,
+  expireSubscriptions,
+  grantSubscriptionGraceToExistingBarbers,
   grantManualSubscription,
   barberHasPaidAccess,
   getPaidAccessByBarberIds,
@@ -298,6 +301,119 @@ test("revoked seat does NOT grant access", async () => {
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, false);
+});
+
+test("grace grants active subscription to existing barber", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  let createdSubscription = null;
+  let createdPayment = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  User.find = () => chainableQuery([{ _id: barberId }]);
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => {
+    createdSubscription = {
+      _id: new mongoose.Types.ObjectId(),
+      ...payload,
+    };
+    return createdSubscription;
+  };
+  PaymentRecord.create = async (payload) => {
+    createdPayment = payload;
+    return payload;
+  };
+
+  const summary = await grantSubscriptionGraceToExistingBarbers({ now });
+
+  assert.equal(summary.totalBarbersFound, 1);
+  assert.equal(summary.grantedCount, 1);
+  assert.equal(summary.skippedCount, 0);
+  assert.equal(summary.errorsCount, 0);
+  assert.equal(createdSubscription.status, "active");
+  assert.equal(createdSubscription.ownerType, "barber");
+  assert.equal(createdSubscription.ownerRefModel, "User");
+  assert.equal(String(createdSubscription.ownerId), String(barberId));
+  assert.equal(String(createdSubscription.payerId), String(barberId));
+  assert.equal(createdSubscription.totalPrice, defaultPlanDoc.pricePerSeat);
+  assert.ok(createdPayment);
+  assert.equal(createdPayment.status, "paid");
+});
+
+test("grace is idempotent for existing active barber", async () => {
+  let createCalls = 0;
+  let paymentCalls = 0;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  User.find = () => chainableQuery([{ _id: barberId }]);
+  Subscription.findOne = async (query) => {
+    if (query.status?.$in) return makeSubDoc({ status: "active" });
+    return null;
+  };
+  Subscription.create = async () => {
+    createCalls++;
+    return makeSubDoc();
+  };
+  PaymentRecord.create = async () => {
+    paymentCalls++;
+    return {};
+  };
+
+  const summary = await grantSubscriptionGraceToExistingBarbers();
+
+  assert.equal(summary.grantedCount, 0);
+  assert.equal(summary.skippedCount, 1);
+  assert.equal(createCalls, 0);
+  assert.equal(paymentCalls, 0);
+});
+
+test("grace skips existing trialing barber", async () => {
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  User.find = () => chainableQuery([{ _id: barberId }]);
+  Subscription.findOne = async (query) => {
+    if (query.status?.$in) return makeSubDoc({ status: "trialing" });
+    return null;
+  };
+  PaymentRecord.create = async () => {
+    assert.fail("PaymentRecord should not be created for skipped trial");
+  };
+
+  const summary = await grantSubscriptionGraceToExistingBarbers();
+
+  assert.equal(summary.grantedCount, 0);
+  assert.equal(summary.skippedCount, 1);
+});
+
+test("after grace, getPaidAccessByBarberIds includes barber", async () => {
+  const grantedSubscription = makeSubDoc({ ownerId: barberId, status: "active" });
+
+  Subscription.find = () => chainableQuery([grantedSubscription]);
+  SubscriptionSeat.find = () => chainableQuery([]);
+
+  const access = await getPaidAccessByBarberIds([barberId]);
+
+  assert.equal(access.get(String(barberId)), true);
+});
+
+test("createSalonTrialSubscription creates trialing salon subscription", async () => {
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => ({
+    _id: new mongoose.Types.ObjectId(),
+    ...payload,
+  });
+
+  const subscription = await createSalonTrialSubscription({
+    salonId,
+    payerId,
+  });
+
+  assert.equal(subscription.ownerType, "salon");
+  assert.equal(String(subscription.ownerId), String(salonId));
+  assert.equal(String(subscription.payerId), String(payerId));
+  assert.equal(subscription.status, "trialing");
+  assert.equal(subscription.seatCount, 1);
+  assert.equal(subscription.ownerRefModel, "Salon");
+  assert.ok(subscription.trialEndsAt);
 });
 
 test("getPaidAccessByBarberIds returns paid individual and salon-seat covered barbers", async () => {
@@ -680,6 +796,41 @@ test("expired salon subscription + active seat does not grant access", async () 
   SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
 
   const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
+});
+
+test("expireSubscriptions expires trialing subscription after trial end", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    status: "trialing",
+    trialEndsAt: new Date("2026-06-03T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  let savedStatus = null;
+
+  subscription.save = async function save() {
+    savedStatus = this.status;
+    return this;
+  };
+  Subscription.find = async () => [subscription];
+
+  const summary = await expireSubscriptions({ now });
+
+  assert.equal(summary.checkedCount, 1);
+  assert.equal(summary.expiredCount, 1);
+  assert.equal(summary.errorsCount, 0);
+  assert.equal(savedStatus, "expired");
+});
+
+test("expired subscription no longer grants barber access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber" && query.status?.$in) return null;
+    return null;
+  };
+  SubscriptionSeat.findOne = () => chainableQuery(null);
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+
   assert.equal(hasAccess, false);
 });
 

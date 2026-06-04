@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
+import { createTrialSubscription } from "../services/subscriptionService.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -72,6 +73,22 @@ export const registerUser = async (req, res) => {
       password: hashedPassword,
       role,
     });
+
+    if (role === "barber") {
+      try {
+        await createTrialSubscription({
+          ownerType: "barber",
+          ownerId: user._id,
+          payerId: user._id,
+          seatCount: 1,
+        });
+      } catch (subscriptionError) {
+        await User.findByIdAndDelete(user._id).catch(() => {});
+        console.error("Registration trial creation failed:", subscriptionError);
+        return res.status(500).json({ message: "Registration failed" });
+      }
+    }
+
     const token = signToken(user._id);
 
     return res.status(201).json({

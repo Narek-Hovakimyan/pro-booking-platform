@@ -9,7 +9,8 @@
     "test": "node --test \"src/**/*.test.js\"",
     "migrate:salons": "node migrations/migrateToMultipleSalons.js",
     "migrate:fix-work-history": "node migrations/fixWorkHistory.js",
-    "migrate:schedule-per-salon": "node migrations/migrateScheduleToPerSalon.js"
+    "migrate:schedule-per-salon": "node migrations/migrateScheduleToPerSalon.js",
+    "subscriptions:grace": "node scripts/grantSubscriptionGraceToExistingBarbers.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
