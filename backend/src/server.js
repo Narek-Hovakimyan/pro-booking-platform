@@ -28,6 +28,7 @@ import portfolioPhotoRoutes from "./routes/portfolioPhotoRoutes.js";
 import loyaltyRoutes from "./routes/loyaltyRoutes.js";
 import voucherRoutes from "./routes/voucherRoutes.js";
 import revenueRoutes from "./routes/revenueRoutes.js";
+import subscriptionRoutes from "./routes/subscriptionRoutes.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlistExpirationScheduler.js";
@@ -130,6 +131,7 @@ app.use("/api/portfolio", portfolioPhotoRoutes);
 app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/vouchers", voucherRoutes);
 app.use("/api/revenue", revenueRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 
 const startServer = async () => {
   await connectDB();
