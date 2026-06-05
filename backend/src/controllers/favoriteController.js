@@ -2,6 +2,7 @@ import Favorite from "../models/Favorite.js";
 import SalonFavorite from "../models/SalonFavorite.js";
 import User from "../models/User.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
+import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 
 const userFields = "name phone role city salonName imageUrl profession barberType specialty";
@@ -26,7 +27,25 @@ export const getClientFavorites = async (req, res) => {
       .populate("barberId", userFields)
       .sort({ createdAt: -1 });
 
-    return res.json(favorites);
+    // Phase 11: Hide unpaid/expired barbers from favorites response.
+    // Favorite records remain in DB so they reappear when the barber renews.
+    const barberIds = favorites
+      .map((favorite) => favorite.barberId?._id || favorite.barberId)
+      .map((barberId) => String(barberId))
+      .filter(Boolean);
+
+    if (barberIds.length === 0) {
+      return res.json(favorites);
+    }
+
+    const paidAccessMap = await getPaidAccessByBarberIds(barberIds);
+
+    const visibleFavorites = favorites.filter((favorite) => {
+      const barberId = favorite.barberId?._id || favorite.barberId;
+      return paidAccessMap.get(String(barberId)) === true;
+    });
+
+    return res.json(visibleFavorites);
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch favorites");
   }

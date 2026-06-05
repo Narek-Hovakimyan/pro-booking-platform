@@ -37,6 +37,11 @@ const salonEntrySchema = new mongoose.Schema(
       type: defaultScheduleSchema,
       default: () => ({}),
     },
+    relationshipType: {
+      type: String,
+      enum: ["staff", "chair_renter"],
+      default: "staff",
+    },
   },
   { _id: false }
 );

@@ -20,6 +20,7 @@ import {
   promoteToAdmin,
   removeBarberFromSalon,
 } from "../controllers/salonStaffController.js";
+import { getDashboard } from "../controllers/salonDashboardController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 
@@ -32,6 +33,7 @@ router.get("/owner/requests", protect, getOwnerJoinRequests);
 router.get("/:salonId/staff", protect, getSalonStaff);
 router.get("/:salonId", getSalonProfile);
 router.get("/:salonId/admins", protect, getSalonAdmins);
+router.get("/:salonId/dashboard", protect, getDashboard);
 
 router.post("/", protect, createSalon);
 router.patch("/leave", protect, leaveSalon);
