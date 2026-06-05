@@ -9,7 +9,6 @@ import {
   extendManualSubscription,
   getSalonSubscription,
   revokeSalonSeat,
-  updateSalonSeatCount,
 } from "@/shared/api/subscriptions";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -53,6 +52,7 @@ export default function SalonBillingPage() {
   const [selectedSalonId, setSelectedSalonId] = useState("");
   const [details, setDetails] = useState(null);
   const [seatCountInput, setSeatCountInput] = useState("");
+  const [manualSeatCount, setManualSeatCount] = useState("1");
   const [manualMonths, setManualMonths] = useState("1");
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [loadingSalons, setLoadingSalons] = useState(true);
@@ -75,7 +75,9 @@ export default function SalonBillingPage() {
       try {
         const data = await getSalonSubscription(salonId);
         setDetails(data);
-        setSeatCountInput(String(data?.subscription?.seatCount || 1));
+        const nextSeatCount = String(data?.subscription?.seatCount || 1);
+        setSeatCountInput(nextSeatCount);
+        setManualSeatCount(nextSeatCount);
         setSelectedMemberId("");
       } catch (requestError) {
         setDetails(null);
@@ -130,9 +132,18 @@ export default function SalonBillingPage() {
   const revokedSeats = details?.revokedSeats || [];
   const approvedMembers = details?.approvedMembers || [];
   const subscription = details?.subscription || null;
+  const plan = details?.defaultPlan || null;
+  const currency = subscription?.currency || plan?.currency || "AMD";
+  const pricePerSeat =
+    Number(subscription?.pricePerSeat || plan?.pricePerSeat || 0);
   const showManualActivationPanel =
     import.meta.env.DEV || details?.manualActivationAvailable;
   const availableSeatCount = Number(details?.availableSeatCount || 0);
+  const paidSeatCount = Number(subscription?.seatCount || 0);
+  const usedSeatCount = activeSeats.length;
+  const purchaseSeatCount = Math.max(1, Number(seatCountInput) || 1);
+  const purchaseTotal = pricePerSeat * purchaseSeatCount;
+  const manualActivationSeatCount = Math.max(1, Number(manualSeatCount) || 1);
   const activeSeatMemberIds = useMemo(
     () => new Set(activeSeats.map((seat) => getPersonId(seat))),
     [activeSeats]
@@ -185,33 +196,10 @@ export default function SalonBillingPage() {
     }
   };
 
-  const handleSeatCountUpdate = async () => {
-    const nextSeatCount = Number(seatCountInput);
-
-    if (!Number.isFinite(nextSeatCount) || nextSeatCount < 1 || saving) {
-      setError("Seat count must be at least 1.");
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      await updateSalonSeatCount(selectedSalonId, nextSeatCount);
-      setSuccess("Seat count updated.");
-      await loadDetails(selectedSalonId, { keepMessage: true });
-    } catch (requestError) {
-      setError(normalizeError(requestError, "Could not update seat count."));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handlePreparePayment = async () => {
-    const nextSeatCount = Number(seatCountInput || subscription?.seatCount || 1);
+    const nextSeatCount = Number(seatCountInput || 1);
 
-    if (!selectedSalonId || !Number.isFinite(nextSeatCount) || nextSeatCount < 1) {
+    if (!selectedSalonId || !Number.isInteger(nextSeatCount) || nextSeatCount < 1) {
       setError("Seat count must be at least 1.");
       return;
     }
@@ -236,12 +224,12 @@ export default function SalonBillingPage() {
   };
 
   const handleManualActivation = async () => {
-    const nextSeatCount = Number(seatCountInput || subscription?.seatCount || 1);
+    const nextSeatCount = Number(manualSeatCount || 1);
     const months = Number(manualMonths);
 
     if (!selectedSalonId) return;
 
-    if (!Number.isFinite(nextSeatCount) || nextSeatCount < 1) {
+    if (!Number.isInteger(nextSeatCount) || nextSeatCount < 1) {
       setError("Seat count must be at least 1.");
       return;
     }
@@ -369,44 +357,55 @@ export default function SalonBillingPage() {
                         {getSalonName(selectedSalon)}
                       </h2>
                       <p className="mt-1 text-sm text-neutral-500">
+                        You are buying seats for your salon specialists.
+                      </p>
+                      <p className="mt-1 text-xs text-neutral-500">
                         {subscription
                           ? `Status: ${subscription.status}`
                           : "No salon subscription found."}
                       </p>
                     </div>
                     <div className="rounded-xl bg-neutral-100 px-3 py-2 text-sm font-semibold text-neutral-800">
-                      {availableSeatCount} seats available
+                      {availableSeatCount} available
                     </div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
-                        Seat count
+                        Paid seats
                       </div>
                       <div className="mt-1 text-2xl font-bold text-neutral-950">
-                        {subscription?.seatCount || 0}
+                        {paidSeatCount}
                       </div>
                     </div>
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
-                        Active seats
+                        Used seats
                       </div>
                       <div className="mt-1 text-2xl font-bold text-neutral-950">
-                        {activeSeats.length}
+                        {usedSeatCount}
                       </div>
                     </div>
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
-                        Total price
+                        Available seats
                       </div>
-                      <div className="mt-1 text-lg font-bold text-neutral-950">
-                        {formatCurrency(
-                          subscription?.totalPrice,
-                          subscription?.currency || "AMD"
-                        )}
+                      <div className="mt-1 text-2xl font-bold text-neutral-950">
+                        {availableSeatCount}
                       </div>
                     </div>
+                  </div>
+
+                  <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-600">
+                    <p>Each active seat can be assigned to one approved salon member.</p>
+                    <p className="mt-1">Payment does not assign seats automatically.</p>
+                    {subscription && (
+                      <p className="mt-2 font-medium text-neutral-800">
+                        Active monthly total:{" "}
+                        {formatCurrency(subscription.totalPrice, currency)}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-3">
@@ -476,23 +475,30 @@ export default function SalonBillingPage() {
                     <div className="flex items-center gap-2">
                       <Users className="h-4 w-4 text-neutral-500" />
                       <h2 className="font-semibold text-neutral-950">
-                        Seat count
+                        Salon payment
                       </h2>
                     </div>
-                    <div className="flex gap-2">
+                    <p className="text-sm text-neutral-500">
+                      You are buying seats for your salon specialists.
+                    </p>
+                    <label className="block">
+                      <span className="text-sm font-medium text-neutral-700">
+                        Seats to pay for monthly
+                      </span>
                       <input
-                        className="h-10 min-w-0 flex-1 rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                        className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
                         min="1"
                         onChange={(event) => setSeatCountInput(event.target.value)}
                         type="number"
                         value={seatCountInput}
                       />
-                      <Button
-                        disabled={saving || !subscription}
-                        onClick={handleSeatCountUpdate}
-                      >
-                        Update
-                      </Button>
+                    </label>
+                    <div className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-700">
+                      <div>Price per seat: {formatCurrency(pricePerSeat, currency)}</div>
+                      <div className="mt-1 font-semibold text-neutral-950">
+                        {purchaseSeatCount} x {formatCurrency(pricePerSeat, currency)} ={" "}
+                        {formatCurrency(purchaseTotal, currency)}/month
+                      </div>
                     </div>
                     <Button
                       className="w-full"
@@ -500,11 +506,12 @@ export default function SalonBillingPage() {
                       onClick={handlePreparePayment}
                       variant="outline"
                     >
-                      {preparingPayment ? "Preparing..." : "Prepare payment"}
+                      {preparingPayment ? "Preparing..." : "Prepare salon payment"}
                     </Button>
                     <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
-                      Manual payment / activation required. Preparing payment
-                      does not activate the salon subscription.
+                      Payment does not assign seats automatically. Each active
+                      seat can be assigned to one approved salon member after
+                      activation.
                     </div>
                     {paymentIntent && (
                       <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
@@ -515,6 +522,11 @@ export default function SalonBillingPage() {
                         <p className="mt-1">
                           Amount:{" "}
                           {formatCurrency(paymentIntent.amount, paymentIntent.currency)}
+                        </p>
+                        <p className="mt-1">
+                          Seats: {paymentIntent.seatCount} at{" "}
+                          {formatCurrency(paymentIntent.pricePerSeat, paymentIntent.currency)}
+                          /seat
                         </p>
                       </div>
                     )}
@@ -535,6 +547,18 @@ export default function SalonBillingPage() {
                       </div>
                       <label className="block">
                         <span className="text-sm font-medium text-neutral-700">
+                          Seats
+                        </span>
+                        <input
+                          className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                          min="1"
+                          onChange={(event) => setManualSeatCount(event.target.value)}
+                          type="number"
+                          value={manualSeatCount}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-medium text-neutral-700">
                           Months
                         </span>
                         <input
@@ -545,6 +569,11 @@ export default function SalonBillingPage() {
                           value={manualMonths}
                         />
                       </label>
+                      <div className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-700">
+                        {manualActivationSeatCount} x{" "}
+                        {formatCurrency(pricePerSeat, currency)} x {Number(manualMonths) || 1}{" "}
+                        month(s)
+                      </div>
                       <Button
                         className="w-full"
                         disabled={manualActivating || !selectedSalonId}
@@ -594,7 +623,7 @@ export default function SalonBillingPage() {
                     {availableSeatCount <= 0 && (
                       <p className="flex items-center gap-1.5 text-xs text-neutral-500">
                         <Minus className="h-3.5 w-3.5" />
-                        Increase seat count before assigning another specialist.
+                        Prepare payment or activate more paid seats first.
                       </p>
                     )}
                   </CardContent>

@@ -72,6 +72,7 @@ export const devGrantSubscription = async (req, res) => {
       payerId,
       seatCount: seatCount || 1,
       months: months || 1,
+      requester: req.user,
     });
 
     return res.status(201).json(subscription);

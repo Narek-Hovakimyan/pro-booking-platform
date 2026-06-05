@@ -321,6 +321,7 @@ test("dev grant barber activates subscription and creates paid PaymentRecord", a
 
 test("dev grant salon activates subscription with correct totalPrice", async () => {
   let createdPayment = null;
+  let createdSeat = false;
 
   SubscriptionPlan.findOne = async () => defaultPlanDoc;
   Subscription.findOne = async () => null;
@@ -331,6 +332,10 @@ test("dev grant salon activates subscription with correct totalPrice", async () 
   PaymentRecord.create = async (payload) => {
     createdPayment = payload;
     return payload;
+  };
+  SubscriptionSeat.create = async () => {
+    createdSeat = true;
+    return {};
   };
 
   const result = await extendManualSubscription({
@@ -348,6 +353,7 @@ test("dev grant salon activates subscription with correct totalPrice", async () 
   assert.equal(result.totalPrice, 20000);
   assert.equal(createdPayment.amount, 40000);
   assert.equal(createdPayment.seatCount, 4);
+  assert.equal(createdSeat, false);
 });
 
 test("extending active subscription extends from currentPeriodEnd, not now", async () => {
@@ -731,6 +737,7 @@ test("salon owner can view subscription seat details", async () => {
     totalPrice: 25000,
   });
 
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.find = () => chainableQuery([]);
@@ -749,6 +756,7 @@ test("salon owner can view subscription seat details", async () => {
   assert.equal(result.revokedSeats.length, 0);
   assert.equal(result.availableSeatCount, 5);
   assert.equal(result.approvedMembers.length, 1);
+  assert.equal(result.defaultPlan.pricePerSeat, defaultPlanDoc.pricePerSeat);
 });
 
 test("salon admin can view subscription seat details", async () => {
@@ -760,6 +768,7 @@ test("salon admin can view subscription seat details", async () => {
     totalPrice: 15000,
   });
 
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.find = () => chainableQuery([]);
@@ -1057,7 +1066,7 @@ test("payment intent for barber calculates default plan amount and does not acti
   assert.equal(paymentCreated, false);
 });
 
-test("payment intent for salon calculates seatCount times pricePerSeat", async () => {
+test("salon owner can create payment intent for 4 seats", async () => {
   SubscriptionPlan.findOne = async () => defaultPlanDoc;
   Salon.findById = async () => makeSalonDoc({ ownerId: barberId });
 
@@ -1065,16 +1074,39 @@ test("payment intent for salon calculates seatCount times pricePerSeat", async (
     requester: { _id: barberId, role: "barber" },
     ownerType: "salon",
     ownerId: salonId,
-    seatCount: 3,
+    seatCount: 4,
   });
 
-  assert.equal(result.amount, defaultPlanDoc.pricePerSeat * 3);
+  assert.equal(result.provider, "manual");
+  assert.equal(result.requiresManualActivation, true);
+  assert.equal(result.ownerType, "salon");
+  assert.equal(result.ownerId, String(salonId));
+  assert.equal(result.seatCount, 4);
+  assert.equal(result.pricePerSeat, defaultPlanDoc.pricePerSeat);
+  assert.equal(result.amount, defaultPlanDoc.pricePerSeat * 4);
+  assert.equal(result.currency, defaultPlanDoc.currency);
+  assert.equal(result.message, "Manual payment activation is required.");
   assert.deepEqual(result.metadata, {
     ownerType: "salon",
     ownerId: String(salonId),
-    seatCount: 3,
+    seatCount: 4,
     planCode: defaultPlanDoc.code,
   });
+});
+
+test("payment intent rejects non-integer salon seatCount", async () => {
+  await assert.rejects(
+    () =>
+      createSubscriptionPaymentIntent({
+        requester: { _id: barberId, role: "barber" },
+        ownerType: "salon",
+        ownerId: salonId,
+        seatCount: 1.5,
+      }),
+    (error) =>
+      error.statusCode === 400 &&
+      error.message === "seatCount must be at least 1"
+  );
 });
 
 test("non-owner cannot create salon payment intent", async () => {
@@ -1198,10 +1230,9 @@ test("cannot reduce seatCount below active seats", async () => {
   );
 });
 
-test("can increase seatCount and totalPrice updates", async () => {
+test("direct seatCount update cannot increase paid seats", async () => {
   const salonDoc = makeSalonDoc({ ownerId });
 
-  let savedSub = null;
   const salonSub = makeSubDoc({
     ownerType: "salon",
     ownerId: salonId,
@@ -1209,25 +1240,27 @@ test("can increase seatCount and totalPrice updates", async () => {
     totalPrice: 15000,
     pricePerSeat: 5000,
     save() {
-      savedSub = this;
       return this;
     },
   });
 
   Salon.findById = async () => salonDoc;
   Subscription.findOne = async () => salonSub;
-  SubscriptionSeat.countDocuments = async () => 2; // 2 active, increasing to 5 is fine
-  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  SubscriptionSeat.countDocuments = async () => 2;
 
-  const result = await updateSalonSubscriptionSeatCount({
-    salonId,
-    seatCount: 5,
-    requester: { _id: ownerId, role: "barber" },
-  });
-
-  assert.ok(result);
-  assert.equal(result.seatCount, 5);
-  assert.equal(result.totalPrice, 25000); // 5 * 5000
+  await assert.rejects(
+    () =>
+      updateSalonSubscriptionSeatCount({
+        salonId,
+        seatCount: 5,
+        requester: { _id: ownerId, role: "barber" },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.ok(err.message.includes("requires preparing payment"));
+      return true;
+    }
+  );
 });
 
 test("no existing barber route is blocked in Phase 2 (smoke test)", async () => {

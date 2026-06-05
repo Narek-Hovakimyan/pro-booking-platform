@@ -245,6 +245,7 @@ export const extendManualSubscription = async ({
   payerId,
   seatCount = 1,
   months = 1,
+  requester = null,
 }) => {
   if (!["barber", "salon"].includes(ownerType)) {
     const error = new Error("ownerType must be 'barber' or 'salon'");
@@ -256,6 +257,47 @@ export const extendManualSubscription = async ({
     const error = new Error("ownerId and payerId are required");
     error.statusCode = 400;
     throw error;
+  }
+
+  if (requester) {
+    if (!requester._id) {
+      const error = new Error("Authentication required");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    if (requester.role !== "barber") {
+      const error = new Error("Only barbers can activate subscriptions");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (!sameId(requester._id, payerId)) {
+      const error = new Error("payerId must match the authenticated user");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (ownerType === "barber" && !sameId(requester._id, ownerId)) {
+      const error = new Error("You can only activate your own subscription");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (ownerType === "salon") {
+      const salon = await Salon.findById(ownerId);
+      if (!salon) {
+        const error = new Error("Salon not found");
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (!canManageSalonRequest(salon, requester._id)) {
+        const error = new Error("Only salon owner or admin can activate subscription");
+        error.statusCode = 403;
+        throw error;
+      }
+    }
   }
 
   const normalizedSeatCount = Number(seatCount || 1);
@@ -486,7 +528,7 @@ export const createSubscriptionPaymentIntent = async ({
   }
 
   const normalizedSeatCount = Number(seatCount || 1);
-  if (!Number.isFinite(normalizedSeatCount) || normalizedSeatCount < 1) {
+  if (!Number.isInteger(normalizedSeatCount) || normalizedSeatCount < 1) {
     const error = new Error("seatCount must be at least 1");
     error.statusCode = 400;
     throw error;
@@ -516,8 +558,7 @@ export const createSubscriptionPaymentIntent = async ({
   const plan = await getOrCreateDefaultSubscriptionPlan();
   const amount = plan.pricePerSeat * normalizedSeatCount;
   const provider = getPaymentProvider(providerName);
-
-  return provider.createPaymentIntent({
+  const paymentIntent = await provider.createPaymentIntent({
     amount,
     currency: plan.currency,
     metadata: {
@@ -527,6 +568,16 @@ export const createSubscriptionPaymentIntent = async ({
       planCode: plan.code,
     },
   });
+
+  return {
+    ...paymentIntent,
+    ownerType,
+    ownerId: String(ownerId),
+    seatCount: normalizedSeatCount,
+    pricePerSeat: plan.pricePerSeat,
+    amount,
+    currency: plan.currency,
+  };
 };
 
 /**
@@ -674,6 +725,7 @@ const isApprovedMember = (barber, salonId) => {
  */
 export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
   const salon = await requireSalonOwnerOrAdmin(salonId, requester?._id);
+  const plan = await getOrCreateDefaultSubscriptionPlan();
 
   // Fetch the salon's subscription (active/trialing or any)
   const subscription = await Subscription.findOne({
@@ -723,6 +775,15 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
     revokedSeats,
     availableSeatCount,
     approvedMembers,
+    defaultPlan: plan
+      ? {
+          code: plan.code,
+          name: plan.name,
+          pricePerSeat: plan.pricePerSeat,
+          currency: plan.currency,
+          interval: plan.interval,
+        }
+      : null,
     manualActivationAvailable: isManualActivationAvailable(),
   };
 };
@@ -888,7 +949,7 @@ export const updateSalonSubscriptionSeatCount = async ({
 }) => {
   await requireSalonOwnerOrAdmin(salonId, requester?._id);
 
-  if (typeof seatCount !== "number" || seatCount < 1) {
+  if (!Number.isInteger(seatCount) || seatCount < 1) {
     const err = new Error("Seat count must be at least 1");
     err.statusCode = 400;
     throw err;
@@ -902,6 +963,14 @@ export const updateSalonSubscriptionSeatCount = async ({
   if (!subscription) {
     const err = new Error(
       "Salon does not have a subscription. Please create one first."
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (seatCount > subscription.seatCount) {
+    const err = new Error(
+      "Increasing paid seats requires preparing payment and activating the subscription."
     );
     err.statusCode = 400;
     throw err;
