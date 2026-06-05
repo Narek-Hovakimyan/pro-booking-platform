@@ -6,6 +6,10 @@ const initialState = {
   salonSeatCoverage: null,
   coveredBy: null,
   defaultPlan: null,
+  role: null,
+  applicability: null,
+  message: "",
+  manualActivationAvailable: false,
   loading: false,
   error: "",
   loaded: false,
@@ -27,6 +31,12 @@ const subscriptionSlice = createSlice({
       state.salonSeatCoverage = payload.salonSeatCoverage || null;
       state.coveredBy = payload.coveredBy || null;
       state.defaultPlan = payload.defaultPlan || null;
+      state.role = payload.role || null;
+      state.applicability = payload.applicability || null;
+      state.message = payload.message || "";
+      state.manualActivationAvailable = Boolean(
+        payload.manualActivationAvailable
+      );
       state.loading = false;
       state.error = "";
       state.loaded = true;

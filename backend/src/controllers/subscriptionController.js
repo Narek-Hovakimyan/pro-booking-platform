@@ -9,6 +9,8 @@ import {
   revokeSalonSubscriptionSeat,
   updateSalonSubscriptionSeatCount,
   createSubscriptionPaymentIntent,
+  getMySubscriptionPaymentHistory,
+  getSalonSubscriptionPaymentHistory,
 } from "../services/subscriptionService.js";
 
 const isProduction = () => process.env.NODE_ENV === "production";
@@ -106,6 +108,41 @@ export const createPaymentIntent = async (req, res) => {
     return res.status(status).json({
       code: error.code,
       message: error.message || "Could not prepare payment",
+    });
+  }
+};
+
+export const getMySubscriptionPayments = async (req, res) => {
+  try {
+    const payments = await getMySubscriptionPaymentHistory({
+      requester: req.user,
+      limit: req.query?.limit,
+    });
+
+    return res.json(payments);
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not fetch payment history",
+    });
+  }
+};
+
+export const getSalonSubscriptionPayments = async (req, res) => {
+  try {
+    const payments = await getSalonSubscriptionPaymentHistory({
+      salonId: req.params.salonId,
+      requester: req.user,
+      limit: req.query?.limit,
+    });
+
+    return res.json(payments);
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not fetch salon payment history",
     });
   }
 };

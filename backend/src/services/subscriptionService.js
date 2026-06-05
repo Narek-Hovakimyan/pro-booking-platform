@@ -181,6 +181,50 @@ const addMonths = (date, months) => {
 export const isManualActivationAvailable = () =>
   process.env.NODE_ENV !== "production";
 
+export const getDaysRemaining = (date, now = new Date()) => {
+  if (!date) return null;
+
+  const target = new Date(date);
+  if (Number.isNaN(target.getTime())) return null;
+
+  const diffMs = target.getTime() - now.getTime();
+  return Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
+};
+
+export const serializeSubscriptionStatus = (
+  subscription,
+  plan = null,
+  now = new Date()
+) => {
+  if (!subscription) return null;
+
+  const raw = subscription.toObject ? subscription.toObject() : subscription;
+  const planData = raw.planId && typeof raw.planId === "object" ? raw.planId : plan;
+  const currentPeriodEnd = raw.currentPeriodEnd || raw.trialEndsAt || null;
+  const daysRemaining = getDaysRemaining(currentPeriodEnd, now);
+  const endDate = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
+  const periodEnded =
+    endDate && !Number.isNaN(endDate.getTime()) && endDate.getTime() <= now.getTime();
+  const isExpired = raw.status === "expired" || Boolean(periodEnded);
+  const seatCount = Number(raw.seatCount || 1);
+  const pricePerSeat = Number(raw.pricePerSeat ?? planData?.pricePerSeat ?? 0);
+  const monthlyTotal = Number(raw.totalPrice ?? pricePerSeat * seatCount);
+
+  return {
+    ...raw,
+    id: raw.id || raw._id,
+    daysRemaining,
+    isExpired,
+    isExpiringSoon:
+      daysRemaining !== null && daysRemaining <= 7 && !isExpired,
+    renewalRequiredAt: currentPeriodEnd,
+    currentPeriodEnd,
+    monthlyTotal,
+    pricePerSeat,
+    seatCount,
+  };
+};
+
 export const grantSubscriptionGraceToExistingBarbers = async ({
   now = new Date(),
   graceDays = GRACE_DAYS,
@@ -429,6 +473,55 @@ export const extendManualSubscription = async ({
 
 export const grantManualSubscription = extendManualSubscription;
 
+const normalizePaymentHistoryLimit = (limit) => {
+  const parsed = Number(limit);
+  if (!Number.isInteger(parsed) || parsed < 1) return 20;
+  return Math.min(parsed, 100);
+};
+
+export const getMySubscriptionPaymentHistory = async ({
+  requester,
+  limit = 20,
+}) => {
+  if (!requester?._id) {
+    const error = new Error("Authentication required");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (requester.role !== "barber") {
+    const error = new Error("Only barbers can view subscription payments");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return PaymentRecord.find({
+    $or: [
+      { ownerType: "barber", ownerId: requester._id },
+      { payerId: requester._id },
+    ],
+  })
+    .sort({ paidAt: -1, createdAt: -1 })
+    .limit(normalizePaymentHistoryLimit(limit))
+    .lean();
+};
+
+export const getSalonSubscriptionPaymentHistory = async ({
+  salonId,
+  requester,
+  limit = 20,
+}) => {
+  await requireSalonOwnerOrAdmin(salonId, requester?._id);
+
+  return PaymentRecord.find({
+    ownerType: "salon",
+    ownerId: salonId,
+  })
+    .sort({ paidAt: -1, createdAt: -1 })
+    .limit(normalizePaymentHistoryLimit(limit))
+    .lean();
+};
+
 /**
  * Check if a barber has paid access to the platform.
  * Returns true if:
@@ -670,6 +763,10 @@ export const getMySubscriptionAccess = async (user) => {
       .lean(),
     getOrCreateDefaultSubscriptionPlan(),
   ]);
+  const serializedIndividualSubscription = serializeSubscriptionStatus(
+    individualSubscription,
+    plan
+  );
 
   // Check salon seat coverage
   const activeSeat = await SubscriptionSeat.findOne({
@@ -687,8 +784,9 @@ export const getMySubscriptionAccess = async (user) => {
   let coveredBy = null;
 
   if (
-    individualSubscription &&
-    ["trialing", "active"].includes(individualSubscription.status)
+    serializedIndividualSubscription &&
+    ["trialing", "active"].includes(serializedIndividualSubscription.status) &&
+    !serializedIndividualSubscription.isExpired
   ) {
     hasAccess = true;
     coveredBy = "individual";
@@ -696,9 +794,21 @@ export const getMySubscriptionAccess = async (user) => {
 
   if (activeSeat && activeSeat.subscriptionId) {
     const parentStatus = activeSeat.subscriptionId.status;
-    if (parentStatus === "active" || parentStatus === "trialing") {
+    const seatSalonId = getSeatSalonId(activeSeat);
+    const barber = await fetchBarberMembership(barberId);
+
+    if (
+      (parentStatus === "active" || parentStatus === "trialing") &&
+      isApprovedSalonMember(barber, seatSalonId)
+    ) {
       hasAccess = true;
-      salonSeatCoverage = activeSeat;
+      salonSeatCoverage = {
+        ...activeSeat,
+        subscriptionId: serializeSubscriptionStatus(
+          activeSeat.subscriptionId,
+          activeSeat.subscriptionId?.planId || plan
+        ),
+      };
       coveredBy = coveredBy ? "both" : "salon";
     }
   }
@@ -707,7 +817,7 @@ export const getMySubscriptionAccess = async (user) => {
     hasAccess,
     role: "barber",
     applicability: "applicable",
-    individualSubscription: individualSubscription || null,
+    individualSubscription: serializedIndividualSubscription,
     salonSeatCoverage,
     coveredBy,
     defaultPlan: plan
@@ -819,6 +929,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
     ownerType: "salon",
     ownerId: salonId,
   }).lean();
+  const serializedSubscription = serializeSubscriptionStatus(subscription, plan);
 
   // Fetch active and revoked seats, populated with barber basic info
   const [activeSeats, revokedSeats] = await Promise.all([
@@ -840,8 +951,8 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
 
   // Compute available seat count
   const activeSeatCount = activeSeats.length;
-  const availableSeatCount = subscription
-    ? Math.max(0, subscription.seatCount - activeSeatCount)
+  const availableSeatCount = serializedSubscription
+    ? Math.max(0, serializedSubscription.seatCount - activeSeatCount)
     : 0;
 
   // Fetch approved members (barbers whose salons array has this salon as "approved")
@@ -857,7 +968,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
   ).lean();
 
   return {
-    subscription: subscription || null,
+    subscription: serializedSubscription,
     activeSeats,
     revokedSeats,
     availableSeatCount,

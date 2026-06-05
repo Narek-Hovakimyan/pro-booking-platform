@@ -21,9 +21,13 @@ import {
   extendManualSubscription,
   barberHasPaidAccess,
   createSubscriptionPaymentIntent,
+  getDaysRemaining,
+  getMySubscriptionPaymentHistory,
   getPaidAccessByBarberIds,
   getMySubscriptionAccess,
+  getSalonSubscriptionPaymentHistory,
   getSalonSubscriptionDetails,
+  serializeSubscriptionStatus,
   assignSalonSubscriptionSeat,
   revokeSalonSeatsForRemovedMember,
   revokeSalonSubscriptionSeat,
@@ -44,6 +48,7 @@ const originalSeatCountDocuments = SubscriptionSeat.countDocuments;
 const originalSeatCreate = SubscriptionSeat.create;
 const originalSeatFindById = SubscriptionSeat.findById;
 const originalPaymentCreate = PaymentRecord.create;
+const originalPaymentFind = PaymentRecord.find;
 const originalSalonFindById = Salon.findById;
 const originalUserFindById = User.findById;
 const originalUserFind = User.find;
@@ -82,6 +87,7 @@ afterEach(() => {
   SubscriptionSeat.create = originalSeatCreate;
   SubscriptionSeat.findById = originalSeatFindById;
   PaymentRecord.create = originalPaymentCreate;
+  PaymentRecord.find = originalPaymentFind;
   Salon.findById = originalSalonFindById;
   User.findById = originalUserFindById;
   User.find = originalUserFind;
@@ -117,6 +123,29 @@ const chainableQuery = (result) => {
     },
   };
 };
+
+const paymentHistoryQuery = (records, calls = {}) => ({
+  sort(sortValue) {
+    calls.sort = sortValue;
+    records.sort((left, right) => {
+      const rightTime = new Date(right.paidAt || right.createdAt || 0).getTime();
+      const leftTime = new Date(left.paidAt || left.createdAt || 0).getTime();
+      return rightTime - leftTime;
+    });
+    return this;
+  },
+  limit(limitValue) {
+    calls.limit = limitValue;
+    records = records.slice(0, limitValue);
+    return this;
+  },
+  lean() {
+    return records;
+  },
+  then(resolve) {
+    return Promise.resolve(records).then(resolve);
+  },
+});
 
 /* ── Helpers ────────────────────────────────────────────── */
 const makeSubDoc = (overrides = {}) => ({
@@ -1232,6 +1261,48 @@ test("expired subscription no longer grants barber access", async () => {
   assert.equal(hasAccess, false);
 });
 
+test("getDaysRemaining works for active, trialing, and expired dates", () => {
+  const now = new Date("2026-06-05T00:00:00.000Z");
+
+  assert.equal(getDaysRemaining("2026-06-15T00:00:00.000Z", now), 10);
+  assert.equal(getDaysRemaining("2026-06-06T00:00:00.000Z", now), 1);
+  assert.equal(getDaysRemaining("2026-06-01T00:00:00.000Z", now), 0);
+});
+
+test("serializeSubscriptionStatus marks expiring soon when <= 7 days", () => {
+  const now = new Date("2026-06-05T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    status: "active",
+    seatCount: 4,
+    totalPrice: 20000,
+    currentPeriodEnd: new Date("2026-06-10T00:00:00.000Z"),
+  });
+
+  const result = serializeSubscriptionStatus(subscription, defaultPlanDoc, now);
+
+  assert.equal(result.daysRemaining, 5);
+  assert.equal(result.isExpired, false);
+  assert.equal(result.isExpiringSoon, true);
+  assert.equal(result.renewalRequiredAt.getTime(), subscription.currentPeriodEnd.getTime());
+  assert.equal(result.monthlyTotal, 20000);
+  assert.equal(result.pricePerSeat, 5000);
+  assert.equal(result.seatCount, 4);
+});
+
+test("serializeSubscriptionStatus marks expired subscription", () => {
+  const now = new Date("2026-06-05T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    status: "active",
+    currentPeriodEnd: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  const result = serializeSubscriptionStatus(subscription, defaultPlanDoc, now);
+
+  assert.equal(result.daysRemaining, 0);
+  assert.equal(result.isExpired, true);
+  assert.equal(result.isExpiringSoon, false);
+});
+
 test("payment intent for barber calculates default plan amount and does not activate subscription", async () => {
   let subscriptionCreated = false;
   let paymentCreated = false;
@@ -1324,6 +1395,113 @@ test("non-owner cannot create salon payment intent", async () => {
     (error) =>
       error.statusCode === 403 &&
       error.message === "Only salon owner or admin can prepare payment"
+  );
+});
+
+test("individual payment history returns own records newest first", async () => {
+  const oldPayment = {
+    _id: new mongoose.Types.ObjectId(),
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId: barberId,
+    amount: 5000,
+    paidAt: new Date("2026-05-01T00:00:00.000Z"),
+  };
+  const newPayment = {
+    _id: new mongoose.Types.ObjectId(),
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId: barberId,
+    amount: 5000,
+    paidAt: new Date("2026-06-01T00:00:00.000Z"),
+  };
+  let paymentQuery = null;
+
+  PaymentRecord.find = (query) => {
+    paymentQuery = query;
+    return paymentHistoryQuery([oldPayment, newPayment]);
+  };
+
+  const result = await getMySubscriptionPaymentHistory({
+    requester: { _id: barberId, role: "barber" },
+  });
+
+  assert.deepEqual(paymentQuery, {
+    $or: [
+      { ownerType: "barber", ownerId: barberId },
+      { payerId: barberId },
+    ],
+  });
+  assert.deepEqual(
+    result.map((payment) => payment._id),
+    [newPayment._id, oldPayment._id]
+  );
+});
+
+test("client cannot access barber payment history", async () => {
+  await assert.rejects(
+    () =>
+      getMySubscriptionPaymentHistory({
+        requester: { _id: clientId, role: "client" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "Only barbers can view subscription payments"
+  );
+});
+
+test("salon payment history requires owner or admin", async () => {
+  Salon.findById = async () => makeSalonDoc({ ownerId, admins: [] });
+
+  await assert.rejects(
+    () =>
+      getSalonSubscriptionPaymentHistory({
+        salonId,
+        requester: { _id: otherUserId, role: "barber" },
+      }),
+    (error) => error.statusCode === 403
+  );
+});
+
+test("salon payment history returns records newest first", async () => {
+  const calls = {};
+  const oldPayment = {
+    _id: new mongoose.Types.ObjectId(),
+    ownerType: "salon",
+    ownerId: salonId,
+    amount: 10000,
+    paidAt: new Date("2026-04-01T00:00:00.000Z"),
+  };
+  const newPayment = {
+    _id: new mongoose.Types.ObjectId(),
+    ownerType: "salon",
+    ownerId: salonId,
+    amount: 20000,
+    paidAt: new Date("2026-06-01T00:00:00.000Z"),
+  };
+  let paymentQuery = null;
+
+  Salon.findById = async () => makeSalonDoc({ ownerId });
+  PaymentRecord.find = (query) => {
+    paymentQuery = query;
+    return paymentHistoryQuery([oldPayment, newPayment], calls);
+  };
+
+  const result = await getSalonSubscriptionPaymentHistory({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+    limit: 10,
+  });
+
+  assert.deepEqual(paymentQuery, {
+    ownerType: "salon",
+    ownerId: salonId,
+  });
+  assert.deepEqual(calls.sort, { paidAt: -1, createdAt: -1 });
+  assert.equal(calls.limit, 10);
+  assert.deepEqual(
+    result.map((payment) => payment._id),
+    [newPayment._id, oldPayment._id]
   );
 });
 

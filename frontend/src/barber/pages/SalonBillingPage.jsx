@@ -1,4 +1,12 @@
-import { Minus, RefreshCw, UserPlus, Users, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  History,
+  Minus,
+  RefreshCw,
+  UserPlus,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 
@@ -8,6 +16,7 @@ import {
   createSubscriptionPaymentIntent,
   extendManualSubscription,
   getSalonSubscription,
+  getSalonSubscriptionPayments,
   revokeSalonSeat,
 } from "@/shared/api/subscriptions";
 import { Button } from "@/shared/components/ui/button";
@@ -43,6 +52,44 @@ const getPersonId = (person) => getIdString(person?.barberId || person);
 const formatCurrency = (amount, currency = "AMD") =>
   `${Number(amount || 0).toLocaleString()} ${currency}`;
 
+const formatDate = (value) => {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not set";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+const formatPaymentPeriod = (payment) =>
+  `${formatDate(payment?.periodStart)} - ${formatDate(payment?.periodEnd)}`;
+
+const getSubscriptionStatusLabel = (status) => {
+  if (status === "active") return "Active";
+  if (status === "trialing") return "Trial";
+  if (status === "expired") return "Expired";
+  if (status === "past_due") return "Past due";
+  return status ? status.replace("_", " ") : "No subscription";
+};
+
+const getStatusBadgeClass = (subscription) => {
+  if (subscription?.isExpired || subscription?.status === "expired") {
+    return "bg-red-50 text-red-700";
+  }
+
+  if (subscription?.status === "past_due") {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  if (subscription?.status === "active" || subscription?.status === "trialing") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  return "bg-neutral-100 text-neutral-700";
+};
+
 const normalizeError = (error, fallback) =>
   error?.response?.data?.message || fallback;
 
@@ -59,6 +106,8 @@ export default function SalonBillingPage() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [saving, setSaving] = useState(false);
   const [paymentIntent, setPaymentIntent] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [paymentsError, setPaymentsError] = useState("");
   const [preparingPayment, setPreparingPayment] = useState(false);
   const [manualActivating, setManualActivating] = useState(false);
   const [error, setError] = useState("");
@@ -75,6 +124,16 @@ export default function SalonBillingPage() {
       try {
         const data = await getSalonSubscription(salonId);
         setDetails(data);
+        setPaymentsError("");
+        try {
+          const paymentData = await getSalonSubscriptionPayments(salonId);
+          setPayments(Array.isArray(paymentData) ? paymentData : []);
+        } catch (paymentError) {
+          setPayments([]);
+          setPaymentsError(
+            normalizeError(paymentError, "Could not load salon payment history.")
+          );
+        }
         const nextSeatCount = String(data?.subscription?.seatCount || 1);
         setSeatCountInput(nextSeatCount);
         setManualSeatCount(nextSeatCount);
@@ -361,16 +420,18 @@ export default function SalonBillingPage() {
                       </p>
                       <p className="mt-1 text-xs text-neutral-500">
                         {subscription
-                          ? `Status: ${subscription.status}`
+                          ? `Status: ${getSubscriptionStatusLabel(subscription.status)}`
                           : "No salon subscription found."}
                       </p>
                     </div>
-                    <div className="rounded-xl bg-neutral-100 px-3 py-2 text-sm font-semibold text-neutral-800">
-                      {availableSeatCount} available
+                    <div
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold ${getStatusBadgeClass(subscription)}`}
+                    >
+                      {getSubscriptionStatusLabel(subscription?.status)}
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
                         Paid seats
@@ -395,6 +456,25 @@ export default function SalonBillingPage() {
                         {availableSeatCount}
                       </div>
                     </div>
+                    <div className="rounded-xl bg-neutral-50 p-4">
+                      <div className="text-xs font-medium uppercase text-neutral-500">
+                        Days remaining
+                      </div>
+                      <div className="mt-1 text-2xl font-bold text-neutral-950">
+                        {subscription?.daysRemaining ?? "0"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-neutral-50 p-4">
+                      <div className="text-xs font-medium uppercase text-neutral-500">
+                        Expiry date
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-neutral-950">
+                        {formatDate(
+                          subscription?.renewalRequiredAt ||
+                            subscription?.currentPeriodEnd
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-600">
@@ -403,10 +483,36 @@ export default function SalonBillingPage() {
                     {subscription && (
                       <p className="mt-2 font-medium text-neutral-800">
                         Active monthly total:{" "}
-                        {formatCurrency(subscription.totalPrice, currency)}
+                        {formatCurrency(
+                          subscription.monthlyTotal ?? subscription.totalPrice,
+                          currency
+                        )}
                       </p>
                     )}
                   </div>
+
+                  {subscription?.isExpiringSoon && (
+                    <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <AlertTriangle className="h-4 w-4" />
+                        Salon subscription expiring soon
+                      </div>
+                      <p className="mt-1">
+                        Prepare payment early. After payment is confirmed,
+                        subscription will be activated.
+                      </p>
+                    </div>
+                  )}
+
+                  {subscription?.isExpired && (
+                    <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+                      <div className="font-semibold">Salon subscription expired</div>
+                      <p className="mt-1">
+                        Assigned salon seats no longer unlock specialist access
+                        until the salon subscription is active again.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="space-y-3">
                     <h3 className="font-semibold text-neutral-950">
@@ -509,9 +615,9 @@ export default function SalonBillingPage() {
                       {preparingPayment ? "Preparing..." : "Prepare salon payment"}
                     </Button>
                     <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
-                      Payment does not assign seats automatically. Each active
-                      seat can be assigned to one approved salon member after
-                      activation.
+                      Prepare payment does not activate subscription. After
+                      payment is confirmed, subscription will be activated.
+                      Payment does not assign seats automatically.
                     </div>
                     {paymentIntent && (
                       <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
@@ -541,8 +647,8 @@ export default function SalonBillingPage() {
                           Development/MVP manual activation
                         </h2>
                         <p className="mt-1 text-sm text-neutral-500">
-                          Activates the salon subscription only. Seats are still
-                          assigned separately.
+                          In development mode, manual activation is available.
+                          Seats are still assigned separately.
                         </p>
                       </div>
                       <label className="block">
@@ -625,6 +731,53 @@ export default function SalonBillingPage() {
                         <Minus className="h-3.5 w-3.5" />
                         Prepare payment or activate more paid seats first.
                       </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <History className="h-4 w-4 text-neutral-500" />
+                      <h2 className="font-semibold text-neutral-950">
+                        Payment history
+                      </h2>
+                    </div>
+                    {paymentsError && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                        {paymentsError}
+                      </div>
+                    )}
+                    {payments.length === 0 ? (
+                      <div className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-500">
+                        No salon payment records yet.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-neutral-100 rounded-xl border border-neutral-200">
+                        {payments.map((payment) => (
+                          <div
+                            className="space-y-1 p-3 text-sm"
+                            key={payment._id || payment.id}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-semibold text-neutral-950">
+                                {formatCurrency(payment.amount, payment.currency)}
+                              </span>
+                              <span className="capitalize text-neutral-500">
+                                {payment.status}
+                              </span>
+                            </div>
+                            <div className="text-xs text-neutral-500">
+                              {payment.seatCount || 1} seat(s) -{" "}
+                              {formatPaymentPeriod(payment)}
+                            </div>
+                            <div className="text-xs text-neutral-500">
+                              {formatDate(payment.paidAt)} /{" "}
+                              {payment.provider || "manual"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </CardContent>
                 </Card>

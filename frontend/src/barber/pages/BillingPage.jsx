@@ -1,10 +1,18 @@
-import { CalendarDays, CheckCircle2, Info, WalletCards } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  History,
+  Info,
+  WalletCards,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import {
   createSubscriptionPaymentIntent,
   extendManualSubscription,
+  getMySubscriptionPayments,
   getMySubscription,
 } from "@/shared/api/subscriptions";
 import { Button } from "@/shared/components/ui/button";
@@ -35,6 +43,33 @@ const getStatusLabel = (subscription) => {
   return "Subscription required";
 };
 
+const getSubscriptionStatusLabel = (status) => {
+  if (status === "active") return "Active";
+  if (status === "trialing") return "Trial";
+  if (status === "expired") return "Expired";
+  if (status === "past_due") return "Past due";
+  return status ? status.replace("_", " ") : "No subscription";
+};
+
+const getStatusBadgeClass = (subscription) => {
+  if (subscription?.isExpired || subscription?.status === "expired") {
+    return "bg-red-50 text-red-700";
+  }
+
+  if (subscription?.status === "past_due") {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  if (subscription?.status === "active" || subscription?.status === "trialing") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  return "bg-neutral-100 text-neutral-700";
+};
+
+const formatPaymentPeriod = (payment) =>
+  `${formatDate(payment?.periodStart)} - ${formatDate(payment?.periodEnd)}`;
+
 export default function BillingPage() {
   const dispatch = useDispatch();
   const { currentUser } = useSelector((state) => state.auth);
@@ -46,6 +81,9 @@ export default function BillingPage() {
   const [manualActivationError, setManualActivationError] = useState("");
   const [manualActivationSuccess, setManualActivationSuccess] = useState("");
   const [isActivatingManually, setIsActivatingManually] = useState(false);
+  const [payments, setPayments] = useState([]);
+  const [paymentsError, setPaymentsError] = useState("");
+  const [loadingPayments, setLoadingPayments] = useState(false);
   const plan = subscription.defaultPlan;
   const individual = subscription.individualSubscription;
   const isDev = import.meta.env.DEV;
@@ -53,8 +91,22 @@ export default function BillingPage() {
     isDev || subscription.manualActivationAvailable;
   const coveredBySalon =
     subscription.coveredBy === "salon" || subscription.coveredBy === "both";
-  const hasIndividualAccess =
-    individual && ["active", "trialing"].includes(individual.status);
+
+  const loadPayments = useCallback(async () => {
+    setLoadingPayments(true);
+    setPaymentsError("");
+
+    try {
+      const data = await getMySubscriptionPayments();
+      setPayments(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setPaymentsError(
+        error.response?.data?.message || "Could not load payment history."
+      );
+    } finally {
+      setLoadingPayments(false);
+    }
+  }, []);
 
   const refreshSubscription = useCallback(async () => {
     dispatch(loadSubscriptionStart());
@@ -73,7 +125,13 @@ export default function BillingPage() {
 
   useEffect(() => {
     refreshSubscription();
-  }, [refreshSubscription]);
+
+    async function loadInitialPayments() {
+      await loadPayments();
+    }
+
+    loadInitialPayments();
+  }, [loadPayments, refreshSubscription]);
 
   const preparePayment = async () => {
     const ownerId = currentUser?.id || currentUser?._id;
@@ -125,6 +183,7 @@ export default function BillingPage() {
       });
       setManualActivationSuccess("Manual subscription activated.");
       await refreshSubscription();
+      await loadPayments();
     } catch (requestError) {
       setManualActivationError(
         requestError.response?.data?.message ||
@@ -172,35 +231,62 @@ export default function BillingPage() {
                 </div>
               </div>
               <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  subscription.hasAccess
-                    ? "bg-emerald-50 text-emerald-700"
-                    : "bg-amber-50 text-amber-700"
-                }`}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(individual)}`}
               >
-                {subscription.hasAccess ? "Access enabled" : "Access needed"}
+                {getSubscriptionStatusLabel(individual?.status)}
               </span>
             </div>
 
-            {hasIndividualAccess && (
-              <div className="grid gap-3 sm:grid-cols-2">
+            {individual && (
+              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl bg-neutral-50 p-4">
                   <div className="text-xs font-medium uppercase text-neutral-500">
                     Individual plan
                   </div>
                   <div className="mt-1 text-base font-semibold capitalize text-neutral-950">
-                    {individual.status}
+                    {getSubscriptionStatusLabel(individual.status)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-neutral-50 p-4">
+                  <div className="text-xs font-medium uppercase text-neutral-500">
+                    Days remaining
+                  </div>
+                  <div className="mt-1 text-base font-semibold text-neutral-950">
+                    {individual.daysRemaining ?? "Not set"}
                   </div>
                 </div>
                 <div className="rounded-xl bg-neutral-50 p-4">
                   <div className="flex items-center gap-1.5 text-xs font-medium uppercase text-neutral-500">
                     <CalendarDays className="h-3.5 w-3.5" />
-                    {individual.status === "trialing" ? "Trial ends" : "Period ends"}
+                    Expiry date
                   </div>
                   <div className="mt-1 text-base font-semibold text-neutral-950">
-                    {formatDate(individual.trialEndsAt || individual.currentPeriodEnd)}
+                    {formatDate(individual.renewalRequiredAt || individual.currentPeriodEnd)}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {individual?.isExpiringSoon && (
+              <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
+                <div className="flex items-center gap-2 font-semibold">
+                  <AlertTriangle className="h-4 w-4" />
+                  Subscription expiring soon
+                </div>
+                <p className="mt-1">
+                  Prepare payment early. After payment is confirmed,
+                  subscription will be activated.
+                </p>
+              </div>
+            )}
+
+            {individual?.isExpired && (
+              <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+                <div className="font-semibold">Subscription expired</div>
+                <p className="mt-1">
+                  Paid barber tools are blocked until a subscription or salon
+                  seat is active again.
+                </p>
               </div>
             )}
 
@@ -252,8 +338,8 @@ export default function BillingPage() {
               {isPreparingPayment ? "Preparing..." : "Prepare payment"}
             </Button>
             <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
-              Manual payment / activation required. Preparing payment does not
-              activate your subscription.
+              Prepare payment does not activate subscription. After payment is
+              confirmed, subscription will be activated.
             </div>
             {paymentIntent && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
@@ -277,7 +363,7 @@ export default function BillingPage() {
                   Development mode
                 </div>
                 <p className="mt-1">
-                  Manual grants are available through the backend dev endpoint.
+                  In development mode, manual activation is available.
                 </p>
               </div>
             )}
@@ -332,6 +418,59 @@ export default function BillingPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-neutral-500" />
+            <h2 className="text-lg font-semibold text-neutral-950">
+              Payment history
+            </h2>
+          </div>
+          {paymentsError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {paymentsError}
+            </div>
+          )}
+          {loadingPayments ? (
+            <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-500">
+              Loading payment history...
+            </div>
+          ) : payments.length === 0 ? (
+            <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-500">
+              No payment records yet.
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-neutral-200">
+              <div className="hidden grid-cols-5 gap-3 border-b border-neutral-100 bg-neutral-50 p-3 text-xs font-semibold uppercase text-neutral-500 sm:grid">
+                <span>Amount</span>
+                <span>Seats</span>
+                <span>Period</span>
+                <span>Status</span>
+                <span>Paid/provider</span>
+              </div>
+              <div className="divide-y divide-neutral-100">
+                {payments.map((payment) => (
+                  <div
+                    className="grid gap-2 p-3 text-sm sm:grid-cols-5 sm:gap-3"
+                    key={payment._id || payment.id}
+                  >
+                    <span className="font-semibold text-neutral-950">
+                      {formatCurrency(payment.amount, payment.currency)}
+                    </span>
+                    <span>{payment.seatCount || 1}</span>
+                    <span>{formatPaymentPeriod(payment)}</span>
+                    <span className="capitalize">{payment.status}</span>
+                    <span>
+                      {formatDate(payment.paidAt)} / {payment.provider || "manual"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

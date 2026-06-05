@@ -11,6 +11,8 @@ import {
   assignSeat,
   revokeSeat,
   updateSeatCount,
+  getMySubscriptionPayments,
+  getSalonSubscriptionPayments,
 } from "../controllers/subscriptionController.js";
 
 const router = express.Router();
@@ -20,6 +22,9 @@ router.get("/plan/default", getDefaultPlan);
 
 // GET /api/subscriptions/me
 router.get("/me", protect, getMySubscription);
+
+// GET /api/subscriptions/payments/me
+router.get("/payments/me", protect, getMySubscriptionPayments);
 
 // POST /api/subscriptions/dev/grant
 router.post("/dev/grant", protect, devGrantSubscription);
@@ -36,6 +41,9 @@ router.post("/payment-intent", protect, createPaymentIntent);
 
 // GET /api/subscriptions/salon/:salonId
 router.get("/salon/:salonId", protect, getSalonSubscription);
+
+// GET /api/subscriptions/salon/:salonId/payments
+router.get("/salon/:salonId/payments", protect, getSalonSubscriptionPayments);
 
 // GET /api/subscriptions/salon/:salonId/seats
 router.get("/salon/:salonId/seats", protect, getSalonSubscriptionSeats);

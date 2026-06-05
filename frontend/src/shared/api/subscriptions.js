@@ -10,8 +10,18 @@ export const getDefaultSubscriptionPlan = async () => {
   return data;
 };
 
+export const getMySubscriptionPayments = async () => {
+  const { data } = await api.get("/subscriptions/payments/me");
+  return data;
+};
+
 export const getSalonSubscription = async (salonId) => {
   const { data } = await api.get(`/subscriptions/salon/${salonId}`);
+  return data;
+};
+
+export const getSalonSubscriptionPayments = async (salonId) => {
+  const { data } = await api.get(`/subscriptions/salon/${salonId}/payments`);
   return data;
 };
 
