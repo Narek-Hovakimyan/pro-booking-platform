@@ -21,6 +21,7 @@ import {
   removeBarberFromSalon,
 } from "../controllers/salonStaffController.js";
 import { getDashboard } from "../controllers/salonDashboardController.js";
+import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 
@@ -34,6 +35,7 @@ router.get("/:salonId/staff", protect, getSalonStaff);
 router.get("/:salonId", getSalonProfile);
 router.get("/:salonId/admins", protect, getSalonAdmins);
 router.get("/:salonId/dashboard", protect, getDashboard);
+router.get("/:salonId/public-booking", getPublicSalonBooking);
 
 router.post("/", protect, createSalon);
 router.patch("/leave", protect, leaveSalon);

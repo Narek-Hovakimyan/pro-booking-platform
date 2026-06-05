@@ -54,6 +54,7 @@ const MyJobApplicationsPage = lazy(() => import("./pages/MyJobApplicationsPage")
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 const SalonProfilePage = lazy(() => import("./pages/SalonProfilePage"));
+const SalonPublicBookingPage = lazy(() => import("./pages/SalonPublicBookingPage"));
 const SalonsPage = lazy(() => import("./client/pages/SalonsPage"));
 const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
 const EventsPage = lazy(() => import("./pages/EventsPage"));
@@ -692,6 +693,7 @@ export default function App() {
               }
             />
             <Route path="/salons/:salonId" element={<SalonProfilePage />} />
+            <Route path="/salons/:salonId/book" element={<SalonPublicBookingPage />} />
             <Route
               path="/booking"
               element={

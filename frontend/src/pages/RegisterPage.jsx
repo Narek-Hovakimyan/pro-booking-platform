@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
@@ -10,7 +10,9 @@ import { registerUser } from "@/store/slices/authSlice";
 export default function RegisterPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { currentUser, isAuthenticated } = useSelector((state) => state.auth);
+  const redirectPath = searchParams.get("redirect") || "";
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -23,7 +25,7 @@ export default function RegisterPage() {
   if (isAuthenticated) {
     return (
       <Navigate
-        to={currentUser?.role === "barber" ? "/admin" : "/"}
+        to={redirectPath || (currentUser?.role === "barber" ? "/admin" : "/")}
         replace
       />
     );
@@ -54,7 +56,7 @@ export default function RegisterPage() {
       });
 
       dispatch(registerUser(data));
-      navigate(data.user.role === "barber" ? "/admin" : "/");
+      navigate(redirectPath || (data.user.role === "barber" ? "/admin" : "/"));
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
@@ -136,7 +138,10 @@ export default function RegisterPage() {
 
         <p className="text-sm text-neutral-500">
           Արդեն ունե՞ս հաշիվ։{" "}
-          <Link className="font-medium text-neutral-900" to="/login">
+          <Link
+            className="font-medium text-neutral-900"
+            to={redirectPath ? `/login?redirect=${encodeURIComponent(redirectPath)}` : "/login"}
+          >
             Մուտք գործիր
           </Link>
         </p>

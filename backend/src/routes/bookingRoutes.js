@@ -25,7 +25,7 @@ import {
   getBarberMonthlyIncome,
   getClientReliability,
 } from "../controllers/bookingAnalyticsController.js";
-import { protect } from "../middleware/authMiddleware.js";
+import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
@@ -33,7 +33,7 @@ const router = express.Router();
 router.get("/client/:clientId", protect, getClientBookings);
 router.get("/client/:clientId/reliability", protect, getClientReliability);
 router.get("/barber/:barberId/income", protect, requireBarberSubscription, getBarberMonthlyIncome);
-router.get("/barber/:barberId", protect, getBarberBookings);
+router.get("/barber/:barberId", optionalAuth, getBarberBookings);
 router.post("/availability-debug", protect, debugBookingAvailability);
 router.post("/", protect, handleReferenceImageUpload, createBooking);
 router.post("/:id/reschedule-request", protect, createRescheduleRequest);
