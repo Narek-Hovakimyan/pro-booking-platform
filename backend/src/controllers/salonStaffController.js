@@ -17,6 +17,7 @@ import {
 } from "../utils/salonUtils.js";
 import { getSalonAdminsForSalon } from "../services/salon/salonAdminService.js";
 import { getSalonStaff as getSalonStaffForSalon, SalonStaffError } from "../services/salon/salonStaffService.js";
+import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
 import { createNotification } from "./notificationController.js";
 import { sendControllerError } from "../utils/controllerError.js";
 
@@ -71,6 +72,11 @@ export const removeBarberFromSalon = async (req, res) => {
     // Update legacy fields
     syncLegacySalonFields(barber);
     await barber.save();
+    await revokeSalonSeatsForRemovedMember({
+      salonId: salon._id,
+      barberId: barber._id,
+      revokedBy: req.user._id,
+    });
 
     await createNotification({
       userId: barber._id,

@@ -595,6 +595,65 @@ test("createBooking blocks unpaid target barber with BARBER_UNAVAILABLE", async 
   assert.equal(createdBookings.length, 0);
 });
 
+test("createBooking blocks target barber with stale salon seat", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Subscription.findOne = async () => null;
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => ({
+      _id: "seat-1",
+      barberId,
+      salonId,
+      status: "active",
+      subscriptionId: {
+        _id: "salon-subscription-1",
+        ownerId: salonId,
+        status: "active",
+      },
+    }),
+  });
+  User.findById = () => ({
+    select: async () => ({
+      ...barberWithSalon,
+      salons: [{ salon: salonId, status: "rejected" }],
+      salon: null,
+      salonStatus: "none",
+    }),
+  });
+
+  let serviceLookedUp = false;
+  Service.findOne = async () => {
+    serviceLookedUp = true;
+    return null;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(serviceLookedUp, false);
+  assert.equal(createdBookings.length, 0);
+});
+
 test("createBooking allows paid target barber", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);

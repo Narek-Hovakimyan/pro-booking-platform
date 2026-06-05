@@ -75,7 +75,11 @@ const makeBarber = (overrides = {}) => {
 
 test("getBarbers hides unpaid barbers and shows paid individual or salon-seat covered barbers", async () => {
   const paidIndividualBarber = makeBarber({ name: "Paid Individual" });
-  const salonSeatBarber = makeBarber({ name: "Seat Covered" });
+  const salonId = new mongoose.Types.ObjectId();
+  const salonSeatBarber = makeBarber({
+    name: "Seat Covered",
+    salons: [{ salon: salonId, status: "approved" }],
+  });
   const unpaidBarber = makeBarber({ name: "Unpaid Barber" });
   const activeSalonSubscriptionId = new mongoose.Types.ObjectId();
 
@@ -92,9 +96,11 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
     chainableQuery([
       {
         barberId: salonSeatBarber._id,
+        salonId,
         status: "active",
         subscriptionId: {
           _id: activeSalonSubscriptionId,
+          ownerId: salonId,
           status: "trialing",
         },
       },
@@ -111,6 +117,38 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
     ["Paid Individual", "Seat Covered"]
   );
   assert.equal(res.body.some((barber) => barber.name === "Unpaid Barber"), false);
+});
+
+test("getBarbers hides barber with stale salon seat", async () => {
+  const salonId = new mongoose.Types.ObjectId();
+  const staleSeatBarber = makeBarber({
+    name: "Stale Seat",
+    salons: [{ salon: salonId, status: "rejected" }],
+  });
+
+  User.find = () => chainableQuery([staleSeatBarber]);
+  Subscription.find = () => chainableQuery([]);
+  SubscriptionSeat.find = () =>
+    chainableQuery([
+      {
+        barberId: staleSeatBarber._id,
+        salonId,
+        status: "active",
+        subscriptionId: {
+          _id: new mongoose.Types.ObjectId(),
+          ownerId: salonId,
+          status: "active",
+        },
+      },
+    ]);
+  BarberProfile.find = async () => [];
+  Salon.find = async () => [];
+
+  const res = createResponse();
+  await getBarbers({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
 });
 
 test("getBarbers returns barber with grace-granted active subscription", async () => {

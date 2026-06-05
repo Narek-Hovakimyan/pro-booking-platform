@@ -25,6 +25,7 @@ import {
   getMySubscriptionAccess,
   getSalonSubscriptionDetails,
   assignSalonSubscriptionSeat,
+  revokeSalonSeatsForRemovedMember,
   revokeSalonSubscriptionSeat,
   updateSalonSubscriptionSeatCount,
   isManualActivationAvailable,
@@ -154,6 +155,23 @@ const makeBarberUser = (overrides = {}) => ({
   salons: [{ salon: salonId, status: "approved" }],
   salon: salonId,
   salonStatus: "approved",
+  ...overrides,
+});
+
+const makeSubscriptionSeat = (overrides = {}) => ({
+  _id: new mongoose.Types.ObjectId(),
+  subscriptionId: makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    status: "active",
+  }),
+  salonId,
+  barberId,
+  status: "active",
+  assignedAt: new Date(),
+  save() {
+    return this;
+  },
   ...overrides,
 });
 
@@ -451,18 +469,32 @@ test("salon subscription + active seat grants access", async () => {
     return null;
   };
 
-  const parentSub = makeSubDoc({ status: "active" });
-  const activeSeat = {
-    _id: new mongoose.Types.ObjectId(),
-    subscriptionId: parentSub,
-    barberId,
-    status: "active",
-  };
-
+  const activeSeat = makeSubscriptionSeat();
   SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
+  User.findById = () => chainableQuery(makeBarberUser());
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, true);
+});
+
+test("stale active seat does not grant barberHasPaidAccess", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return null;
+    return null;
+  };
+
+  SubscriptionSeat.findOne = () => chainableQuery(makeSubscriptionSeat());
+  User.findById = () =>
+    chainableQuery(
+      makeBarberUser({
+        salons: [{ salon: salonId, status: "rejected" }],
+        salon: null,
+        salonStatus: "none",
+      })
+    );
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
 });
 
 test("expired salon subscription + active seat does NOT grant access", async () => {
@@ -471,13 +503,13 @@ test("expired salon subscription + active seat does NOT grant access", async () 
     return null;
   };
 
-  const parentSub = makeSubDoc({ status: "expired" });
-  const activeSeat = {
-    _id: new mongoose.Types.ObjectId(),
-    subscriptionId: parentSub,
-    barberId,
-    status: "active",
-  };
+  const activeSeat = makeSubscriptionSeat({
+    subscriptionId: makeSubDoc({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "expired",
+    }),
+  });
 
   SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
 
@@ -582,6 +614,7 @@ test("after grace, getPaidAccessByBarberIds includes barber", async () => {
 
   Subscription.find = () => chainableQuery([grantedSubscription]);
   SubscriptionSeat.find = () => chainableQuery([]);
+  User.find = () => chainableQuery([]);
 
   const access = await getPaidAccessByBarberIds([barberId]);
 
@@ -624,8 +657,22 @@ test("getPaidAccessByBarberIds returns paid individual and salon-seat covered ba
     chainableQuery([
       {
         barberId: paidSeatBarberId,
+        salonId,
         status: "active",
         subscriptionId: parentSub,
+      },
+    ]);
+  User.find = () =>
+    chainableQuery([
+      {
+        _id: paidSeatBarberId,
+        role: "barber",
+        salons: [{ salon: salonId, status: "approved" }],
+      },
+      {
+        _id: unpaidBarberId,
+        role: "barber",
+        salons: [],
       },
     ]);
 
@@ -640,6 +687,40 @@ test("getPaidAccessByBarberIds returns paid individual and salon-seat covered ba
   assert.equal(access.get(String(unpaidBarberId)), false);
 });
 
+test("stale active seat does not appear in getPaidAccessByBarberIds", async () => {
+  const staleSeatBarberId = new mongoose.Types.ObjectId();
+  const parentSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    status: "active",
+  });
+
+  Subscription.find = () => chainableQuery([]);
+  SubscriptionSeat.find = () =>
+    chainableQuery([
+      {
+        barberId: staleSeatBarberId,
+        salonId,
+        status: "active",
+        subscriptionId: parentSub,
+      },
+    ]);
+  User.find = () =>
+    chainableQuery([
+      {
+        _id: staleSeatBarberId,
+        role: "barber",
+        salons: [{ salon: salonId, status: "rejected" }],
+        salon: null,
+        salonStatus: "none",
+      },
+    ]);
+
+  const access = await getPaidAccessByBarberIds([staleSeatBarberId]);
+
+  assert.equal(access.get(String(staleSeatBarberId)), false);
+});
+
 test("getPaidAccessByBarberIds ignores active seats on expired salon subscriptions", async () => {
   const coveredBarberId = new mongoose.Types.ObjectId();
   const parentSub = makeSubDoc({ ownerType: "salon", status: "expired" });
@@ -649,8 +730,17 @@ test("getPaidAccessByBarberIds ignores active seats on expired salon subscriptio
     chainableQuery([
       {
         barberId: coveredBarberId,
+        salonId,
         status: "active",
         subscriptionId: parentSub,
+      },
+    ]);
+  User.find = () =>
+    chainableQuery([
+      {
+        _id: coveredBarberId,
+        role: "barber",
+        salons: [{ salon: salonId, status: "approved" }],
       },
     ]);
 
@@ -802,6 +892,38 @@ test("non-owner/non-admin cannot view details", async () => {
   );
 });
 
+test("removing barber from salon revokes active subscription seat", async () => {
+  const activeSeat = makeSubscriptionSeat();
+  const otherSalonSeat = makeSubscriptionSeat({
+    _id: new mongoose.Types.ObjectId(),
+    salonId: new mongoose.Types.ObjectId(),
+  });
+  let savedSeatStatus = null;
+  let savedRevokedAt = null;
+
+  activeSeat.save = async function save() {
+    savedSeatStatus = this.status;
+    savedRevokedAt = this.revokedAt;
+    return this;
+  };
+  otherSalonSeat.save = async () => {
+    throw new Error("Other salon seat should not be revoked");
+  };
+
+  SubscriptionSeat.find = () => chainableQuery([activeSeat, otherSalonSeat]);
+
+  const result = await revokeSalonSeatsForRemovedMember({
+    salonId,
+    barberId,
+    revokedBy: ownerId,
+  });
+
+  assert.equal(result.revokedCount, 1);
+  assert.equal(savedSeatStatus, "revoked");
+  assert.ok(savedRevokedAt instanceof Date);
+  assert.equal(otherSalonSeat.status, "active");
+});
+
 test("owner can assign seat to approved member", async () => {
   const salonDoc = makeSalonDoc({ ownerId });
   const salonSub = makeSubDoc({
@@ -838,6 +960,37 @@ test("owner can assign seat to approved member", async () => {
   assert.ok(seat);
   assert.equal(seat.status, "active");
   assert.equal(seat.salonId.toString(), salonId.toString());
+});
+
+test("revoked seat frees available seat count", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 2,
+    totalPrice: 10000,
+  });
+  const revokedSeat = makeSubscriptionSeat({
+    subscriptionId: salonSub._id,
+    status: "revoked",
+    revokedAt: new Date(),
+  });
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = (query) =>
+    chainableQuery(query.status === "active" ? [] : [revokedSeat]);
+  User.find = () => chainableQuery([makeBarberUser()]);
+
+  const result = await getSalonSubscriptionDetails({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(result.activeSeats.length, 0);
+  assert.equal(result.revokedSeats.length, 1);
+  assert.equal(result.availableSeatCount, 2);
 });
 
 test("cannot assign seat to non-approved member", async () => {
@@ -892,12 +1045,66 @@ test("cannot assign more seats than subscription.seatCount", async () => {
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.countDocuments = async () => 3; // already full
+  SubscriptionSeat.findOne = async () => null;
+  User.findById = async () => makeBarberUser();
 
   await assert.rejects(
     () =>
       assignSalonSubscriptionSeat({
         salonId,
         barberId,
+        assignedBy: { _id: ownerId, role: "barber" },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.ok(err.message.includes("Cannot assign more than"));
+      return true;
+    }
+  );
+});
+
+test("cannot exceed paid seatCount under repeated assignment attempts", async () => {
+  const secondBarberId = new mongoose.Types.ObjectId();
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 1,
+    totalPrice: 5000,
+    status: "active",
+  });
+  let activeSeatCount = 0;
+
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.countDocuments = async () => activeSeatCount;
+  SubscriptionSeat.findOne = async () => null;
+  SubscriptionSeat.create = async (data) => {
+    activeSeatCount += 1;
+    return {
+      ...data,
+      _id: new mongoose.Types.ObjectId(),
+    };
+  };
+  User.findById = async (id) =>
+    makeBarberUser({
+      _id: id,
+      salons: [{ salon: salonId, status: "approved" }],
+    });
+
+  const firstSeat = await assignSalonSubscriptionSeat({
+    salonId,
+    barberId,
+    assignedBy: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(firstSeat.status, "active");
+
+  await assert.rejects(
+    () =>
+      assignSalonSubscriptionSeat({
+        salonId,
+        barberId: secondBarberId,
         assignedBy: { _id: ownerId, role: "barber" },
       }),
     (err) => {
@@ -962,15 +1169,9 @@ test("active seat grants barberHasPaidAccess", async () => {
     return null;
   };
 
-  const parentSub = makeSubDoc({ status: "active" });
-  const activeSeat = {
-    _id: new mongoose.Types.ObjectId(),
-    subscriptionId: parentSub,
-    barberId,
-    status: "active",
-  };
-
+  const activeSeat = makeSubscriptionSeat();
   SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
+  User.findById = () => chainableQuery(makeBarberUser());
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, true);
@@ -982,13 +1183,13 @@ test("expired salon subscription + active seat does not grant access", async () 
     return null;
   };
 
-  const parentSub = makeSubDoc({ status: "expired" });
-  const activeSeat = {
-    _id: new mongoose.Types.ObjectId(),
-    subscriptionId: parentSub,
-    barberId,
-    status: "active",
-  };
+  const activeSeat = makeSubscriptionSeat({
+    subscriptionId: makeSubDoc({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "expired",
+    }),
+  });
 
   SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
 

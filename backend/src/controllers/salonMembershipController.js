@@ -18,6 +18,7 @@ import {
   serializeSalon,
   serializeUser,
 } from "../utils/salonUtils.js";
+import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
 import { createNotification } from "./notificationController.js";
 import { sendControllerError } from "../utils/controllerError.js";
 
@@ -354,6 +355,11 @@ export const leaveSalon = async (req, res) => {
     // Update legacy fields
     syncLegacySalonFields(barber);
     await barber.save();
+    await revokeSalonSeatsForRemovedMember({
+      salonId,
+      barberId: barber._id,
+      revokedBy: barber._id,
+    });
 
     if (salon?.ownerId) {
       await createNotification({

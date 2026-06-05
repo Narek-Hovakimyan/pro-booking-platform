@@ -20,7 +20,7 @@ const MANUAL_PROVIDER = "manual";
 const getIdString = (value) => {
   if (!value) return "";
   if (value._id) return String(value._id);
-  if (value.id) return String(value.id);
+  if (typeof value.id === "string") return value.id;
   return String(value);
 };
 
@@ -28,6 +28,48 @@ const getIdsForQuery = (ids) =>
   ids.map((id) =>
     mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id
   );
+
+const resolveQuery = async (query) => {
+  if (query && typeof query.lean === "function") {
+    return query.lean();
+  }
+
+  return query;
+};
+
+const fetchBarberMembership = async (barberId) => {
+  const query = User.findById(barberId);
+  if (query && typeof query.select === "function") {
+    return resolveQuery(query.select("salon salonStatus salons role"));
+  }
+
+  return query;
+};
+
+const fetchBarberMemberships = async (barberIds) => {
+  const query = User.find({ _id: { $in: getIdsForQuery(barberIds) } });
+  if (query && typeof query.select === "function") {
+    return resolveQuery(query.select("_id salon salonStatus salons role"));
+  }
+
+  return query;
+};
+
+const getSeatSalonId = (seat) =>
+  getIdString(seat?.salonId || seat?.subscriptionId?.ownerId);
+
+const isApprovedSalonMember = (barber, salonId) => {
+  const stringId = getIdString(salonId);
+  if (!barber || !stringId) return false;
+
+  return (
+    (barber.salons || []).some(
+      (s) => getIdString(s.salon) === stringId && s.status === "approved"
+    ) ||
+    (getIdString(barber.salon) === stringId &&
+      barber.salonStatus === "approved")
+  );
+};
 
 /* ───────────────────────────────────────────────────────────
  *  Default plan & basic subscription helpers (Phase 1)
@@ -417,7 +459,14 @@ export const barberHasPaidAccess = async (barberId) => {
   }
 
   const parentStatus = activeSeat.subscriptionId.status;
-  return PAID_SUBSCRIPTION_STATUSES.includes(parentStatus);
+  if (!PAID_SUBSCRIPTION_STATUSES.includes(parentStatus)) {
+    return false;
+  }
+
+  const seatSalonId = getSeatSalonId(activeSeat);
+  const barber = await fetchBarberMembership(barberId);
+
+  return isApprovedSalonMember(barber, seatSalonId);
 };
 
 export const getPaidAccessByBarberIds = async (barberIds = []) => {
@@ -432,7 +481,7 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
 
   const queryIds = getIdsForQuery(ids);
 
-  const [individualSubscriptions, activeSeats] = await Promise.all([
+  const [individualSubscriptions, activeSeats, barbers] = await Promise.all([
     Subscription.find({
       ownerType: "barber",
       ownerId: { $in: queryIds },
@@ -446,7 +495,11 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
     })
       .populate("subscriptionId")
       .lean(),
+    fetchBarberMemberships(ids),
   ]);
+  const barbersById = new Map(
+    (barbers || []).map((barber) => [getIdString(barber._id), barber])
+  );
 
   for (const subscription of individualSubscriptions || []) {
     const ownerId = getIdString(subscription.ownerId);
@@ -455,9 +508,14 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
 
   for (const seat of activeSeats || []) {
     const parentStatus = seat?.subscriptionId?.status;
-    if (PAID_SUBSCRIPTION_STATUSES.includes(parentStatus)) {
-      const barberId = getIdString(seat.barberId);
-      if (barberId) accessByBarberId.set(barberId, true);
+    if (!PAID_SUBSCRIPTION_STATUSES.includes(parentStatus)) continue;
+
+    const barberId = getIdString(seat.barberId);
+    const seatSalonId = getSeatSalonId(seat);
+    const barber = barbersById.get(barberId);
+
+    if (barberId && isApprovedSalonMember(barber, seatSalonId)) {
+      accessByBarberId.set(barberId, true);
     }
   }
 
@@ -703,17 +761,46 @@ const requireSalonOwnerOrAdmin = async (salonId, requesterId) => {
  * Check if a barber user is an approved member of the given salon.
  */
 const isApprovedMember = (barber, salonId) => {
-  const stringId = String(salonId);
-
-  return (
-    (barber.salons || []).some(
-      (s) => String(s.salon) === stringId && s.status === "approved"
-    ) ||
-    (String(barber.salon) === stringId && barber.salonStatus === "approved")
-  );
+  return isApprovedSalonMember(barber, salonId);
 };
 
 /* ── Public service functions ───────────────────────────── */
+
+export const revokeSalonSeatsForRemovedMember = async ({
+  salonId,
+  barberId,
+  revokedBy = null,
+  now = new Date(),
+}) => {
+  if (!salonId || !barberId) {
+    const err = new Error("salonId and barberId are required");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const activeSeats = await SubscriptionSeat.find({
+    barberId,
+    status: "active",
+  }).populate("subscriptionId");
+  const revokedSeats = [];
+
+  for (const seat of activeSeats || []) {
+    if (getSeatSalonId(seat) !== getIdString(salonId)) continue;
+
+    seat.status = "revoked";
+    seat.revokedAt = now;
+    await seat.save();
+    revokedSeats.push(seat);
+  }
+
+  return {
+    salonId: getIdString(salonId),
+    barberId: getIdString(barberId),
+    revokedBy: getIdString(revokedBy) || null,
+    revokedCount: revokedSeats.length,
+    seats: revokedSeats,
+  };
+};
 
 /**
  * Get salon subscription details including seats and approved members.
@@ -819,20 +906,6 @@ export const assignSalonSubscriptionSeat = async ({
     throw err;
   }
 
-  // Count currently active seats
-  const activeSeatCount = await SubscriptionSeat.countDocuments({
-    subscriptionId: subscription._id,
-    status: "active",
-  });
-
-  if (activeSeatCount >= subscription.seatCount) {
-    const err = new Error(
-      `Cannot assign more than ${subscription.seatCount} active seats. Please increase your seat count first.`
-    );
-    err.statusCode = 400;
-    throw err;
-  }
-
   // Verify barber exists
   const barber = await User.findById(barberId);
   if (!barber || barber.role !== "barber") {
@@ -861,6 +934,21 @@ export const assignSalonSubscriptionSeat = async ({
     return existingActive;
   }
 
+  // Count currently active seats after duplicate detection so repeated
+  // assignment attempts for the same barber remain idempotent.
+  const activeSeatCount = await SubscriptionSeat.countDocuments({
+    subscriptionId: subscription._id,
+    status: "active",
+  });
+
+  if (activeSeatCount >= subscription.seatCount) {
+    const err = new Error(
+      `Cannot assign more than ${subscription.seatCount} active seats. Please increase your paid seat count first.`
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
   // Check for existing revoked seat for this subscription + barber — reactivate
   const existingRevoked = await SubscriptionSeat.findOne({
     subscriptionId: subscription._id,
@@ -878,16 +966,34 @@ export const assignSalonSubscriptionSeat = async ({
   }
 
   // Create new seat
-  const seat = await SubscriptionSeat.create({
-    subscriptionId: subscription._id,
-    salonId: salon._id,
-    barberId: barber._id,
-    assignedBy: assignedBy._id,
-    status: "active",
-    assignedAt: new Date(),
-  });
+  try {
+    const seat = await SubscriptionSeat.create({
+      subscriptionId: subscription._id,
+      salonId: salon._id,
+      barberId: barber._id,
+      assignedBy: assignedBy._id,
+      status: "active",
+      assignedAt: new Date(),
+    });
 
-  return seat;
+    return seat;
+  } catch (error) {
+    if (error?.code === 11000) {
+      const activeSeat = await SubscriptionSeat.findOne({
+        subscriptionId: subscription._id,
+        barberId,
+        status: "active",
+      });
+
+      if (activeSeat) return activeSeat;
+
+      const err = new Error("Seat is already assigned to this barber");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    throw error;
+  }
 };
 
 /**
