@@ -10,7 +10,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import {
+  cancelSubscriptionPaymentAttempt,
   createSubscriptionPaymentIntent,
+  devConfirmSubscriptionPaymentAttempt,
   extendManualSubscription,
   getMySubscriptionPayments,
   getMySubscription,
@@ -77,6 +79,11 @@ export default function BillingPage() {
   const [paymentIntent, setPaymentIntent] = useState(null);
   const [paymentError, setPaymentError] = useState("");
   const [isPreparingPayment, setIsPreparingPayment] = useState(false);
+  const [paymentMonths, setPaymentMonths] = useState("1");
+  const [pendingAttempt, setPendingAttempt] = useState(null);
+  const [attemptActionError, setAttemptActionError] = useState("");
+  const [isConfirmingAttempt, setIsConfirmingAttempt] = useState(false);
+  const [isCancellingAttempt, setIsCancellingAttempt] = useState(false);
   const [manualMonths, setManualMonths] = useState("1");
   const [manualActivationError, setManualActivationError] = useState("");
   const [manualActivationSuccess, setManualActivationSuccess] = useState("");
@@ -135,10 +142,18 @@ export default function BillingPage() {
 
   const preparePayment = async () => {
     const ownerId = currentUser?.id || currentUser?._id;
+    const months = Number(paymentMonths);
+
     if (!ownerId || isPreparingPayment) return;
+
+    if (!Number.isInteger(months) || months < 1) {
+      setPaymentError("Months must be at least 1.");
+      return;
+    }
 
     setIsPreparingPayment(true);
     setPaymentError("");
+    setAttemptActionError("");
     setPaymentIntent(null);
 
     try {
@@ -146,8 +161,10 @@ export default function BillingPage() {
         ownerType: "barber",
         ownerId,
         seatCount: 1,
+        months,
       });
       setPaymentIntent(data);
+      setPendingAttempt(data.paymentAttempt || null);
     } catch (requestError) {
       setPaymentError(
         requestError.response?.data?.message ||
@@ -155,6 +172,49 @@ export default function BillingPage() {
       );
     } finally {
       setIsPreparingPayment(false);
+    }
+  };
+
+  const confirmPendingAttempt = async () => {
+    const attemptId = pendingAttempt?.id || pendingAttempt?._id;
+    if (!attemptId || isConfirmingAttempt) return;
+
+    setIsConfirmingAttempt(true);
+    setAttemptActionError("");
+
+    try {
+      const result = await devConfirmSubscriptionPaymentAttempt(attemptId);
+      setPendingAttempt(result.paymentAttempt || null);
+      await refreshSubscription();
+      await loadPayments();
+    } catch (requestError) {
+      setAttemptActionError(
+        requestError.response?.data?.message ||
+          "Could not confirm payment attempt."
+      );
+    } finally {
+      setIsConfirmingAttempt(false);
+    }
+  };
+
+  const cancelPendingAttempt = async () => {
+    const attemptId = pendingAttempt?.id || pendingAttempt?._id;
+    if (!attemptId || isCancellingAttempt) return;
+
+    setIsCancellingAttempt(true);
+    setAttemptActionError("");
+
+    try {
+      await cancelSubscriptionPaymentAttempt(attemptId);
+      setPendingAttempt(null);
+      setPaymentIntent(null);
+    } catch (requestError) {
+      setAttemptActionError(
+        requestError.response?.data?.message ||
+          "Could not cancel payment attempt."
+      );
+    } finally {
+      setIsCancellingAttempt(false);
     }
   };
 
@@ -330,6 +390,18 @@ export default function BillingPage() {
             <div className="text-sm text-neutral-500">
               / {plan?.interval || "month"}
             </div>
+            <label className="block">
+              <span className="text-sm font-medium text-neutral-700">
+                Months
+              </span>
+              <input
+                className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                min="1"
+                onChange={(event) => setPaymentMonths(event.target.value)}
+                type="number"
+                value={paymentMonths}
+              />
+            </label>
             <Button
               className="w-full"
               disabled={isPreparingPayment}
@@ -349,6 +421,56 @@ export default function BillingPage() {
                 <p className="mt-1">
                   Amount: {formatCurrency(paymentIntent.amount, paymentIntent.currency)}
                 </p>
+              </div>
+            )}
+            {pendingAttempt && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                <div className="font-semibold">
+                  Payment prepared but not active yet
+                </div>
+                <p className="mt-1">
+                  Attempt: {pendingAttempt.id || pendingAttempt._id}
+                </p>
+                <p className="mt-1 capitalize">Status: {pendingAttempt.status}</p>
+                <p className="mt-1">
+                  {pendingAttempt.seatCount || 1} seat(s),{" "}
+                  {pendingAttempt.months || 1} month(s),{" "}
+                  {formatCurrency(pendingAttempt.amount, pendingAttempt.currency)}
+                </p>
+                <p className="mt-1">
+                  Subscription activates only after payment confirmation.
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  {showManualActivationPanel && pendingAttempt.status === "pending" && (
+                    <Button
+                      className="flex-1"
+                      disabled={isConfirmingAttempt}
+                      onClick={confirmPendingAttempt}
+                    >
+                      {isConfirmingAttempt ? "Confirming..." : "Confirm manually"}
+                    </Button>
+                  )}
+                  {pendingAttempt.status === "pending" && (
+                    <Button
+                      className="flex-1"
+                      disabled={isCancellingAttempt}
+                      onClick={cancelPendingAttempt}
+                      variant="outline"
+                    >
+                      {isCancellingAttempt ? "Cancelling..." : "Cancel prepared payment"}
+                    </Button>
+                  )}
+                </div>
+                {showManualActivationPanel && (
+                  <p className="mt-2 text-blue-700">
+                    Manual confirm is development-only.
+                  </p>
+                )}
+              </div>
+            )}
+            {attemptActionError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {attemptActionError}
               </div>
             )}
             {paymentError && (

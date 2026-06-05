@@ -7,6 +7,7 @@ import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import PaymentRecord from "../models/PaymentRecord.js";
+import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
 import Salon from "../models/Salon.js";
 import User from "../models/User.js";
 
@@ -20,12 +21,15 @@ import {
   grantManualSubscription,
   extendManualSubscription,
   barberHasPaidAccess,
+  cancelSubscriptionPaymentAttempt,
+  confirmSubscriptionPaymentAttempt,
   createSubscriptionPaymentIntent,
   getDaysRemaining,
   getMySubscriptionPaymentHistory,
   getPaidAccessByBarberIds,
   getMySubscriptionAccess,
   getSalonSubscriptionPaymentHistory,
+  getSubscriptionPaymentAttempt,
   getSalonSubscriptionDetails,
   serializeSubscriptionStatus,
   assignSalonSubscriptionSeat,
@@ -39,6 +43,7 @@ import {
 const originalPlanFindOne = SubscriptionPlan.findOne;
 const originalPlanCreate = SubscriptionPlan.create;
 const originalSubFindOne = Subscription.findOne;
+const originalSubFindById = Subscription.findById;
 const originalSubFind = Subscription.find;
 const originalSubCreate = Subscription.create;
 const originalSubSave = Subscription.prototype.save;
@@ -49,6 +54,8 @@ const originalSeatCreate = SubscriptionSeat.create;
 const originalSeatFindById = SubscriptionSeat.findById;
 const originalPaymentCreate = PaymentRecord.create;
 const originalPaymentFind = PaymentRecord.find;
+const originalAttemptCreate = SubscriptionPaymentAttempt.create;
+const originalAttemptFindById = SubscriptionPaymentAttempt.findById;
 const originalSalonFindById = Salon.findById;
 const originalUserFindById = User.findById;
 const originalUserFind = User.find;
@@ -78,6 +85,7 @@ afterEach(() => {
   SubscriptionPlan.findOne = originalPlanFindOne;
   SubscriptionPlan.create = originalPlanCreate;
   Subscription.findOne = originalSubFindOne;
+  Subscription.findById = originalSubFindById;
   Subscription.find = originalSubFind;
   Subscription.create = originalSubCreate;
   Subscription.prototype.save = originalSubSave;
@@ -88,6 +96,8 @@ afterEach(() => {
   SubscriptionSeat.findById = originalSeatFindById;
   PaymentRecord.create = originalPaymentCreate;
   PaymentRecord.find = originalPaymentFind;
+  SubscriptionPaymentAttempt.create = originalAttemptCreate;
+  SubscriptionPaymentAttempt.findById = originalAttemptFindById;
   Salon.findById = originalSalonFindById;
   User.findById = originalUserFindById;
   User.find = originalUserFind;
@@ -203,6 +213,81 @@ const makeSubscriptionSeat = (overrides = {}) => ({
   },
   ...overrides,
 });
+
+const makePaymentAttempt = (overrides = {}) => ({
+  _id: new mongoose.Types.ObjectId(),
+  ownerType: "barber",
+  ownerId: barberId,
+  payerId: barberId,
+  subscriptionId: null,
+  provider: "manual",
+  providerIntentId: null,
+  amount: 5000,
+  currency: "AMD",
+  seatCount: 1,
+  months: 1,
+  status: "pending",
+  metadata: {},
+  paidAt: null,
+  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  save() {
+    return this;
+  },
+  toObject() {
+    return { ...this };
+  },
+  ...overrides,
+});
+
+const stubPaymentAttemptCreate = () => {
+  let createdAttempt = null;
+
+  SubscriptionPaymentAttempt.create = async (payload) => {
+    createdAttempt = makePaymentAttempt(payload);
+    return createdAttempt;
+  };
+
+  return {
+    getCreatedAttempt: () => createdAttempt,
+  };
+};
+
+const stubManualConfirmationDependencies = ({
+  existingSubscription = null,
+  createdSubscription = null,
+} = {}) => {
+  const paymentRecords = [];
+  let subscriptionCreateCount = 0;
+  let subscriptionFindCount = 0;
+  let subscriptionToReturn = createdSubscription;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => {
+    subscriptionFindCount++;
+    return existingSubscription;
+  };
+  Subscription.create = async (payload) => {
+    subscriptionCreateCount++;
+    subscriptionToReturn = makeSubDoc({
+      ...payload,
+      _id: payload._id || new mongoose.Types.ObjectId(),
+    });
+    return subscriptionToReturn;
+  };
+  PaymentRecord.create = async (payload) => {
+    paymentRecords.push(payload);
+    return payload;
+  };
+
+  return {
+    getPaymentRecords: () => paymentRecords,
+    getSubscriptionCreateCount: () => subscriptionCreateCount,
+    getSubscriptionFindCount: () => subscriptionFindCount,
+    getSubscription: () => subscriptionToReturn,
+  };
+};
 
 const ownerId = new mongoose.Types.ObjectId();
 
@@ -1306,6 +1391,7 @@ test("serializeSubscriptionStatus marks expired subscription", () => {
 test("payment intent for barber calculates default plan amount and does not activate subscription", async () => {
   let subscriptionCreated = false;
   let paymentCreated = false;
+  const attemptStub = stubPaymentAttemptCreate();
 
   SubscriptionPlan.findOne = async () => defaultPlanDoc;
   Subscription.create = async () => {
@@ -1326,19 +1412,36 @@ test("payment intent for barber calculates default plan amount and does not acti
 
   assert.equal(result.provider, "manual");
   assert.equal(result.requiresManualActivation, true);
+  assert.ok(result.paymentAttemptId);
+  assert.equal(result.status, "pending");
   assert.equal(result.amount, defaultPlanDoc.pricePerSeat);
   assert.equal(result.currency, defaultPlanDoc.currency);
   assert.deepEqual(result.metadata, {
     ownerType: "barber",
     ownerId: String(barberId),
     seatCount: 1,
+    months: 1,
     planCode: defaultPlanDoc.code,
+  });
+  assert.equal(result.paymentAttempt.status, "pending");
+  assert.equal(result.paymentAttempt.amount, defaultPlanDoc.pricePerSeat);
+  assert.equal(result.paymentAttempt.months, 1);
+  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.deepEqual(attemptStub.getCreatedAttempt().metadata, {
+    ownerType: "barber",
+    ownerId: String(barberId),
+    seatCount: 1,
+    months: 1,
+    planCode: defaultPlanDoc.code,
+    monthlyTotal: defaultPlanDoc.pricePerSeat,
   });
   assert.equal(subscriptionCreated, false);
   assert.equal(paymentCreated, false);
 });
 
 test("salon owner can create payment intent for 4 seats", async () => {
+  const attemptStub = stubPaymentAttemptCreate();
+
   SubscriptionPlan.findOne = async () => defaultPlanDoc;
   Salon.findById = async () => makeSalonDoc({ ownerId: barberId });
 
@@ -1354,15 +1457,28 @@ test("salon owner can create payment intent for 4 seats", async () => {
   assert.equal(result.ownerType, "salon");
   assert.equal(result.ownerId, String(salonId));
   assert.equal(result.seatCount, 4);
+  assert.equal(result.months, 1);
   assert.equal(result.pricePerSeat, defaultPlanDoc.pricePerSeat);
   assert.equal(result.amount, defaultPlanDoc.pricePerSeat * 4);
+  assert.equal(result.monthlyTotal, defaultPlanDoc.pricePerSeat * 4);
   assert.equal(result.currency, defaultPlanDoc.currency);
   assert.equal(result.message, "Manual payment activation is required.");
+  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.paymentAttempt.status, "pending");
   assert.deepEqual(result.metadata, {
     ownerType: "salon",
     ownerId: String(salonId),
     seatCount: 4,
+    months: 1,
     planCode: defaultPlanDoc.code,
+  });
+  assert.deepEqual(attemptStub.getCreatedAttempt().metadata, {
+    ownerType: "salon",
+    ownerId: String(salonId),
+    seatCount: 4,
+    months: 1,
+    planCode: defaultPlanDoc.code,
+    monthlyTotal: defaultPlanDoc.pricePerSeat * 4,
   });
 });
 
@@ -1394,7 +1510,256 @@ test("non-owner cannot create salon payment intent", async () => {
       }),
     (error) =>
       error.statusCode === 403 &&
-      error.message === "Only salon owner or admin can prepare payment"
+      error.message === "Only salon owner or admin can prepare payment attempts"
+  );
+});
+
+test("payment intent supports months and creates pending attempt for total amount", async () => {
+  const attemptStub = stubPaymentAttemptCreate();
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+
+  const result = await createSubscriptionPaymentIntent({
+    requester: { _id: barberId, role: "barber" },
+    ownerType: "barber",
+    ownerId: barberId,
+    seatCount: 1,
+    months: 3,
+  });
+
+  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.status, "pending");
+  assert.equal(result.months, 3);
+  assert.equal(result.amount, defaultPlanDoc.pricePerSeat * 3);
+  assert.equal(attemptStub.getCreatedAttempt().status, "pending");
+  assert.equal(attemptStub.getCreatedAttempt().amount, defaultPlanDoc.pricePerSeat * 3);
+});
+
+test("payment intent rejects invalid months", async () => {
+  await assert.rejects(
+    () =>
+      createSubscriptionPaymentIntent({
+        requester: { _id: barberId, role: "barber" },
+        ownerType: "barber",
+        ownerId: barberId,
+        months: 0,
+      }),
+    (error) =>
+      error.statusCode === 400 &&
+      error.message === "months must be at least 1"
+  );
+});
+
+test("client cannot create payment attempt", async () => {
+  await assert.rejects(
+    () =>
+      createSubscriptionPaymentIntent({
+        requester: { _id: clientId, role: "client" },
+        ownerType: "barber",
+        ownerId: clientId,
+        seatCount: 1,
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "Only barbers can manage subscription payments"
+  );
+});
+
+test("dev-confirm activates subscription and creates one paid payment record", async () => {
+  const now = new Date("2026-06-05T12:00:00.000Z");
+  let attemptSaveCount = 0;
+  const attempt = makePaymentAttempt({
+    months: 2,
+    amount: 10000,
+    save() {
+      attemptSaveCount++;
+      return this;
+    },
+  });
+  const stubs = stubManualConfirmationDependencies();
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+
+  const result = await confirmSubscriptionPaymentAttempt({
+    paymentAttemptId: attempt._id,
+    confirmedBy: { _id: barberId, role: "barber" },
+    now,
+  });
+
+  assert.equal(result.idempotent, false);
+  assert.equal(result.paymentAttempt.status, "paid");
+  assert.equal(result.paymentAttempt.paidAt.getTime(), now.getTime());
+  assert.ok(result.paymentAttempt.subscriptionId);
+  assert.equal(result.subscription.status, "active");
+  assert.equal(result.subscription.totalPrice, defaultPlanDoc.pricePerSeat);
+  assert.equal(stubs.getSubscriptionCreateCount(), 1);
+  assert.equal(stubs.getPaymentRecords().length, 1);
+  assert.equal(stubs.getPaymentRecords()[0].amount, defaultPlanDoc.pricePerSeat * 2);
+  assert.equal(stubs.getPaymentRecords()[0].status, "paid");
+  assert.equal(attemptSaveCount, 1);
+});
+
+test("dev-confirm is idempotent and does not double-extend subscription", async () => {
+  const attempt = makePaymentAttempt();
+  let attemptSaveCount = 0;
+  attempt.save = async function save() {
+    attemptSaveCount++;
+    return this;
+  };
+  const stubs = stubManualConfirmationDependencies();
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+
+  const first = await confirmSubscriptionPaymentAttempt({
+    paymentAttemptId: attempt._id,
+    confirmedBy: { _id: barberId, role: "barber" },
+  });
+  const subscription = stubs.getSubscription();
+
+  Subscription.findById = async (id) => {
+    assert.equal(String(id), String(subscription._id));
+    return subscription;
+  };
+
+  const second = await confirmSubscriptionPaymentAttempt({
+    paymentAttemptId: attempt._id,
+    confirmedBy: { _id: barberId, role: "barber" },
+  });
+
+  assert.equal(first.idempotent, false);
+  assert.equal(second.idempotent, true);
+  assert.equal(stubs.getSubscriptionCreateCount(), 1);
+  assert.equal(stubs.getSubscriptionFindCount(), 1);
+  assert.equal(stubs.getPaymentRecords().length, 1);
+  assert.equal(attemptSaveCount, 1);
+});
+
+test("cancel pending payment attempt works and does not activate subscription", async () => {
+  let attemptSaveCount = 0;
+  let subscriptionCreated = false;
+  const attempt = makePaymentAttempt({
+    save() {
+      attemptSaveCount++;
+      return this;
+    },
+  });
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+  Subscription.create = async () => {
+    subscriptionCreated = true;
+    return {};
+  };
+
+  const result = await cancelSubscriptionPaymentAttempt({
+    paymentAttemptId: attempt._id,
+    requester: { _id: barberId, role: "barber" },
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(attempt.status, "cancelled");
+  assert.equal(attemptSaveCount, 1);
+  assert.equal(subscriptionCreated, false);
+});
+
+test("cancelled payment attempt cannot be confirmed", async () => {
+  const attempt = makePaymentAttempt({ status: "cancelled" });
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+
+  await assert.rejects(
+    () =>
+      confirmSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        confirmedBy: { _id: barberId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 400 &&
+      error.message === "Only pending payment attempts can be confirmed"
+  );
+});
+
+test("non-owner cannot read, confirm, or cancel payment attempt", async () => {
+  const attempt = makePaymentAttempt();
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+
+  await assert.rejects(
+    () =>
+      getSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        requester: { _id: otherUserId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "You can only view your own payment attempt"
+  );
+
+  await assert.rejects(
+    () =>
+      cancelSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        requester: { _id: otherUserId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "You can only cancel your own payment attempt"
+  );
+
+  await assert.rejects(
+    () =>
+      confirmSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        confirmedBy: { _id: otherUserId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "You can only confirm your own payment attempt"
+  );
+});
+
+test("salon owner can confirm salon payment attempt", async () => {
+  const attempt = makePaymentAttempt({
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId: otherUserId,
+    seatCount: 4,
+    amount: 20000,
+  });
+  const stubs = stubManualConfirmationDependencies();
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+  Salon.findById = async () => makeSalonDoc({ ownerId: barberId });
+
+  const result = await confirmSubscriptionPaymentAttempt({
+    paymentAttemptId: attempt._id,
+    confirmedBy: { _id: barberId, role: "barber" },
+  });
+
+  assert.equal(result.paymentAttempt.status, "paid");
+  assert.equal(result.subscription.ownerType, "salon");
+  assert.equal(result.subscription.seatCount, 4);
+  assert.equal(result.subscription.totalPrice, defaultPlanDoc.pricePerSeat * 4);
+  assert.equal(stubs.getPaymentRecords().length, 1);
+  assert.equal(stubs.getPaymentRecords()[0].ownerType, "salon");
+});
+
+test("client cannot confirm payment attempt", async () => {
+  const attempt = makePaymentAttempt({
+    ownerId: clientId,
+    payerId: clientId,
+  });
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+
+  await assert.rejects(
+    () =>
+      confirmSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        confirmedBy: { _id: clientId, role: "client" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "Only barbers can manage subscription payments"
   );
 });
 

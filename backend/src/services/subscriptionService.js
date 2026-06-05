@@ -3,6 +3,7 @@ import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import PaymentRecord from "../models/PaymentRecord.js";
+import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
 import Salon from "../models/Salon.js";
 import User from "../models/User.js";
 import {
@@ -16,6 +17,7 @@ const TRIAL_DAYS = 14;
 const GRACE_DAYS = 30;
 const PAID_SUBSCRIPTION_STATUSES = ["trialing", "active"];
 const MANUAL_PROVIDER = "manual";
+const PAYMENT_ATTEMPT_EXPIRY_HOURS = 24;
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -180,6 +182,10 @@ const addMonths = (date, months) => {
 
 export const isManualActivationAvailable = () =>
   process.env.NODE_ENV !== "production";
+
+export const isDevPaymentConfirmationAvailable = () =>
+  process.env.NODE_ENV !== "production" ||
+  process.env.ALLOW_DEV_PAYMENT_CONFIRM === "true";
 
 export const getDaysRemaining = (date, now = new Date()) => {
   if (!date) return null;
@@ -386,8 +392,8 @@ export const extendManualSubscription = async ({
     }
   }
 
-  const normalizedSeatCount = Number(seatCount || 1);
-  const normalizedMonths = Number(months || 1);
+  const normalizedSeatCount = Number(seatCount ?? 1);
+  const normalizedMonths = Number(months ?? 1);
 
   if (!Number.isInteger(normalizedSeatCount) || normalizedSeatCount < 1) {
     const error = new Error("seatCount must be at least 1");
@@ -477,6 +483,110 @@ const normalizePaymentHistoryLimit = (limit) => {
   const parsed = Number(limit);
   if (!Number.isInteger(parsed) || parsed < 1) return 20;
   return Math.min(parsed, 100);
+};
+
+const buildPaymentAttemptExpiry = (now = new Date()) =>
+  new Date(now.getTime() + PAYMENT_ATTEMPT_EXPIRY_HOURS * 60 * 60 * 1000);
+
+const serializePaymentAttempt = (attempt) => {
+  if (!attempt) return null;
+  const raw = attempt.toObject ? attempt.toObject() : attempt;
+
+  return {
+    id: raw.id || raw._id,
+    _id: raw._id,
+    ownerType: raw.ownerType,
+    ownerId: raw.ownerId,
+    payerId: raw.payerId,
+    subscriptionId: raw.subscriptionId || null,
+    provider: raw.provider,
+    providerIntentId: raw.providerIntentId || null,
+    amount: raw.amount,
+    currency: raw.currency,
+    seatCount: raw.seatCount,
+    months: raw.months,
+    status: raw.status,
+    metadata: raw.metadata || {},
+    paidAt: raw.paidAt || null,
+    expiresAt: raw.expiresAt || null,
+    createdAt: raw.createdAt || null,
+    updatedAt: raw.updatedAt || null,
+  };
+};
+
+const validateSubscriptionRequester = async ({
+  requester,
+  ownerType,
+  ownerId,
+  payerId = null,
+  action = "manage",
+}) => {
+  if (!requester?._id) {
+    const error = new Error("Authentication required");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (requester.role !== "barber") {
+    const error = new Error("Only barbers can manage subscription payments");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (ownerType === "barber") {
+    if (!sameId(requester._id, ownerId) && !sameId(requester._id, payerId)) {
+      const error = new Error(`You can only ${action} your own payment attempt`);
+      error.statusCode = 403;
+      throw error;
+    }
+    return null;
+  }
+
+  if (ownerType === "salon") {
+    if (sameId(requester._id, payerId)) return null;
+
+    const salon = await Salon.findById(ownerId);
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!canManageSalonRequest(salon, requester._id)) {
+      const error = new Error(`Only salon owner or admin can ${action} payment attempts`);
+      error.statusCode = 403;
+      throw error;
+    }
+
+    return salon;
+  }
+
+  const error = new Error("ownerType must be 'barber' or 'salon'");
+  error.statusCode = 400;
+  throw error;
+};
+
+const getAuthorizedPaymentAttempt = async ({
+  paymentAttemptId,
+  requester,
+  action,
+}) => {
+  const attempt = await SubscriptionPaymentAttempt.findById(paymentAttemptId);
+  if (!attempt) {
+    const error = new Error("Payment attempt not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  await validateSubscriptionRequester({
+    requester,
+    ownerType: attempt.ownerType,
+    ownerId: attempt.ownerId,
+    payerId: attempt.payerId,
+    action,
+  });
+
+  return attempt;
 };
 
 export const getMySubscriptionPaymentHistory = async ({
@@ -652,20 +762,10 @@ export const createSubscriptionPaymentIntent = async ({
   ownerType,
   ownerId,
   seatCount = 1,
+  months = 1,
   providerName = "manual",
+  now = new Date(),
 }) => {
-  if (!requester?._id) {
-    const error = new Error("Authentication required");
-    error.statusCode = 401;
-    throw error;
-  }
-
-  if (requester.role !== "barber") {
-    const error = new Error("Only barbers can prepare subscription payments");
-    error.statusCode = 403;
-    throw error;
-  }
-
   if (!["barber", "salon"].includes(ownerType)) {
     const error = new Error("ownerType must be 'barber' or 'salon'");
     error.statusCode = 400;
@@ -678,36 +778,31 @@ export const createSubscriptionPaymentIntent = async ({
     throw error;
   }
 
-  const normalizedSeatCount = Number(seatCount || 1);
+  const normalizedSeatCount = Number(seatCount ?? 1);
+  const normalizedMonths = Number(months ?? 1);
   if (!Number.isInteger(normalizedSeatCount) || normalizedSeatCount < 1) {
     const error = new Error("seatCount must be at least 1");
     error.statusCode = 400;
     throw error;
   }
 
-  if (ownerType === "barber" && !sameId(requester._id, ownerId)) {
-    const error = new Error("You can only prepare payment for your own subscription");
-    error.statusCode = 403;
+  if (!Number.isInteger(normalizedMonths) || normalizedMonths < 1) {
+    const error = new Error("months must be at least 1");
+    error.statusCode = 400;
     throw error;
   }
 
-  if (ownerType === "salon") {
-    const salon = await Salon.findById(ownerId);
-    if (!salon) {
-      const error = new Error("Salon not found");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    if (!canManageSalonRequest(salon, requester._id)) {
-      const error = new Error("Only salon owner or admin can prepare payment");
-      error.statusCode = 403;
-      throw error;
-    }
-  }
+  await validateSubscriptionRequester({
+    requester,
+    ownerType,
+    ownerId,
+    payerId: ownerType === "barber" ? requester?._id : null,
+    action: "prepare",
+  });
 
   const plan = await getOrCreateDefaultSubscriptionPlan();
-  const amount = plan.pricePerSeat * normalizedSeatCount;
+  const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
+  const amount = monthlyTotal * normalizedMonths;
   const provider = getPaymentProvider(providerName);
   const paymentIntent = await provider.createPaymentIntent({
     amount,
@@ -716,18 +811,149 @@ export const createSubscriptionPaymentIntent = async ({
       ownerType,
       ownerId: String(ownerId),
       seatCount: normalizedSeatCount,
+      months: normalizedMonths,
       planCode: plan.code,
     },
+  });
+  const attempt = await SubscriptionPaymentAttempt.create({
+    ownerType,
+    ownerId,
+    payerId: requester._id,
+    provider: providerName,
+    providerIntentId: paymentIntent.providerIntentId || null,
+    amount,
+    currency: plan.currency,
+    seatCount: normalizedSeatCount,
+    months: normalizedMonths,
+    status: "pending",
+    metadata: {
+      ownerType,
+      ownerId: String(ownerId),
+      seatCount: normalizedSeatCount,
+      months: normalizedMonths,
+      planCode: plan.code,
+      monthlyTotal,
+    },
+    expiresAt: buildPaymentAttemptExpiry(now),
   });
 
   return {
     ...paymentIntent,
+    paymentAttemptId: getIdString(attempt._id),
+    paymentAttempt: serializePaymentAttempt(attempt),
     ownerType,
     ownerId: String(ownerId),
     seatCount: normalizedSeatCount,
+    months: normalizedMonths,
     pricePerSeat: plan.pricePerSeat,
+    monthlyTotal,
     amount,
     currency: plan.currency,
+    status: attempt.status,
+  };
+};
+
+export const getSubscriptionPaymentAttempt = async ({
+  paymentAttemptId,
+  requester,
+}) => {
+  const attempt = await getAuthorizedPaymentAttempt({
+    paymentAttemptId,
+    requester,
+    action: "view",
+  });
+
+  return serializePaymentAttempt(attempt);
+};
+
+export const cancelSubscriptionPaymentAttempt = async ({
+  paymentAttemptId,
+  requester,
+}) => {
+  const attempt = await getAuthorizedPaymentAttempt({
+    paymentAttemptId,
+    requester,
+    action: "cancel",
+  });
+
+  if (attempt.status !== "pending") {
+    const error = new Error("Only pending payment attempts can be cancelled");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  attempt.status = "cancelled";
+  await attempt.save();
+
+  return serializePaymentAttempt(attempt);
+};
+
+export const confirmSubscriptionPaymentAttempt = async ({
+  paymentAttemptId,
+  confirmedBy,
+  now = new Date(),
+}) => {
+  if (!isDevPaymentConfirmationAvailable()) {
+    const error = new Error("Dev payment confirmation is disabled in production");
+    error.statusCode = 403;
+    error.code = "DEV_PAYMENT_CONFIRM_DISABLED";
+    throw error;
+  }
+
+  const attempt = await getAuthorizedPaymentAttempt({
+    paymentAttemptId,
+    requester: confirmedBy,
+    action: "confirm",
+  });
+
+  if (attempt.status === "paid") {
+    return {
+      paymentAttempt: serializePaymentAttempt(attempt),
+      subscription: attempt.subscriptionId
+        ? serializeSubscriptionStatus(
+            await Subscription.findById(attempt.subscriptionId),
+            null,
+            now
+          )
+        : null,
+      idempotent: true,
+    };
+  }
+
+  if (attempt.status !== "pending") {
+    const error = new Error("Only pending payment attempts can be confirmed");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (attempt.expiresAt && new Date(attempt.expiresAt) <= now) {
+    attempt.status = "expired";
+    await attempt.save();
+
+    const error = new Error("Payment attempt has expired");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const subscription = await extendManualSubscription({
+    ownerType: attempt.ownerType,
+    ownerId: attempt.ownerId,
+    payerId: attempt.payerId,
+    seatCount: attempt.seatCount,
+    months: attempt.months,
+  });
+
+  attempt.status = "paid";
+  attempt.subscriptionId = subscription._id;
+  attempt.providerIntentId =
+    attempt.providerIntentId || `${attempt.provider}:${attempt._id}`;
+  attempt.paidAt = now;
+  await attempt.save();
+
+  return {
+    paymentAttempt: serializePaymentAttempt(attempt),
+    subscription: serializeSubscriptionStatus(subscription, null, now),
+    idempotent: false,
   };
 };
 

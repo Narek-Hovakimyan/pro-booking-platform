@@ -13,6 +13,9 @@ import {
   updateSeatCount,
   getMySubscriptionPayments,
   getSalonSubscriptionPayments,
+  getPaymentAttempt,
+  cancelPaymentAttempt,
+  devConfirmPaymentAttempt,
 } from "../controllers/subscriptionController.js";
 
 const router = express.Router();
@@ -34,6 +37,19 @@ router.post("/dev/extend", protect, devExtendSubscription);
 
 // POST /api/subscriptions/payment-intent
 router.post("/payment-intent", protect, createPaymentIntent);
+
+// GET /api/subscriptions/payment-attempts/:attemptId
+router.get("/payment-attempts/:attemptId", protect, getPaymentAttempt);
+
+// POST /api/subscriptions/payment-attempts/:attemptId/cancel
+router.post("/payment-attempts/:attemptId/cancel", protect, cancelPaymentAttempt);
+
+// POST /api/subscriptions/payment-attempts/:attemptId/dev-confirm
+router.post(
+  "/payment-attempts/:attemptId/dev-confirm",
+  protect,
+  devConfirmPaymentAttempt
+);
 
 /* ══════════════════════════════════════════════════════════
  *  Phase 2 — Salon seat assignment

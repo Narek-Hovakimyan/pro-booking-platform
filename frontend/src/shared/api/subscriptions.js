@@ -54,12 +54,35 @@ export const createSubscriptionPaymentIntent = async ({
   ownerType,
   ownerId,
   seatCount = 1,
+  months = 1,
 }) => {
   const { data } = await api.post("/subscriptions/payment-intent", {
     ownerType,
     ownerId,
     seatCount,
+    months,
   });
+  return data;
+};
+
+export const getSubscriptionPaymentAttempt = async (paymentAttemptId) => {
+  const { data } = await api.get(
+    `/subscriptions/payment-attempts/${paymentAttemptId}`
+  );
+  return data;
+};
+
+export const cancelSubscriptionPaymentAttempt = async (paymentAttemptId) => {
+  const { data } = await api.post(
+    `/subscriptions/payment-attempts/${paymentAttemptId}/cancel`
+  );
+  return data;
+};
+
+export const devConfirmSubscriptionPaymentAttempt = async (paymentAttemptId) => {
+  const { data } = await api.post(
+    `/subscriptions/payment-attempts/${paymentAttemptId}/dev-confirm`
+  );
   return data;
 };
 

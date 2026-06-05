@@ -13,7 +13,9 @@ import { useSelector } from "react-redux";
 import api from "@/shared/api/axios";
 import {
   assignSalonSeat,
+  cancelSubscriptionPaymentAttempt,
   createSubscriptionPaymentIntent,
+  devConfirmSubscriptionPaymentAttempt,
   extendManualSubscription,
   getSalonSubscription,
   getSalonSubscriptionPayments,
@@ -99,6 +101,7 @@ export default function SalonBillingPage() {
   const [selectedSalonId, setSelectedSalonId] = useState("");
   const [details, setDetails] = useState(null);
   const [seatCountInput, setSeatCountInput] = useState("");
+  const [paymentMonths, setPaymentMonths] = useState("1");
   const [manualSeatCount, setManualSeatCount] = useState("1");
   const [manualMonths, setManualMonths] = useState("1");
   const [selectedMemberId, setSelectedMemberId] = useState("");
@@ -106,10 +109,14 @@ export default function SalonBillingPage() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [saving, setSaving] = useState(false);
   const [paymentIntent, setPaymentIntent] = useState(null);
+  const [pendingAttempt, setPendingAttempt] = useState(null);
+  const [attemptActionError, setAttemptActionError] = useState("");
   const [payments, setPayments] = useState([]);
   const [paymentsError, setPaymentsError] = useState("");
   const [preparingPayment, setPreparingPayment] = useState(false);
   const [manualActivating, setManualActivating] = useState(false);
+  const [confirmingAttempt, setConfirmingAttempt] = useState(false);
+  const [cancellingAttempt, setCancellingAttempt] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -124,6 +131,9 @@ export default function SalonBillingPage() {
       try {
         const data = await getSalonSubscription(salonId);
         setDetails(data);
+        setPaymentIntent(null);
+        setPendingAttempt(null);
+        setAttemptActionError("");
         setPaymentsError("");
         try {
           const paymentData = await getSalonSubscriptionPayments(salonId);
@@ -201,7 +211,9 @@ export default function SalonBillingPage() {
   const paidSeatCount = Number(subscription?.seatCount || 0);
   const usedSeatCount = activeSeats.length;
   const purchaseSeatCount = Math.max(1, Number(seatCountInput) || 1);
-  const purchaseTotal = pricePerSeat * purchaseSeatCount;
+  const purchaseMonths = Math.max(1, Number(paymentMonths) || 1);
+  const purchaseMonthlyTotal = pricePerSeat * purchaseSeatCount;
+  const purchaseTotal = purchaseMonthlyTotal * purchaseMonths;
   const manualActivationSeatCount = Math.max(1, Number(manualSeatCount) || 1);
   const activeSeatMemberIds = useMemo(
     () => new Set(activeSeats.map((seat) => getPersonId(seat))),
@@ -257,15 +269,22 @@ export default function SalonBillingPage() {
 
   const handlePreparePayment = async () => {
     const nextSeatCount = Number(seatCountInput || 1);
+    const months = Number(paymentMonths || 1);
 
     if (!selectedSalonId || !Number.isInteger(nextSeatCount) || nextSeatCount < 1) {
       setError("Seat count must be at least 1.");
       return;
     }
 
+    if (!Number.isInteger(months) || months < 1) {
+      setError("Months must be at least 1.");
+      return;
+    }
+
     setPreparingPayment(true);
     setError("");
     setSuccess("");
+    setAttemptActionError("");
     setPaymentIntent(null);
 
     try {
@@ -273,12 +292,56 @@ export default function SalonBillingPage() {
         ownerType: "salon",
         ownerId: selectedSalonId,
         seatCount: nextSeatCount,
+        months,
       });
       setPaymentIntent(data);
+      setPendingAttempt(data.paymentAttempt || null);
     } catch (requestError) {
       setError(normalizeError(requestError, "Could not prepare manual payment."));
     } finally {
       setPreparingPayment(false);
+    }
+  };
+
+  const handleConfirmAttempt = async () => {
+    const attemptId = pendingAttempt?.id || pendingAttempt?._id;
+    if (!attemptId || confirmingAttempt) return;
+
+    setConfirmingAttempt(true);
+    setAttemptActionError("");
+
+    try {
+      const result = await devConfirmSubscriptionPaymentAttempt(attemptId);
+      setPendingAttempt(result.paymentAttempt || null);
+      setSuccess("Payment attempt confirmed manually.");
+      await loadDetails(selectedSalonId, { keepMessage: true });
+    } catch (requestError) {
+      setAttemptActionError(
+        normalizeError(requestError, "Could not confirm payment attempt.")
+      );
+    } finally {
+      setConfirmingAttempt(false);
+    }
+  };
+
+  const handleCancelAttempt = async () => {
+    const attemptId = pendingAttempt?.id || pendingAttempt?._id;
+    if (!attemptId || cancellingAttempt) return;
+
+    setCancellingAttempt(true);
+    setAttemptActionError("");
+
+    try {
+      await cancelSubscriptionPaymentAttempt(attemptId);
+      setPendingAttempt(null);
+      setPaymentIntent(null);
+      setSuccess("Prepared payment cancelled.");
+    } catch (requestError) {
+      setAttemptActionError(
+        normalizeError(requestError, "Could not cancel payment attempt.")
+      );
+    } finally {
+      setCancellingAttempt(false);
     }
   };
 
@@ -599,11 +662,27 @@ export default function SalonBillingPage() {
                         value={seatCountInput}
                       />
                     </label>
+                    <label className="block">
+                      <span className="text-sm font-medium text-neutral-700">
+                        Months
+                      </span>
+                      <input
+                        className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                        min="1"
+                        onChange={(event) => setPaymentMonths(event.target.value)}
+                        type="number"
+                        value={paymentMonths}
+                      />
+                    </label>
                     <div className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-700">
                       <div>Price per seat: {formatCurrency(pricePerSeat, currency)}</div>
                       <div className="mt-1 font-semibold text-neutral-950">
                         {purchaseSeatCount} x {formatCurrency(pricePerSeat, currency)} ={" "}
-                        {formatCurrency(purchaseTotal, currency)}/month
+                        {formatCurrency(purchaseMonthlyTotal, currency)}/month
+                      </div>
+                      <div className="mt-1 font-semibold text-neutral-950">
+                        Total: {formatCurrency(purchaseTotal, currency)} for{" "}
+                        {purchaseMonths} month(s)
                       </div>
                     </div>
                     <Button
@@ -634,6 +713,61 @@ export default function SalonBillingPage() {
                           {formatCurrency(paymentIntent.pricePerSeat, paymentIntent.currency)}
                           /seat
                         </p>
+                      </div>
+                    )}
+                    {pendingAttempt && (
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                        <div className="font-semibold">
+                          Payment prepared but not active yet
+                        </div>
+                        <p className="mt-1">
+                          Attempt: {pendingAttempt.id || pendingAttempt._id}
+                        </p>
+                        <p className="mt-1 capitalize">
+                          Status: {pendingAttempt.status}
+                        </p>
+                        <p className="mt-1">
+                          {pendingAttempt.seatCount || 1} seat(s),{" "}
+                          {pendingAttempt.months || 1} month(s),{" "}
+                          {formatCurrency(pendingAttempt.amount, pendingAttempt.currency)}
+                        </p>
+                        <p className="mt-1">
+                          Subscription activates only after payment confirmation.
+                        </p>
+                        <div className="mt-3 flex flex-col gap-2">
+                          {showManualActivationPanel &&
+                            pendingAttempt.status === "pending" && (
+                              <Button
+                                disabled={confirmingAttempt}
+                                onClick={handleConfirmAttempt}
+                              >
+                                {confirmingAttempt
+                                  ? "Confirming..."
+                                  : "Confirm manually"}
+                              </Button>
+                            )}
+                          {pendingAttempt.status === "pending" && (
+                            <Button
+                              disabled={cancellingAttempt}
+                              onClick={handleCancelAttempt}
+                              variant="outline"
+                            >
+                              {cancellingAttempt
+                                ? "Cancelling..."
+                                : "Cancel prepared payment"}
+                            </Button>
+                          )}
+                        </div>
+                        {showManualActivationPanel && (
+                          <p className="mt-2 text-blue-700">
+                            Manual confirm is development-only.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {attemptActionError && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                        {attemptActionError}
                       </div>
                     )}
                   </CardContent>

@@ -11,6 +11,9 @@ import {
   createSubscriptionPaymentIntent,
   getMySubscriptionPaymentHistory,
   getSalonSubscriptionPaymentHistory,
+  getSubscriptionPaymentAttempt,
+  cancelSubscriptionPaymentAttempt,
+  confirmSubscriptionPaymentAttempt,
 } from "../services/subscriptionService.js";
 
 const isProduction = () => process.env.NODE_ENV === "production";
@@ -72,8 +75,8 @@ export const devGrantSubscription = async (req, res) => {
       ownerType,
       ownerId,
       payerId,
-      seatCount: seatCount || 1,
-      months: months || 1,
+      seatCount: seatCount ?? 1,
+      months: months ?? 1,
       requester: req.user,
     });
 
@@ -92,13 +95,14 @@ export const devExtendSubscription = devGrantSubscription;
 
 export const createPaymentIntent = async (req, res) => {
   try {
-    const { ownerType, ownerId, seatCount } = req.body || {};
+    const { ownerType, ownerId, seatCount, months } = req.body || {};
 
     const paymentIntent = await createSubscriptionPaymentIntent({
       requester: req.user,
       ownerType,
       ownerId,
       seatCount,
+      months,
       providerName: "manual",
     });
 
@@ -108,6 +112,57 @@ export const createPaymentIntent = async (req, res) => {
     return res.status(status).json({
       code: error.code,
       message: error.message || "Could not prepare payment",
+    });
+  }
+};
+
+export const getPaymentAttempt = async (req, res) => {
+  try {
+    const attempt = await getSubscriptionPaymentAttempt({
+      paymentAttemptId: req.params.attemptId,
+      requester: req.user,
+    });
+
+    return res.json(attempt);
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not fetch payment attempt",
+    });
+  }
+};
+
+export const cancelPaymentAttempt = async (req, res) => {
+  try {
+    const attempt = await cancelSubscriptionPaymentAttempt({
+      paymentAttemptId: req.params.attemptId,
+      requester: req.user,
+    });
+
+    return res.json(attempt);
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not cancel payment attempt",
+    });
+  }
+};
+
+export const devConfirmPaymentAttempt = async (req, res) => {
+  try {
+    const result = await confirmSubscriptionPaymentAttempt({
+      paymentAttemptId: req.params.attemptId,
+      confirmedBy: req.user,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not confirm payment attempt",
     });
   }
 };
