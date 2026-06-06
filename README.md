@@ -1,6 +1,6 @@
 # HairBook — Pro Booking Platform
 
-A full-stack SaaS application for salon and barber appointment management. HairBook connects clients with barbers and salons, providing booking, messaging, reviews, portfolio, events, and a subscription-based access model.
+A full-stack SaaS application for salon and barber appointment management. HairBook connects clients with barbers and salons, providing booking, messaging, reviews, portfolio, events, jobs, and a subscription-based access model.
 
 **Roles:** Client | Barber | Salon Owner | Salon Admin  
 **Monetization:** Individual barber subscriptions + salon seat subscriptions  
@@ -14,7 +14,7 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 | Library | Purpose |
 |---|---|
 | **React 19** | UI framework |
-| **Vite 8** | Build tool / dev server |
+| **Vite 6** | Build tool / dev server |
 | **Redux Toolkit** | State management |
 | **React Router 7** | Client-side routing |
 | **Tailwind CSS 3** | Utility-first styling |
@@ -57,8 +57,11 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 - Register for barber events
 - View event certificates (public verification page)
 - Booking history and loyalty tracking
+- **Reference images** — upload reference/after photos when booking
+- **Consultation & consent forms** — capture client details and consent during booking
 
 ### Barber
+
 - Manage personal profile, gallery, portfolio photos
 - Manage certifications and uploaded certificates
 - Manage services and packages (single, package with included services)
@@ -77,6 +80,7 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 - **Salon dashboard** (if owner/admin)
 - **Salon calendar** (if owner/admin)
 - **Salon billing** (if owner/admin — seat subscription management)
+- **Salon reports** (if owner/admin — date-range analytics, revenue, top services, per-staff breakdown)
 - Treatment records via booking outcomes
 
 ### Salon Owner / Admin
@@ -90,6 +94,7 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 - Remove barbers from salon
 - **Salon dashboard** — aggregated metrics, revenue, alerts, staff overview
 - **Salon calendar** — unified view of all staff bookings
+- **Salon reports** — date-range analytics with revenue, booking status, per-staff breakdown, daily trends, top services
 - **Salon billing** — manage seat subscription and seat assignments
 - Public booking link configuration
 
@@ -142,11 +147,14 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 | `/register` | public | Registration |
 | `/login` | public | Login |
 | `/barbers` | client | Browse barbers |
+| `/specialists` | client | Browse barbers (alias for `/barbers`) |
 | `/barbers/:barberId/profile` | client | Barber profile detail |
+| `/specialists/:barberId/profile` | client | Barber profile detail (alias) |
 | `/salons` | client | Browse salons |
 | `/salons/:salonId` | public | Salon profile |
 | `/salons/:salonId/book` | public | **Public salon booking link** |
 | `/booking/:barberId` | client | Book appointment with barber |
+| `/success` | client | Booking success page |
 | `/my-bookings` | client | My bookings |
 | `/my-waitlist` | client | My waitlist entries |
 | `/favorites` | client | Favorites (barbers + salons) |
@@ -174,13 +182,16 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 | `/admin/profile` | barber | Profile settings |
 | `/admin/settings` | barber | Settings |
 | `/admin/settings/salon` | barber | Salon membership settings |
+| `/admin/settings/default-schedule` | barber | Default personal schedule settings |
+| `/admin/settings/certifications` | barber | Certifications management |
 | `/admin/billing` | barber | Individual subscription billing |
 | `/admin/salon/dashboard` | barber | Salon owner dashboard |
 | `/admin/salon/calendar` | barber | Salon owner unified calendar |
 | `/admin/salon/billing` | barber | Salon subscription billing |
-| `/success` | client | Booking success page |
+| `/admin/salon/reports` | barber | Salon owner analytics reports |
 
 *\* Requires active subscription or salon seat*
+
 
 ### Backend API Groups
 
@@ -189,8 +200,8 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 | Auth | `/api/auth` | Register, login, email verification |
 | Users | `/api/users` | User profile, barber listing |
 | Barbers | `/api/barbers` | Barber profile, client-facing barber data |
-| Salons | `/api/salons` | Salon CRUD, membership, staff, dashboard, calendar, public booking |
-| Bookings | `/api/bookings` | Create, cancel, reschedule, outcomes, read |
+| Salons | `/api/salons` | Salon CRUD, membership, staff, dashboard, calendar, public booking, **reports** |
+| Bookings | `/api/bookings` | Create, cancel, reschedule, outcomes, read, analytics |
 | Services | `/api/services` | Barber services & packages |
 | Service Categories | `/api/service-categories` | Service categories |
 | Schedules | `/api/schedules` | Weekly schedule, date overrides, non-working days |
@@ -226,7 +237,21 @@ hairdressProject/
 │   │   ├── routes/              # Express routers
 │   │   ├── services/            # Business logic
 │   │   │   ├── payment/         # Payment provider abstraction ( ManualPaymentProvider, factory )
-│   │   │   └── salon/           # Salon dashboard, calendar, membership, staff, relationship services
+│   │   │   ├── salon/           # Salon dashboard, calendar, membership, staff, relationship, reports services
+│   │   │   ├── bookingAnalyticsService.js
+│   │   │   ├── bookingOutcomeService.js
+│   │   │   ├── bookingReadService.js
+│   │   │   ├── bookingReminderService.js
+│   │   │   ├── bookingSideEffectsService.js
+│   │   │   ├── clientReliabilityService.js
+│   │   │   ├── emailService.js
+│   │   │   ├── notificationService.js
+│   │   │   ├── revenueService.js
+│   │   │   ├── subscriptionService.js
+│   │   │   ├── subscriptionExpirationScheduler.js
+│   │   │   ├── waitlistService.js
+│   │   │   ├── waitlistExpirationScheduler.js
+│   │   │   └── waitlistValidation.js
 │   │   ├── utils/               # Helpers (schedule, booking, event, salon, media URLs, permissions)
 │   │   └── server.js            # Express app entry point
 │   ├── cron/                    # node-cron jobs (cleanup, event reminders, pending bookings)
@@ -242,9 +267,9 @@ hairdressProject/
 │   │   ├── barber/              # Barber dashboard pages & components
 │   │   │   ├── components/      # ServicesManager, ScheduleManager, BookingsList, PortfolioManager, etc.
 │   │   │   └── pages/           # AdminPage, BillingPage, SalonDashboardPage, SalonCalendarPage, etc.
-│   │   ├── features/            # Feature modules (events, messages)
+│   │   ├── features/            # Feature modules (events, messages, jobs, reviews)
 │   │   ├── shared/              # Shared UI, API client, hooks, utils, SubscriptionGuard
-│   │   │   └── api/             # Axios client, API modules (subscriptions, salonDashboard, etc.)
+│   │   │   └── api/             # Axios client, API modules (subscriptions, salonDashboard, salonCalendar, etc.)
 │   │   ├── store/               # Redux store, slices, localStorage middleware
 │   │   └── pages/               # Cross-role pages (Login, Register, Messages, Events, Certificates)
 │   └── .env.example
@@ -254,13 +279,17 @@ hairdressProject/
 ### Key directories explained
 
 - **`frontend/src/client`** — Views for end-users: browsing barbers/salons, booking, reviews, favorites, waitlist.
-- **`frontend/src/barber`** — Barber/admin dashboard: manage services, schedule, bookings, calendar, portfolio, events, certificates, billing, salon management.
-- **`frontend/src/shared/api/`** — API client modules for subscriptions, salon dashboard, salon calendar, public booking, revenue, portfolio, service categories.
-- **`frontend/src/shared/components/`** — Reusable UI including `SubscriptionGuard` (paid-access wrapper), `ProtectedRoute`, `Header`, notifications.
+- **`frontend/src/barber`** — Barber/admin dashboard: manage services, schedule, bookings, calendar, portfolio, events, certificates, billing, salon management (includes `SalonPromotionsManager`, `SalonDashboardPage`, `SalonReportsPage`, etc.).
+- **`frontend/src/features/`** — Modular feature directories for events, jobs, messages, and reviews.
+- **`frontend/src/shared/api/`** — API client modules for subscriptions, salon dashboard, salon calendar, public booking, revenue, portfolio, service categories, loyalty, salon promotions.
+- **`frontend/src/shared/components/`** — Reusable UI including `SubscriptionGuard` (paid-access wrapper), `ProtectedRoute`, `Header`, notifications, `BookingDetailsModal`.
+- **`frontend/src/pages/`** — Cross-role pages: `SalonPublicBookingPage` (public booking wizard), `Login`, `Register`, `Messages`, `Events`, `Certificates`.
 - **`backend/src/services/payment/`** — Payment provider abstraction layer (`ManualPaymentProvider`, factory pattern, provider interface).
-- **`backend/src/services/salon/`** — Salon-specific business logic: dashboard aggregation, unified calendar, membership management, staff/relationship services.
+- **`backend/src/services/salon/`** — Salon-specific business logic: dashboard aggregation, unified calendar, membership management, staff/relationship services, salon reports.
 - **`backend/src/services/subscriptionService.js`** — Core subscription logic: plans, access checks, seats, payment intent lifecycle, expiration.
-- **`backend/src/models/`** — Mongoose schemas including `SubscriptionPlan`, `Subscription`, `SubscriptionSeat`, `PaymentRecord`, `SubscriptionPaymentAttempt`, `WaitlistEntry`, `PortfolioPhoto`, `Event`, `EventRegistration`, `EventCertificate`, `SalonJobPost`, `SalonJobApplication`, `Voucher`, `LoyaltyProgram`, `LoyaltyProgress`.
+- **`backend/src/middleware/uploadMiddleware.js`** — Multer configuration for avatars, certifications, event files, portfolio photos, certificates, and booking reference images.
+- **`backend/src/models/`** — Mongoose schemas including `SubscriptionPlan`, `Subscription`, `SubscriptionSeat`, `PaymentRecord`, `SubscriptionPaymentAttempt`, `WaitlistEntry`, `PortfolioPhoto`, `Event`, `EventRegistration`, `EventCertificate`, `EventReview`, `SalonJobPost`, `SalonJobApplication`, `Voucher`, `LoyaltyProgram`, `LoyaltyProgress`, `SalonReview`, `SalonFavorite`.
+
 
 ---
 
@@ -362,7 +391,8 @@ Default ports:
 
 ## Testing Checklist
 
-- [ ] Backend: `npm test` (currently over **1,100 backend tests** covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, salon dashboard, salon calendar, subscription, waitlist, socket auth, availability, and more)
+- [ ] Backend: `npm test` (currently over **1,162 backend tests** covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, salon dashboard, salon calendar, salon reports, subscription, waitlist, socket auth, availability, and more)
+
 - [ ] Frontend lint: `npm run lint`
 - [ ] Frontend build: `npm run build`
 
@@ -525,7 +555,8 @@ Then serve `frontend/dist/` with any static file server, ensuring SPA fallback.
 
 ## Deployment Checklist
 
-- [ ] Backend `npm test` passes (1,100+ tests — requires local MongoDB)
+- [ ] Backend `npm test` passes (1,162+ tests — requires local MongoDB)
+
 - [ ] Frontend `npm run lint` passes
 - [ ] Frontend `npm run build` succeeds
 - [ ] `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_API_ORIGIN` set before frontend build

@@ -284,9 +284,18 @@ const bookingSchema = new mongoose.Schema(
       ref: "Voucher",
       default: null,
     },
+    promotionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Voucher",
+      default: null,
+    },
     voucherDiscount: {
       type: Number,
       default: 0,
+      min: 0,
+    },
+    discountAmount: {
+      type: Number,
       min: 0,
     },
     voucherCode: {
@@ -294,9 +303,18 @@ const bookingSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    promotionCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+    originalPrice: {
+      type: Number,
+      min: 0,
+    },
     finalPrice: {
       type: Number,
-      default: 0,
       min: 0,
     },
   },

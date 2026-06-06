@@ -14,7 +14,6 @@ const voucherSchema = new mongoose.Schema(
     code: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
       trim: true,
     },
@@ -23,6 +22,11 @@ const voucherSchema = new mongoose.Schema(
       required: true,
       trim: true,
       maxlength: 120,
+    },
+    discountType: {
+      type: String,
+      enum: ["fixed", "percentage"],
+      default: "fixed",
     },
     type: {
       type: String,
@@ -34,9 +38,27 @@ const voucherSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
     serviceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Service",
+      default: null,
+    },
+    applicableServiceIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
+      default: [],
+    },
+    applicableBarberIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+      default: [],
+    },
+    startDate: {
+      type: Date,
       default: null,
     },
     maxUses: {
@@ -71,8 +93,10 @@ const voucherSchema = new mongoose.Schema(
 );
 
 voucherSchema.index({ ownerType: 1, ownerId: 1 });
-voucherSchema.index({ code: 1 }, { unique: true });
+voucherSchema.index({ ownerType: 1, ownerId: 1, code: 1 }, { unique: true });
+voucherSchema.index({ code: 1 });
 voucherSchema.index({ active: 1, expiresAt: 1 });
+voucherSchema.index({ active: 1, startDate: 1, expiresAt: 1 });
 
 const Voucher = mongoose.model("Voucher", voucherSchema);
 

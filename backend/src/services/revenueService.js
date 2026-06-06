@@ -64,6 +64,28 @@ const assertOwnBarberAccess = ({ barberId, requester }) => {
   }
 };
 
+const getBookingRevenueAmount = (booking) => {
+  const finalPrice = Number(booking?.finalPrice);
+  const hasDiscountMarker = Boolean(
+    booking?.promotionId ||
+      booking?.voucherId ||
+      booking?.promotionCode ||
+      booking?.voucherCode ||
+      Number(booking?.discountAmount || booking?.voucherDiscount || 0) > 0
+  );
+  if (
+    hasDiscountMarker &&
+    booking?.finalPrice !== undefined &&
+    booking?.finalPrice !== null &&
+    Number.isFinite(finalPrice)
+  ) {
+    return finalPrice;
+  }
+
+  const price = Number(booking?.price);
+  return Number.isFinite(price) ? price : 0;
+};
+
 export const getBarberRevenueSummary = async ({
   barberId,
   requester,
@@ -107,7 +129,7 @@ export const getBarberRevenueSummary = async ({
   // ── Revenue data (completed only) ──
   const completedBookings = bookings.filter((b) => b.status === "completed");
   const totalRevenue = completedBookings.reduce(
-    (sum, b) => sum + (Number.isFinite(Number(b.price)) ? Number(b.price) : 0),
+    (sum, b) => sum + getBookingRevenueAmount(b),
     0
   );
   const completedBookingsCount = completedBookings.length;
@@ -122,7 +144,7 @@ export const getBarberRevenueSummary = async ({
     const dateKey = getBookingDateField(b);
     if (!dateKey) continue;
     const existing = dayMap.get(dateKey) || { revenue: 0, count: 0 };
-    existing.revenue += Number.isFinite(Number(b.price)) ? Number(b.price) : 0;
+    existing.revenue += getBookingRevenueAmount(b);
     existing.count += 1;
     dayMap.set(dateKey, existing);
   }
@@ -139,7 +161,7 @@ export const getBarberRevenueSummary = async ({
   for (const b of completedBookings) {
     const name = b.serviceName || "Unknown";
     const existing = serviceRevenueMap.get(name) || { revenue: 0, count: 0 };
-    existing.revenue += Number.isFinite(Number(b.price)) ? Number(b.price) : 0;
+    existing.revenue += getBookingRevenueAmount(b);
     existing.count += 1;
     serviceRevenueMap.set(name, existing);
   }

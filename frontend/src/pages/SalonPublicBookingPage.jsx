@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { MapPin, Phone, Star, Store, UserRound, LogIn, CalendarDays, Scissors } from "lucide-react";
+import { MapPin, Phone, Star, Store, UserRound, LogIn, CalendarDays, Scissors, X } from "lucide-react";
+
 
 import { getPublicSalonBooking } from "@/shared/api/publicSalonBooking";
 import api from "@/shared/api/axios";
@@ -323,6 +324,41 @@ export default function SalonPublicBookingPage() {
     setSelectedTime("");
   };
 
+  const [promoCode, setPromoCode] = useState("");
+  const [promoStatus, setPromoStatus] = useState({ type: "", message: "" });
+  const [validatedPromo, setValidatedPromo] = useState(null);
+  const [validatingPromo, setValidatingPromo] = useState(false);
+
+  // ── Promo code validation ──
+  const handleApplyPromo = async () => {
+    const code = promoCode.trim().toUpperCase();
+    if (!code) return;
+    setValidatingPromo(true);
+    setPromoStatus({ type: "", message: "" });
+    try {
+      const res = await api.post(`/salons/${salonId}/promotions/validate`, {
+        code,
+        serviceId: selectedService?.id || selectedService?._id,
+        barberId: selectedBarber?.id || selectedBarber?._id,
+      });
+      if (res.data.valid) {
+        setValidatedPromo(res.data.promotion);
+        setPromoStatus({ type: "success", message: `${res.data.promotion.title} applied! ${res.data.discountAmount > 0 ? `Save ${Number(res.data.discountAmount).toLocaleString()} դր.` : ""}` });
+      }
+    } catch (err) {
+      setValidatedPromo(null);
+      setPromoStatus({ type: "error", message: err.response?.data?.message || "Invalid promo code" });
+    } finally {
+      setValidatingPromo(false);
+    }
+  };
+
+  const handleRemovePromo = () => {
+    setPromoCode("");
+    setValidatedPromo(null);
+    setPromoStatus({ type: "", message: "" });
+  };
+
   // ── Submit booking ──
   const submitBooking = async () => {
     if (
@@ -361,6 +397,10 @@ export default function SalonPublicBookingPage() {
         salonId,
       };
 
+      if (validatedPromo) {
+        bookingPayload.promotionCode = validatedPromo.code;
+      }
+
       await createBooking(bookingPayload);
 
       setBookingSuccess(true);
@@ -390,7 +430,9 @@ export default function SalonPublicBookingPage() {
   );
 
   // ── Loading state ──
+
   if (isLoading) {
+
     return (
       <div className="space-y-4">
         <div className="h-48 animate-pulse rounded-2xl bg-neutral-100" />
@@ -941,6 +983,50 @@ export default function SalonPublicBookingPage() {
               </div>
             </div>
 
+            {/* ── Promo code ── */}
+            <div className="rounded-2xl border border-neutral-200 p-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-neutral-600 mb-2">
+                Promo code
+              </div>
+              {validatedPromo ? (
+                <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm">
+                  <div>
+                    <span className="font-semibold text-emerald-800">{validatedPromo.code}</span>
+                    <span className="ml-2 text-emerald-600">— {validatedPromo.title}</span>
+                  </div>
+                  <button
+                    onClick={handleRemovePromo}
+                    className="rounded-lg p-1 text-emerald-500 hover:bg-emerald-100"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                    className="flex-1 rounded-xl border border-neutral-200 p-3 text-sm transition focus:border-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-100"
+                    placeholder="Enter promo code"
+                    maxLength={20}
+                  />
+                  <button
+                    onClick={handleApplyPromo}
+                    disabled={validatingPromo || !promoCode.trim()}
+                    className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                  >
+                    {validatingPromo ? "..." : "Apply"}
+                  </button>
+                </div>
+              )}
+              {promoStatus.message && (
+                <p className={`mt-2 text-sm ${promoStatus.type === "success" ? "text-emerald-600" : "text-red-600"}`}>
+                  {promoStatus.message}
+                </p>
+              )}
+            </div>
+
             {currentUser ? (
               <>
                 {/* Client details form */}
@@ -953,6 +1039,7 @@ export default function SalonPublicBookingPage() {
                     onChange={(e) => setClient({ ...client, name: e.target.value })}
                   />
                 </label>
+
 
                 <label className="grid gap-1.5 text-sm font-semibold">
                   <span>Phone <span className="text-red-500">*</span></span>

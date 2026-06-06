@@ -20,6 +20,28 @@ export class DashboardError extends Error {
   }
 }
 
+const getBookingRevenueAmount = (booking) => {
+  const finalPrice = Number(booking?.finalPrice);
+  const hasDiscountMarker = Boolean(
+    booking?.promotionId ||
+      booking?.voucherId ||
+      booking?.promotionCode ||
+      booking?.voucherCode ||
+      Number(booking?.discountAmount || booking?.voucherDiscount || 0) > 0
+  );
+  if (
+    hasDiscountMarker &&
+    booking?.finalPrice !== undefined &&
+    booking?.finalPrice !== null &&
+    Number.isFinite(finalPrice)
+  ) {
+    return finalPrice;
+  }
+
+  const price = Number(booking?.price || booking?.totalPrice || 0);
+  return Number.isFinite(price) ? price : 0;
+};
+
 /**
  * Get approved salon member IDs, grouped by relationship type.
  */
@@ -276,11 +298,11 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
   ]);
 
   const todayRevenue = todayCompleted.reduce(
-    (sum, b) => sum + Number(b.price || b.totalPrice || 0),
+    (sum, b) => sum + getBookingRevenueAmount(b),
     0
   );
   const monthRevenue = monthCompleted.reduce(
-    (sum, b) => sum + Number(b.price || b.totalPrice || 0),
+    (sum, b) => sum + getBookingRevenueAmount(b),
     0
   );
 

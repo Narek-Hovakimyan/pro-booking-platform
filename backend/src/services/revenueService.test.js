@@ -76,6 +76,44 @@ test("barber gets revenue summary for own completed bookings", async () => {
   assert.equal(summary.to, to);
 });
 
+test("revenue summary uses finalPrice when present", async () => {
+  Booking.find = mockFind([
+    createBooking({
+      bookingDate: "2024-06-03",
+      price: 100,
+      finalPrice: 70,
+      promotionId: "promotion-1",
+      serviceName: "Haircut",
+    }),
+    createBooking({
+      bookingDate: "2024-06-04",
+      price: 50,
+      finalPrice: 0,
+      promotionId: "promotion-2",
+      serviceName: "Beard Trim",
+    }),
+    createBooking({
+      bookingDate: "2024-06-05",
+      price: 30,
+      serviceName: "Legacy",
+    }),
+  ]);
+
+  const summary = await getBarberRevenueSummary({
+    barberId,
+    requester: barberRequester,
+    from,
+    to,
+  });
+
+  assert.equal(summary.totalRevenue, 100);
+  assert.equal(summary.completedBookingsCount, 3);
+  assert.deepEqual(
+    summary.revenueByDay.map((item) => item.revenue),
+    [70, 0, 30]
+  );
+});
+
 test("client requester is forbidden", async () => {
   await assertRevenueError(
     getBarberRevenueSummary({ barberId, requester: clientRequester, from, to }),

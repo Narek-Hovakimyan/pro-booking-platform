@@ -104,6 +104,14 @@ export default function AdminPanel({
           />
         )}
 
+        {section === "salon-promotions" && (
+          <BarberSettings
+            error={error}
+            isLoading={isLoading}
+            settingsView="promotions"
+          />
+        )}
+
         {section === "settings-default-schedule" && (
           <BarberSettings
             error={error}

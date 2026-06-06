@@ -859,6 +859,10 @@ export default function App() {
               element={renderAdminPage("vouchers", { requireSubscription: true })}
             />
             <Route
+              path="/admin/salon/promotions"
+              element={renderAdminPage("salon-promotions", { requireSubscription: true })}
+            />
+            <Route
               path="/admin/calendar"
               element={
                 <ProtectedRoute role="barber">

@@ -106,11 +106,69 @@ test("createBooking with valid voucherCode applies discount to booking.price and
 
   assert.equal(res.statusCode, 201);
   assert.equal(String(createdBookings[0].voucherId), "voucher-1");
+  assert.equal(String(createdBookings[0].promotionId), "voucher-1");
   assert.equal(createdBookings[0].voucherCode, "WELCOME10");
+  assert.equal(createdBookings[0].promotionCode, "WELCOME10");
   assert.equal(createdBookings[0].voucherDiscount, 10);
+  assert.equal(createdBookings[0].discountAmount, 10);
+  assert.equal(createdBookings[0].originalPrice, 100);
   assert.equal(createdBookings[0].finalPrice, 90); // audit trail
   assert.equal(createdBookings[0].price, 90); // booking.price is the discounted price
   assert.equal(createdBookings[0].price, 100 - 10); // service.price(100) - voucherDiscount(10)
+});
+
+test("createBooking with promotionCode stores promotion fields", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  const voucher = {
+    _id: "promotion-1",
+    ownerType: "salon",
+    ownerId: salonId,
+    code: "SAVE25",
+    title: "Save 25",
+    type: "amount",
+    discountType: "percentage",
+    amount: 25,
+    maxUses: 5,
+    currentUses: 0,
+    active: true,
+    expiresAt: null,
+    startDate: null,
+    applicableServiceIds: [serviceId],
+    applicableBarberIds: [barberId],
+    redemptionBookingIds: [],
+  };
+
+  Voucher.findOne = async () => voucher;
+  Voucher.findOneAndUpdate = async () => voucher;
+  Voucher.findByIdAndUpdate = async () => voucher;
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        promotionCode: "save25",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].price, 75);
+  assert.equal(createdBookings[0].originalPrice, 100);
+  assert.equal(createdBookings[0].discountAmount, 25);
+  assert.equal(createdBookings[0].finalPrice, 75);
+  assert.equal(createdBookings[0].promotionCode, "SAVE25");
+  assert.equal(String(createdBookings[0].promotionId), "promotion-1");
 });
 
 test("createBooking with invalid voucherCode returns 400", async () => {

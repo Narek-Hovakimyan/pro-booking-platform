@@ -23,10 +23,17 @@ import {
   updateMemberRelationshipType,
 } from "../controllers/salonStaffController.js";
 import { getDashboard } from "../controllers/salonDashboardController.js";
+import { getReports } from "../controllers/salonReportController.js";
 import { getCalendar } from "../controllers/salonCalendarController.js";
 import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
+import {
+  getSalonPromotions,
+  createSalonPromotion,
+  updateSalonPromotion,
+  validateSalonPromotion,
+} from "../controllers/salonPromotionController.js";
 
 const router = express.Router();
 
@@ -40,6 +47,11 @@ router.get("/:salonId/admins", protect, getSalonAdmins);
 router.get("/:salonId/dashboard", protect, getDashboard);
 router.get("/:salonId/calendar", protect, getCalendar);
 router.get("/:salonId/public-booking", getPublicSalonBooking);
+router.get("/:salonId/reports", protect, getReports);
+router.get("/:salonId/promotions", protect, getSalonPromotions);
+router.post("/:salonId/promotions", protect, createSalonPromotion);
+router.post("/:salonId/promotions/validate", validateSalonPromotion);
+router.patch("/:salonId/promotions/:promotionId", protect, updateSalonPromotion);
 
 router.post("/", protect, createSalon);
 router.patch("/leave", protect, leaveSalon);

@@ -423,6 +423,10 @@ export const validateVoucherCode = async (req, res) => {
       }
     }
 
+    if (voucher.startDate && new Date() < new Date(voucher.startDate)) {
+      return res.status(400).json({ message: "This promotion is not yet active" });
+    }
+
     // Usage check
     if (voucher.currentUses >= voucher.maxUses) {
       return res.status(400).json({ message: "This voucher has been fully redeemed" });
@@ -457,6 +461,26 @@ export const validateVoucherCode = async (req, res) => {
       }
     }
 
+    if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
+      if (!serviceId) {
+        return res.status(400).json({ message: "serviceId is required for this promotion" });
+      }
+      const matches = voucher.applicableServiceIds.some((id) => sameId(id, serviceId));
+      if (!matches) {
+        return res.status(400).json({ message: "This promotion does not apply to this service" });
+      }
+    }
+
+    if (voucher.applicableBarberIds && voucher.applicableBarberIds.length > 0) {
+      if (!barberId) {
+        return res.status(400).json({ message: "barberId is required for this promotion" });
+      }
+      const matches = voucher.applicableBarberIds.some((id) => sameId(id, barberId));
+      if (!matches) {
+        return res.status(400).json({ message: "This promotion does not apply to this barber" });
+      }
+    }
+
     if (!serviceId) {
       return res.status(400).json({ message: "serviceId is required" });
     }
@@ -470,7 +494,12 @@ export const validateVoucherCode = async (req, res) => {
     }
     // discountPreview is capped against the service's discounted price (not raw price)
     const { discountedPrice: serviceDiscountedPrice } = calculateServiceDiscountedPrice(service);
-    const discountPreview = Math.min(Number(voucher.amount), serviceDiscountedPrice);
+    const discountPreview =
+      voucher.discountType === "percentage"
+        ? Math.round(
+            (serviceDiscountedPrice * Math.min(Number(voucher.amount), 100)) / 100
+          )
+        : Math.min(Number(voucher.amount), serviceDiscountedPrice);
 
 
     return res.json({
@@ -481,11 +510,15 @@ export const validateVoucherCode = async (req, res) => {
         title: voucher.title,
         type: voucher.type,
         amount: voucher.amount,
+        discountType: voucher.discountType || "fixed",
         serviceId: voucher.serviceId,
+        applicableServiceIds: voucher.applicableServiceIds || [],
+        applicableBarberIds: voucher.applicableBarberIds || [],
         ownerType: voucher.ownerType,
         ownerId: voucher.ownerId,
         maxUses: voucher.maxUses,
         currentUses: voucher.currentUses,
+        startDate: voucher.startDate,
         expiresAt: voucher.expiresAt,
       },
       discountPreview,

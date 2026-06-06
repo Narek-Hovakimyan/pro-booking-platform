@@ -234,14 +234,40 @@ const claimVoucherForBooking = async ({
     }
   }
 
-  // 3. Service-specific match
+  // 3. Service match — either serviceId (legacy) or applicableServiceIds (promotion)
   if (voucher.serviceId) {
     if (!sameId(voucher.serviceId, serviceId)) {
       throw Object.assign(new Error("This voucher does not apply to this service"), { statusCode: 400 });
     }
   }
+  if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
+    const matchesService = voucher.applicableServiceIds.some(
+      (sid) => sameId(sid, serviceId)
+    );
+    if (!matchesService) {
+      throw Object.assign(new Error("This promotion does not apply to this service"), { statusCode: 400 });
+    }
+  }
 
-  // 4. Atomically claim a use — guard: currentUses < maxUses AND still active
+  // 4. Barber match (applicableBarberIds)
+  if (voucher.applicableBarberIds && voucher.applicableBarberIds.length > 0) {
+    const matchesBarber = voucher.applicableBarberIds.some(
+      (bid) => sameId(bid, barberId)
+    );
+    if (!matchesBarber) {
+      throw Object.assign(new Error("This promotion does not apply to this barber"), { statusCode: 400 });
+    }
+  }
+
+  // 5. Start date check
+  if (voucher.startDate) {
+    const now = new Date();
+    if (now < new Date(voucher.startDate)) {
+      throw Object.assign(new Error("This promotion is not yet active"), { statusCode: 400 });
+    }
+  }
+
+  // 6. Atomically claim a use — guard: currentUses < maxUses AND still active
   const claimFilter = {
     _id: voucher._id,
     active: true,
@@ -258,16 +284,25 @@ const claimVoucherForBooking = async ({
   );
 
   if (!claimed) {
-    throw Object.assign(new Error("This voucher is no longer available"), { statusCode: 400 });
+    throw Object.assign(new Error("This promotion is no longer available"), { statusCode: 400 });
   }
 
-  // 5. Compute discount
-  const preUseUses = Number(claimed.currentUses) + 1; // what it became
+  // 7. Compute discount
   const voucherAmount = Number(claimed.amount);
-  const voucherDiscount = Math.min(voucherAmount, servicePrice);
+  const discountType = claimed.discountType || "fixed";
+  let voucherDiscount;
+
+  if (discountType === "percentage") {
+    const pct = Math.min(voucherAmount, 100); // cap at 100%
+    voucherDiscount = Math.round((servicePrice * pct) / 100);
+  } else {
+    voucherDiscount = Math.min(voucherAmount, servicePrice);
+  }
+
   const finalPrice = Math.max(0, servicePrice - voucherDiscount);
 
   return { voucher: claimed, voucherDiscount, finalPrice };
+
 };
 
 /**
@@ -496,7 +531,8 @@ export const createBooking = async (req, res) => {
 
       // ── Voucher claim ──
       let voucherClaim = null;
-      const rawVoucherCode = req.body.voucherCode || req.body.voucher_code;
+      const rawVoucherCode =
+        req.body.promotionCode || req.body.voucherCode || req.body.voucher_code;
       if (rawVoucherCode) {
         try {
           voucherClaim = await claimVoucherForBooking({
@@ -538,11 +574,15 @@ export const createBooking = async (req, res) => {
           // Voucher fields (if applicable)
           ...(voucherClaim
             ? {
-                voucherId: voucherClaim.voucher._id,
-                voucherCode: rawVoucherCode.toUpperCase().trim(),
-                voucherDiscount: voucherClaim.voucherDiscount,
-                finalPrice: voucherClaim.finalPrice,
-              }
+              voucherId: voucherClaim.voucher._id,
+              promotionId: voucherClaim.voucher._id,
+              voucherCode: rawVoucherCode.toUpperCase().trim(),
+              promotionCode: rawVoucherCode.toUpperCase().trim(),
+              voucherDiscount: voucherClaim.voucherDiscount,
+              discountAmount: voucherClaim.voucherDiscount,
+              originalPrice: bookingPrice,
+              finalPrice: voucherClaim.finalPrice,
+            }
             : {}),
         });
       } catch (createErr) {
