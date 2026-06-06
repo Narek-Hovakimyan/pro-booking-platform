@@ -231,6 +231,60 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
   assert.deepEqual(reviewQueries, [{ barberId: { $in: [staffBarberId] } }]);
 });
 
+test("switching relationshipType excludes and re-includes member in dashboard metrics", async () => {
+  let relationshipType = "staff";
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins: [],
+    name: "Owner Salon",
+  });
+  User.findById = () => ({
+    select: async () => ({ _id: ownerId }),
+  });
+  User.find = () => ({
+    select: async () => [
+      {
+        _id: staffBarberId,
+        salons: [
+          { salon: { toString: () => salonId }, status: "approved", relationshipType },
+        ],
+        salon: salonId,
+        salonStatus: "approved",
+      },
+    ],
+  });
+  SubscriptionPlan.findOne = async () => ({ pricePerSeat: 100 });
+  Subscription.findOne = () => ({ lean: async () => null });
+  Subscription.find = () => ({ lean: async () => [] });
+  SubscriptionSeat.countDocuments = async () => 0;
+  SubscriptionSeat.find = () => ({ lean: async () => [] });
+  SalonJoinRequest.countDocuments = async () => 0;
+  Booking.countDocuments = async () => 1;
+  Booking.find = () =>
+    createLeanQuery([
+      { _id: "booking-1", barberId: staffBarberId, status: "completed", price: 100 },
+    ]);
+  Review.find = () => createLeanQuery([]);
+
+  const initialResult = await getSalonDashboard(salonId, ownerId);
+  assert.equal(initialResult.staffSummary.totalApprovedStaff, 1);
+  assert.equal(initialResult.staffSummary.totalChairRenters, 0);
+
+  relationshipType = "chair_renter";
+  const chairRenterResult = await getSalonDashboard(salonId, ownerId);
+  assert.equal(chairRenterResult.staffSummary.totalApprovedStaff, 0);
+  assert.equal(chairRenterResult.staffSummary.totalChairRenters, 1);
+  assert.equal(chairRenterResult.bookingSummary.todayBookings, 0);
+  assert.equal(chairRenterResult.revenueSummary.todayRevenue, 0);
+
+  relationshipType = "staff";
+  const revertedResult = await getSalonDashboard(salonId, ownerId);
+  assert.equal(revertedResult.staffSummary.totalApprovedStaff, 1);
+  assert.equal(revertedResult.staffSummary.totalChairRenters, 0);
+});
+
 test("getSalonDashboard allows salon admin access", async () => {
   Salon.findById = async () => ({
     _id: salonId,

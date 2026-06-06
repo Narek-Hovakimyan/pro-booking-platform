@@ -1,6 +1,24 @@
 import SettingsCard from "@/barber/components/settings/SettingsCard";
 import { Button } from "@/shared/components/ui/button";
 import { getMediaUrl } from "@/shared/utils/media";
+import { useState } from "react";
+
+const relationshipOptions = [
+  { value: "staff", label: "Staff" },
+  { value: "chair_renter", label: "Chair renter" },
+];
+
+const relationshipBadgeClassNames = {
+  staff: "bg-neutral-100 text-neutral-700",
+  chair_renter: "bg-sky-50 text-sky-700",
+};
+
+const relationshipHelperText = {
+  chair_renter:
+    "Chair renters work independently. Salon owner will not see their private bookings, revenue, or calendar movement.",
+  staff:
+    "Staff members are included in salon dashboard, calendar, and revenue reports.",
+};
 
 export default function ManagedSalonsSection({
   managedSalonStaff,
@@ -12,7 +30,11 @@ export default function ManagedSalonsSection({
   onOpenDemoteConfirmation,
   onOpenPromoteConfirmation,
   onOpenRemoveBarberConfirmation,
+  onSaveRelationshipType,
+  savingRelationshipKey,
 }) {
+  const [relationshipDrafts, setRelationshipDrafts] = useState({});
+
   if (managedSalonStaff.length === 0) return null;
 
   return (
@@ -146,60 +168,136 @@ export default function ManagedSalonsSection({
                     const isBarberAdmin = managedSalon.adminIds.includes(
                       String(barberId)
                     );
+                    const relationshipKey = `${managedSalonId}:${barberId}`;
+                    const currentRelationshipType =
+                      barber.relationshipType || "staff";
+                    const selectedRelationshipType =
+                      relationshipDrafts[relationshipKey] ||
+                      currentRelationshipType;
+                    const relationshipChanged =
+                      selectedRelationshipType !== currentRelationshipType;
+                    const isSavingRelationship =
+                      savingRelationshipKey === relationshipKey;
 
                     return (
                       <div
-                        className="flex items-center justify-between rounded-xl border border-neutral-100 bg-neutral-50 p-2"
+                        className="rounded-xl border border-neutral-100 bg-neutral-50 p-3"
                         key={barberId}
                       >
-                        <div className="flex items-center gap-2">
-                          {barber.avatarUrl && (
-                            <img
-                              alt={barber.name}
-                              className="h-6 w-6 rounded-full object-cover"
-                              src={getMediaUrl(barber.avatarUrl)}
-                            />
-                          )}
-                          <span className="text-sm font-medium text-neutral-900">
-                            {barber.name}
-                          </span>
-                          {isBarberAdmin && (
-                            <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
-                              Admin
-                            </span>
-                          )}
-                        </div>
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="flex items-center gap-2">
+                            {barber.avatarUrl && (
+                              <img
+                                alt={barber.name}
+                                className="h-6 w-6 rounded-full object-cover"
+                                src={getMediaUrl(barber.avatarUrl)}
+                              />
+                            )}
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-medium text-neutral-900">
+                                  {barber.name}
+                                </span>
+                                {isBarberAdmin && (
+                                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                                    Admin
+                                  </span>
+                                )}
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                    relationshipBadgeClassNames[
+                                      currentRelationshipType
+                                    ] || relationshipBadgeClassNames.staff
+                                  }`}
+                                >
+                                  {currentRelationshipType === "chair_renter"
+                                    ? "Chair renter"
+                                    : "Staff"}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-neutral-500">
+                                Current relationship type
+                              </p>
+                            </div>
+                          </div>
 
-                        <div className="flex gap-2">
-                          {isOwner && !isSelf && !isBarberAdmin && (
-                            <Button
-                              disabled={isSalonSaving}
-                              onClick={() =>
-                                onOpenPromoteConfirmation(
-                                  salonName,
-                                  managedSalonId,
-                                  barber
-                                )
-                              }
-                              size="sm"
-                              variant="outline"
-                            >
-                              Promote
-                            </Button>
-                          )}
+                          <div className="flex min-w-0 flex-1 flex-col gap-3 lg:max-w-xl">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <select
+                                className="min-w-0 flex-1 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                                disabled={isSalonSaving || isSavingRelationship}
+                                onChange={(event) =>
+                                  setRelationshipDrafts((currentDrafts) => ({
+                                    ...currentDrafts,
+                                    [relationshipKey]: event.target.value,
+                                  }))
+                                }
+                                value={selectedRelationshipType}
+                              >
+                                {relationshipOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <Button
+                                disabled={
+                                  isSalonSaving ||
+                                  isSavingRelationship ||
+                                  !relationshipChanged
+                                }
+                                onClick={() =>
+                                  onSaveRelationshipType(
+                                    managedSalonId,
+                                    barberId,
+                                    selectedRelationshipType
+                                  )
+                                }
+                                size="sm"
+                              >
+                                {isSavingRelationship ? "Saving..." : "Save"}
+                              </Button>
+                            </div>
+                            <p className="text-xs text-neutral-500">
+                              {relationshipHelperText[selectedRelationshipType] ||
+                                relationshipHelperText.staff}
+                            </p>
 
-                          {(isOwner || isAdmin) && !isSelf && (
-                            <Button
-                              disabled={isSalonSaving}
-                              onClick={() =>
-                                onOpenRemoveBarberConfirmation(managedSalon, barber)
-                              }
-                              size="sm"
-                              variant="outline"
-                            >
-                              Remove
-                            </Button>
-                          )}
+                            <div className="flex flex-wrap gap-2">
+                              {isOwner && !isSelf && !isBarberAdmin && (
+                                <Button
+                                  disabled={isSalonSaving}
+                                  onClick={() =>
+                                    onOpenPromoteConfirmation(
+                                      salonName,
+                                      managedSalonId,
+                                      barber
+                                    )
+                                  }
+                                  size="sm"
+                                  variant="outline"
+                                >
+                                  Promote
+                                </Button>
+                              )}
+
+                              {(isOwner || isAdmin) && !isSelf && (
+                                <Button
+                                  disabled={isSalonSaving}
+                                  onClick={() =>
+                                    onOpenRemoveBarberConfirmation(
+                                      managedSalon,
+                                      barber
+                                    )
+                                  }
+                                  size="sm"
+                                  variant="outline"
+                                >
+                                  Remove
+                                </Button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );

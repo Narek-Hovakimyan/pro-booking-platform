@@ -334,3 +334,48 @@ test("summary counts statuses correctly", async () => {
     noShowCount: 1,
   });
 });
+
+test("switching relationshipType excludes and re-includes member in calendar", async () => {
+  let relationshipType = "staff";
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins: [],
+    name: "Salon Prime",
+    city: "Yerevan",
+  });
+  User.findById = () => makeSelectQuery({ _id: ownerId });
+  User.find = () =>
+    makeSelectQuery([makeBarber(staffOneId, relationshipType)]);
+  Booking.find = () =>
+    makeLeanQuery([
+      createBooking({
+        _id: "dynamic-booking",
+        barberId: { _id: staffOneId, name: "Staff One" },
+      }),
+    ]);
+
+  const initialResult = await getSalonCalendar(salonId, ownerId, {
+    date: "2026-06-10",
+    view: "day",
+  });
+  assert.equal(initialResult.staff.length, 1);
+  assert.equal(initialResult.bookings.length, 1);
+
+  relationshipType = "chair_renter";
+  const chairRenterResult = await getSalonCalendar(salonId, ownerId, {
+    date: "2026-06-10",
+    view: "day",
+  });
+  assert.equal(chairRenterResult.staff.length, 0);
+  assert.equal(chairRenterResult.bookings.length, 0);
+
+  relationshipType = "staff";
+  const revertedResult = await getSalonCalendar(salonId, ownerId, {
+    date: "2026-06-10",
+    view: "day",
+  });
+  assert.equal(revertedResult.staff.length, 1);
+  assert.equal(revertedResult.bookings.length, 1);
+});

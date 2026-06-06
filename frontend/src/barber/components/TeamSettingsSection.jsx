@@ -8,11 +8,14 @@ export default function TeamSettingsSection({
   managedSalons,
   ownerRequests,
   salonAdmins,
+  salonStaffById,
   salons,
   onDecideSalonRequest,
   onOpenDemoteConfirmation,
   onOpenPromoteConfirmation,
   onOpenRemoveBarberConfirmation,
+  onSaveRelationshipType,
+  savingRelationshipKey,
 }) {
   const managedSalonStaff = managedSalons.map((managedSalon) => {
     const managedSalonId = managedSalon.id || managedSalon._id;
@@ -31,7 +34,7 @@ export default function TeamSettingsSection({
       isOwner,
       isAdmin,
       adminIds,
-      barbers: fullSalon?.barbers || [],
+      barbers: salonStaffById[managedSalonId] || [],
     };
   });
 
@@ -47,6 +50,8 @@ export default function TeamSettingsSection({
         onOpenDemoteConfirmation={onOpenDemoteConfirmation}
         onOpenPromoteConfirmation={onOpenPromoteConfirmation}
         onOpenRemoveBarberConfirmation={onOpenRemoveBarberConfirmation}
+        onSaveRelationshipType={onSaveRelationshipType}
+        savingRelationshipKey={savingRelationshipKey}
       />
       <SalonStaffSection
         approvedSalonEntries={approvedSalonEntries}

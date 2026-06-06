@@ -16,7 +16,11 @@ import {
   serializeUser,
 } from "../utils/salonUtils.js";
 import { getSalonAdminsForSalon } from "../services/salon/salonAdminService.js";
-import { getSalonStaff as getSalonStaffForSalon, SalonStaffError } from "../services/salon/salonStaffService.js";
+import {
+  getSalonStaff as getSalonStaffForSalon,
+  SalonStaffError,
+  updateSalonMemberRelationshipType,
+} from "../services/salon/salonStaffService.js";
 import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
 import { createNotification } from "./notificationController.js";
 import { sendControllerError } from "../utils/controllerError.js";
@@ -235,5 +239,33 @@ export const getSalonStaff = async (req, res) => {
     }
 
     return sendControllerError(res, error, "Could not fetch salon staff");
+  }
+};
+
+export const updateMemberRelationshipType = async (req, res) => {
+  try {
+    if (!requireBarber(req, res)) return undefined;
+
+    const barber = await updateSalonMemberRelationshipType(
+      req.params.salonId,
+      req.params.barberId,
+      req.user._id,
+      req.body?.relationshipType
+    );
+
+    return res.json({
+      message: `Relationship type updated to ${barber.relationshipType}`,
+      barber,
+    });
+  } catch (error) {
+    if (error instanceof SalonStaffError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    return sendControllerError(
+      res,
+      error,
+      "Could not update salon member relationship type"
+    );
   }
 };

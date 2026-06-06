@@ -94,6 +94,8 @@ export default function BarberSettings({
   const [salonSaved, setSalonSaved] = useState("");
   const [isSalonSaving, setIsSalonSaving] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
+  const [salonStaffById, setSalonStaffById] = useState({});
+  const [savingRelationshipKey, setSavingRelationshipKey] = useState("");
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -358,16 +360,25 @@ export default function BarberSettings({
     const managed = statusResponse.data?.managedSalons || statusResponse.data?.ownedSalons || [];
     if (managed.length > 0) {
       const adminMap = {};
+      const staffMap = {};
       for (const salon of managed) {
         const salonId = salon.id || salon._id;
         try {
-          const { data } = await api.get(`/salons/${salonId}/admins`);
-          adminMap[salonId] = data;
+          const [adminsResponse, staffResponse] = await Promise.all([
+            api.get(`/salons/${salonId}/admins`),
+            api.get(`/salons/${salonId}/staff`),
+          ]);
+          adminMap[salonId] = adminsResponse.data;
+          staffMap[salonId] = staffResponse.data || [];
         } catch {
           // Silently fail
         }
       }
       setSalonAdmins(adminMap);
+      setSalonStaffById(staffMap);
+    } else {
+      setSalonAdmins({});
+      setSalonStaffById({});
     }
   };
 
@@ -654,14 +665,19 @@ export default function BarberSettings({
 
     let isMounted = true;
 
-    async function fetchAdmins() {
+    async function fetchManagedSalonData() {
       const adminMap = {};
+      const staffMap = {};
       for (const salon of managedSalons) {
         const salonId = salon.id || salon._id;
         try {
-          const { data } = await api.get(`/salons/${salonId}/admins`);
+          const [adminsResponse, staffResponse] = await Promise.all([
+            api.get(`/salons/${salonId}/admins`),
+            api.get(`/salons/${salonId}/staff`),
+          ]);
           if (isMounted) {
-            adminMap[salonId] = data;
+            adminMap[salonId] = adminsResponse.data;
+            staffMap[salonId] = staffResponse.data || [];
           }
         } catch {
           // Silently fail
@@ -669,15 +685,47 @@ export default function BarberSettings({
       }
       if (isMounted) {
         setSalonAdmins(adminMap);
+        setSalonStaffById(staffMap);
       }
     }
 
-    fetchAdmins();
+    fetchManagedSalonData();
 
     return () => {
       isMounted = false;
     };
   }, [managedSalons]);
+
+  const saveRelationshipType = async (
+    salonId,
+    barberId,
+    relationshipType
+  ) => {
+    if (isSalonSaving) return;
+
+    const nextSavingKey = `${salonId}:${barberId}`;
+    setIsSalonSaving(true);
+    setSavingRelationshipKey(nextSavingKey);
+    setSalonError("");
+    setSalonSaved("");
+
+    try {
+      await api.patch(
+        `/salons/${salonId}/members/${barberId}/relationship-type`,
+        { relationshipType }
+      );
+      await refreshSalonData();
+      setSalonSaved("Relationship type updated.");
+    } catch (requestError) {
+      setSalonError(
+        requestError.response?.data?.message ||
+          "Could not update relationship type. Please try again."
+      );
+    } finally {
+      setSavingRelationshipKey("");
+      setIsSalonSaving(false);
+    }
+  };
 
   // Filter out salons the barber is already connected to (frontend safety backup)
   const barberConnectedSalonIds = new Set([
@@ -773,11 +821,14 @@ export default function BarberSettings({
                   managedSalons={managedSalons}
                   ownerRequests={ownerRequests}
                   salonAdmins={salonAdmins}
+                  salonStaffById={salonStaffById}
                   salons={salons}
                   onDecideSalonRequest={decideSalonRequest}
                   onOpenDemoteConfirmation={openDemoteAdminConfirmation}
                   onOpenPromoteConfirmation={openPromoteAdminConfirmation}
                   onOpenRemoveBarberConfirmation={openRemoveBarberConfirmation}
+                  onSaveRelationshipType={saveRelationshipType}
+                  savingRelationshipKey={savingRelationshipKey}
                 />
 
               </>

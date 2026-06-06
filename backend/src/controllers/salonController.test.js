@@ -374,6 +374,7 @@ test("getSalonStaff — response excludes private fields", async () => {
   assert.ok(staff.city);
   assert.ok(staff.bio);
   assert.ok(staff.roleInSalon);
+  assert.equal(staff.relationshipType, "staff");
 });
 
 test("getSalonStaff — only approved barbers returned", async () => {
