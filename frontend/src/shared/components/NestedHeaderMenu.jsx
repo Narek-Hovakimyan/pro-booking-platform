@@ -28,6 +28,7 @@ const getMenuGroups = (canShowManageHiring, canManageSalon) => [
       ...(canManageSalon
         ? [
             { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
+            { label: "Salon Calendar", to: "/admin/salon/calendar" },
             { label: "Salon Billing", to: "/admin/salon/billing" },
           ]
         : []),

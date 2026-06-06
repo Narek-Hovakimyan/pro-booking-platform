@@ -639,11 +639,21 @@ export default function SalonDashboardPage() {
               {/* ─── Upcoming bookings ─── */}
               <Card>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <CalendarCheck className="h-4 w-4 text-neutral-500" />
-                    <h3 className="font-semibold text-neutral-950">
-                      Upcoming Bookings
-                    </h3>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarCheck className="h-4 w-4 text-neutral-500" />
+                      <h3 className="font-semibold text-neutral-950">
+                        Upcoming Bookings
+                      </h3>
+                    </div>
+                    {selectedSalonId && (
+                      <Link
+                        className="text-sm font-semibold text-neutral-700 underline underline-offset-2 transition hover:text-neutral-950"
+                        to={`/admin/salon/calendar?salonId=${selectedSalonId}`}
+                      >
+                        Open Salon Calendar
+                      </Link>
+                    )}
                   </div>
                   {upcomingBookings.length === 0 ? (
                     <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-500">

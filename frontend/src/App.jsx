@@ -61,6 +61,7 @@ const EventsPage = lazy(() => import("./pages/EventsPage"));
 const CertificatePage = lazy(() => import("./pages/CertificatePage"));
 const RevenuePage = lazy(() => import("./barber/pages/RevenuePage"));
 const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
+const SalonCalendarPage = lazy(() => import("./barber/pages/SalonCalendarPage"));
 const SalonDashboardPage = lazy(() => import("./barber/pages/SalonDashboardPage"));
 
 export default function App() {
@@ -915,6 +916,14 @@ export default function App() {
               element={
                 <ProtectedRoute role="barber">
                   <SalonDashboardPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/salon/calendar"
+              element={
+                <ProtectedRoute role="barber">
+                  <SalonCalendarPage />
                 </ProtectedRoute>
               }
             />
