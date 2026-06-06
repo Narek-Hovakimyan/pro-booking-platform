@@ -41,7 +41,7 @@ const makeLeanQuery = (result) => ({
   },
 });
 
-const makeBarber = (id, relationshipType = "staff") => ({
+const makeBarber = (id, relationshipType = "staff", relationshipStatus) => ({
   _id: id,
   name: `Barber ${String(id).slice(-3)}`,
   avatarUrl: "",
@@ -52,6 +52,7 @@ const makeBarber = (id, relationshipType = "staff") => ({
       salon: salonId,
       status: "approved",
       relationshipType,
+      ...(relationshipStatus ? { relationshipStatus } : {}),
     },
   ],
 });
@@ -335,8 +336,9 @@ test("summary counts statuses correctly", async () => {
   });
 });
 
-test("switching relationshipType excludes and re-includes member in calendar", async () => {
+test("relationship confirmation controls calendar private movement", async () => {
   let relationshipType = "staff";
+  let relationshipStatus;
 
   Salon.findById = async () => ({
     _id: salonId,
@@ -347,7 +349,7 @@ test("switching relationshipType excludes and re-includes member in calendar", a
   });
   User.findById = () => makeSelectQuery({ _id: ownerId });
   User.find = () =>
-    makeSelectQuery([makeBarber(staffOneId, relationshipType)]);
+    makeSelectQuery([makeBarber(staffOneId, relationshipType, relationshipStatus)]);
   Booking.find = () =>
     makeLeanQuery([
       createBooking({
@@ -363,7 +365,35 @@ test("switching relationshipType excludes and re-includes member in calendar", a
   assert.equal(initialResult.staff.length, 1);
   assert.equal(initialResult.bookings.length, 1);
 
+  relationshipType = "staff";
+  relationshipStatus = "pending";
+  const pendingStaffResult = await getSalonCalendar(salonId, ownerId, {
+    date: "2026-06-10",
+    view: "day",
+  });
+  assert.equal(pendingStaffResult.staff.length, 0);
+  assert.equal(pendingStaffResult.bookings.length, 0);
+
+  relationshipType = "staff";
+  relationshipStatus = "rejected";
+  const rejectedStaffResult = await getSalonCalendar(salonId, ownerId, {
+    date: "2026-06-10",
+    view: "day",
+  });
+  assert.equal(rejectedStaffResult.staff.length, 0);
+  assert.equal(rejectedStaffResult.bookings.length, 0);
+
+  relationshipType = "staff";
+  relationshipStatus = "accepted";
+  const acceptedStaffResult = await getSalonCalendar(salonId, ownerId, {
+    date: "2026-06-10",
+    view: "day",
+  });
+  assert.equal(acceptedStaffResult.staff.length, 1);
+  assert.equal(acceptedStaffResult.bookings.length, 1);
+
   relationshipType = "chair_renter";
+  relationshipStatus = "accepted";
   const chairRenterResult = await getSalonCalendar(salonId, ownerId, {
     date: "2026-06-10",
     view: "day",
@@ -372,6 +402,7 @@ test("switching relationshipType excludes and re-includes member in calendar", a
   assert.equal(chairRenterResult.bookings.length, 0);
 
   relationshipType = "staff";
+  relationshipStatus = undefined;
   const revertedResult = await getSalonCalendar(salonId, ownerId, {
     date: "2026-06-10",
     view: "day",

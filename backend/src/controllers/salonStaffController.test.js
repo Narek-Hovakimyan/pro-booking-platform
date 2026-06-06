@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 
 import {
   removeBarberFromSalon,
+  respondToRelationshipType,
   updateMemberRelationshipType,
 } from "./salonStaffController.js";
 import Notification from "../models/Notification.js";
@@ -107,10 +108,21 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
   assert.equal(barber.salonStatus, "none");
 });
 
-test("owner can update relationshipType", async () => {
+test("owner request sets pending relationshipType", async () => {
   const ownerId = new mongoose.Types.ObjectId();
   const salonId = new mongoose.Types.ObjectId();
   const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Member",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    salon: salonId,
+    salonStatus: "approved",
+    async save() {
+      return this;
+    },
+  };
 
   Salon.findById = async () => ({
     _id: salonId,
@@ -125,17 +137,7 @@ test("owner can update relationshipType", async () => {
     }
 
     if (String(id) === String(barberId)) {
-      return {
-        _id: barberId,
-        name: "Salon Member",
-        role: "barber",
-        salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
-        salon: salonId,
-        salonStatus: "approved",
-        async save() {
-          return this;
-        },
-      };
+      return barber;
     }
 
     return null;
@@ -153,12 +155,29 @@ test("owner can update relationshipType", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.barber.relationshipType, "chair_renter");
+  assert.equal(res.body.barber.relationshipStatus, "pending");
+  assert.equal(barber.salons[0].relationshipType, "chair_renter");
+  assert.equal(barber.salons[0].relationshipStatus, "pending");
+  assert.equal(String(barber.salons[0].relationshipRequestedBy), String(ownerId));
+  assert.ok(barber.salons[0].relationshipRequestedAt instanceof Date);
+  assert.equal(barber.salons[0].relationshipRespondedAt, null);
 });
 
-test("admin can update relationshipType", async () => {
+test("admin request sets pending relationshipType", async () => {
   const adminId = new mongoose.Types.ObjectId();
   const salonId = new mongoose.Types.ObjectId();
   const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Member",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    salon: salonId,
+    salonStatus: "approved",
+    async save() {
+      return this;
+    },
+  };
 
   Salon.findById = async () => ({
     _id: salonId,
@@ -173,17 +192,7 @@ test("admin can update relationshipType", async () => {
     }
 
     if (String(id) === String(barberId)) {
-      return {
-        _id: barberId,
-        name: "Salon Member",
-        role: "barber",
-        salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
-        salon: salonId,
-        salonStatus: "approved",
-        async save() {
-          return this;
-        },
-      };
+      return barber;
     }
 
     return null;
@@ -201,6 +210,9 @@ test("admin can update relationshipType", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.barber.relationshipType, "chair_renter");
+  assert.equal(res.body.barber.relationshipStatus, "pending");
+  assert.equal(barber.salons[0].relationshipStatus, "pending");
+  assert.equal(String(barber.salons[0].relationshipRequestedBy), String(adminId));
 });
 
 test("normal member cannot update relationshipType", async () => {
@@ -394,4 +406,159 @@ test("cannot update non-approved member", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /approved member/);
+});
+
+test("barber can accept pending relationship", async () => {
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Member",
+    role: "barber",
+    salons: [
+      {
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "pending",
+        relationshipRequestedAt: new Date("2026-06-01T10:00:00.000Z"),
+      },
+    ],
+    salon: salonId,
+    salonStatus: "approved",
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId });
+  User.findById = async (id) => (String(id) === String(barberId) ? barber : null);
+
+  const res = createResponse();
+  await respondToRelationshipType(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId: String(salonId) },
+      body: { response: "accepted" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barber.relationshipStatus, "accepted");
+  assert.equal(barber.salons[0].relationshipStatus, "accepted");
+  assert.ok(barber.salons[0].relationshipRespondedAt instanceof Date);
+});
+
+test("barber can reject pending relationship", async () => {
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Member",
+    role: "barber",
+    salons: [
+      {
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "pending",
+      },
+    ],
+    salon: salonId,
+    salonStatus: "approved",
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId });
+  User.findById = async (id) => (String(id) === String(barberId) ? barber : null);
+
+  const res = createResponse();
+  await respondToRelationshipType(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId: String(salonId) },
+      body: { response: "rejected" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barber.relationshipStatus, "rejected");
+  assert.equal(barber.salons[0].relationshipStatus, "rejected");
+  assert.equal(barber.salons[0].relationshipType, "staff");
+});
+
+test("non-target barber cannot respond", async () => {
+  const salonId = new mongoose.Types.ObjectId();
+  const targetBarberId = new mongoose.Types.ObjectId();
+  const otherBarberId = new mongoose.Types.ObjectId();
+
+  Salon.findById = async () => ({ _id: salonId });
+  User.findById = async (id) => {
+    if (String(id) !== String(otherBarberId)) return null;
+    return {
+      _id: otherBarberId,
+      name: "Other Barber",
+      role: "barber",
+      salons: [],
+      async save() {
+        return this;
+      },
+    };
+  };
+
+  const res = createResponse();
+  await respondToRelationshipType(
+    {
+      user: { _id: otherBarberId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(targetBarberId) },
+      body: { response: "accepted" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /approved member/);
+});
+
+test("cannot respond when no pending request", async () => {
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Member",
+    role: "barber",
+    salons: [
+      {
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "accepted",
+      },
+    ],
+    salon: salonId,
+    salonStatus: "approved",
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId });
+  User.findById = async (id) => (String(id) === String(barberId) ? barber : null);
+
+  const res = createResponse();
+  await respondToRelationshipType(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId: String(salonId) },
+      body: { response: "accepted" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /No pending relationship request/);
 });

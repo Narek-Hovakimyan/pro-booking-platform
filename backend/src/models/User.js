@@ -42,6 +42,24 @@ const salonEntrySchema = new mongoose.Schema(
       enum: ["staff", "chair_renter"],
       default: "staff",
     },
+    relationshipStatus: {
+      type: String,
+      enum: ["pending", "accepted", "rejected"],
+      default: "accepted",
+    },
+    relationshipRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    relationshipRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    relationshipRespondedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { _id: false }
 );

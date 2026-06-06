@@ -231,8 +231,9 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
   assert.deepEqual(reviewQueries, [{ barberId: { $in: [staffBarberId] } }]);
 });
 
-test("switching relationshipType excludes and re-includes member in dashboard metrics", async () => {
+test("relationship confirmation controls dashboard private movement", async () => {
   let relationshipType = "staff";
+  let relationshipStatus;
 
   Salon.findById = async () => ({
     _id: salonId,
@@ -248,7 +249,12 @@ test("switching relationshipType excludes and re-includes member in dashboard me
       {
         _id: staffBarberId,
         salons: [
-          { salon: { toString: () => salonId }, status: "approved", relationshipType },
+          {
+            salon: { toString: () => salonId },
+            status: "approved",
+            relationshipType,
+            ...(relationshipStatus ? { relationshipStatus } : {}),
+          },
         ],
         salon: salonId,
         salonStatus: "approved",
@@ -271,8 +277,32 @@ test("switching relationshipType excludes and re-includes member in dashboard me
   const initialResult = await getSalonDashboard(salonId, ownerId);
   assert.equal(initialResult.staffSummary.totalApprovedStaff, 1);
   assert.equal(initialResult.staffSummary.totalChairRenters, 0);
+  assert.equal(initialResult.bookingSummary.todayBookings, 1);
+
+  relationshipType = "staff";
+  relationshipStatus = "pending";
+  const pendingStaffResult = await getSalonDashboard(salonId, ownerId);
+  assert.equal(pendingStaffResult.staffSummary.totalApprovedStaff, 0);
+  assert.equal(pendingStaffResult.staffSummary.totalChairRenters, 0);
+  assert.equal(pendingStaffResult.bookingSummary.todayBookings, 0);
+  assert.equal(pendingStaffResult.revenueSummary.todayRevenue, 0);
+
+  relationshipType = "staff";
+  relationshipStatus = "rejected";
+  const rejectedStaffResult = await getSalonDashboard(salonId, ownerId);
+  assert.equal(rejectedStaffResult.staffSummary.totalApprovedStaff, 0);
+  assert.equal(rejectedStaffResult.staffSummary.totalChairRenters, 0);
+  assert.equal(rejectedStaffResult.bookingSummary.todayBookings, 0);
+  assert.equal(rejectedStaffResult.revenueSummary.todayRevenue, 0);
+
+  relationshipStatus = "accepted";
+  const acceptedStaffResult = await getSalonDashboard(salonId, ownerId);
+  assert.equal(acceptedStaffResult.staffSummary.totalApprovedStaff, 1);
+  assert.equal(acceptedStaffResult.staffSummary.totalChairRenters, 0);
+  assert.equal(acceptedStaffResult.bookingSummary.todayBookings, 1);
 
   relationshipType = "chair_renter";
+  relationshipStatus = "accepted";
   const chairRenterResult = await getSalonDashboard(salonId, ownerId);
   assert.equal(chairRenterResult.staffSummary.totalApprovedStaff, 0);
   assert.equal(chairRenterResult.staffSummary.totalChairRenters, 1);
@@ -280,9 +310,11 @@ test("switching relationshipType excludes and re-includes member in dashboard me
   assert.equal(chairRenterResult.revenueSummary.todayRevenue, 0);
 
   relationshipType = "staff";
+  relationshipStatus = undefined;
   const revertedResult = await getSalonDashboard(salonId, ownerId);
   assert.equal(revertedResult.staffSummary.totalApprovedStaff, 1);
   assert.equal(revertedResult.staffSummary.totalChairRenters, 0);
+  assert.equal(revertedResult.bookingSummary.todayBookings, 1);
 });
 
 test("getSalonDashboard allows salon admin access", async () => {

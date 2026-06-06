@@ -7,6 +7,10 @@ import {
   timeToMinutes,
 } from "../../utils/bookingDateTime.js";
 import { isSalonAdmin, isSalonOwner } from "../../utils/salonPermissions.js";
+import {
+  getRelationshipType,
+  isAcceptedStaffMember,
+} from "./salonRelationshipService.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CALENDAR_VIEWS = new Set(["day", "week"]);
@@ -76,6 +80,7 @@ const getApprovedSalonEntry = (barber, salonId) => {
       salon: salonId,
       status: "approved",
       relationshipType: "staff",
+      relationshipStatus: "accepted",
     };
   }
 
@@ -96,8 +101,8 @@ const getStaffMembers = async (salonId) => {
       const approvedSalonEntry = getApprovedSalonEntry(barber, salonId);
       if (!approvedSalonEntry) return null;
 
-      const relationshipType = approvedSalonEntry.relationshipType || "staff";
-      if (relationshipType !== "staff") {
+      const relationshipType = getRelationshipType(approvedSalonEntry);
+      if (relationshipType !== "staff" || !isAcceptedStaffMember(approvedSalonEntry)) {
         return null;
       }
 

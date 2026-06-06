@@ -126,6 +126,11 @@ test("barber with approved salons gets same status shape", async () => {
       isPrimary: false,
       joinedAt,
       defaultSchedule,
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      relationshipRequestedBy: null,
+      relationshipRequestedAt: null,
+      relationshipRespondedAt: null,
     },
     {
       ...secondSalon,
@@ -140,6 +145,11 @@ test("barber with approved salons gets same status shape", async () => {
         breakStart: "",
         breakEnd: "",
       },
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      relationshipRequestedBy: null,
+      relationshipRequestedAt: null,
+      relationshipRespondedAt: null,
     },
   ]);
   assert.deepEqual(status.pendingEntries, []);

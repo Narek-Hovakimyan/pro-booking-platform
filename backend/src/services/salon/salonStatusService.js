@@ -6,6 +6,7 @@ import {
   serializeRequest,
   serializeSalon,
 } from "../../utils/salonUtils.js";
+import { serializeRelationshipFields } from "./salonRelationshipService.js";
 
 const createDefaultSalonEntrySchedule = () => ({
   startTime: "09:00",
@@ -80,6 +81,7 @@ export const getSalonStatusForBarber = async (barberId) => {
       isPrimary: entry.isPrimary,
       joinedAt: entry.joinedAt,
       defaultSchedule: entry.defaultSchedule || createDefaultSalonEntrySchedule(),
+      ...serializeRelationshipFields(entry),
     };
   });
 

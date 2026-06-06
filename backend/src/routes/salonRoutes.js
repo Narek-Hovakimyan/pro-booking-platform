@@ -19,6 +19,7 @@ import {
   getSalonStaff,
   promoteToAdmin,
   removeBarberFromSalon,
+  respondToRelationshipType,
   updateMemberRelationshipType,
 } from "../controllers/salonStaffController.js";
 import { getDashboard } from "../controllers/salonDashboardController.js";
@@ -49,6 +50,11 @@ router.patch(
   "/:salonId/members/:barberId/relationship-type",
   protect,
   updateMemberRelationshipType
+);
+router.patch(
+  "/:salonId/relationship-type/respond",
+  protect,
+  respondToRelationshipType
 );
 router.post("/:salonId/join-requests", protect, requestToJoinSalon);
 router.put("/join-requests/:requestId", protect, decideJoinRequest);

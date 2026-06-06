@@ -4,6 +4,10 @@ import api from "@/shared/api/axios";
 import SettingsCard from "@/barber/components/settings/SettingsCard";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { getMediaUrl } from "@/shared/utils/media";
+import { Button } from "@/shared/components/ui/button";
+
+const getRelationshipLabel = (relationshipType) =>
+  relationshipType === "chair_renter" ? "Chair renter" : "Staff";
 
 function StaffCard({ person }) {
   const avatarSrc =
@@ -122,6 +126,9 @@ export default function SalonStaffSection({ approvedSalonEntries }) {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const pendingRelationshipEntries = approvedSalonEntries.filter(
+    (entry) => entry.relationshipStatus === "pending"
+  );
 
   // Fetch staff when selectedSalonId changes
   useEffect(() => {
@@ -180,6 +187,56 @@ export default function SalonStaffSection({ approvedSalonEntries }) {
         <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
         </p>
+      )}
+
+      {pendingRelationshipEntries.length > 0 && (
+        <div className="space-y-2">
+          {pendingRelationshipEntries.map((entry) => {
+            const salonId = entry.id || entry._id;
+            const salonName = entry.name || "Salon";
+            const requestedType = entry.relationshipType || "staff";
+
+            return (
+              <div
+                className="rounded-xl border border-amber-200 bg-amber-50 p-4"
+                key={salonId}
+              >
+                <p className="text-sm font-semibold text-neutral-950">
+                  Salon owner wants to mark you as{" "}
+                  {getRelationshipLabel(requestedType)}.
+                </p>
+                <p className="mt-1 text-xs text-neutral-600">{salonName}</p>
+                <div className="mt-3 space-y-1 text-xs text-neutral-700">
+                  <p>
+                    Staff means salon owner can see your bookings, revenue, and
+                    calendar for this salon.
+                  </p>
+                  <p>
+                    Chair renter means you work independently and owner cannot
+                    see your private movement.
+                  </p>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    disabled={entry.isRelationshipSaving}
+                    onClick={() => entry.onRelationshipResponse?.("accepted")}
+                    size="sm"
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    disabled={entry.isRelationshipSaving}
+                    onClick={() => entry.onRelationshipResponse?.("rejected")}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {loading ? (

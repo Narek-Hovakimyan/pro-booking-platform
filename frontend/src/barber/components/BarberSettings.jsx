@@ -96,6 +96,8 @@ export default function BarberSettings({
   const [confirmation, setConfirmation] = useState(null);
   const [salonStaffById, setSalonStaffById] = useState({});
   const [savingRelationshipKey, setSavingRelationshipKey] = useState("");
+  const [respondingRelationshipSalonId, setRespondingRelationshipSalonId] =
+    useState("");
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -639,6 +641,16 @@ export default function BarberSettings({
   // Use new salons array if available, otherwise fallback to legacy
   const allSalonEntries =
     salonEntries.length > 0 ? salonEntries : legacySalonEntry ? [legacySalonEntry] : [];
+  const salonEntriesWithRelationshipActions = allSalonEntries.map((entry) => {
+    const salonId = entry?.salon?.id || entry?.salon?._id || entry?.id || entry?._id;
+
+    return {
+      ...entry,
+      isRelationshipSaving: String(respondingRelationshipSalonId) === String(salonId),
+      onRelationshipResponse: (response) =>
+        respondToRelationshipRequest(salonId, response),
+    };
+  });
 
   const managedSalons = useMemo(
     () => salonStatus.managedSalons || salonStatus.ownedSalons || [],
@@ -715,7 +727,7 @@ export default function BarberSettings({
         { relationshipType }
       );
       await refreshSalonData();
-      setSalonSaved("Relationship type updated.");
+      setSalonSaved("Relationship request sent. Waiting for specialist confirmation.");
     } catch (requestError) {
       setSalonError(
         requestError.response?.data?.message ||
@@ -723,6 +735,35 @@ export default function BarberSettings({
       );
     } finally {
       setSavingRelationshipKey("");
+      setIsSalonSaving(false);
+    }
+  };
+
+  const respondToRelationshipRequest = async (salonId, response) => {
+    if (!salonId || isSalonSaving) return;
+
+    setIsSalonSaving(true);
+    setRespondingRelationshipSalonId(salonId);
+    setSalonError("");
+    setSalonSaved("");
+
+    try {
+      await api.patch(`/salons/${salonId}/relationship-type/respond`, {
+        response,
+      });
+      await refreshSalonData();
+      setSalonSaved(
+        response === "accepted"
+          ? "Relationship request accepted."
+          : "Relationship request rejected."
+      );
+    } catch (requestError) {
+      setSalonError(
+        requestError.response?.data?.message ||
+          "Could not respond to relationship request. Please try again."
+      );
+    } finally {
+      setRespondingRelationshipSalonId("");
       setIsSalonSaving(false);
     }
   };
@@ -815,7 +856,7 @@ export default function BarberSettings({
                   onUpdateSalonDraft={updateSalonDraft}
                 />
                 <TeamSettingsSection
-                  approvedSalonEntries={allSalonEntries}
+                  approvedSalonEntries={salonEntriesWithRelationshipActions}
                   currentUserId={currentUserId}
                   isSalonSaving={isSalonSaving}
                   managedSalons={managedSalons}

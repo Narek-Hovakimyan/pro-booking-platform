@@ -18,6 +18,7 @@ import {
 import { getSalonAdminsForSalon } from "../services/salon/salonAdminService.js";
 import {
   getSalonStaff as getSalonStaffForSalon,
+  respondToSalonMemberRelationshipType,
   SalonStaffError,
   updateSalonMemberRelationshipType,
 } from "../services/salon/salonStaffService.js";
@@ -254,7 +255,7 @@ export const updateMemberRelationshipType = async (req, res) => {
     );
 
     return res.json({
-      message: `Relationship type updated to ${barber.relationshipType}`,
+      message: `Relationship request sent for ${barber.relationshipType}`,
       barber,
     });
   } catch (error) {
@@ -265,7 +266,34 @@ export const updateMemberRelationshipType = async (req, res) => {
     return sendControllerError(
       res,
       error,
-      "Could not update salon member relationship type"
+      "Could not request salon member relationship type"
+    );
+  }
+};
+
+export const respondToRelationshipType = async (req, res) => {
+  try {
+    if (!requireBarber(req, res)) return undefined;
+
+    const barber = await respondToSalonMemberRelationshipType(
+      req.params.salonId,
+      req.user._id,
+      req.body?.response
+    );
+
+    return res.json({
+      message: `Relationship request ${barber.relationshipStatus}`,
+      barber,
+    });
+  } catch (error) {
+    if (error instanceof SalonStaffError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    return sendControllerError(
+      res,
+      error,
+      "Could not respond to salon relationship request"
     );
   }
 };

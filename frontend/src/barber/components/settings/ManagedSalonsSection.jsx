@@ -13,6 +13,18 @@ const relationshipBadgeClassNames = {
   chair_renter: "bg-sky-50 text-sky-700",
 };
 
+const relationshipStatusClassNames = {
+  accepted: "bg-emerald-50 text-emerald-700",
+  pending: "bg-amber-50 text-amber-700",
+  rejected: "bg-red-50 text-red-700",
+};
+
+const relationshipStatusLabels = {
+  accepted: "Accepted",
+  pending: "Pending confirmation",
+  rejected: "Rejected",
+};
+
 const relationshipHelperText = {
   chair_renter:
     "Chair renters work independently. Salon owner will not see their private bookings, revenue, or calendar movement.",
@@ -171,11 +183,14 @@ export default function ManagedSalonsSection({
                     const relationshipKey = `${managedSalonId}:${barberId}`;
                     const currentRelationshipType =
                       barber.relationshipType || "staff";
+                    const relationshipStatus =
+                      barber.relationshipStatus || "accepted";
                     const selectedRelationshipType =
                       relationshipDrafts[relationshipKey] ||
                       currentRelationshipType;
                     const relationshipChanged =
-                      selectedRelationshipType !== currentRelationshipType;
+                      selectedRelationshipType !== currentRelationshipType ||
+                      relationshipStatus === "rejected";
                     const isSavingRelationship =
                       savingRelationshipKey === relationshipKey;
 
@@ -214,9 +229,22 @@ export default function ManagedSalonsSection({
                                     ? "Chair renter"
                                     : "Staff"}
                                 </span>
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                    relationshipStatusClassNames[
+                                      relationshipStatus
+                                    ] || relationshipStatusClassNames.accepted
+                                  }`}
+                                >
+                                  {relationshipStatusLabels[
+                                    relationshipStatus
+                                  ] || relationshipStatusLabels.accepted}
+                                </span>
                               </div>
                               <p className="mt-1 text-xs text-neutral-500">
-                                Current relationship type
+                                {relationshipStatus === "pending"
+                                  ? "Waiting for specialist confirmation"
+                                  : "Current relationship type"}
                               </p>
                             </div>
                           </div>
@@ -262,6 +290,13 @@ export default function ManagedSalonsSection({
                               {relationshipHelperText[selectedRelationshipType] ||
                                 relationshipHelperText.staff}
                             </p>
+                            {relationshipStatus === "pending" && (
+                              <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                                Waiting for specialist confirmation before this
+                                relationship applies to private dashboard or
+                                calendar access.
+                              </p>
+                            )}
 
                             <div className="flex flex-wrap gap-2">
                               {isOwner && !isSelf && !isBarberAdmin && (

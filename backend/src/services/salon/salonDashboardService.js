@@ -7,6 +7,10 @@ import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import { isSalonOwner, isSalonAdmin } from "../../utils/salonPermissions.js";
 import { getOrCreateDefaultSubscriptionPlan, getDaysRemaining } from "../subscriptionService.js";
+import {
+  getRelationshipType,
+  isAcceptedStaffMember,
+} from "./salonRelationshipService.js";
 
 export class DashboardError extends Error {
   constructor(statusCode, message) {
@@ -33,16 +37,25 @@ const getSalonMembers = async (salonId) => {
 
   for (const user of users) {
     // Check the salon entry for this specific salon
-    const salonEntry = (user.salons || []).find(
+    let salonEntry = (user.salons || []).find(
       (s) => s.salon?.toString() === salonId.toString() && s.status === "approved"
     );
 
-    // If no salons array entry but legacy fields match, treat as "staff" (backward compat)
-    const relationshipType = salonEntry?.relationshipType || "staff";
+    if (!salonEntry && user.salonStatus === "approved" && String(user.salon || "") === String(salonId)) {
+      salonEntry = {
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "accepted",
+      };
+    }
+
+    // If no salons array entry but legacy fields match, treat as accepted staff.
+    const relationshipType = getRelationshipType(salonEntry);
 
     if (relationshipType === "chair_renter") {
       chairRenterIds.push(user._id);
-    } else {
+    } else if (isAcceptedStaffMember(salonEntry)) {
       staffIds.push(user._id);
     }
   }

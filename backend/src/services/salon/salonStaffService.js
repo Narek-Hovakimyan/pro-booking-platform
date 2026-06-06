@@ -3,8 +3,13 @@ import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import { sameId } from "../../utils/salonPermissions.js";
 import { syncLegacySalonFields } from "../../utils/salonHelpers.js";
-
-const allowedRelationshipTypes = new Set(["staff", "chair_renter"]);
+import {
+  getRelationshipStatus,
+  getRelationshipType,
+  relationshipStatuses,
+  relationshipTypes,
+  serializeRelationshipFields,
+} from "./salonRelationshipService.js";
 
 const getApprovedSalonEntry = (user, salonId) => {
   const approvedEntry = (user?.salons || []).find(
@@ -20,6 +25,7 @@ const getApprovedSalonEntry = (user, salonId) => {
       salon: salonId,
       status: "approved",
       relationshipType: "staff",
+      relationshipStatus: "accepted",
       isPrimary: true,
     };
   }
@@ -111,7 +117,7 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
       city: profile?.city || user.city || "",
       bio: profile?.bio || "",
       roleInSalon,
-      relationshipType: approvedSalonEntry?.relationshipType || "staff",
+      ...serializeRelationshipFields(approvedSalonEntry),
     };
   });
 
@@ -124,7 +130,7 @@ export const updateSalonMemberRelationshipType = async (
   requestingUserId,
   relationshipType
 ) => {
-  if (!allowedRelationshipTypes.has(relationshipType)) {
+  if (!relationshipTypes.has(relationshipType)) {
     throw new SalonStaffError(
       400,
       "relationshipType must be either staff or chair_renter"
@@ -178,12 +184,20 @@ export const updateSalonMemberRelationshipType = async (
     }
 
     barber.salons[salonEntryIndex].relationshipType = relationshipType;
+    barber.salons[salonEntryIndex].relationshipStatus = "pending";
+    barber.salons[salonEntryIndex].relationshipRequestedBy = requestingUserId;
+    barber.salons[salonEntryIndex].relationshipRequestedAt = new Date();
+    barber.salons[salonEntryIndex].relationshipRespondedAt = null;
   } else if (barber.salonStatus === "approved" && sameId(barber.salon, salon._id)) {
     barber.salons.push({
       salon: salon._id,
       status: "approved",
       isPrimary: true,
       relationshipType,
+      relationshipStatus: "pending",
+      relationshipRequestedBy: requestingUserId,
+      relationshipRequestedAt: new Date(),
+      relationshipRespondedAt: null,
       defaultSchedule: {},
     });
   } else {
@@ -200,5 +214,67 @@ export const updateSalonMemberRelationshipType = async (
     id: barber._id,
     name: barber.name,
     relationshipType,
+    relationshipStatus: "pending",
+  };
+};
+
+export const respondToSalonMemberRelationshipType = async (
+  salonId,
+  barberId,
+  response
+) => {
+  if (!relationshipStatuses.has(response) || response === "pending") {
+    throw new SalonStaffError(400, "response must be accepted or rejected");
+  }
+
+  const salon = await Salon.findById(salonId);
+
+  if (!salon) {
+    throw new SalonStaffError(404, "Salon not found");
+  }
+
+  const barber = await User.findById(barberId);
+
+  if (!barber || barber.role !== "barber") {
+    throw new SalonStaffError(404, "Barber not found");
+  }
+
+  barber.salons = Array.isArray(barber.salons) ? barber.salons : [];
+  let salonEntry = barber.salons.find((entry) => sameId(entry?.salon, salon._id));
+
+  if (!salonEntry && barber.salonStatus === "approved" && sameId(barber.salon, salon._id)) {
+    salonEntry = {
+      salon: salon._id,
+      status: "approved",
+      isPrimary: true,
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      defaultSchedule: {},
+    };
+    barber.salons.push(salonEntry);
+  }
+
+  if (!salonEntry || salonEntry.status !== "approved") {
+    throw new SalonStaffError(
+      400,
+      "You must be an approved member of this salon"
+    );
+  }
+
+  if (getRelationshipStatus(salonEntry) !== "pending") {
+    throw new SalonStaffError(400, "No pending relationship request");
+  }
+
+  salonEntry.relationshipStatus = response;
+  salonEntry.relationshipRespondedAt = new Date();
+
+  syncLegacySalonFields(barber);
+  await barber.save();
+
+  return {
+    id: barber._id,
+    name: barber.name,
+    relationshipType: getRelationshipType(salonEntry),
+    relationshipStatus: response,
   };
 };
