@@ -1,5 +1,36 @@
 import mongoose from "mongoose";
 
+const depositSettingsSchema = new mongoose.Schema(
+  {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    mode: {
+      type: String,
+      enum: ["percentage", "fixed"],
+      default: "percentage",
+    },
+    value: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    minimumBookingPrice: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+    noShowPolicyText: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: "",
+    },
+  },
+  { _id: false }
+);
+
 const certificationSchema = new mongoose.Schema(
   {
     title: {
@@ -109,6 +140,10 @@ const barberProfileSchema = new mongoose.Schema(
     certifications: {
       type: [certificationSchema],
       default: [],
+    },
+    depositSettings: {
+      type: depositSettingsSchema,
+      default: () => ({}),
     },
   },
   { timestamps: true }

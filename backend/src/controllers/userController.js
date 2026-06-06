@@ -219,6 +219,21 @@ export const getBarbers = async (_req, res) => {
           imageUrl: profile?.imageUrl || barber.avatarUrl || "",
           galleryImages: profile?.galleryImages || [],
           defaultSchedule: getDefaultSchedule(profile),
+          depositSettings: profile?.depositSettings
+            ? {
+                enabled: profile.depositSettings.enabled || false,
+                mode: profile.depositSettings.mode || "percentage",
+                value: profile.depositSettings.value || 0,
+                minimumBookingPrice: profile.depositSettings.minimumBookingPrice ?? null,
+                noShowPolicyText: String(profile.depositSettings.noShowPolicyText || "").slice(0, 1000),
+              }
+            : {
+                enabled: false,
+                mode: "percentage",
+                value: 0,
+                minimumBookingPrice: null,
+                noShowPolicyText: "",
+              },
         };
       })
     );

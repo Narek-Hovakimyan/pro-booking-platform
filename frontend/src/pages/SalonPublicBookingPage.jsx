@@ -13,6 +13,7 @@ import EmptyState from "@/shared/components/common/EmptyState";
 import { useBooking } from "@/shared/hooks/useBooking";
 import { getMediaUrl } from "@/shared/utils/media";
 import { formatDateKey, formatDateLabel, getDayKeyFromDate, getNext7Days, parseDateKey } from "@/shared/utils/dates";
+import { calculateDepositEstimate } from "@/shared/utils/deposit";
 import { getSalonSlotAvailabilitySummary } from "@/shared/utils/slots";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import initialSchedule, { defaultPersonalSchedule, getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
@@ -96,6 +97,9 @@ export default function SalonPublicBookingPage() {
     setSelectedServiceId(null);
     setSelectedDate("");
     setSelectedTime("");
+    setPromoCode("");
+    setValidatedPromo(null);
+    setPromoStatus({ type: "", message: "" });
   };
 
   // ── Combined handler to change service and reset dependent state ──
@@ -103,6 +107,9 @@ export default function SalonPublicBookingPage() {
     setSelectedServiceId(serviceId);
     setSelectedDate("");
     setSelectedTime("");
+    setPromoCode("");
+    setValidatedPromo(null);
+    setPromoStatus({ type: "", message: "" });
   };
 
   // ── Load public salon booking data ──
@@ -328,6 +335,16 @@ export default function SalonPublicBookingPage() {
   const [promoStatus, setPromoStatus] = useState({ type: "", message: "" });
   const [validatedPromo, setValidatedPromo] = useState(null);
   const [validatingPromo, setValidatingPromo] = useState(false);
+  const selectedServicePriceInfo = getServicePriceInfo(selectedService);
+  const publicPromoDiscount = Math.max(0, Number(validatedPromo?.discountAmount || 0));
+  const publicFinalPrice = Math.max(
+    0,
+    Number(validatedPromo?.finalPrice ?? selectedServicePriceInfo.discountedPrice ?? 0)
+  );
+  const depositEstimate = calculateDepositEstimate(
+    selectedBarber?.depositSettings,
+    publicFinalPrice
+  );
 
   // ── Promo code validation ──
   const handleApplyPromo = async () => {
@@ -342,7 +359,7 @@ export default function SalonPublicBookingPage() {
         barberId: selectedBarber?.id || selectedBarber?._id,
       });
       if (res.data.valid) {
-        setValidatedPromo(res.data.promotion);
+        setValidatedPromo(res.data);
         setPromoStatus({ type: "success", message: `${res.data.promotion.title} applied! ${res.data.discountAmount > 0 ? `Save ${Number(res.data.discountAmount).toLocaleString()} դր.` : ""}` });
       }
     } catch (err) {
@@ -398,7 +415,7 @@ export default function SalonPublicBookingPage() {
       };
 
       if (validatedPromo) {
-        bookingPayload.promotionCode = validatedPromo.code;
+        bookingPayload.promotionCode = validatedPromo.promotion?.code;
       }
 
       await createBooking(bookingPayload);
@@ -975,13 +992,63 @@ export default function SalonPublicBookingPage() {
                 <span className="text-neutral-500">Time</span>
                 <span className="font-semibold text-neutral-950">{validSelectedTime}</span>
               </div>
+              {(selectedServicePriceInfo.hasDiscount || publicPromoDiscount > 0) && (
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                  <span className="text-neutral-500">Original price</span>
+                  <span className="font-semibold text-neutral-950">
+                    {Number(selectedServicePriceInfo.originalPrice || 0).toLocaleString()} դրամ
+                  </span>
+                </div>
+              )}
+              {selectedServicePriceInfo.hasDiscount && (
+                <div className="flex items-center justify-between gap-4 bg-rose-50 px-4 py-2 text-rose-800">
+                  <span className="font-medium">Service discount</span>
+                  <span className="font-semibold">
+                    -{Number(selectedServicePriceInfo.serviceDiscountAmount || 0).toLocaleString()} դր
+                  </span>
+                </div>
+              )}
+              {publicPromoDiscount > 0 && (
+                <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-amber-800">
+                  <span className="font-medium">
+                    Promo code discount ({validatedPromo?.promotion?.code})
+                  </span>
+                  <span className="font-semibold">
+                    -{publicPromoDiscount.toLocaleString()} դր
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
-                <span className="font-medium">Price</span>
+                <span className="font-medium">
+                  {depositEstimate.depositRequired ? "Final price" : "Price"}
+                </span>
                 <span className="text-lg font-bold">
-                  {Number(selectedService.price || 0).toLocaleString()} դրամ
+                  {publicFinalPrice.toLocaleString()} դրամ
                 </span>
               </div>
             </div>
+
+            {depositEstimate.depositRequired && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="font-medium">Deposit due</span>
+                  <span className="font-bold">
+                    {depositEstimate.depositAmount.toLocaleString()} դրամ
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-4 text-amber-800">
+                  <span>Remaining due at appointment</span>
+                  <span className="font-semibold">
+                    {depositEstimate.remainingDue.toLocaleString()} դրամ
+                  </span>
+                </div>
+                {selectedBarber?.depositSettings?.noShowPolicyText && (
+                  <p className="mt-3 text-xs leading-relaxed text-amber-800">
+                    {selectedBarber.depositSettings.noShowPolicyText}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* ── Promo code ── */}
             <div className="rounded-2xl border border-neutral-200 p-4">
@@ -991,8 +1058,12 @@ export default function SalonPublicBookingPage() {
               {validatedPromo ? (
                 <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm">
                   <div>
-                    <span className="font-semibold text-emerald-800">{validatedPromo.code}</span>
-                    <span className="ml-2 text-emerald-600">— {validatedPromo.title}</span>
+                    <span className="font-semibold text-emerald-800">
+                      {validatedPromo.promotion?.code}
+                    </span>
+                    <span className="ml-2 text-emerald-600">
+                      — {validatedPromo.promotion?.title}
+                    </span>
                   </div>
                   <button
                     onClick={handleRemovePromo}

@@ -9,6 +9,7 @@ import LoyaltyProgress from "../models/LoyaltyProgress.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
 import { calculateServiceDiscountedPrice } from "./serviceController.js";
+import { calculateDeposit } from "./depositSettingsController.js";
 
 
 import User from "../models/User.js";
@@ -549,11 +550,31 @@ export const createBooking = async (req, res) => {
 
       const effectivePrice = voucherClaim ? voucherClaim.finalPrice : bookingPrice;
 
+      // ── Deposit calculation ──
+      // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
+      let depositSettings = { enabled: false };
+      try {
+        const barberProfile = await BarberProfile.findOne({ barberId }).lean();
+        if (barberProfile?.depositSettings) {
+          depositSettings = barberProfile.depositSettings;
+        }
+      } catch {
+        // BarberProfile not available — deposit not required
+      }
+      const { depositRequired, depositAmount } = calculateDeposit(depositSettings, effectivePrice);
+      const depositStatus = depositRequired ? "pending" : "not_required";
+
       let booking;
       try {
         booking = await Booking.create({
           barberId,
           serviceId,
+          depositRequired,
+          depositAmount,
+          depositStatus,
+          depositMode: depositSettings.enabled ? (depositSettings.mode || "percentage") : "",
+          depositValue: depositSettings.enabled ? (depositSettings.value || 0) : 0,
+          depositPolicyText: depositSettings.enabled ? (depositSettings.noShowPolicyText || "") : "",
           clientId: isManualBooking ? null : clientId,
           clientName: isManualBooking ? clientName : req.body.clientName,
           clientPhone,

@@ -829,6 +829,10 @@ export default function App() {
               element={renderAdminPage("settings-certifications")}
             />
             <Route
+              path="/admin/settings/deposit"
+              element={renderAdminPage("settings-deposit")}
+            />
+            <Route
               path="/admin/bookings"
               element={renderAdminPage("bookings", { requireSubscription: true })}
             />

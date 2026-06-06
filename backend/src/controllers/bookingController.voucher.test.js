@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { createBooking, updateBooking } from "./bookingController.js";
+import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
@@ -38,6 +39,7 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BarberProfile.findOne = originalMethods.barberProfileFindOne;
   Notification.create = originalMethods.notificationCreate;
   Salon.exists = originalMethods.salonExists;
   Salon.findById = originalMethods.salonFindById;
@@ -115,6 +117,71 @@ test("createBooking with valid voucherCode applies discount to booking.price and
   assert.equal(createdBookings[0].finalPrice, 90); // audit trail
   assert.equal(createdBookings[0].price, 90); // booking.price is the discounted price
   assert.equal(createdBookings[0].price, 100 - 10); // service.price(100) - voucherDiscount(10)
+});
+
+test("createBooking with voucher calculates deposit from discounted final price", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  BarberProfile.findOne = () => ({
+    lean: async () => ({
+      depositSettings: {
+        enabled: true,
+        mode: "percentage",
+        value: 50,
+        minimumBookingPrice: null,
+        noShowPolicyText: "",
+      },
+    }),
+  });
+
+  const voucher = {
+    _id: "voucher-deposit",
+    ownerType: "barber",
+    ownerId: barberId,
+    code: "HALFOFF",
+    title: "Half Off",
+    type: "amount",
+    amount: 40,
+    maxUses: 5,
+    currentUses: 0,
+    active: true,
+    expiresAt: null,
+    redemptionBookingIds: [],
+  };
+
+  Voucher.findOne = async () => voucher;
+  Voucher.findOneAndUpdate = async () => voucher;
+  Voucher.findByIdAndUpdate = async () => ({
+    ...voucher,
+    currentUses: 1,
+    redemptionBookingIds: ["booking-new"],
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        voucherCode: "HALFOFF",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].finalPrice, 60);
+  assert.equal(createdBookings[0].price, 60);
+  assert.equal(createdBookings[0].depositRequired, true);
+  assert.equal(createdBookings[0].depositAmount, 30);
+  assert.equal(createdBookings[0].depositStatus, "pending");
 });
 
 test("createBooking with promotionCode stores promotion fields", async () => {

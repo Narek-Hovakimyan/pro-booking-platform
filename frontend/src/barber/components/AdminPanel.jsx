@@ -120,6 +120,14 @@ export default function AdminPanel({
           />
         )}
 
+        {section === "settings-deposit" && (
+          <BarberSettings
+            error={error}
+            isLoading={isLoading}
+            settingsView="deposit"
+          />
+        )}
+
         {section === "settings-certifications" && (
           <BarberSettings
             error={error}

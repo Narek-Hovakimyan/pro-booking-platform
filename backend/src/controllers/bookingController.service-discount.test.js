@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { createBooking } from "./bookingController.js";
+import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
@@ -36,6 +37,7 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BarberProfile.findOne = originalMethods.barberProfileFindOne;
   Notification.create = originalMethods.notificationCreate;
   Salon.exists = originalMethods.salonExists;
   Salon.findById = originalMethods.salonFindById;

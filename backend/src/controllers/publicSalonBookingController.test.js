@@ -328,6 +328,54 @@ test("does not expose private dashboard metrics", async () => {
   assert.equal(res.body.staffSummary, undefined);
 });
 
+test("public booking data includes safe deposit minimumBookingPrice", async () => {
+  const res = createResponse();
+
+  __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
+    async () => paidAccessMap
+  );
+  __publicSalonBookingTestHooks.setGetSalonReviewStats(
+    async () => reviewStatsMap
+  );
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    name: "Test Salon",
+    city: "Yerevan",
+    address: "",
+    phone: "",
+    imageUrl: "",
+  });
+  User.find = () => makeFindChain([makeBarber(paidStaffBarberId)]);
+  BarberProfile.find = async () => [
+    {
+      barberId: paidStaffBarberId,
+      depositSettings: {
+        enabled: true,
+        mode: "fixed",
+        value: 1000,
+        minimumBookingPrice: 5000,
+        noShowPolicyText: "Deposit applies to qualifying bookings.",
+      },
+    },
+  ];
+  Schedule.find = async () => [];
+  Booking.find = async () => [];
+  Service.find = () => makeLeanQuery([]);
+  paidAccessMap = new Map([[String(paidStaffBarberId), true]]);
+
+  await getPublicSalonBooking({ params: { salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.barbers[0].depositSettings, {
+    enabled: true,
+    mode: "fixed",
+    value: 1000,
+    minimumBookingPrice: 5000,
+    noShowPolicyText: "Deposit applies to qualifying bookings.",
+  });
+});
+
 test("missing salon returns 404", async () => {
   const res = createResponse();
 

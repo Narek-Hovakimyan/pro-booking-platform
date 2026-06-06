@@ -119,6 +119,46 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
   assert.equal(res.body.some((barber) => barber.name === "Unpaid Barber"), false);
 });
 
+test("getBarbers includes safe deposit settings for booking estimates", async () => {
+  const paidBarber = makeBarber({ name: "Deposit Barber" });
+
+  User.find = () => chainableQuery([paidBarber]);
+  Subscription.find = () =>
+    chainableQuery([
+      {
+        ownerId: paidBarber._id,
+        status: "active",
+      },
+    ]);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  BarberProfile.find = async () => [
+    {
+      barberId: paidBarber._id,
+      depositSettings: {
+        enabled: true,
+        mode: "percentage",
+        value: 25,
+        minimumBookingPrice: 5000,
+        noShowPolicyText: "Deposit applies before booking.",
+      },
+    },
+  ];
+  Salon.find = async () => [];
+
+  const res = createResponse();
+  await getBarbers({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body[0].depositSettings, {
+    enabled: true,
+    mode: "percentage",
+    value: 25,
+    minimumBookingPrice: 5000,
+    noShowPolicyText: "Deposit applies before booking.",
+  });
+  assert.equal(res.body[0].email, undefined);
+});
+
 test("getBarbers hides barber with stale salon seat", async () => {
   const salonId = new mongoose.Types.ObjectId();
   const staleSeatBarber = makeBarber({

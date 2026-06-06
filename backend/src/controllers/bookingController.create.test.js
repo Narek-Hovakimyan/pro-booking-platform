@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 
 import { __bookingTestHooks, createBooking } from "./bookingController.js";
+import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
@@ -50,6 +51,7 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BarberProfile.findOne = originalMethods.barberProfileFindOne;
   Notification.create = originalMethods.notificationCreate;
   Salon.exists = originalMethods.salonExists;
   Salon.findById = originalMethods.salonFindById;
@@ -1697,4 +1699,88 @@ test("FormData: malformed consent JSON string with uploaded file returns 400 and
   assert.equal(res.body.message, "Invalid consent JSON");
   assert.equal(fs.existsSync(filePath), false);
   assert.equal(createdBookings.length, 0);
+});
+
+test("createBooking with enabled deposit stores pending deposit fields", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  BarberProfile.findOne = () => ({
+    lean: async () => ({
+      depositSettings: {
+        enabled: true,
+        mode: "percentage",
+        value: 25,
+        minimumBookingPrice: null,
+        noShowPolicyText: "No-show deposit policy",
+      },
+    }),
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].depositRequired, true);
+  assert.equal(createdBookings[0].depositAmount, 25);
+  assert.equal(createdBookings[0].depositStatus, "pending");
+  assert.equal(createdBookings[0].depositMode, "percentage");
+  assert.equal(createdBookings[0].depositValue, 25);
+  assert.equal(createdBookings[0].depositPolicyText, "No-show deposit policy");
+});
+
+test("createBooking with disabled deposit keeps old no-deposit behavior", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  BarberProfile.findOne = () => ({
+    lean: async () => ({
+      depositSettings: {
+        enabled: false,
+        mode: "fixed",
+        value: 50,
+        minimumBookingPrice: null,
+        noShowPolicyText: "Hidden when disabled",
+      },
+    }),
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].depositRequired, false);
+  assert.equal(createdBookings[0].depositAmount, 0);
+  assert.equal(createdBookings[0].depositStatus, "not_required");
+  assert.equal(createdBookings[0].depositMode, "");
+  assert.equal(createdBookings[0].depositValue, 0);
+  assert.equal(createdBookings[0].depositPolicyText, "");
 });

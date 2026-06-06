@@ -7,6 +7,7 @@ import api from "@/shared/api/axios";
 import CertificationsManager from "@/barber/components/CertificationsManager";
 import TeamSettingsSection from "@/barber/components/TeamSettingsSection";
 import SalonPromotionsManager from "@/barber/components/SalonPromotionsManager";
+import DepositSettingsSection from "@/barber/components/DepositSettingsSection";
 import useDefaultSalonScheduleSettings from "@/barber/hooks/useDefaultSalonScheduleSettings";
 import EventCertificatesSection from "@/barber/components/settings/EventCertificatesSection";
 
@@ -832,6 +833,11 @@ export default function BarberSettings({
                 description="Manage your specialist certifications and event certificates."
                 to="/admin/settings/certifications"
               />
+              <SettingsHubCard
+                title="Deposit"
+                description="Configure booking deposit / no-show protection settings."
+                to="/admin/settings/deposit"
+              />
             </div>
           </>
         )}
@@ -978,6 +984,22 @@ export default function BarberSettings({
                   />
                 )}
               </>
+            )}
+          </>
+        )}
+
+        {settingsView === "deposit" && (
+          <>
+            <h2 className="text-xl font-bold sm:text-2xl">Booking Deposit / No-show Protection</h2>
+            {error && (
+              <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {error}
+              </p>
+            )}
+            {isLoading || isProfileLoading ? (
+              <p className="text-neutral-500">Loading...</p>
+            ) : (
+              <DepositSettingsSection />
             )}
           </>
         )}

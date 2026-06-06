@@ -317,6 +317,34 @@ const bookingSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    // ── Deposit fields ──
+    depositRequired: {
+      type: Boolean,
+      default: false,
+    },
+    depositAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    depositStatus: {
+      type: String,
+      enum: ["not_required", "pending", "paid", "failed", "refunded"],
+      default: "not_required",
+    },
+    depositMode: {
+      type: String,
+      default: "",
+    },
+    depositValue: {
+      type: Number,
+      default: 0,
+    },
+    depositPolicyText: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   { timestamps: true }
 );

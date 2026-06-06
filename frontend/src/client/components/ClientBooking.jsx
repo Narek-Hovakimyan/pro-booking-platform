@@ -709,6 +709,7 @@ export default function ClientBooking({
           consent={consent}
           voucherCode={voucherCode}
           discountPreview={discountPreview}
+          depositSettings={barber?.depositSettings}
         />
 
         {showWaitlistForm && selectedBarberId && selectedService && selectedDate && (

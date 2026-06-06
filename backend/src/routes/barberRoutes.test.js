@@ -25,3 +25,23 @@ test("barber client CRM route is registered before generic barber id route", () 
     "/me/clients must be registered before /:id"
   );
 });
+
+test("barber deposit settings routes require auth and barber role middleware", () => {
+  const getRoute = barberRoutes.stack.find(
+    (layer) => layer.route?.path === "/me/deposit-settings" && layer.route?.methods?.get
+  );
+  const patchRoute = barberRoutes.stack.find(
+    (layer) => layer.route?.path === "/me/deposit-settings" && layer.route?.methods?.patch
+  );
+
+  assert.ok(getRoute, "expected GET /me/deposit-settings route");
+  assert.ok(patchRoute, "expected PATCH /me/deposit-settings route");
+  assert.deepEqual(
+    getRoute.route.stack.map((stackLayer) => stackLayer.name),
+    ["protect", "requireBarberRole", "getMyDepositSettings"]
+  );
+  assert.deepEqual(
+    patchRoute.route.stack.map((stackLayer) => stackLayer.name),
+    ["protect", "requireBarberRole", "updateMyDepositSettings"]
+  );
+});

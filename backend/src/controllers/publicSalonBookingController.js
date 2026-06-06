@@ -198,6 +198,21 @@ export const getPublicSalonBooking = async (req, res) => {
         relationshipType: approvedSalonEntry?.relationshipType || "staff",
         availabilityStatus: availability.status,
         firstAvailableSlot: availability.firstAvailableSlot,
+        depositSettings: profile?.depositSettings
+          ? {
+              enabled: profile.depositSettings.enabled || false,
+              mode: profile.depositSettings.mode || "percentage",
+              value: profile.depositSettings.value || 0,
+              minimumBookingPrice: profile.depositSettings.minimumBookingPrice ?? null,
+              noShowPolicyText: String(profile.depositSettings.noShowPolicyText || "").slice(0, 1000),
+            }
+          : {
+              enabled: false,
+              mode: "percentage",
+              value: 0,
+              minimumBookingPrice: null,
+              noShowPolicyText: "",
+            },
         availabilityReason: availability.reason,
         services: barberServices.map((svc) => ({
           id: svc._id,

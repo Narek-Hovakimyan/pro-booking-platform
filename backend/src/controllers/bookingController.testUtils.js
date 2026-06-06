@@ -3,6 +3,7 @@ import {
   __bookingSideEffectsTestHooks,
 } from "../services/bookingSideEffectsService.js";
 import Booking from "../models/Booking.js";
+import BarberProfile from "../models/BarberProfile.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
@@ -20,6 +21,7 @@ export const originalMethods = {
   bookingAggregate: Booking.aggregate,
   bookingFindById: Booking.findById,
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
+  barberProfileFindOne: BarberProfile.findOne,
   notificationCreate: Notification.create,
   salonExists: Salon.exists,
   salonFindById: Salon.findById,
@@ -129,6 +131,9 @@ export const mockCreateBookingDependencies = (createdBookings) => {
   Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
   SubscriptionSeat.findOne = () => ({
     populate: async () => null,
+  });
+  BarberProfile.findOne = () => ({
+    lean: async () => null,
   });
   Service.findOne = async () => ({
     _id: serviceId,

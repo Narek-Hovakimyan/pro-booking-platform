@@ -511,6 +511,7 @@ export default function BookingPage({
           selectedDateLabel={selectedDateLabel}
           selectedTime={selectedTime}
           client={client}
+          depositSettings={barber?.depositSettings}
         />
       </div>
     </div>

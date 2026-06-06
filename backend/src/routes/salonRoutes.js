@@ -26,6 +26,7 @@ import { getDashboard } from "../controllers/salonDashboardController.js";
 import { getReports } from "../controllers/salonReportController.js";
 import { getCalendar } from "../controllers/salonCalendarController.js";
 import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
+import { updateStaffDepositSettingsBySalonOwner } from "../controllers/depositSettingsController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 import {
@@ -71,5 +72,12 @@ router.patch(
 router.post("/:salonId/join-requests", protect, requestToJoinSalon);
 router.put("/join-requests/:requestId", protect, decideJoinRequest);
 router.put("/join-requests/:requestId/cancel", protect, cancelJoinRequest);
+
+// Staff deposit settings (owner/admin only, not for chair_renters)
+router.patch(
+  "/:salonId/staff/:barberId/deposit-settings",
+  protect,
+  updateStaffDepositSettingsBySalonOwner
+);
 
 export default router;

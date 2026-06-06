@@ -37,6 +37,7 @@ const getMenuGroups = (canShowManageHiring, canManageSalon) => [
       { label: "Settings Hub", to: "/admin/settings" },
       { label: "Salon Settings", to: "/admin/settings/salon" },
       { label: "Default Schedule", to: "/admin/settings/default-schedule" },
+      { label: "Deposit", to: "/admin/settings/deposit" },
       { label: "Certifications", to: "/admin/settings/certifications" },
     ],
   },
