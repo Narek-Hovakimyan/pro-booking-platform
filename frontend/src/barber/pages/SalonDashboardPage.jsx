@@ -15,7 +15,6 @@ import api from "@/shared/api/axios";
 import { getSalonDashboard } from "@/shared/api/salonDashboard";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import StatusBadge from "@/shared/components/StatusBadge";
 
 /* ─── Helpers ─── */
 
@@ -39,6 +38,18 @@ const getSalonName = (salon) => {
   return salonData?.name || salon?.name || "Salon";
 };
 
+const getSubscriptionStatusLabel = (status) => {
+  if (!status) return "No subscription";
+  const labels = {
+    active: "Active",
+    expired: "Expired",
+    pending: "Pending",
+    cancelled: "Cancelled",
+    grace: "Grace period",
+  };
+  return labels[status] || status;
+};
+
 const formatCurrency = (amount, currency = "AMD") =>
   `${Number(amount || 0).toLocaleString()} ${currency}`;
 
@@ -53,44 +64,27 @@ const formatDate = (value) => {
   });
 };
 
-const formatTime = (timeValue) => {
-  if (!timeValue) return "";
-  const date = new Date(timeValue);
-  if (!Number.isNaN(date.getTime())) {
-    return date.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  return timeValue;
+const formatTime = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
-const getSubscriptionStatusLabel = (status) => {
-  if (status === "active") return "Active";
-  if (status === "trialing") return "Trial";
-  if (status === "expired") return "Expired";
-  if (status === "past_due") return "Past due";
-  if (status === "none" || !status) return "No subscription";
-  return status.replace(/_/g, " ");
-};
+/* ─── Sub-components ─── */
 
-const getSeverityStyles = (severity) => {
-  if (severity === "error") return "border-red-200 bg-red-50 text-red-700";
-  if (severity === "warning")
-    return "border-amber-200 bg-amber-50 text-amber-800";
-  return "border-blue-200 bg-blue-50 text-blue-800";
-};
-
-/* ─── Stat Widget ─── */
-
-function StatWidget({ icon: Icon, label, value, sub }) {
+/** A small label + big value widget used inside stat cards. */
+function StatWidget({ label, value, icon: Icon, sub }) {
   return (
-    <div className="rounded-xl bg-neutral-50 p-4">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase text-neutral-500">
-        {Icon && <Icon className="h-3.5 w-3.5" />}
+    <div>
+      <div className="flex items-center gap-1 text-xs font-medium text-neutral-500">
+        {Icon && <Icon className="h-3 w-3" />}
         {label}
       </div>
-      <div className="mt-1 text-2xl font-bold text-neutral-950">
+      <div className="mt-0.5 text-lg font-bold text-neutral-950">
         {value ?? "—"}
       </div>
       {sub !== undefined && sub !== null && (
@@ -100,37 +94,40 @@ function StatWidget({ icon: Icon, label, value, sub }) {
   );
 }
 
-/* ─── Alert row ─── */
-
+/** Alert row shown in the alerts section. */
 function AlertRow({ alert }) {
-  let linkTo = null;
-  if (
-    alert.type === "subscription_expired" ||
-    alert.type === "subscription_expiring_soon" ||
-    alert.type === "no_subscription" ||
-    alert.type === "staff_without_seat"
-  ) {
-    linkTo = "/admin/salon/billing";
-  }
-  if (alert.type === "pending_join_requests") {
-    linkTo = "/admin/settings/salon";
-  }
+  const iconMap = {
+    warning: AlertTriangle,
+    info: null,
+    error: AlertTriangle,
+  };
+  const Icon = iconMap[alert.severity] || null;
 
   return (
-    <div
-      className={`flex items-start gap-3 rounded-xl border p-4 text-sm ${getSeverityStyles(alert.severity)}`}
-    >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-      <span className="flex-1">{alert.message}</span>
-      {linkTo && (
-        <Link
-          className="shrink-0 font-semibold underline underline-offset-2 transition hover:opacity-70"
-          to={linkTo}
-        >
-          Manage
-        </Link>
-      )}
+    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+      {Icon && <Icon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />}
+      <span>{alert.message}</span>
     </div>
+  );
+}
+
+/** Status badge for booking table. */
+function StatusBadge({ status }) {
+  const colors = {
+    pending: "bg-amber-100 text-amber-800",
+    confirmed: "bg-blue-100 text-blue-800",
+    completed: "bg-green-100 text-green-800",
+    cancelled: "bg-red-100 text-red-800",
+    "no-show": "bg-neutral-100 text-neutral-700",
+  };
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+        colors[status] || "bg-neutral-100 text-neutral-700"
+      }`}
+    >
+      {status?.replace(/_/g, " ") || "unknown"}
+    </span>
   );
 }
 
@@ -183,7 +180,7 @@ export default function SalonDashboardPage() {
     };
   }, []);
 
-  // Load dashboard when selectedSalonId changes
+  // Fetch dashboard when selectedSalonId changes
   useEffect(() => {
     if (!selectedSalonId) return;
 
@@ -199,7 +196,6 @@ export default function SalonDashboardPage() {
         }
       } catch (requestError) {
         if (isMounted) {
-          setDashboard(null);
           setError(
             requestError?.response?.data?.message || "Could not load dashboard."
           );
@@ -212,41 +208,32 @@ export default function SalonDashboardPage() {
     }
 
     fetchDashboard();
-
-    return () => {
-      isMounted = false;
-    };
   }, [selectedSalonId]);
 
   const handleSalonChange = (salonId) => {
     setSelectedSalonId(salonId);
+    setDashboard(null);
   };
 
   const handleRefresh = () => {
-    if (selectedSalonId) {
-      // Force refetch by briefly clearing and resetting
-      setLoadingDashboard(true);
-      getSalonDashboard(selectedSalonId)
-        .then((data) => {
-          setDashboard(data);
-          setError("");
-        })
-        .catch((requestError) => {
-          setDashboard(null);
-          setError(
-            requestError?.response?.data?.message || "Could not load dashboard."
-          );
-        })
-        .finally(() => {
-          setLoadingDashboard(false);
-        });
-    }
+    if (!selectedSalonId) return;
+
+    setLoadingDashboard(true);
+    getSalonDashboard(selectedSalonId)
+      .then((data) => {
+        setDashboard(data);
+        setError("");
+      })
+      .catch((requestError) => {
+        setError(
+          requestError?.response?.data?.message || "Could not load dashboard."
+        );
+      })
+      .finally(() => setLoadingDashboard(false));
   };
 
-  /* ── Derived data ── */
-
-  const subscription = dashboard?.subscriptionSummary || null;
-  const staff = dashboard?.staffSummary || null;
+  const subscription = dashboard?.subscription || null;
+  const staff = dashboard?.staff || null;
   const bookings = dashboard?.bookingSummary || null;
   const revenue = dashboard?.revenueSummary || null;
   const reviews = dashboard?.reviewSummary || null;
@@ -269,17 +256,25 @@ export default function SalonDashboardPage() {
           </p>
         </div>
 
-        <Button
-          className="gap-2"
-          disabled={!selectedSalonId || loadingDashboard}
-          onClick={handleRefresh}
-          variant="outline"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${loadingDashboard ? "animate-spin" : ""}`}
-          />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          <Link
+            className="text-sm font-semibold text-neutral-700 underline underline-offset-2 transition hover:text-neutral-950"
+            to={selectedSalonId ? `/admin/salon/reports?salonId=${selectedSalonId}` : "/admin/salon/reports"}
+          >
+            Salon Reports
+          </Link>
+          <Button
+            className="gap-2"
+            disabled={!selectedSalonId || loadingDashboard}
+            onClick={handleRefresh}
+            variant="outline"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${loadingDashboard ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* ─── Error ─── */}
