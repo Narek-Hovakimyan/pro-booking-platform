@@ -349,6 +349,11 @@ const bookingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+bookingSchema.index({ barberId: 1, bookingDate: 1, time: 1 });
+bookingSchema.index({ barberId: 1, dayKey: 1, time: 1 });
+bookingSchema.index({ clientId: 1, createdAt: -1 });
+bookingSchema.index({ salonId: 1, barberId: 1, createdAt: -1 });
+
 const Booking = mongoose.model("Booking", bookingSchema);
 
 export default Booking;

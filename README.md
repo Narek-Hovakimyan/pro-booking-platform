@@ -340,7 +340,6 @@ Default ports:
 | `RESEND_API_KEY` | Resend API key | |
 | `EMAIL_FROM` | Sender address | `HairBook <noreply@example.com>` |
 | `EMAIL_REPLY_TO` | Reply-to address (optional) | |
-| `RUN_MIGRATIONS_ON_START` | Run data migrations on every server start | `false` |
 | `ENABLE_BOOKING_REMINDERS` | Opt in to automatic booking reminders | `false` |
 | `BOOKING_REMINDER_INTERVAL_MS` | Booking reminder scheduler interval | `60000` |
 | `ENABLE_WAITLIST_EXPIRATION` | Opt in to automatic past-date waitlist expiration | `false` |
@@ -437,7 +436,7 @@ cd frontend && npm run build
 
 6. **Payment provider** — A real payment provider is not yet integrated. The system uses a `ManualPaymentProvider` for development. The payment attempt lifecycle (`createPaymentIntent` → pending → confirm) is fully structured and ready for real provider integration via the payment provider factory.
 
-7. **Debug routes** — `POST /api/debug/*` routes are only available in `NODE_ENV=development`.
+7. **Debug routes** — `/api/debug/*` routes are only available in `NODE_ENV=development`.
 
 ### Files & directories that must NOT be committed
 
@@ -449,7 +448,7 @@ cd frontend && npm run build
 
 ### Serving uploads
 
-The backend serves uploaded files via Express static middleware at `/uploads/*` paths for multiple directories: `avatars`, `certifications`, `events`, `certificate-files`, `portfolio`. Configuration uses:
+The backend serves uploaded files via Express static middleware at `/uploads/*` paths for multiple directories: `avatars`, `certifications`, `events`, `certificate-files`, `portfolio`. Booking reference images under `uploads/booking-references/` are intentionally not public; they are served only through the protected booking image route after booking ownership/manager checks. Configuration uses:
 - `dotfiles: "deny"` — prevents serving dotfiles
 - `fallthrough: false` — returns 404 instead of falling through
 - `index: false` — disables directory listing
@@ -488,6 +487,7 @@ must all fall back to `index.html` for page reload or direct navigation to work.
 - The `requireBarberSubscription` middleware enforces paid access — unpaid barbers receive `403 SUBSCRIPTION_REQUIRED`.
 - Debug routes are only available in development.
 - CORS is restricted to `CLIENT_URL` origins in production.
+- The backend also disables `X-Powered-By`, sets `nosniff`, frame-deny, referrer, permissions headers on all responses, and emits JSON instead of HTML for unexpected middleware/CORS errors.
 
 ### Upload persistence
 

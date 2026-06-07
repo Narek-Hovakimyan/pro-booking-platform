@@ -66,6 +66,10 @@ const paymentRecordSchema = new mongoose.Schema(
   }
 );
 
+paymentRecordSchema.index({ payerId: 1, paidAt: -1, createdAt: -1 });
+paymentRecordSchema.index({ ownerType: 1, ownerId: 1, paidAt: -1, createdAt: -1 });
+paymentRecordSchema.index({ subscriptionId: 1, paidAt: -1, createdAt: -1 });
+
 const PaymentRecord = mongoose.model('PaymentRecord', paymentRecordSchema);
 
 export default PaymentRecord;

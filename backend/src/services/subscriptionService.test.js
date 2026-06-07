@@ -411,6 +411,33 @@ test("dev grant endpoint disabled in production", async () => {
   assert.equal(responseBody.code, "DEV_SUBSCRIPTION_DISABLED");
 });
 
+test("dev-confirm remains disabled in production even if override env is set", async () => {
+  const originalEnv = process.env.NODE_ENV;
+  const originalAllowOverride = process.env.ALLOW_DEV_PAYMENT_CONFIRM;
+  process.env.NODE_ENV = "production";
+  process.env.ALLOW_DEV_PAYMENT_CONFIRM = "true";
+
+  try {
+    await assert.rejects(
+      () =>
+        confirmSubscriptionPaymentAttempt({
+          paymentAttemptId: new mongoose.Types.ObjectId(),
+          confirmedBy: { _id: barberId, role: "barber" },
+        }),
+      (error) =>
+        error.statusCode === 403 &&
+        error.code === "DEV_PAYMENT_CONFIRM_DISABLED"
+    );
+  } finally {
+    process.env.NODE_ENV = originalEnv;
+    if (originalAllowOverride === undefined) {
+      delete process.env.ALLOW_DEV_PAYMENT_CONFIRM;
+    } else {
+      process.env.ALLOW_DEV_PAYMENT_CONFIRM = originalAllowOverride;
+    }
+  }
+});
+
 test("dev grant barber activates subscription and creates paid PaymentRecord", async () => {
   let createdSubscription = null;
   let createdPayment = null;

@@ -44,6 +44,8 @@ const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 
+app.disable("x-powered-by");
+
 if (process.env.TRUST_PROXY === "true") {
   app.set("trust proxy", 1);
 }
@@ -78,6 +80,21 @@ const corsOptions = {
 initSocket(server);
 
 app.use(cors(corsOptions));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  if (isProduction) {
+    res.setHeader(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains"
+    );
+  }
+
+  next();
+});
 app.use(express.json());
 const uploadsRoot = path.join(process.cwd(), "uploads");
 const uploadStaticOptions = {
@@ -133,6 +150,27 @@ app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/vouchers", voucherRoutes);
 app.use("/api/revenue", revenueRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+app.use((error, _req, res, next) => {
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  if (error?.message === "Not allowed by CORS") {
+    return res.status(403).json({ message: "Origin not allowed by CORS" });
+  }
+
+  console.error("Unhandled server error", error);
+
+  const statusCode = Number.isInteger(error?.statusCode)
+    ? error.statusCode
+    : 500;
+  const message =
+    statusCode >= 500
+      ? "Internal server error"
+      : error?.message || "Request failed";
+
+  return res.status(statusCode).json({ message });
+});
 
 const startServer = async () => {
   await connectDB();

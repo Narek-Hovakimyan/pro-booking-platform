@@ -184,8 +184,7 @@ export const isManualActivationAvailable = () =>
   process.env.NODE_ENV !== "production";
 
 export const isDevPaymentConfirmationAvailable = () =>
-  process.env.NODE_ENV !== "production" ||
-  process.env.ALLOW_DEV_PAYMENT_CONFIRM === "true";
+  process.env.NODE_ENV !== "production";
 
 export const getDaysRemaining = (date, now = new Date()) => {
   if (!date) return null;
