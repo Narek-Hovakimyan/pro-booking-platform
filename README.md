@@ -403,7 +403,7 @@ Default ports:
 
 ## Testing Checklist
 
-- [ ] Backend: `npm test` (currently over **1,162 backend tests** covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, salon dashboard, salon calendar, salon reports, subscription, waitlist, socket auth, availability, and more)
+- [ ] Backend: `npm test` (currently over **1,228 backend tests** covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, salon dashboard, salon calendar, salon reports, subscription, waitlist, socket auth, availability, deposit settings, and more)
 
 - [ ] Frontend lint: `npm run lint`
 - [ ] Frontend build: `npm run build`
@@ -573,7 +573,7 @@ Then serve `frontend/dist/` with any static file server, ensuring SPA fallback.
 
 ## Deployment Checklist
 
-- [ ] Backend `npm test` passes (1,162+ tests — requires local MongoDB)
+- [ ] Backend `npm test` passes (1,228+ tests — requires local MongoDB)
 
 - [ ] Frontend `npm run lint` passes
 - [ ] Frontend `npm run build` succeeds
