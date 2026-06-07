@@ -9,6 +9,7 @@ import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
+import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 
@@ -28,6 +29,7 @@ export const originalMethods = {
   scheduleFindOne: Schedule.findOne,
   serviceFindOne: Service.findOne,
   subscriptionFindOne: Subscription.findOne,
+  subscriptionPaymentAttemptCreate: SubscriptionPaymentAttempt.create,
   subscriptionSeatFindOne: SubscriptionSeat.findOne,
   userFindById: User.findById,
 };
@@ -129,6 +131,10 @@ export const mockBookingFind = (bookings) => async (query) =>
 
 export const mockCreateBookingDependencies = (createdBookings) => {
   Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
+  SubscriptionPaymentAttempt.create = async (payload) => ({
+    _id: "payment-attempt-1",
+    ...payload,
+  });
   SubscriptionSeat.findOne = () => ({
     populate: async () => null,
   });

@@ -11,6 +11,7 @@ import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
+import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 import { handleReferenceImageUploadError } from "../middleware/uploadMiddleware.js";
@@ -34,6 +35,7 @@ import {
 } from "./bookingController.testUtils.js";
 
 const originalConsoleError = console.error;
+const originalPaymentProvider = process.env.PAYMENT_PROVIDER;
 
 const oldAutoClosedWeeklySchedule = {
   sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
@@ -58,8 +60,14 @@ afterEach(() => {
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
   Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionPaymentAttempt.create = originalMethods.subscriptionPaymentAttemptCreate;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
+  if (originalPaymentProvider === undefined) {
+    delete process.env.PAYMENT_PROVIDER;
+  } else {
+    process.env.PAYMENT_PROVIDER = originalPaymentProvider;
+  }
   console.error = originalConsoleError;
 });
 
@@ -1703,7 +1711,15 @@ test("FormData: malformed consent JSON string with uploaded file returns 400 and
 
 test("createBooking with enabled deposit stores pending deposit fields", async () => {
   const createdBookings = [];
+  const paymentAttempts = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  SubscriptionPaymentAttempt.create = async (payload) => {
+    paymentAttempts.push(payload);
+    return {
+      _id: "deposit-payment-attempt-1",
+      ...payload,
+    };
+  };
   BarberProfile.findOne = () => ({
     lean: async () => ({
       depositSettings: {
@@ -1741,6 +1757,58 @@ test("createBooking with enabled deposit stores pending deposit fields", async (
   assert.equal(createdBookings[0].depositMode, "percentage");
   assert.equal(createdBookings[0].depositValue, 25);
   assert.equal(createdBookings[0].depositPolicyText, "No-show deposit policy");
+  assert.equal(paymentAttempts.length, 1);
+  assert.equal(paymentAttempts[0].purpose, "booking_deposit");
+  assert.equal(paymentAttempts[0].amount, 25);
+  assert.equal(paymentAttempts[0].status, "pending");
+  assert.equal(res.body.payment.paymentAttemptId, "deposit-payment-attempt-1");
+  assert.equal(res.body.payment.paymentStatus, "pending");
+});
+
+test("createBooking with disabled payment provider leaves required deposit pending without payment attempt", async () => {
+  process.env.PAYMENT_PROVIDER = "disabled";
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  SubscriptionPaymentAttempt.create = async () => {
+    assert.fail("Disabled provider should not create a payment attempt");
+  };
+  BarberProfile.findOne = () => ({
+    lean: async () => ({
+      depositSettings: {
+        enabled: true,
+        mode: "fixed",
+        value: 50,
+        minimumBookingPrice: null,
+        noShowPolicyText: "No-show deposit policy",
+      },
+    }),
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].depositRequired, true);
+  assert.equal(createdBookings[0].depositStatus, "pending");
+  assert.equal(res.body.payment.paymentAttemptId, null);
+  assert.equal(res.body.payment.paymentStatus, "pending");
+  assert.equal(res.body.payment.checkoutUrl, null);
+  assert.match(res.body.payment.message, /online payment is not enabled/i);
 });
 
 test("createBooking with disabled deposit keeps old no-deposit behavior", async () => {

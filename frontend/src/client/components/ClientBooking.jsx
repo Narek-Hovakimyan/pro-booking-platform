@@ -371,10 +371,14 @@ export default function ClientBooking({
         bookingPayload.voucherCode = voucherCode;
       }
 
-      await createBooking(bookingPayload);
+      const createdBooking = await createBooking(bookingPayload);
 
       resetBookingFlow();
-      navigate("/success");
+      navigate("/success", {
+        state: {
+          payment: createdBooking?.payment || createdBooking?.depositPayment || null,
+        },
+      });
     } catch (requestError) {
       setError(
         getFriendlyApiError(
