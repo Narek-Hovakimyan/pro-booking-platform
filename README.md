@@ -336,6 +336,10 @@ Default ports:
 | `JWT_SECRET` | Secret key for signing JWT tokens | `your-long-random-secret` |
 | `CLIENT_URL` | Frontend origin(s) for CORS (comma-separated) | `http://localhost:5173` |
 | `APP_PUBLIC_URL` | Public URL of this backend | `https://api.example.com` |
+| `PAYMENT_PROVIDER` | Payment adapter (`manual`, `disabled`, `mock`, `test`) | `manual` |
+| `PAYMENT_WEBHOOK_SECRET` | Optional webhook signature secret for provider adapters | |
+| `PAYMENT_SUCCESS_URL` | Optional checkout success redirect URL | |
+| `PAYMENT_CANCEL_URL` | Optional checkout cancel redirect URL | |
 | `EMAIL_PROVIDER` | Email provider (optional) | `resend` or empty |
 | `RESEND_API_KEY` | Resend API key | |
 | `EMAIL_FROM` | Sender address | `HairBook <noreply@example.com>` |
@@ -434,7 +438,9 @@ cd frontend && npm run build
    - `POST /api/subscriptions/dev/extend`
    - `POST /api/subscriptions/payment-attempts/:attemptId/dev-confirm`
 
-6. **Payment provider** — A real payment provider is not yet integrated. The system uses a `ManualPaymentProvider` for development. The payment attempt lifecycle (`createPaymentIntent` → pending → confirm) is fully structured and ready for real provider integration via the payment provider factory.
+6. **Payment provider** — A real payment provider is not yet integrated. `PAYMENT_PROVIDER=manual` is the default and does not charge real money. `PAYMENT_PROVIDER=disabled` keeps deposit/subscription payments pending without creating checkout URLs. `mock`/`test` providers are development-only and are rejected in production. Real provider adapters must implement payment intent creation plus webhook signature verification and webhook event parsing before paid state can be trusted.
+
+   Payment attempts support `subscription` and `booking_deposit` purposes. Booking deposits remain `depositStatus=pending` until a verified provider webhook confirms payment. Pending deposits are not counted as paid revenue.
 
 7. **Debug routes** — `/api/debug/*` routes are only available in `NODE_ENV=development`.
 
@@ -488,6 +494,7 @@ must all fall back to `index.html` for page reload or direct navigation to work.
 - Debug routes are only available in development.
 - CORS is restricted to `CLIENT_URL` origins in production.
 - The backend also disables `X-Powered-By`, sets `nosniff`, frame-deny, referrer, permissions headers on all responses, and emits JSON instead of HTML for unexpected middleware/CORS errors.
+- Manual/dev payment confirmation is disabled in production. Production webhook handling rejects manual/disabled fake paid events; only a future provider adapter with verified webhook confirmation should mark payment attempts paid.
 
 ### Upload persistence
 

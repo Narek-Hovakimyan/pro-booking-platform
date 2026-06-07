@@ -28,6 +28,10 @@ import { createCrudController } from "./crudController.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import { barberHasPaidAccess } from "../services/subscriptionService.js";
 import {
+  buildSafePaymentMetadata,
+  createBookingDepositPaymentAttempt,
+} from "../services/payment/paymentAttemptService.js";
+import {
   getBookingDateTime,
   getDayKeyFromDate,
   isDateKey,
@@ -619,7 +623,24 @@ export const createBooking = async (req, res) => {
         await recordVoucherRedemption(voucherClaim.voucher._id, booking._id);
       }
 
-      return { booking };
+      let payment = null;
+      if (booking.depositRequired) {
+        try {
+          payment = await createBookingDepositPaymentAttempt({
+            booking,
+            createdBy: req.user?._id,
+          });
+        } catch (paymentError) {
+          payment = buildSafePaymentMetadata({
+            providerName: "manual",
+            message:
+              paymentError.message ||
+              "Deposit is required, but online payment is not enabled yet.",
+          });
+        }
+      }
+
+      return { booking, payment };
     });
 
     if (createResult.message) {
@@ -630,7 +651,7 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    const { booking } = createResult;
+    const { booking, payment } = createResult;
     const notificationClientName = await getClientName(booking, req.user);
 
     if (!isManualBooking) {
@@ -644,7 +665,13 @@ export const createBooking = async (req, res) => {
 
     emitBookingUpdated(booking, "created");
 
-    return res.status(201).json(booking);
+    const responseBooking = booking?.toObject ? booking.toObject() : { ...booking };
+    if (payment) {
+      responseBooking.payment = payment;
+      responseBooking.depositPayment = payment;
+    }
+
+    return res.status(201).json(responseBooking);
   } catch (error) {
     // DB or unexpected failure — cleanup uploaded files
     cleanup();

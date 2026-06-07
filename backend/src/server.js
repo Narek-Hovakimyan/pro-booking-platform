@@ -29,6 +29,7 @@ import loyaltyRoutes from "./routes/loyaltyRoutes.js";
 import voucherRoutes from "./routes/voucherRoutes.js";
 import revenueRoutes from "./routes/revenueRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
@@ -95,6 +96,8 @@ app.use((req, res, next) => {
 
   next();
 });
+app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
+app.use("/api/payments", paymentRoutes);
 app.use(express.json());
 const uploadsRoot = path.join(process.cwd(), "uploads");
 const uploadStaticOptions = {

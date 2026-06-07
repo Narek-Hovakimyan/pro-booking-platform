@@ -70,6 +70,7 @@ export default function SalonPublicBookingPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [bookingPayment, setBookingPayment] = useState(null);
 
   // Schedule data (fetched per-barber)
   const [barberScheduleEntry, setBarberScheduleEntry] = useState(null);
@@ -423,8 +424,9 @@ export default function SalonPublicBookingPage() {
         bookingPayload.promotionCode = validatedPromo.promotion?.code;
       }
 
-      await createBooking(bookingPayload);
+      const createdBooking = await createBooking(bookingPayload);
 
+      setBookingPayment(createdBooking?.payment || createdBooking?.depositPayment || null);
       setBookingSuccess(true);
       setStep(0);
     } catch (requestError) {
@@ -492,6 +494,27 @@ export default function SalonPublicBookingPage() {
           <p className="text-neutral-500">
             Your booking at <strong>{salon.name}</strong> has been submitted. The barber will confirm shortly.
           </p>
+          {bookingPayment && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900">
+              <div className="font-semibold">Deposit required</div>
+              <p className="mt-2">
+                Status: <span className="font-semibold">{bookingPayment.paymentStatus || "pending"}</span>
+              </p>
+              {bookingPayment.checkoutUrl ? (
+                <a
+                  href={bookingPayment.checkoutUrl}
+                  className="mt-3 inline-flex rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white transition hover:bg-amber-800"
+                >
+                  Pay deposit
+                </a>
+              ) : (
+                <p className="mt-2">
+                  {bookingPayment.message ||
+                    "Deposit is required, but online payment is not enabled yet."}
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Button onClick={() => navigate("/my-bookings")}>
               View my bookings
@@ -506,6 +529,7 @@ export default function SalonPublicBookingPage() {
                 setSelectedDate("");
                 setSelectedTime("");
                 setClient({ name: "", phone: "", note: "" });
+                setBookingPayment(null);
               }}
             >
               Book again

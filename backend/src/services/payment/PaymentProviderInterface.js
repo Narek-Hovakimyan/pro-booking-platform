@@ -23,7 +23,15 @@ export default class PaymentProviderInterface {
     throw new Error("Not implemented");
   }
 
-  async handleWebhook() {
+  async getPaymentStatus() {
+    throw new Error("Not implemented");
+  }
+
+  async verifyWebhookSignature() {
+    throw new Error("Not implemented");
+  }
+
+  async parseWebhookEvent() {
     throw new Error("Not implemented");
   }
 }

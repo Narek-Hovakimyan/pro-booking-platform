@@ -1,11 +1,34 @@
+import DisabledPaymentProvider from "./DisabledPaymentProvider.js";
 import ManualPaymentProvider from "./ManualPaymentProvider.js";
+import MockPaymentProvider from "./MockPaymentProvider.js";
 
 const providers = {
+  disabled: DisabledPaymentProvider,
   manual: ManualPaymentProvider,
+  mock: MockPaymentProvider,
+  test: MockPaymentProvider,
 };
 
-export const getPaymentProvider = (providerName = "manual") => {
-  const normalizedProviderName = String(providerName || "manual").toLowerCase();
+export const getConfiguredPaymentProviderName = () =>
+  String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase();
+
+export const getPaymentProvider = (providerName = getConfiguredPaymentProviderName()) => {
+  const normalizedProviderName = String(
+    providerName || getConfiguredPaymentProviderName()
+  ).toLowerCase();
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    ["mock", "test"].includes(normalizedProviderName)
+  ) {
+    const error = new Error(
+      `${normalizedProviderName} payment provider is disabled in production`
+    );
+    error.code = "PAYMENT_PROVIDER_DISABLED_IN_PRODUCTION";
+    error.statusCode = 403;
+    throw error;
+  }
+
   const Provider = providers[normalizedProviderName];
 
   if (!Provider) {
@@ -17,5 +40,5 @@ export const getPaymentProvider = (providerName = "manual") => {
     throw error;
   }
 
-  return new Provider();
+  return new Provider(normalizedProviderName);
 };

@@ -10,7 +10,11 @@ import {
   canManageSalonRequest,
   sameId,
 } from "../utils/salonPermissions.js";
-import { getPaymentProvider } from "./payment/paymentProviderFactory.js";
+import { applyPaymentAttemptTransition } from "./payment/paymentAttemptState.js";
+import {
+  getConfiguredPaymentProviderName,
+  getPaymentProvider,
+} from "./payment/paymentProviderFactory.js";
 
 const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
@@ -497,9 +501,13 @@ const serializePaymentAttempt = (attempt) => {
     ownerType: raw.ownerType,
     ownerId: raw.ownerId,
     payerId: raw.payerId,
+    purpose: raw.purpose || "subscription",
     subscriptionId: raw.subscriptionId || null,
+    bookingId: raw.bookingId || null,
     provider: raw.provider,
+    providerPaymentId: raw.providerPaymentId || raw.providerIntentId || null,
     providerIntentId: raw.providerIntentId || null,
+    checkoutUrl: raw.checkoutUrl || null,
     amount: raw.amount,
     currency: raw.currency,
     seatCount: raw.seatCount,
@@ -507,6 +515,9 @@ const serializePaymentAttempt = (attempt) => {
     status: raw.status,
     metadata: raw.metadata || {},
     paidAt: raw.paidAt || null,
+    confirmedAt: raw.confirmedAt || null,
+    failedAt: raw.failedAt || null,
+    refundedAt: raw.refundedAt || null,
     expiresAt: raw.expiresAt || null,
     createdAt: raw.createdAt || null,
     updatedAt: raw.updatedAt || null,
@@ -762,7 +773,7 @@ export const createSubscriptionPaymentIntent = async ({
   ownerId,
   seatCount = 1,
   months = 1,
-  providerName = "manual",
+  providerName = getConfiguredPaymentProviderName(),
   now = new Date(),
 }) => {
   if (!["barber", "salon"].includes(ownerType)) {
@@ -815,16 +826,21 @@ export const createSubscriptionPaymentIntent = async ({
     },
   });
   const attempt = await SubscriptionPaymentAttempt.create({
+    purpose: "subscription",
     ownerType,
     ownerId,
     payerId: requester._id,
     provider: providerName,
-    providerIntentId: paymentIntent.providerIntentId || null,
+    providerPaymentId:
+      paymentIntent.providerPaymentId || paymentIntent.providerIntentId || null,
+    providerIntentId:
+      paymentIntent.providerIntentId || paymentIntent.providerPaymentId || null,
+    checkoutUrl: paymentIntent.checkoutUrl || null,
     amount,
     currency: plan.currency,
     seatCount: normalizedSeatCount,
     months: normalizedMonths,
-    status: "pending",
+    status: paymentIntent.status || "pending",
     metadata: {
       ownerType,
       ownerId: String(ownerId),
@@ -833,6 +849,7 @@ export const createSubscriptionPaymentIntent = async ({
       planCode: plan.code,
       monthlyTotal,
     },
+    createdBy: requester._id,
     expiresAt: buildPaymentAttemptExpiry(now),
   });
 
@@ -881,7 +898,7 @@ export const cancelSubscriptionPaymentAttempt = async ({
     throw error;
   }
 
-  attempt.status = "cancelled";
+  applyPaymentAttemptTransition(attempt, "cancelled");
   await attempt.save();
 
   return serializePaymentAttempt(attempt);
@@ -905,6 +922,12 @@ export const confirmSubscriptionPaymentAttempt = async ({
     action: "confirm",
   });
 
+  if ((attempt.purpose || "subscription") !== "subscription") {
+    const error = new Error("Only subscription payment attempts can be dev-confirmed");
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (attempt.status === "paid") {
     return {
       paymentAttempt: serializePaymentAttempt(attempt),
@@ -919,7 +942,7 @@ export const confirmSubscriptionPaymentAttempt = async ({
     };
   }
 
-  if (attempt.status !== "pending") {
+  if (!["pending", "requires_action"].includes(attempt.status)) {
     const error = new Error("Only pending payment attempts can be confirmed");
     error.statusCode = 400;
     throw error;
@@ -942,11 +965,12 @@ export const confirmSubscriptionPaymentAttempt = async ({
     months: attempt.months,
   });
 
-  attempt.status = "paid";
+  applyPaymentAttemptTransition(attempt, "paid", now);
   attempt.subscriptionId = subscription._id;
+  attempt.providerPaymentId =
+    attempt.providerPaymentId || `${attempt.provider}:${attempt._id}`;
   attempt.providerIntentId =
-    attempt.providerIntentId || `${attempt.provider}:${attempt._id}`;
-  attempt.paidAt = now;
+    attempt.providerIntentId || attempt.providerPaymentId;
   await attempt.save();
 
   return {

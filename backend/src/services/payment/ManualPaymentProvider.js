@@ -50,6 +50,9 @@ export default class ManualPaymentProvider extends PaymentProviderInterface {
   async createPaymentIntent({ amount, currency, metadata } = {}) {
     return {
       provider: this.providerName,
+      providerPaymentId: null,
+      checkoutUrl: null,
+      status: "pending",
       requiresManualActivation: true,
       message: "Manual payment activation is required.",
       amount,
@@ -58,8 +61,20 @@ export default class ManualPaymentProvider extends PaymentProviderInterface {
     };
   }
 
-  async handleWebhook() {
+  async getPaymentStatus() {
+    return "pending";
+  }
+
+  async verifyWebhookSignature() {
+    const error = new Error("Manual provider does not accept webhook payments");
+    error.code = "WEBHOOK_NOT_SUPPORTED";
+    error.statusCode = 400;
+    throw error;
+  }
+
+  async parseWebhookEvent() {
     const error = new Error("Manual provider does not support webhooks");
+    error.code = "WEBHOOK_NOT_SUPPORTED";
     error.statusCode = 400;
     throw error;
   }

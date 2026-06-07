@@ -2,6 +2,13 @@ import mongoose from "mongoose";
 
 const subscriptionPaymentAttemptSchema = new mongoose.Schema(
   {
+    purpose: {
+      type: String,
+      enum: ["subscription", "booking_deposit"],
+      default: "subscription",
+      required: true,
+      index: true,
+    },
     ownerType: {
       type: String,
       required: true,
@@ -21,12 +28,27 @@ const subscriptionPaymentAttemptSchema = new mongoose.Schema(
       ref: "Subscription",
       default: null,
     },
+    bookingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Booking",
+      default: null,
+    },
     provider: {
       type: String,
-      enum: ["manual", "stripe", "idram", "telcell", "bank"],
+      enum: ["disabled", "manual", "mock", "test", "stripe", "idram", "telcell", "bank"],
       default: "manual",
     },
+    providerPaymentId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     providerIntentId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    checkoutUrl: {
       type: String,
       default: null,
       trim: true,
@@ -54,7 +76,15 @@ const subscriptionPaymentAttemptSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "paid", "failed", "cancelled", "expired"],
+      enum: [
+        "pending",
+        "requires_action",
+        "paid",
+        "failed",
+        "cancelled",
+        "refunded",
+        "expired",
+      ],
       default: "pending",
     },
     metadata: {
@@ -65,9 +95,30 @@ const subscriptionPaymentAttemptSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    confirmedAt: {
+      type: Date,
+      default: null,
+    },
+    failedAt: {
+      type: Date,
+      default: null,
+    },
+    refundedAt: {
+      type: Date,
+      default: null,
+    },
     expiresAt: {
       type: Date,
       default: null,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    processedWebhookEventIds: {
+      type: [String],
+      default: [],
     },
   },
   { timestamps: true }
@@ -75,7 +126,9 @@ const subscriptionPaymentAttemptSchema = new mongoose.Schema(
 
 subscriptionPaymentAttemptSchema.index({ payerId: 1, status: 1, createdAt: -1 });
 subscriptionPaymentAttemptSchema.index({ ownerType: 1, ownerId: 1, status: 1 });
+subscriptionPaymentAttemptSchema.index({ purpose: 1, bookingId: 1, status: 1 });
 subscriptionPaymentAttemptSchema.index({ provider: 1, providerIntentId: 1 });
+subscriptionPaymentAttemptSchema.index({ provider: 1, providerPaymentId: 1 });
 
 const SubscriptionPaymentAttempt = mongoose.model(
   "SubscriptionPaymentAttempt",

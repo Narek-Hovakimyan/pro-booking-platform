@@ -10,9 +10,13 @@ export default function DepositNotice({
   depositAmount = 0,
   remainingDue = 0,
   policyText = "",
+  paymentStatus = "pending",
+  checkoutUrl = "",
+  paymentMessage = "",
   className = "",
 }) {
   const safeDiscountAmount = Math.max(0, Number(discountAmount || 0));
+  const safePaymentStatus = paymentStatus || "pending";
 
   return (
     <div
@@ -49,9 +53,25 @@ export default function DepositNotice({
         </div>
       </div>
 
-      <p className="mt-3 text-xs leading-relaxed text-amber-800">
-        Deposit payment is pending. Online payment integration is not enabled yet.
-      </p>
+      <div className="mt-3 space-y-2 text-xs leading-relaxed text-amber-800">
+        <p>
+          Deposit payment status:{" "}
+          <span className="font-semibold">{safePaymentStatus}</span>
+        </p>
+        {checkoutUrl ? (
+          <a
+            href={checkoutUrl}
+            className="inline-flex rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white transition hover:bg-amber-800"
+          >
+            Pay deposit
+          </a>
+        ) : (
+          <p>
+            {paymentMessage ||
+              "Deposit is required, but online payment is not enabled yet."}
+          </p>
+        )}
+      </div>
 
       {policyText && (
         <p className="mt-3 text-xs leading-relaxed text-amber-800">
