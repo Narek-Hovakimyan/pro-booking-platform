@@ -103,7 +103,6 @@ export const createPaymentIntent = async (req, res) => {
       ownerId,
       seatCount,
       months,
-      providerName: "manual",
     });
 
     return res.json(paymentIntent);
