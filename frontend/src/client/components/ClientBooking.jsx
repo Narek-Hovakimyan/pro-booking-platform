@@ -40,6 +40,7 @@ export default function ClientBooking({
   setClient,
   selectedSalonId: externalSelectedSalonId,
   onSalonSelect,
+  onPriceAdjustmentChange,
 }) {
   const navigate = useNavigate();
   const { createBooking } = useBooking();
@@ -251,6 +252,15 @@ export default function ClientBooking({
     setDiscountPreview(0);
     setVoucherError("");
   };
+
+  useEffect(() => {
+    if (!onPriceAdjustmentChange) return;
+
+    onPriceAdjustmentChange({
+      discountPreview,
+      voucherCode,
+    });
+  }, [discountPreview, onPriceAdjustmentChange, voucherCode]);
 
   /* ── Clear voucher when service changes ── */
   useEffect(() => {

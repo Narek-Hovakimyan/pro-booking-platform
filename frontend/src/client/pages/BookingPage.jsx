@@ -84,13 +84,28 @@ export default function BookingPage({
   );
   const [activeBarberId, setActiveBarberId] = useState(null);
   const [selectedSalonId, setSelectedSalonId] = useState(initialSelectedSalonId);
+  const [priceAdjustment, setPriceAdjustment] = useState({
+    discountPreview: 0,
+    voucherCode: "",
+  });
   const users = useSelector((state) => state.users);
   const barberFromState = location.state?.barber;
-  const barber = barberFromState || (users || []).find(
+  const barberFromStore = (users || []).find(
     (user) =>
       user?.role === "barber" &&
       String(user?.id || user?._id) === String(barberId)
   );
+  const barber = useMemo(() => {
+    if (!barberFromState) return barberFromStore;
+
+    return {
+      ...barberFromStore,
+      ...barberFromState,
+      depositSettings:
+        barberFromState.depositSettings ?? barberFromStore?.depositSettings,
+    };
+  }, [barberFromState, barberFromStore]);
+  const needsEnrichedBarber = !barber?.depositSettings;
 
   const barberBookings = useMemo(
     () =>
@@ -190,7 +205,7 @@ export default function BookingPage({
   ]);
 
   useEffect(() => {
-    if (barber) return undefined;
+    if (!needsEnrichedBarber) return undefined;
 
     let isMounted = true;
 
@@ -222,7 +237,7 @@ export default function BookingPage({
     return () => {
       isMounted = false;
     };
-  }, [barber, barberId, dispatch]);
+  }, [barberId, dispatch, needsEnrichedBarber]);
 
   const selectedDateDayKey = selectedDateOption?.dayKey || "";
   const selectedOverride = barberScheduleOverrides[selectedDate];
@@ -503,6 +518,7 @@ export default function BookingPage({
           setClient={setClient}
           selectedSalonId={selectedSalonId}
           onSalonSelect={setSelectedSalonId}
+          onPriceAdjustmentChange={setPriceAdjustment}
         />
 
         <BookingSummary
@@ -512,6 +528,7 @@ export default function BookingPage({
           selectedTime={selectedTime}
           client={client}
           depositSettings={barber?.depositSettings}
+          discountPreview={priceAdjustment.discountPreview}
         />
       </div>
     </div>

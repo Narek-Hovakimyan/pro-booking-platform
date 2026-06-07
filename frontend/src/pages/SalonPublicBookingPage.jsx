@@ -9,6 +9,7 @@ import api from "@/shared/api/axios";
 import { getFriendlyApiError } from "@/shared/api/errors";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import DepositNotice from "@/shared/components/booking/DepositNotice";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { useBooking } from "@/shared/hooks/useBooking";
 import { getMediaUrl } from "@/shared/utils/media";
@@ -340,6 +341,10 @@ export default function SalonPublicBookingPage() {
   const publicFinalPrice = Math.max(
     0,
     Number(validatedPromo?.finalPrice ?? selectedServicePriceInfo.discountedPrice ?? 0)
+  );
+  const publicTotalDiscount = Math.max(
+    0,
+    Number(selectedServicePriceInfo.originalPrice || 0) - publicFinalPrice
   );
   const depositEstimate = calculateDepositEstimate(
     selectedBarber?.depositSettings,
@@ -1029,25 +1034,14 @@ export default function SalonPublicBookingPage() {
             </div>
 
             {depositEstimate.depositRequired && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="font-medium">Deposit due</span>
-                  <span className="font-bold">
-                    {depositEstimate.depositAmount.toLocaleString()} դրամ
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-4 text-amber-800">
-                  <span>Remaining due at appointment</span>
-                  <span className="font-semibold">
-                    {depositEstimate.remainingDue.toLocaleString()} դրամ
-                  </span>
-                </div>
-                {selectedBarber?.depositSettings?.noShowPolicyText && (
-                  <p className="mt-3 text-xs leading-relaxed text-amber-800">
-                    {selectedBarber.depositSettings.noShowPolicyText}
-                  </p>
-                )}
-              </div>
+              <DepositNotice
+                originalPrice={selectedServicePriceInfo.originalPrice}
+                discountAmount={publicTotalDiscount}
+                finalPrice={publicFinalPrice}
+                depositAmount={depositEstimate.depositAmount}
+                remainingDue={depositEstimate.remainingDue}
+                policyText={selectedBarber?.depositSettings?.noShowPolicyText}
+              />
             )}
 
             {/* ── Promo code ── */}

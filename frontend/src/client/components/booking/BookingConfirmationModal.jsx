@@ -1,4 +1,5 @@
 import { Button } from "@/shared/components/ui/button";
+import DepositNotice from "@/shared/components/booking/DepositNotice";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { calculateDepositEstimate } from "@/shared/utils/deposit";
 
@@ -25,6 +26,7 @@ export default function BookingConfirmationModal({
   const priceInfo = getServicePriceInfo(selectedService);
   const promoDiscount = Math.max(0, Number(discountPreview || 0));
   const finalTotal = Math.max(0, priceInfo.discountedPrice - promoDiscount);
+  const totalDiscount = Math.max(0, priceInfo.originalPrice - finalTotal);
   const depositEstimate = calculateDepositEstimate(depositSettings, finalTotal);
 
   return (
@@ -120,25 +122,15 @@ export default function BookingConfirmationModal({
         </div>
 
         {depositEstimate.depositRequired && (
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <div className="flex items-center justify-between gap-4">
-              <span className="font-medium">Deposit due</span>
-              <span className="font-bold">
-                {depositEstimate.depositAmount.toLocaleString()} դրամ
-              </span>
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-4 text-amber-800">
-              <span>Remaining due at appointment</span>
-              <span className="font-semibold">
-                {depositEstimate.remainingDue.toLocaleString()} դրամ
-              </span>
-            </div>
-            {depositSettings?.noShowPolicyText && (
-              <p className="mt-3 text-xs leading-relaxed text-amber-800">
-                {depositSettings.noShowPolicyText}
-              </p>
-            )}
-          </div>
+          <DepositNotice
+            className="mt-5"
+            originalPrice={priceInfo.originalPrice}
+            discountAmount={totalDiscount}
+            finalPrice={finalTotal}
+            depositAmount={depositEstimate.depositAmount}
+            remainingDue={depositEstimate.remainingDue}
+            policyText={depositSettings?.noShowPolicyText}
+          />
         )}
 
         {consultation && (

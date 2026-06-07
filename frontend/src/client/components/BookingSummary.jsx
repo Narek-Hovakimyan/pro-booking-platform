@@ -1,5 +1,6 @@
 import { CalendarDays, Clock, Scissors, User } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import DepositNotice from "@/shared/components/booking/DepositNotice";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { calculateDepositEstimate } from "@/shared/utils/deposit";
 
@@ -9,11 +10,15 @@ export default function BookingSummary({
   selectedTime,
   client,
   depositSettings = null,
+  discountPreview = 0,
 }) {
   const priceInfo = getServicePriceInfo(selectedService);
+  const promoDiscount = Math.max(0, Number(discountPreview || 0));
+  const finalTotal = Math.max(0, priceInfo.discountedPrice - promoDiscount);
+  const totalDiscount = Math.max(0, priceInfo.originalPrice - finalTotal);
   const depositEstimate = calculateDepositEstimate(
     depositSettings,
-    priceInfo.discountedPrice
+    finalTotal
   );
 
   return (
@@ -47,18 +52,15 @@ export default function BookingSummary({
           </p>
 
           {depositEstimate.depositRequired && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
-              <div className="flex items-center justify-between gap-3">
-                <span>Deposit</span>
-                <span className="font-semibold">
-                  {depositEstimate.depositAmount.toLocaleString()} դրամ
-                </span>
-              </div>
-              <div className="mt-1 flex items-center justify-between gap-3 text-xs text-amber-800">
-                <span>Remaining due</span>
-                <span>{depositEstimate.remainingDue.toLocaleString()} դրամ</span>
-              </div>
-            </div>
+            <DepositNotice
+              className="rounded-xl p-3"
+              originalPrice={priceInfo.originalPrice}
+              discountAmount={totalDiscount}
+              finalPrice={finalTotal}
+              depositAmount={depositEstimate.depositAmount}
+              remainingDue={depositEstimate.remainingDue}
+              policyText={depositSettings?.noShowPolicyText}
+            />
           )}
         </div>
       </CardContent>
