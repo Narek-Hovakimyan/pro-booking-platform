@@ -27,6 +27,10 @@ import {
 } from "../controllers/bookingAnalyticsController.js";
 import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
+import {
+  publicBookingLimiter,
+  uploadLimiter,
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
@@ -35,7 +39,7 @@ router.get("/client/:clientId/reliability", protect, getClientReliability);
 router.get("/barber/:barberId/income", protect, requireBarberSubscription, getBarberMonthlyIncome);
 router.get("/barber/:barberId", optionalAuth, getBarberBookings);
 router.post("/availability-debug", protect, debugBookingAvailability);
-router.post("/", protect, handleReferenceImageUpload, createBooking);
+router.post("/", protect, publicBookingLimiter, uploadLimiter, handleReferenceImageUpload, createBooking);
 router.post("/:id/reschedule-request", protect, createRescheduleRequest);
 router.patch("/:id/reschedule-request/accept", protect, acceptRescheduleRequest);
 router.patch("/:id/reschedule-request/reject", protect, rejectRescheduleRequest);
@@ -44,6 +48,6 @@ router.patch("/:id/delay", protect, requireBarberSubscription, delayBooking);
 router.get("/:bookingId/reference-images/:imageName", protect, getReferenceImage);
 router.patch("/:id/no-show", protect, requireBarberSubscription, markNoShow);
 router.patch("/:id/late-cancel", protect, requireBarberSubscription, markLateCancel);
-router.put("/:id/treatment-record", protect, requireBarberSubscription, updateTreatmentRecord);
+router.put("/:id/treatment-record", protect, requireBarberSubscription, uploadLimiter, updateTreatmentRecord);
 
 export default router;

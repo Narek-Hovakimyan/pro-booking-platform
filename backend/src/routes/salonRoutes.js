@@ -29,6 +29,7 @@ import { getPublicSalonBooking } from "../controllers/publicSalonBookingControll
 import { updateStaffDepositSettingsBySalonOwner } from "../controllers/depositSettingsController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
+import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
 import {
   getSalonPromotions,
   createSalonPromotion,
@@ -51,7 +52,7 @@ router.get("/:salonId/public-booking", getPublicSalonBooking);
 router.get("/:salonId/reports", protect, getReports);
 router.get("/:salonId/promotions", protect, getSalonPromotions);
 router.post("/:salonId/promotions", protect, createSalonPromotion);
-router.post("/:salonId/promotions/validate", validateSalonPromotion);
+router.post("/:salonId/promotions/validate", promoValidationLimiter, validateSalonPromotion);
 router.patch("/:salonId/promotions/:promotionId", protect, updateSalonPromotion);
 
 router.post("/", protect, createSalon);

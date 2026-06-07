@@ -10,11 +10,12 @@ import {
   updateVoucher,
   validateVoucherCode,
 } from "../controllers/voucherController.js";
+import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
 // POST /api/vouchers/validate — must be before /:id
-router.post("/validate", protect, validateVoucherCode);
+router.post("/validate", protect, promoValidationLimiter, validateVoucherCode);
 
 // GET /api/vouchers/public/:ownerType/:ownerId — must be before /:id
 router.get("/public/:ownerType/:ownerId", getPublicVouchers);

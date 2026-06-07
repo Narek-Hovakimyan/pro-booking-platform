@@ -6,10 +6,11 @@ import {
   markConversationRead,
 } from "../controllers/messageController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { messageLimiter } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
-router.post("/", protect, createMessage);
+router.post("/", protect, messageLimiter, createMessage);
 router.get("/", protect, getMyMessages);
 router.put("/read/:otherUserId", protect, markConversationRead);
 router.get("/conversation/:otherUserId", protect, getConversation);

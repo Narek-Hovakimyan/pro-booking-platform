@@ -18,6 +18,7 @@ import {
   updateMyDepositSettings,
 } from "../controllers/depositSettingsController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 import {
   handleAvatarUpload,
@@ -41,6 +42,7 @@ router.get("/profile/:barberId", getProfileByBarberId);
 router.put(
   "/profile/:barberId",
   protect,
+  uploadLimiter,
   handleAvatarUpload,
   upsertProfileByBarberId
 );
@@ -56,6 +58,7 @@ router.post(
   "/certifications",
   protect,
   requireBarberSubscription,
+  uploadLimiter,
   handleCertificationImageUpload,
   addCertification
 );
@@ -63,6 +66,7 @@ router.put(
   "/certifications/:certId",
   protect,
   requireBarberSubscription,
+  uploadLimiter,
   handleCertificationImageUpload,
   updateCertification
 );

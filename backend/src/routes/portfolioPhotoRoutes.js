@@ -7,6 +7,7 @@ import {
   deletePortfolioPhoto,
 } from "../controllers/portfolioPhotoController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 import { handlePortfolioImageUpload } from "../middleware/uploadMiddleware.js";
 
@@ -17,7 +18,7 @@ router.get("/barber/:barberId", getPortfolioByBarber);
 
 // Protected
 router.get("/me", protect, getMyPortfolio);
-router.post("/", protect, requireBarberSubscription, handlePortfolioImageUpload, addPortfolioPhoto);
+router.post("/", protect, requireBarberSubscription, uploadLimiter, handlePortfolioImageUpload, addPortfolioPhoto);
 router.put("/:id", protect, requireBarberSubscription, updatePortfolioPhoto);
 router.delete("/:id", protect, requireBarberSubscription, deletePortfolioPhoto);
 

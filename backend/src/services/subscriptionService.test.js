@@ -2286,8 +2286,8 @@ test("subscription endpoints remain accessible while unpaid", async () => {
   assert.ok(!source.includes("requireBarberSubscription"));
   assert.match(source, /router\.get\("\/me",\s*protect,\s*getMySubscription/);
   assert.match(source, /router\.get\("\/salon\/:salonId",\s*protect,\s*getSalonSubscription/);
-  assert.match(source, /router\.post\("\/salon\/:salonId\/seats",\s*protect,\s*assignSeat/);
-  assert.match(source, /router\.patch\("\/seats\/:seatId\/revoke",\s*protect,\s*revokeSeat/);
+  assert.match(source, /router\.post\("\/salon\/:salonId\/seats",\s*protect,\s*paymentLimiter,\s*assignSeat/);
+  assert.match(source, /router\.patch\("\/seats\/:seatId\/revoke",\s*protect,\s*paymentLimiter,\s*revokeSeat/);
 });
 
 test("barber profile upsert does not require subscription (Phase 1 non-enforcement preserved)", async () => {

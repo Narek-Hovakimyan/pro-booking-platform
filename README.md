@@ -336,6 +336,15 @@ Default ports:
 | `JWT_SECRET` | Secret key for signing JWT tokens | `your-long-random-secret` |
 | `CLIENT_URL` | Frontend origin(s) for CORS (comma-separated) | `http://localhost:5173` |
 | `APP_PUBLIC_URL` | Public URL of this backend | `https://api.example.com` |
+| `RATE_LIMIT_ENABLED` | Enable API rate limiting outside test env | `true` |
+| `RATE_LIMIT_AUTH_WINDOW_MS` | Auth limiter window | `900000` |
+| `RATE_LIMIT_AUTH_MAX` | Auth attempts per window | `20` |
+| `RATE_LIMIT_PUBLIC_WINDOW_MS` | Public/action limiter window | `900000` |
+| `RATE_LIMIT_PUBLIC_MAX` | Public/action attempts per window | `120` |
+| `RATE_LIMIT_UPLOAD_WINDOW_MS` | Upload limiter window | `900000` |
+| `RATE_LIMIT_UPLOAD_MAX` | Upload attempts per window | `40` |
+| `RATE_LIMIT_PAYMENT_WINDOW_MS` | Payment/webhook limiter window | `900000` |
+| `RATE_LIMIT_PAYMENT_MAX` | Payment attempts per window | `60` |
 | `PAYMENT_PROVIDER` | Payment adapter (`manual`, `disabled`, `mock`, `test`) | `manual` |
 | `PAYMENT_WEBHOOK_SECRET` | Optional webhook signature secret for provider adapters | |
 | `PAYMENT_SUCCESS_URL` | Optional checkout success redirect URL | |
@@ -495,6 +504,8 @@ must all fall back to `index.html` for page reload or direct navigation to work.
 - CORS is restricted to `CLIENT_URL` origins in production.
 - The backend also disables `X-Powered-By`, sets `nosniff`, frame-deny, referrer, permissions headers on all responses, and emits JSON instead of HTML for unexpected middleware/CORS errors.
 - Manual/dev payment confirmation is disabled in production. Production webhook handling rejects manual/disabled fake paid events; only a future provider adapter with verified webhook confirmation should mark payment attempts paid.
+- Rate limiting is enabled by default outside `NODE_ENV=test` and returns `{ "message": "Too many requests, please try again later.", "code": "RATE_LIMITED" }` for limited requests. Tune the `RATE_LIMIT_*` values for production traffic patterns.
+- `TRUST_PROXY=true` sets Express `trust proxy` to one hop. Enable it only when the app is behind a trusted reverse proxy/load balancer such as nginx, Render, Railway, or a similar platform that controls forwarded IP headers.
 
 ### Upload persistence
 

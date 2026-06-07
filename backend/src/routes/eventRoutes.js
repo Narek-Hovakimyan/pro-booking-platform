@@ -25,6 +25,7 @@ import {
   getEventReviews,
 } from "../controllers/eventReviewController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { publicBookingLimiter, uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { handleEventImageUpload, handleCertificateFileUpload } from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
@@ -37,12 +38,12 @@ router.get("/:id/reviews", getEventReviews);
 router.get("/:id", getEventById);
 
 // Protected routes
-router.post("/", protect, handleEventImageUpload, createEvent);
-router.put("/:id", protect, handleEventImageUpload, updateEvent);
+router.post("/", protect, uploadLimiter, handleEventImageUpload, createEvent);
+router.put("/:id", protect, uploadLimiter, handleEventImageUpload, updateEvent);
 router.delete("/:id", protect, cancelEvent);
 
 // Registration routes
-router.post("/:id/register", protect, registerForEvent);
+router.post("/:id/register", protect, publicBookingLimiter, registerForEvent);
 router.delete("/:id/register", protect, cancelRegistration);
 
 // Attendance & certificates (Phase 2)
@@ -59,6 +60,7 @@ router.post(
 router.post(
   "/:eventId/registrations/:registrationId/certificate/upload",
   protect,
+  uploadLimiter,
   handleCertificateFileUpload,
   issueEventRegistrationCertificateUpload
 );

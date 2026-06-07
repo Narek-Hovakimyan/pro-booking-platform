@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
 import voucherRoutes from "./voucherRoutes.js";
 
 test("voucher routes expose CRUD and validate endpoints in safe order", () => {
@@ -13,8 +14,12 @@ test("voucher routes expose CRUD and validate endpoints in safe order", () => {
   assert.deepEqual(routes[0], {
     path: "/validate",
     methods: ["post"],
-    handlers: ["protect", "validateVoucherCode"],
+    handlers: ["protect", "<anonymous>", "validateVoucherCode"],
   });
+  assert.equal(
+    voucherRoutes.stack[0].route.stack[1].handle,
+    promoValidationLimiter
+  );
   assert.deepEqual(routes.find((route) => route.path === "/"), {
     path: "/",
     methods: ["post"],
