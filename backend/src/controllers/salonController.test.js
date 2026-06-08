@@ -63,7 +63,7 @@ const selectedDefaultSchedule = {
   breakEnd: "15:00",
 };
 
-test("listManageableSalons returns every approved salon membership", async () => {
+test("listManageableSalons returns only owner/admin salons, not approved memberships", async () => {
   const res = createResponse();
   const foundQueries = [];
 
@@ -79,18 +79,16 @@ test("listManageableSalons returns every approved salon membership", async () =>
     }),
   });
 
-  SalonJoinRequest.find = () => ({
-    distinct: async () => [],
-  });
+  SalonJoinRequest.find = () => {
+    throw new Error("should not query join requests for manageable");
+  };
 
   Salon.find = (query) => {
     foundQueries.push(query);
 
+    // Barber is not owner/admin of either salon, so return empty
     return {
-      sort: async () => [
-        { _id: salonAId, name: "First Salon", ownerId: "owner-a", admins: [] },
-        { _id: salonBId, name: "Second Salon", ownerId: "owner-b", admins: [] },
-      ],
+      sort: async () => [],
     };
   };
 
@@ -100,13 +98,14 @@ test("listManageableSalons returns every approved salon membership", async () =>
   );
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.length, 2);
-  assert.deepEqual(
-    res.body.map((salon) => String(salon._id)),
-    [salonAId, salonBId]
-  );
-  assert.deepEqual(foundQueries[0].$or[2], {
-    _id: { $in: [salonAId, salonBId] },
+  // Approved membership alone does NOT grant management access
+  assert.equal(res.body.length, 0);
+  // Query uses owner/admin only, no membership $in clause
+  assert.deepEqual(foundQueries[0], {
+    $or: [
+      { ownerId: barberId },
+      { admins: barberId },
+    ],
   });
 });
 

@@ -11,6 +11,9 @@ export const isSalonAdmin = (salon, userId) =>
 export const canManageSalonRequest = (salon, userId) =>
   isSalonOwner(salon, userId) || isSalonAdmin(salon, userId);
 
+/** Alias for canManageSalonRequest — clearer name for owner/admin permission check. */
+export const canManageSalon = canManageSalonRequest;
+
 /**
  * Check if a user can remove a barber from a salon.
  * Owner can remove anyone except themselves.

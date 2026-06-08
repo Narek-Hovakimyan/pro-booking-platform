@@ -48,7 +48,8 @@ test("returns serialized owner and admins", async () => {
     return {
       select(fields) {
         ownerSelect = fields;
-        return createUser();
+        const { phone: _, ...rest } = createUser();
+        return rest;
       },
     };
   };
@@ -57,19 +58,22 @@ test("returns serialized owner and admins", async () => {
     return {
       select(fields) {
         adminsSelect = fields;
-        return [createUser({ _id: adminId, name: "Admin" })];
+        const { phone: _, ...rest } = createUser({ _id: adminId, name: "Admin" });
+        return [rest];
       },
     };
   };
 
   const payload = await getSalonAdminsForSalon(salonId);
 
-  assert.equal(ownerSelect, "name phone avatarUrl city");
-  assert.equal(adminsSelect, "name phone avatarUrl city");
+  assert.equal(ownerSelect, "name avatarUrl city");
+  assert.equal(adminsSelect, "name avatarUrl city");
   assert.equal(payload.owner.id, ownerId);
   assert.equal(payload.owner.password, undefined);
+  assert.equal(payload.owner.phone, undefined);
   assert.deepEqual(payload.admins.map((admin) => admin.id), [adminId]);
   assert.equal(payload.admins[0].password, undefined);
+  assert.equal(payload.admins[0].phone, undefined);
 });
 
 test("returns empty admins without admin lookup when salon has no admin IDs", async () => {

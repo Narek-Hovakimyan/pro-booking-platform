@@ -317,34 +317,12 @@ test("approved salon member can create event with second salonId", async () => {
   assert.equal(res.body.salonId.name, "Second Salon");
 });
 
-test("approved salon member can create off-site event without salonId", async () => {
+test("approved salon member cannot create off-site event without salonId (not owner/admin)", async () => {
   const res = createResponse();
-  let createdPayload;
 
   Salon.findOne = () => ({
     select: async () => null,
   });
-  User.findById = () => ({
-    select: async () => ({
-      _id: organizerId,
-      salon: null,
-      salonStatus: "none",
-      salons: [{ salon: salonAId, status: "approved" }],
-    }),
-  });
-  SalonJoinRequest.find = () => ({
-    distinct: async () => [],
-  });
-  Event.create = async (payload) => {
-    createdPayload = payload;
-    return { _id: "created-event", ...payload };
-  };
-  Event.findById = (id) =>
-    createQuery({
-      _id: id,
-      ...createdPayload,
-      organizerId: { _id: organizerId, name: "Organizer" },
-    });
 
   await createEvent(
     {
@@ -362,9 +340,8 @@ test("approved salon member can create off-site event without salonId", async ()
     res
   );
 
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.salonId, null);
-  assert.equal(createdPayload.location, "Conference Hall");
+  assert.equal(res.statusCode, 403);
+  assert.ok(res.body.message.includes("Only salon owners"));
 });
 
 test("createEvent unexpected error returns 500 generic without leaking raw message", async () => {

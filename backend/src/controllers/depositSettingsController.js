@@ -2,7 +2,7 @@ import BarberProfile from "../models/BarberProfile.js";
 import User from "../models/User.js";
 import Salon from "../models/Salon.js";
 import { isAcceptedStaffMember } from "../services/salon/salonRelationshipService.js";
-import { sameId } from "../utils/salonPermissions.js";
+import { canManageSalon, sameId } from "../utils/salonPermissions.js";
 
 export const MAX_NO_SHOW_POLICY_TEXT_LENGTH = 1000;
 
@@ -200,11 +200,7 @@ export const updateStaffDepositSettingsBySalonOwner = async (req, res) => {
     }
 
     // Verify requester is salon owner or admin
-    const isOwner = sameId(salon.ownerId, req.user._id);
-    const isAdmin = Array.isArray(salon.admins) &&
-      salon.admins.some((adminId) => sameId(adminId, req.user._id));
-
-    if (!isOwner && !isAdmin) {
+    if (!canManageSalon(salon, req.user._id)) {
       return res.status(403).json({ message: "Only salon owner or admin can update staff deposit settings" });
     }
 

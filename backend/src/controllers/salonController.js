@@ -183,9 +183,7 @@ export const listSalons = async (req, res) => {
 
 export const listManageableSalons = async (req, res) => {
   try {
-    if (!req.user?._id) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+    if (!requireBarber(req, res)) return undefined;
 
     const salons = await findManageableSalonsForUser(req.user._id);
 

@@ -137,21 +137,12 @@ export const canUserCreateEventForSalon = async (user, salon) => {
 
 export const getManageableSalonQuery = async (user) => {
   const userId = getUserId(user);
-  const membershipUser = await loadMembershipUser(user);
-  const membershipSalonIds = new Set(getApprovedUserSalonIds(membershipUser));
 
-  const acceptedSalonIds = await getAcceptedSalonJoinRequestSalonIds(userId);
-  acceptedSalonIds.forEach((salonId) => membershipSalonIds.add(salonId));
-
-  const query = {
+  // Manageable means owner/admin only.
+  // Approved staff/chair_renter membership is NOT management permission.
+  return {
     $or: [{ ownerId: userId }, { admins: userId }],
   };
-
-  if (membershipSalonIds.size > 0) {
-    query.$or.push({ _id: { $in: Array.from(membershipSalonIds) } });
-  }
-
-  return query;
 };
 
 export const findManageableSalonsForUser = async (userId) => {
@@ -164,17 +155,9 @@ export const userHasAnyManageableSalon = async (user) => {
     return false;
   }
 
-  const [managedSalon, membershipUser, acceptedSalonIds] = await Promise.all([
-    Salon.findOne({
-      $or: [{ ownerId: getUserId(user) }, { admins: getUserId(user) }],
-    }).select("_id"),
-    loadMembershipUser(user),
-    getAcceptedSalonJoinRequestSalonIds(getUserId(user)),
-  ]);
+  const managedSalon = await Salon.findOne({
+    $or: [{ ownerId: getUserId(user) }, { admins: getUserId(user) }],
+  }).select("_id");
 
-  return Boolean(
-    managedSalon ||
-      acceptedSalonIds.length > 0 ||
-      getApprovedUserSalonIds(membershipUser).length > 0
-  );
+  return Boolean(managedSalon);
 };

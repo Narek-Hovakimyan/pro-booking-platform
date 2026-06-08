@@ -2,7 +2,7 @@ import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import { serializeUser } from "../../utils/salonUtils.js";
 
-const salonAdminUserFields = "name phone avatarUrl city";
+const salonAdminUserFields = "name avatarUrl city";
 
 export class SalonAdminError extends Error {
   constructor(statusCode, message) {
