@@ -23,7 +23,6 @@ import {
   getSalonNameFromEntry,
   getSalonAddressFromEntry,
   normalizeManageableSalonEntries,
-  getSalonListFromResponse,
   normalizeSchedule,
   areSchedulesEqual,
   normalizeDefaultScheduleDraft,
@@ -77,8 +76,6 @@ export default function ScheduleManager({
   const [perSalonError, setPerSalonError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [manageableSalons, setManageableSalons] = useState([]);
-  const [isLoadingManageable, setIsLoadingManageable] = useState(false);
   const isMountedRef = useRef(true);
   const hasNoUserRef = useRef(false);
   const servicesFetchAttemptedRef = useRef("");
@@ -639,19 +636,7 @@ export default function ScheduleManager({
   };
 
   const openDrawer = useCallback(() => {
-    setIsLoadingManageable(true);
     setIsDrawerOpen(true);
-    api.get("/salons/mine/manageable")
-      .then(({ data }) => {
-        const salonsList = getSalonListFromResponse(data);
-        setManageableSalons(salonsList);
-      })
-      .catch(() => {
-        setManageableSalons([]);
-      })
-      .finally(() => {
-        setIsLoadingManageable(false);
-      });
   }, []);
 
   const handleSalonSelect = useCallback((salonId) => {
@@ -732,10 +717,10 @@ export default function ScheduleManager({
         <ScheduleSalonDrawer
           isOpen={isDrawerOpen}
           onClose={() => setIsDrawerOpen(false)}
-          salons={manageableSalons}
+          salons={approvedSalons}
           selectedId={activeSalonId}
           onSelect={handleSalonSelect}
-          isLoading={isLoadingManageable}
+          isLoading={false}
         />
       </>
     );
@@ -841,10 +826,10 @@ export default function ScheduleManager({
       <ScheduleSalonDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        salons={manageableSalons}
+        salons={approvedSalons}
         selectedId={activeSalonId}
         onSelect={handleSalonSelect}
-        isLoading={isLoadingManageable}
+        isLoading={false}
       />
     </div>
   );
