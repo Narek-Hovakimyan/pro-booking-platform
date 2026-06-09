@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import WaitlistEntry from "../models/WaitlistEntry.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
@@ -18,11 +20,24 @@ import {
 } from "./waitlistService.testUtils.js";
 import { acceptWaitlistOffer } from "./waitlistService.js";
 
+const mockBarberPaidAccess = () => {
+  Subscription.findOne = async () => ({
+    _id: "sub-1",
+    ownerType: "barber",
+    ownerId: barberId,
+    status: "active",
+  });
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => null,
+  });
+};
+
 afterEach(() => {
   resetWaitlistServiceModelMocks();
 });
 
 test("client can accept own offered waitlist entry", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-entry",
     status: "offered",
@@ -83,6 +98,7 @@ test("client can accept own offered waitlist entry", async () => {
 });
 
 test("accept creates accepted Booking", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-create-booking",
     status: "offered",
@@ -136,6 +152,7 @@ test("accept creates accepted Booking", async () => {
 });
 
 test("accept marks waitlist converted and stores convertedBooking", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-convert",
     status: "offered",
@@ -182,6 +199,7 @@ test("accept marks waitlist converted and stores convertedBooking", async () => 
 });
 
 test("accept sends barber notification", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-notif-barber",
     status: "offered",
@@ -233,6 +251,7 @@ test("accept sends barber notification", async () => {
 });
 
 test("accept succeeds if barber notification fails after booking and conversion", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-notif-fail",
     status: "offered",
@@ -317,6 +336,7 @@ test("accept rejects if status is not offered", async () => {
 });
 
 test("accept re-checks overlap and does not create Booking if time is taken", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-overlap",
     status: "offered",
@@ -365,6 +385,7 @@ test("accept re-checks overlap and does not create Booking if time is taken", as
 });
 
 test("overlap failure restores entry to offered", async () => {
+  mockBarberPaidAccess();
   const entry = createMockEntry({
     _id: "accept-restore",
     status: "offered",

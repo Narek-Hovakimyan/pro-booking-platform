@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { listManageableSalons, listSalons, updateSalonDefaultSchedule } from "./salonController.js";
+import { listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
 import { getSalonStaff } from "./salonStaffController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
@@ -537,4 +537,72 @@ test("listSalons malicious pattern is escaped, not passed raw", async () => {
   assert.ok(regexPattern.includes("\\("), "parentheses are escaped");
   assert.ok(regexPattern.includes("\\)"), "parentheses are escaped");
   assert.ok(regexPattern.includes("\\+"), "plus signs are escaped");
+});
+
+// ── Paid access filter ──
+
+test("listSalons excludes unpaid barbers from salon barbers list", async () => {
+  const res = createResponse();
+
+  const paidBarberId = "64b000000000000000001101";
+  const unpaidBarberId = "64b000000000000000001102";
+  const salonId = "64b000000000000000001100";
+
+  __salonControllerTestHooks.setGetPaidAccessByBarberIds(async (ids) => {
+    const map = new Map();
+    ids.forEach((id) => {
+      map.set(String(id), String(id) === String(paidBarberId));
+    });
+    return map;
+  });
+
+  __salonControllerTestHooks.setGetSalonReviewStats(async () => {
+    const map = new Map();
+    map.set(String(salonId), { averageRating: 4.5, totalReviews: 10 });
+    return map;
+  });
+
+  Salon.find = () => ({
+    sort: async () => [{ _id: salonId, name: "Test Salon", city: "Yerevan" }],
+  });
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+
+  const makeBarber = (id, name) => ({
+    _id: id,
+    name,
+    role: "barber",
+    avatarUrl: "",
+    specialty: "unisex",
+    city: "Yerevan",
+    salons: [{ salon: salonId, status: "approved" }],
+    salon: salonId,
+    salonStatus: "approved",
+    toObject() {
+      const { toObject, ...rest } = this;
+      return { ...rest };
+    },
+  });
+
+  User.find = () => ({
+    select: async () => [
+      makeBarber(paidBarberId, "Paid Barber"),
+      makeBarber(unpaidBarberId, "Unpaid Barber"),
+    ],
+  });
+
+  BarberProfile.find = async () => [];
+
+  await listSalons({ query: {} }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(Array.isArray(res.body), true);
+  assert.equal(res.body.length, 1, "one salon returned");
+
+  const salonResult = res.body[0];
+  assert.equal(Array.isArray(salonResult.barbers), true);
+  assert.equal(salonResult.barbers.length, 1, "only paid barber included");
+  assert.equal(salonResult.barbers[0].id || salonResult.barbers[0]._id, paidBarberId);
+
+  __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
+  __salonControllerTestHooks.resetGetSalonReviewStats();
 });

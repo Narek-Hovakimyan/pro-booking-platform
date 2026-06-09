@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import WaitlistEntry from "../models/WaitlistEntry.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
@@ -33,6 +35,8 @@ const originalMethods = {
   salonFindById: Salon.findById,
   serviceFindOne: Service.findOne,
   userFindById: User.findById,
+  subscriptionFindOne: Subscription.findOne,
+  subscriptionSeatFindOne: SubscriptionSeat.findOne,
 };
 const originalConsoleWarn = console.warn;
 
@@ -53,6 +57,8 @@ export const resetWaitlistServiceModelMocks = () => {
   Salon.findById = originalMethods.salonFindById;
   Service.findOne = originalMethods.serviceFindOne;
   User.findById = originalMethods.userFindById;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   console.warn = originalConsoleWarn;
 
   // Re-apply passthrough for populateWaitlistEntry so action tests
@@ -197,6 +203,15 @@ export const mockWaitlistApprovalFlow = ({
     return createdBooking;
   };
   Notification.create = async (payload) => payload;
+  Subscription.findOne = async () => ({
+    _id: "sub-1",
+    ownerType: "barber",
+    ownerId: barberId,
+    status: "active",
+  });
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => null,
+  });
 
   return {
     entry,

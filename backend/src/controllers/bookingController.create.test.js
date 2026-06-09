@@ -605,6 +605,52 @@ test("createBooking blocks unpaid target barber with BARBER_UNAVAILABLE", async 
   assert.equal(createdBookings.length, 0);
 });
 
+test("client-sent paid/paymentStatus/depositPaid fields do not bypass paid access check", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Subscription.findOne = async () => null;
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => null,
+  });
+
+  let serviceLookedUp = false;
+  Service.findOne = async () => {
+    serviceLookedUp = true;
+    return null;
+  };
+
+  const res = createResponse();
+
+  // Send paid, paymentStatus, and depositPaid as if a malicious client
+  // tried to trick the server into skipping the paid access check
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        paid: true,
+        paymentStatus: "completed",
+        depositPaid: true,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(serviceLookedUp, false);
+  assert.equal(createdBookings.length, 0);
+});
+
 test("createBooking blocks target barber with stale salon seat", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);

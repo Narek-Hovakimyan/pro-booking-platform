@@ -8,6 +8,7 @@ import {
   createService,
   deleteService,
   getServicesByBarber,
+  __serviceControllerTestHooks,
   updateService,
 } from "./serviceController.js";
 import Salon from "../models/Salon.js";
@@ -38,6 +39,7 @@ afterEach(() => {
   Service.findById = originalServiceMethods.findById;
   ServiceCategory.findById = originalServiceCategoryMethods.findById;
   Salon.findById = originalSalonMethods.findById;
+  __serviceControllerTestHooks.resetBarberHasPaidAccess();
 });
 
 const createResponse = () => ({
@@ -658,6 +660,7 @@ test("client cannot create, update, or delete services", async () => {
 });
 
 test("fetching services by barber still works", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
   const services = [{ _id: "service-a", barberId: barberA._id, name: "Cut" }];
   let findQuery;
@@ -684,6 +687,7 @@ test("fetching services by barber still works", async () => {
 });
 
 test("GET services by barber returns populated customCategoryId when service has one", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
   const customCategory = {
     _id: customCategoryId,
@@ -730,6 +734,7 @@ test("GET services by barber returns populated customCategoryId when service has
 
 
 test("GET services by barber returns null customCategoryId for system-category service", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
   const services = [
     {
@@ -760,6 +765,7 @@ test("GET services by barber returns null customCategoryId for system-category s
 });
 
 test("GET services by barber with inactive customCategoryId returns null (active match)", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
 
   // Mongoose populate with `match: { active: true }` returns null

@@ -7,7 +7,7 @@ import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { createCrudController } from "./crudController.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
-import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
+import { barberHasPaidAccess, getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import {
   sanitizeDefaultSchedule,
@@ -398,6 +398,14 @@ export const getProfileByBarberId = async (req, res) => {
 
     if (!profile && !barber) {
       return res.json(null);
+    }
+
+    // Phase 11: Hide unpaid/expired barbers from public profile
+    if (barber) {
+      const hasAccess = await barberHasPaidAccess(barber._id);
+      if (!hasAccess) {
+        return res.status(404).json({ message: "Barber not found" });
+      }
     }
 
     return res.json({

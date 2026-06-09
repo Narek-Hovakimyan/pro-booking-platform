@@ -28,6 +28,7 @@ import {
   throwDuplicateWaitlistEntryError,
   createWaitlistActionError,
 } from "./waitlistValidation.js";
+import { barberHasPaidAccess } from "./subscriptionService.js";
 
 const waitlistCreationLocks = new Map();
 const waitlistDisplayPopulate = [
@@ -389,6 +390,20 @@ export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
     );
   }
 
+  // Block booking creation for unpaid/expired barbers
+  const barberHasAccess = await barberHasPaidAccess(claimedEntry.barberId);
+  if (!barberHasAccess) {
+    // Restore to offered so client can retry when barber is active again
+    await WaitlistEntry.findOneAndUpdate(
+      { _id: claimedEntry._id, status: "converting" },
+      { $set: { status: "offered" } }
+    );
+    throw createWaitlistActionError(
+      "This specialist is not currently accepting bookings.",
+      "FORBIDDEN"
+    );
+  }
+
   let booking;
   let convertedEntry;
 
@@ -530,6 +545,19 @@ export const approveWaitlistEntry = async ({ entryId, barberId, time }) => {
     throw createWaitlistActionError(
       "Waitlist entry is already being processed",
       "CONFLICT"
+    );
+  }
+
+  // Block booking creation for unpaid/expired barbers
+  const barberHasAccess = await barberHasPaidAccess(claimedEntry.barberId);
+  if (!barberHasAccess) {
+    await WaitlistEntry.findOneAndUpdate(
+      { _id: claimedEntry._id, status: "converting" },
+      { $set: { status: previousStatus } }
+    );
+    throw createWaitlistActionError(
+      "This specialist is not currently accepting bookings.",
+      "FORBIDDEN"
     );
   }
 

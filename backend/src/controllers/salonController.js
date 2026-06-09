@@ -3,6 +3,7 @@ import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import Schedule from "../models/Schedule.js";
 import User from "../models/User.js";
+import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
 import {
   findManageableSalonsForUser,
@@ -20,6 +21,24 @@ import {
   openCurrentWorkHistory,
 } from "../utils/salonHelpers.js";
 import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
+
+// Test hooks — allows tests to override dependencies without a DI framework
+let getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIds;
+let getSalonReviewStatsForSalons = getSalonReviewStats;
+export const __salonControllerTestHooks = {
+  resetGetPaidAccessByBarberIds() {
+    getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIds;
+  },
+  setGetPaidAccessByBarberIds(fn) {
+    getPaidAccessByBarberIdsForSalons = fn;
+  },
+  resetGetSalonReviewStats() {
+    getSalonReviewStatsForSalons = getSalonReviewStats;
+  },
+  setGetSalonReviewStats(fn) {
+    getSalonReviewStatsForSalons = fn;
+  },
+};
 
 /**
  * Get the primary approved salon for a barber.
@@ -138,8 +157,13 @@ export const listSalons = async (req, res) => {
       barberId: { $in: barbers.map((barber) => barber._id) },
     });
 
+    // Phase 10: Only include barbers with active subscription/seat access
+    const barberIds = barbers.map((b) => b._id);
+    const paidAccessMap = await getPaidAccessByBarberIdsForSalons(barberIds);
+    const paidBarbers = barbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
+
     const [reviewStatsBySalonId] = await Promise.all([
-      getSalonReviewStats(salonIds),
+      getSalonReviewStatsForSalons(salonIds),
     ]);
 
     const barbersBySalonId = new Map();
@@ -148,7 +172,7 @@ export const listSalons = async (req, res) => {
       barbersBySalonId.set(String(salon._id), []);
     });
 
-    barbers.forEach((barber) => {
+    paidBarbers.forEach((barber) => {
       // Check new salons array first
       if (Array.isArray(barber.salons) && barber.salons.length > 0) {
         const approvedEntries = barber.salons.filter((s) => s.status === "approved");
@@ -210,19 +234,24 @@ export const getSalonProfile = async (req, res) => {
       ],
     }).select("-password");
 
+    // Phase 10: Only include barbers with active subscription/seat access
+    const barberIds = barbers.map((b) => b._id);
+    const paidAccessMap = await getPaidAccessByBarberIdsForSalons(barberIds);
+    const paidBarbers = barbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
+
     const profiles = await BarberProfile.find({
-      barberId: { $in: barbers.map((barber) => barber._id) },
+      barberId: { $in: paidBarbers.map((barber) => barber._id) },
     });
 
     const [reviewStatsBySalonId] = await Promise.all([
-      getSalonReviewStats(salon._id, { latestLimit: 5 }),
+      getSalonReviewStatsForSalons(salon._id, { latestLimit: 5 }),
     ]);
 
     return res.json(
       buildPublicSalonResponse({
         salon,
         reviewStats: reviewStatsBySalonId.get(String(salon._id)),
-        barbers,
+        barbers: paidBarbers,
         profiles,
       })
     );

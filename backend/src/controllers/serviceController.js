@@ -6,6 +6,18 @@ import ServiceCategory from "../models/ServiceCategory.js";
 import { createCrudController } from "./crudController.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
 import { sendControllerError } from "../utils/controllerError.js";
+import { barberHasPaidAccess as _barberHasPaidAccess } from "../services/subscriptionService.js";
+
+// Test hooks — allows tests to override dependencies without a DI framework
+let barberHasPaidAccess = _barberHasPaidAccess;
+export const __serviceControllerTestHooks = {
+  resetBarberHasPaidAccess() {
+    barberHasPaidAccess = _barberHasPaidAccess;
+  },
+  setBarberHasPaidAccess(fn) {
+    barberHasPaidAccess = fn;
+  },
+};
 
 export const serviceController = createCrudController(Service, "Service");
 
@@ -300,6 +312,12 @@ const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
 
 export const getServicesByBarber = async (req, res) => {
   try {
+    // Phase 11: Hide unpaid/expired barbers from public endpoint
+    const hasAccess = await barberHasPaidAccess(req.params.barberId);
+    if (!hasAccess) {
+      return res.status(404).json({ message: "Barber not found" });
+    }
+
     const services = await Service.find({ barberId: req.params.barberId })
       .populate({
         path: "customCategoryId",
