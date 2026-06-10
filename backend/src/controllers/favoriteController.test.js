@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 
-import { getClientFavorites } from "./favoriteController.js";
+import {
+  getClientFavorites,
+  getFavoriteSalons,
+} from "./favoriteController.js";
 import Favorite from "../models/Favorite.js";
+import SalonFavorite from "../models/SalonFavorite.js";
+import SalonReview from "../models/SalonReview.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 
 const originalMethods = {
   favoriteFind: Favorite.find,
+  salonFavoriteFind: SalonFavorite.find,
+  salonReviewAggregate: SalonReview.aggregate,
+  salonReviewFind: SalonReview.find,
   subscriptionFind: Subscription.find,
   seatFind: SubscriptionSeat.find,
   userFind: User.find,
@@ -16,6 +24,9 @@ const originalMethods = {
 
 afterEach(() => {
   Favorite.find = originalMethods.favoriteFind;
+  SalonFavorite.find = originalMethods.salonFavoriteFind;
+  SalonReview.aggregate = originalMethods.salonReviewAggregate;
+  SalonReview.find = originalMethods.salonReviewFind;
   Subscription.find = originalMethods.subscriptionFind;
   SubscriptionSeat.find = originalMethods.seatFind;
   User.find = originalMethods.userFind;
@@ -315,4 +326,160 @@ test("getClientFavorites skips paid access lookup when there are no favorites", 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, []);
   assert.equal(subscriptionLookupCalled, false);
+});
+
+test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () => {
+  const clientId = "client-e";
+  const salonAId = "salon-A";
+  const paidBarberId = "barber-paid2";
+  const unpaidBarberId = "barber-unpaid2";
+  let subscriptionQuery = null;
+
+  SalonFavorite.find = () => ({
+    populate() {
+      return this;
+    },
+    async sort() {
+      return [
+        {
+          _id: "fav-salon-1",
+          clientId,
+          salonId: {
+            _id: salonAId,
+            name: "Salon A",
+            city: "",
+            address: "",
+            phone: "",
+            imageUrl: "",
+          },
+          toObject() {
+            return {
+              _id: "fav-salon-1",
+              clientId,
+              salonId: {
+                _id: salonAId,
+                name: "Salon A",
+                city: "",
+                address: "",
+                phone: "",
+                imageUrl: "",
+              },
+            };
+          },
+        },
+      ];
+    },
+  });
+
+  User.find = (query) => {
+    if (query.role === "barber") {
+      // Return mock method chain for select()
+      const result = [
+        {
+          _id: paidBarberId,
+          name: "Paid Barber",
+          role: "barber",
+          city: "",
+          avatarUrl: "",
+          salon: salonAId,
+          salonStatus: "approved",
+          salons: [{ salon: salonAId, status: "approved" }],
+          toObject() {
+            return this;
+          },
+        },
+        {
+          _id: unpaidBarberId,
+          name: "Unpaid Barber",
+          role: "barber",
+          city: "",
+          avatarUrl: "",
+          salon: salonAId,
+          salonStatus: "approved",
+          salons: [{ salon: salonAId, status: "approved" }],
+          toObject() {
+            return this;
+          },
+        },
+      ];
+
+      return {
+        select() {
+          return {
+            then(resolve) {
+              resolve(result);
+            },
+          };
+        },
+      };
+    }
+
+    return {
+      select() {
+        return this;
+      },
+      async lean() {
+        return [];
+      },
+    };
+  };
+
+  // Mock getPaidAccessByBarberIds via Subscription.find
+  Subscription.find = (query) => {
+    subscriptionQuery = query;
+    return {
+      select() {
+        return this;
+      },
+      async lean() {
+        // Only paidBarberId has active subscription
+        return [{ ownerId: paidBarberId }];
+      },
+    };
+  };
+  SubscriptionSeat.find = () => ({
+    populate() {
+      return this;
+    },
+    async lean() {
+      return [];
+    },
+  });
+
+  // Mock getSalonReviewStats internal calls
+  SalonReview.aggregate = () =>
+    Promise.resolve([]);
+  SalonReview.find = () => {
+    // The populate chain final sort() result must be thenable for Promise.all
+    const thenable = Promise.resolve([]);
+    return {
+      populate() {
+        return {
+          sort() {
+            return thenable;
+          },
+        };
+      },
+      sort() {
+        return thenable;
+      },
+    };
+  };
+
+  const res = createResponse();
+  await getFavoriteSalons({ user: { id: clientId, role: "client" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1, "should return one salon favorite");
+  assert.equal(res.body[0].salonId.barbers.length, 1, "should exclude unpaid barber");
+  assert.equal(
+    String(res.body[0].salonId.barbers[0]._id),
+    paidBarberId,
+    "only paid barber should be included"
+  );
+  assert.equal(
+    res.body[0].salonId.barbers[0].name,
+    "Paid Barber",
+    "paid barber name should match"
+  );
 });

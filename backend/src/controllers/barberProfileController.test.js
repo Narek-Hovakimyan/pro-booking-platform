@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 
 import {
   getBarberCardSummary,
+  getProfileByBarberId,
 } from "./barberProfileController.js";
 import {
   addCertification,
@@ -32,7 +33,9 @@ const originalMethods = {
   scheduleFind: Schedule.find,
   serviceFind: Service.find,
   subscriptionFind: Subscription.find,
+  subscriptionFindOne: Subscription.findOne,
   subscriptionSeatFind: SubscriptionSeat.find,
+  subscriptionSeatFindOne: SubscriptionSeat.findOne,
   userFind: User.find,
 };
 
@@ -50,7 +53,9 @@ afterEach(() => {
   Schedule.find = originalMethods.scheduleFind;
   Service.find = originalMethods.serviceFind;
   Subscription.find = originalMethods.subscriptionFind;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
+  SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.find = originalMethods.userFind;
 });
 
@@ -471,6 +476,41 @@ test("public barber event certificates include issued safe certificate data only
   assert.equal(res.body[0].verificationCode, undefined);
   assert.equal(res.body[0].email, undefined);
   assert.equal(res.body[0].phone, undefined);
+});
+
+test("getProfileByBarberId returns 404 for unpaid barber", async () => {
+  const res = createResponse();
+  const unpaidBarberId = "64b000000000000000000999";
+  const barber = {
+    _id: unpaidBarberId,
+    name: "Unpaid Barber",
+    phone: "100",
+    role: "barber",
+    city: "City",
+    salons: [],
+    salon: null,
+    salonStatus: "none",
+    createdAt: new Date("2024-01-01"),
+    toObject() {
+      return { ...this };
+    },
+  };
+
+  BarberProfile.findOne = async () => null;
+  // getProfileByBarberId calls User.findById(id).select("-password")
+  User.findById = () => ({
+    select: async () => barber,
+  });
+  // barberHasPaidAccess calls findOne on Subscription and SubscriptionSeat
+  Subscription.findOne = async () => null;
+  SubscriptionSeat.findOne = () => ({
+    populate: async () => null,
+  });
+
+  await getProfileByBarberId({ params: { barberId: unpaidBarberId } }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Barber not found");
 });
 
 test("card summary populate uses active-only match for customCategoryId", async () => {

@@ -117,19 +117,33 @@ export const getFavoriteSalons = async (req, res) => {
     const salonIds = favorites
       .map((favorite) => favorite.salonId?._id || favorite.salonId)
       .filter(Boolean);
-    const [barbers, reviewStatsBySalonId] = await Promise.all([
+    const [allBarbers, reviewStatsBySalonId] = await Promise.all([
       User.find({
         role: "barber",
-        salon: { $in: salonIds },
-        salonStatus: "approved",
-      }).select("name phone role city avatarUrl salon salonStatus"),
+        $or: [
+          { salon: { $in: salonIds }, salonStatus: "approved" },
+          { "salons.salon": { $in: salonIds }, "salons.status": "approved" },
+        ],
+      }).select("name phone role city avatarUrl salon salonStatus salons"),
       getSalonReviewStats(salonIds),
     ]);
+
+    // Phase 11: Only include barbers with active subscription/seat access
+    const barberIds = allBarbers.map((b) => b._id);
+    const paidAccessMap = await getPaidAccessByBarberIds(barberIds);
+    const paidBarbers = allBarbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
+
     const barbersBySalonId = new Map();
 
-    barbers.forEach((barber) => {
-      const key = String(barber.salon);
-      barbersBySalonId.set(key, [...(barbersBySalonId.get(key) || []), barber]);
+    paidBarbers.forEach((barber) => {
+      // Check both legacy salon field and new salons array
+      const salonFromArray = (barber.salons || []).find(
+        (s) => s.salon && s.status === "approved"
+      );
+      const key = String(salonFromArray?.salon || barber.salon);
+      if (key) {
+        barbersBySalonId.set(key, [...(barbersBySalonId.get(key) || []), barber]);
+      }
     });
 
     return res.json(

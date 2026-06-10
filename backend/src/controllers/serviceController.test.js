@@ -801,6 +801,19 @@ test("GET services by barber with inactive customCategoryId returns null (active
   assert.equal(res.body[0].category, "other");
 });
 
+test("unpaid barber gets 404 from getServicesByBarber", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => false);
+  const res = createResponse();
+
+  await getServicesByBarber(
+    { params: { barberId: barberA._id } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Barber not found");
+});
+
 // ─── Discount tests ───
 
 test("calculateServiceDiscountedPrice applies MVP discount rules", () => {
