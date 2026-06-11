@@ -132,7 +132,7 @@ export default function SalonBillingPage() {
         const data = await getSalonSubscription(salonId);
         setDetails(data);
         setPaymentIntent(null);
-        setPendingAttempt(null);
+        setPendingAttempt(data?.pendingPaymentAttempt || null);
         setAttemptActionError("");
         setPaymentsError("");
         try {
@@ -336,6 +336,7 @@ export default function SalonBillingPage() {
       setPendingAttempt(null);
       setPaymentIntent(null);
       setSuccess("Prepared payment cancelled.");
+      await loadDetails(selectedSalonId, { keepMessage: true });
     } catch (requestError) {
       setAttemptActionError(
         normalizeError(requestError, "Could not cancel payment attempt.")
@@ -726,6 +727,9 @@ export default function SalonBillingPage() {
                         <p className="mt-1 capitalize">
                           Status: {pendingAttempt.status}
                         </p>
+                        <p className="mt-1 capitalize">
+                          Provider: {pendingAttempt.provider || "manual"}
+                        </p>
                         <p className="mt-1">
                           {pendingAttempt.seatCount || 1} seat(s),{" "}
                           {pendingAttempt.months || 1} month(s),{" "}
@@ -733,6 +737,9 @@ export default function SalonBillingPage() {
                         </p>
                         <p className="mt-1">
                           Subscription activates only after payment confirmation.
+                        </p>
+                        <p className="mt-1">
+                          This is not marked as paid until confirmation succeeds.
                         </p>
                         <div className="mt-3 flex flex-col gap-2">
                           {showManualActivationPanel &&

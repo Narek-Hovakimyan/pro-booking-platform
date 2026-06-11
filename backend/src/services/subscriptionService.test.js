@@ -55,6 +55,7 @@ const originalSeatFindById = SubscriptionSeat.findById;
 const originalPaymentCreate = PaymentRecord.create;
 const originalPaymentFind = PaymentRecord.find;
 const originalAttemptCreate = SubscriptionPaymentAttempt.create;
+const originalAttemptFind = SubscriptionPaymentAttempt.find;
 const originalAttemptFindById = SubscriptionPaymentAttempt.findById;
 const originalSalonFindById = Salon.findById;
 const originalUserFindById = User.findById;
@@ -97,6 +98,7 @@ afterEach(() => {
   PaymentRecord.create = originalPaymentCreate;
   PaymentRecord.find = originalPaymentFind;
   SubscriptionPaymentAttempt.create = originalAttemptCreate;
+  SubscriptionPaymentAttempt.find = originalAttemptFind;
   SubscriptionPaymentAttempt.findById = originalAttemptFindById;
   Salon.findById = originalSalonFindById;
   User.findById = originalUserFindById;
@@ -1013,6 +1015,7 @@ test("salon owner can view subscription seat details", async () => {
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.find = () => chainableQuery([]);
+  SubscriptionPaymentAttempt.find = () => chainableQuery([]);
 
   User.find = () => chainableQuery([makeBarberUser()]);
 
@@ -1044,6 +1047,7 @@ test("salon admin can view subscription seat details", async () => {
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.find = () => chainableQuery([]);
+  SubscriptionPaymentAttempt.find = () => chainableQuery([]);
   User.find = () => chainableQuery([makeBarberUser()]);
 
   const result = await getSalonSubscriptionDetails({
@@ -1074,6 +1078,7 @@ test("salon billing member list includes accepted staff only", async () => {
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.find = () => chainableQuery([]);
+  SubscriptionPaymentAttempt.find = () => chainableQuery([]);
   User.find = (query, projection) => {
     memberQuery = query;
     memberProjection = projection;
@@ -1113,10 +1118,112 @@ test("salon billing member list includes accepted staff only", async () => {
   assert.match(memberProjection, /salons\.relationshipStatus/);
 });
 
+test("salon subscription details recover latest pending subscription payment attempt", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 2,
+    totalPrice: 10000,
+  });
+  const pendingAttempt = makePaymentAttempt({
+    purpose: "subscription",
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId: ownerId,
+    status: "pending",
+    amount: 10000,
+    seatCount: 2,
+    months: 1,
+    provider: "manual",
+    paidAt: null,
+    createdAt: new Date("2026-06-12T12:00:00.000Z"),
+  });
+  const calls = {};
+  let attemptQuery = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  User.find = () => chainableQuery([]);
+  SubscriptionPaymentAttempt.find = (query) => {
+    attemptQuery = query;
+    return {
+      sort(sortValue) {
+        calls.sort = sortValue;
+        return this;
+      },
+      limit(limitValue) {
+        calls.limit = limitValue;
+        return this;
+      },
+      lean() {
+        return [pendingAttempt];
+      },
+    };
+  };
+
+  const result = await getSalonSubscriptionDetails({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+  });
+
+  assert.deepEqual(attemptQuery, {
+    purpose: "subscription",
+    ownerType: "salon",
+    ownerId: salonId,
+    status: { $in: ["pending", "requires_action"] },
+  });
+  assert.deepEqual(calls.sort, { createdAt: -1 });
+  assert.equal(calls.limit, 1);
+  assert.equal(result.pendingPaymentAttempt.id, pendingAttempt._id);
+  assert.equal(result.pendingPaymentAttempt.status, "pending");
+  assert.equal(result.pendingPaymentAttempt.paidAt, null);
+  assert.equal(result.pendingPaymentAttempt.purpose, "subscription");
+});
+
+test("salon pending payment recovery excludes booking deposit attempts by query", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 1,
+    totalPrice: 5000,
+  });
+  let attemptQuery = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  User.find = () => chainableQuery([]);
+  SubscriptionPaymentAttempt.find = (query) => {
+    attemptQuery = query;
+    return chainableQuery([]);
+  };
+
+  const result = await getSalonSubscriptionDetails({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(attemptQuery.ownerType, "salon");
+  assert.equal(attemptQuery.ownerId, salonId);
+  assert.equal(attemptQuery.purpose, "subscription");
+  assert.deepEqual(attemptQuery.status, { $in: ["pending", "requires_action"] });
+  assert.equal(result.pendingPaymentAttempt, null);
+});
+
 test("non-owner/non-admin cannot view details", async () => {
   const salonDoc = makeSalonDoc({ ownerId, admins: [] });
+  let attemptedPaymentLookup = false;
 
   Salon.findById = async () => salonDoc;
+  SubscriptionPaymentAttempt.find = () => {
+    attemptedPaymentLookup = true;
+    return chainableQuery([]);
+  };
 
   await assert.rejects(
     () =>
@@ -1129,6 +1236,7 @@ test("non-owner/non-admin cannot view details", async () => {
       return true;
     }
   );
+  assert.equal(attemptedPaymentLookup, false);
 });
 
 test("removing barber from salon revokes active subscription seat", async () => {
@@ -1221,6 +1329,7 @@ test("revoked seat frees available seat count", async () => {
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.find = (query) =>
     chainableQuery(query.status === "active" ? [] : [revokedSeat]);
+  SubscriptionPaymentAttempt.find = () => chainableQuery([]);
   User.find = () => chainableQuery([makeBarberUser()]);
 
   const result = await getSalonSubscriptionDetails({
@@ -1265,6 +1374,7 @@ test("salon billing seat details exclude chair renter seats", async () => {
         ? [acceptedSeat, chairRenterSeat]
         : [revokedChairRenterSeat]
     );
+  SubscriptionPaymentAttempt.find = () => chainableQuery([]);
   User.find = () => chainableQuery([]);
 
   const result = await getSalonSubscriptionDetails({

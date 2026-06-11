@@ -21,6 +21,7 @@ const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
 const GRACE_DAYS = 30;
 const PAID_SUBSCRIPTION_STATUSES = ["trialing", "active"];
+const RECOVERABLE_PAYMENT_ATTEMPT_STATUSES = ["pending", "requires_action"];
 const MANUAL_PROVIDER = "manual";
 const PAYMENT_ATTEMPT_EXPIRY_HOURS = 24;
 const SUBSCRIPTION_SEAT_BARBER_FIELDS =
@@ -562,6 +563,20 @@ const serializePaymentAttempt = (attempt) => {
     createdAt: raw.createdAt || null,
     updatedAt: raw.updatedAt || null,
   };
+};
+
+const getLatestRecoverableSalonPaymentAttempt = async (salonId) => {
+  const attempts = await SubscriptionPaymentAttempt.find({
+    purpose: "subscription",
+    ownerType: "salon",
+    ownerId: salonId,
+    status: { $in: RECOVERABLE_PAYMENT_ATTEMPT_STATUSES },
+  })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .lean();
+
+  return serializePaymentAttempt(attempts?.[0]);
 };
 
 const validateSubscriptionRequester = async ({
@@ -1221,7 +1236,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
   const serializedSubscription = serializeSubscriptionStatus(subscription, plan);
 
   // Fetch active and revoked seats, populated with barber basic info
-  const [rawActiveSeats, rawRevokedSeats] = await Promise.all([
+  const [rawActiveSeats, rawRevokedSeats, pendingPaymentAttempt] = await Promise.all([
     SubscriptionSeat.find({
       subscriptionId: subscription?._id,
       status: "active",
@@ -1236,6 +1251,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
       .sort({ revokedAt: -1 })
       .limit(20)
       .lean(),
+    getLatestRecoverableSalonPaymentAttempt(salon._id),
   ]);
   const activeSeats = filterAcceptedStaffSeats(rawActiveSeats, salon._id);
   const revokedSeats = filterAcceptedStaffSeats(rawRevokedSeats, salon._id);
@@ -1288,6 +1304,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
     revokedSeats,
     availableSeatCount,
     approvedMembers,
+    pendingPaymentAttempt,
     defaultPlan: plan
       ? {
           code: plan.code,
