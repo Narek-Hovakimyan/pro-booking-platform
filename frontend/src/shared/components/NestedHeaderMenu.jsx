@@ -7,6 +7,7 @@ const getMenuGroups = (canShowManageHiring, canManageSalon) => [
     key: "work",
     label: "Work",
     children: [
+      { label: "Find Jobs", to: "/jobs" },
       ...(canShowManageHiring
         ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
         : []),
