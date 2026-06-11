@@ -17,6 +17,10 @@ import {
 } from "../utils/salonUtils.js";
 import { normalizeSalonDefaultSchedule } from "../utils/salonScheduleUtils.js";
 import {
+  normalizeAutoClosedWeeklySchedule,
+  sanitizeWeeklySchedule,
+} from "../utils/scheduleUtils.js";
+import {
   requireBarber,
   openCurrentWorkHistory,
 } from "../utils/salonHelpers.js";
@@ -337,6 +341,12 @@ export const updateSalonDefaultSchedule = async (req, res) => {
     const { salonId } = req.params;
     const barberId = req.user._id;
     const defaultSchedule = normalizeSalonDefaultSchedule(req.body);
+    const weeklySchedule =
+      req.body.weeklySchedule === undefined
+        ? undefined
+        : normalizeAutoClosedWeeklySchedule(
+            sanitizeWeeklySchedule(req.body.weeklySchedule)
+          );
 
     // 1. Save to barber.salons[X].defaultSchedule
     const barber = await User.findOneAndUpdate(
@@ -354,12 +364,20 @@ export const updateSalonDefaultSchedule = async (req, res) => {
     }
 
     // 2. Also update/create the Schedule model so the Schedule page reads the same data
-    await Schedule.findOneAndUpdate(
+    const scheduleSet = { defaultSchedule };
+
+    if (weeklySchedule !== undefined) {
+      scheduleSet.weeklySchedule = weeklySchedule;
+    }
+
+    const schedule = await Schedule.findOneAndUpdate(
       { barberId, salonId },
       {
-        barberId,
-        salonId,
-        defaultSchedule,
+        $set: scheduleSet,
+        $setOnInsert: {
+          barberId,
+          salonId,
+        },
       },
       { returnDocument: "after", runValidators: true, upsert: true }
     );
@@ -369,6 +387,7 @@ export const updateSalonDefaultSchedule = async (req, res) => {
     return res.json({
       message: "Default schedule updated",
       defaultSchedule: salonEntry?.defaultSchedule || defaultSchedule,
+      weeklySchedule: schedule?.weeklySchedule || weeklySchedule || {},
     });
   } catch (error) {
     return res.status(400).json({

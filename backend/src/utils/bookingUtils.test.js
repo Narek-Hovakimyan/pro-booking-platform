@@ -46,6 +46,32 @@ test("explicit non-working weekly day does not fall back to default schedule", (
   });
 });
 
+test("explicit Sunday off is treated as a rest day", () => {
+  const schedule = {
+    weeklySchedule: {
+      sun: {
+        working: false,
+        from: "",
+        to: "",
+        breakFrom: "",
+        breakTo: "",
+      },
+    },
+    scheduleOverrides: {},
+  };
+
+  assert.deepEqual(
+    getScheduleForDate(schedule, "2099-06-07", "sun", defaultSchedule),
+    {
+      working: false,
+      from: "",
+      to: "",
+      breakFrom: "",
+      breakTo: "",
+    }
+  );
+});
+
 test("missing weekly day falls back to default schedule", () => {
   const schedule = {
     weeklySchedule: {},

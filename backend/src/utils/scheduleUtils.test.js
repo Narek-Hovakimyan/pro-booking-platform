@@ -153,10 +153,30 @@ test("normalizeScheduleForAvailability removes past date-specific closed days", 
 test("sanitizeWeeklySchedule preserves explicit weekly day off", () => {
   assert.deepEqual(
     sanitizeWeeklySchedule({
-      sat: { working: false },
+      sun: { working: false },
     }),
     {
-      sat: {
+      sun: {
+        working: false,
+        from: "",
+        to: "",
+        breakFrom: "",
+        breakTo: "",
+      },
+    }
+  );
+});
+
+test("sanitizeWeeklySchedule allows off day without start, end, or break fields", () => {
+  assert.deepEqual(
+    sanitizeWeeklySchedule({
+      sun: {
+        working: false,
+        breakFrom: "bad",
+      },
+    }),
+    {
+      sun: {
         working: false,
         from: "",
         to: "",
@@ -190,12 +210,13 @@ test("sanitizeWeeklySchedule preserves valid working weekly day", () => {
   );
 });
 
-test("sanitizeWeeklySchedule omits invalid working day without hours", () => {
-  assert.deepEqual(
-    sanitizeWeeklySchedule({
-      sat: { working: true },
-    }),
-    {}
+test("sanitizeWeeklySchedule rejects working day without hours", () => {
+  assert.throws(
+    () =>
+      sanitizeWeeklySchedule({
+        sat: { working: true },
+      }),
+    /Working hours must use HH:mm format/
   );
 });
 

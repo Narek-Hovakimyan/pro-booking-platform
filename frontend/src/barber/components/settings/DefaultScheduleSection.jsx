@@ -11,6 +11,29 @@ function timeInputClass(hasError) {
   );
 }
 
+const DAYS = [
+  { label: "Mon", key: "mon" },
+  { label: "Tue", key: "tue" },
+  { label: "Wed", key: "wed" },
+  { label: "Thu", key: "thu" },
+  { label: "Fri", key: "fri" },
+  { label: "Sat", key: "sat" },
+  { label: "Sun", key: "sun" },
+];
+
+const getWeeklyDayState = (schedule, dayKey) => {
+  const weeklyDay = schedule.weeklySchedule?.[dayKey] || {};
+  const isWorking = weeklyDay.working !== false;
+
+  return {
+    isWorking,
+    from: isWorking ? weeklyDay.from || schedule.startTime : "",
+    to: isWorking ? weeklyDay.to || schedule.endTime : "",
+    breakFrom: isWorking ? weeklyDay.breakFrom || "" : "",
+    breakTo: isWorking ? weeklyDay.breakTo || "" : "",
+  };
+};
+
 export default function DefaultScheduleSection({
   allSalonEntries,
   salonSchedules,
@@ -19,6 +42,7 @@ export default function DefaultScheduleSection({
   errorSalonId,
   salonScheduleErrors,
   onUpdateSchedule,
+  onUpdateWeeklyDay,
   onSaveSchedule,
 }) {
   return (
@@ -48,6 +72,7 @@ export default function DefaultScheduleSection({
               hasBreak: false,
               breakStart: "",
               breakEnd: "",
+              weeklySchedule: {},
             };
             const isSaving = savingSalonId === salonId;
             const saved = savedSalonId === salonId;
@@ -144,6 +169,156 @@ export default function DefaultScheduleSection({
                       placeholder="HH:mm"
                     />
                   </label>
+                </div>
+
+                <div className="mt-5">
+                  <div className="mb-3">
+                    <h5 className="font-semibold text-neutral-950 text-sm">
+                      Weekly defaults
+                    </h5>
+                    <p className="text-xs text-neutral-500">
+                      Turn off regular rest days. Date-specific overrides still take priority.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {DAYS.map(({ label, key }) => {
+                      const dayState = getWeeklyDayState(schedule, key);
+
+                      return (
+                        <div
+                          key={key}
+                          className="rounded-xl border border-neutral-200 bg-white p-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-bold text-neutral-950">
+                                {label}
+                              </div>
+                              <div className="text-xs text-neutral-500">
+                                {dayState.isWorking ? "Working" : "Day off / Rest day"}
+                              </div>
+                            </div>
+
+                            <label className="inline-flex items-center gap-2 text-sm font-semibold">
+                              <input
+                                type="checkbox"
+                                checked={dayState.isWorking}
+                                onChange={(event) =>
+                                  onUpdateWeeklyDay(
+                                    salonId,
+                                    key,
+                                    event.target.checked
+                                      ? {
+                                          working: true,
+                                          from: dayState.from || schedule.startTime,
+                                          to: dayState.to || schedule.endTime,
+                                          breakFrom: dayState.breakFrom || "",
+                                          breakTo: dayState.breakTo || "",
+                                        }
+                                      : {
+                                          working: false,
+                                          from: "",
+                                          to: "",
+                                          breakFrom: "",
+                                          breakTo: "",
+                                        }
+                                  )
+                                }
+                              />
+                              Working
+                            </label>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <label className="grid gap-1 text-xs font-semibold text-neutral-600">
+                              Work start
+                              <input
+                                className={timeInputClass(Boolean(error))}
+                                disabled={!dayState.isWorking}
+                                inputMode="numeric"
+                                pattern="[0-9]{2}:[0-9]{2}"
+                                value={dayState.from}
+                                onChange={(event) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: event.target.value,
+                                    to: dayState.to || schedule.endTime,
+                                    breakFrom: dayState.breakFrom || "",
+                                    breakTo: dayState.breakTo || "",
+                                  })
+                                }
+                                placeholder="HH:mm"
+                              />
+                            </label>
+
+                            <label className="grid gap-1 text-xs font-semibold text-neutral-600">
+                              Work end
+                              <input
+                                className={timeInputClass(Boolean(error))}
+                                disabled={!dayState.isWorking}
+                                inputMode="numeric"
+                                pattern="[0-9]{2}:[0-9]{2}"
+                                value={dayState.to}
+                                onChange={(event) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: dayState.from || schedule.startTime,
+                                    to: event.target.value,
+                                    breakFrom: dayState.breakFrom || "",
+                                    breakTo: dayState.breakTo || "",
+                                  })
+                                }
+                                placeholder="HH:mm"
+                              />
+                            </label>
+
+                            <label className="grid gap-1 text-xs font-semibold text-neutral-600">
+                              Break start
+                              <input
+                                className={timeInputClass(Boolean(error))}
+                                disabled={!dayState.isWorking}
+                                inputMode="numeric"
+                                pattern="[0-9]{2}:[0-9]{2}"
+                                value={dayState.breakFrom}
+                                onChange={(event) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: dayState.from || schedule.startTime,
+                                    to: dayState.to || schedule.endTime,
+                                    breakFrom: event.target.value,
+                                    breakTo: dayState.breakTo || "",
+                                  })
+                                }
+                                placeholder="HH:mm"
+                              />
+                            </label>
+
+                            <label className="grid gap-1 text-xs font-semibold text-neutral-600">
+                              Break end
+                              <input
+                                className={timeInputClass(Boolean(error))}
+                                disabled={!dayState.isWorking}
+                                inputMode="numeric"
+                                pattern="[0-9]{2}:[0-9]{2}"
+                                value={dayState.breakTo}
+                                onChange={(event) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: dayState.from || schedule.startTime,
+                                    to: dayState.to || schedule.endTime,
+                                    breakFrom: dayState.breakFrom || "",
+                                    breakTo: event.target.value,
+                                  })
+                                }
+                                placeholder="HH:mm"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {error && (

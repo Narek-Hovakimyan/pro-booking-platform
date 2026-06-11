@@ -677,6 +677,7 @@ export default function BarberSettings({
     errorSalonId,
     salonScheduleErrors,
     updateSalonSchedule,
+    updateWeeklyDaySchedule,
     saveDefaultSchedule,
   } = useDefaultSalonScheduleSettings({
     currentUserId,
@@ -926,6 +927,7 @@ export default function BarberSettings({
                 errorSalonId={errorSalonId}
                 salonScheduleErrors={salonScheduleErrors}
                 onUpdateSchedule={updateSalonSchedule}
+                onUpdateWeeklyDay={updateWeeklyDaySchedule}
                 onSaveSchedule={saveDefaultSchedule}
               />
             )}

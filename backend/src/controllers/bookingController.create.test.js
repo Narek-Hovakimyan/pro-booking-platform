@@ -306,6 +306,75 @@ test("booking availability treats explicit non-working weekly day as closed", as
   assert.equal(result.message, "Barber is not working this day");
 });
 
+test("booking availability returns no slots for Sunday when Sunday is off", async () => {
+  Schedule.findOne = async () => ({
+    weeklySchedule: {
+      sun: {
+        working: false,
+        from: "",
+        to: "",
+        breakFrom: "",
+        breakTo: "",
+      },
+    },
+    scheduleOverrides: {},
+    nonWorkingDays: [],
+    defaultSchedule: {
+      startTime: "10:00",
+      endTime: "20:00",
+      hasBreak: false,
+      breakStart: "",
+      breakEnd: "",
+    },
+  });
+  Booking.find = mockBookingFind([]);
+
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate: "2026-06-14",
+    time: "10:20",
+    duration: 20,
+  });
+
+  assert.equal(result.message, "Barber is not working this day");
+});
+
+test("booking availability still returns slots for a working weekly day", async () => {
+  Schedule.findOne = async () => ({
+    weeklySchedule: {
+      mon: {
+        working: true,
+        from: "10:00",
+        to: "20:00",
+        breakFrom: "",
+        breakTo: "",
+      },
+    },
+    scheduleOverrides: {},
+    nonWorkingDays: [],
+    defaultSchedule: {
+      startTime: "09:00",
+      endTime: "18:00",
+      hasBreak: false,
+      breakStart: "",
+      breakEnd: "",
+    },
+  });
+  Booking.find = mockBookingFind([]);
+
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate,
+    time: "10:20",
+    duration: 20,
+  });
+
+  assert.equal(result.message, undefined);
+  assert.ok(result.effectiveDayKey);
+});
+
 test("booking availability ignores old auto-closed weekly schedule and falls back to default", async () => {
   Schedule.findOne = async () => ({
     weeklySchedule: oldAutoClosedWeeklySchedule,

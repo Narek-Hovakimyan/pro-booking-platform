@@ -153,9 +153,13 @@ test("updateSalonDefaultSchedule creates salon-specific schedule document", asyn
   assert.equal(res.statusCode, 200);
   assert.deepEqual(scheduleQuery, { barberId, salonId: salonAId });
   assert.deepEqual(schedulePayload, {
-    barberId,
-    salonId: salonAId,
-    defaultSchedule: selectedDefaultSchedule,
+    $set: {
+      defaultSchedule: selectedDefaultSchedule,
+    },
+    $setOnInsert: {
+      barberId,
+      salonId: salonAId,
+    },
   });
   assert.deepEqual(scheduleOptions, {
     returnDocument: "after",
@@ -163,6 +167,56 @@ test("updateSalonDefaultSchedule creates salon-specific schedule document", asyn
     upsert: true,
   });
   assert.deepEqual(res.body.defaultSchedule, selectedDefaultSchedule);
+});
+
+test("updateSalonDefaultSchedule saves Sunday as a weekly day off", async () => {
+  const res = createResponse();
+  let schedulePayload = null;
+  const weeklySchedule = {
+    sun: { working: false },
+  };
+  const sanitizedWeeklySchedule = {
+    sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  };
+
+  User.findOneAndUpdate = async () => ({
+    _id: barberId,
+    salons: [
+      {
+        salon: {
+          toString: () => salonAId,
+        },
+        defaultSchedule: selectedDefaultSchedule,
+      },
+    ],
+  });
+
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    assert.deepEqual(query, { barberId, salonId: salonAId });
+    schedulePayload = payload;
+
+    return {
+      _id: "schedule-a",
+      weeklySchedule: sanitizedWeeklySchedule,
+    };
+  };
+
+  await updateSalonDefaultSchedule(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId: salonAId },
+      body: {
+        ...selectedDefaultSchedule,
+        weeklySchedule,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(schedulePayload.$set.weeklySchedule, sanitizedWeeklySchedule);
+  assert.deepEqual(res.body.defaultSchedule, selectedDefaultSchedule);
+  assert.deepEqual(res.body.weeklySchedule, sanitizedWeeklySchedule);
 });
 
 // ─── Salon staff tests ───────────────────────────────────────────────

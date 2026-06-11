@@ -155,24 +155,63 @@ export const sanitizeWeeklySchedule = (weeklySchedule) => {
       breakTo: daySchedule.breakTo || "",
     };
 
+    if (daySchedule.working === false) {
+      sanitized[dayKey] = {
+        working: false,
+        from: "",
+        to: "",
+        breakFrom: "",
+        breakTo: "",
+      };
+      continue;
+    }
+
+    if (daySchedule.working !== true) continue;
+
     for (const field of ["from", "to", "breakFrom", "breakTo"]) {
       if (!isTimeKeyOrEmpty(nextDaySchedule[field])) {
         throw new Error("Working hours must use HH:mm format");
       }
     }
 
-    if (daySchedule.working === false) {
-      sanitized[dayKey] = nextDaySchedule;
-      continue;
+    const startMinutes = timeToMinutes(nextDaySchedule.from);
+    const endMinutes = timeToMinutes(nextDaySchedule.to);
+    const breakFromFilled = Boolean(nextDaySchedule.breakFrom);
+    const breakToFilled = Boolean(nextDaySchedule.breakTo);
+    const breakFromMinutes = timeToMinutes(nextDaySchedule.breakFrom);
+    const breakToMinutes = timeToMinutes(nextDaySchedule.breakTo);
+
+    if (startMinutes === null || endMinutes === null) {
+      throw new Error("Working hours must use HH:mm format");
+    }
+
+    if (endMinutes <= startMinutes) {
+      throw new Error("End time must be later than start time");
+    }
+
+    if (breakFromFilled !== breakToFilled) {
+      throw new Error("Break start and break end must both be filled or both empty");
     }
 
     if (
-      daySchedule.working === true &&
-      timeToMinutes(nextDaySchedule.from) !== null &&
-      timeToMinutes(nextDaySchedule.to) !== null
+      breakFromFilled &&
+      (breakFromMinutes === null || breakToMinutes === null)
     ) {
-      sanitized[dayKey] = nextDaySchedule;
+      throw new Error("Break time must use HH:mm format");
     }
+
+    if (breakFromFilled && breakToMinutes <= breakFromMinutes) {
+      throw new Error("Break end must be later than break start");
+    }
+
+    if (
+      breakFromFilled &&
+      (breakFromMinutes < startMinutes || breakToMinutes > endMinutes)
+    ) {
+      throw new Error("Break time must be inside working hours");
+    }
+
+    sanitized[dayKey] = nextDaySchedule;
   }
 
   return sanitized;

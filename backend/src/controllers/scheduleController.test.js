@@ -331,7 +331,7 @@ test("saving old all-days closed weekly schedule cleans it back to default fallb
   assert.deepEqual(savedWeeklySchedule, {});
 });
 
-test("saving explicit weekly day off preserves that day", async () => {
+test("saving explicit Sunday day off does not require hours", async () => {
   const res = createResponse();
   let savedWeeklySchedule = null;
 
@@ -354,7 +354,7 @@ test("saving explicit weekly day off preserves that day", async () => {
       params: { barberId, salonId: salonAId },
       body: createScheduleBody({
         weeklySchedule: {
-          sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+          sun: { working: false },
         },
       }),
     },
@@ -363,7 +363,7 @@ test("saving explicit weekly day off preserves that day", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(savedWeeklySchedule, {
-    sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+    sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
   });
 });
 
