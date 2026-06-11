@@ -15,7 +15,6 @@ const getMenuGroups = (canShowManageHiring, canManageSalon) => [
       { label: "Revenue", to: "/admin/revenue" },
       { label: "Portfolio", to: "/admin/portfolio" },
       { label: "Waitlist", to: "/admin/waitlist" },
-      { label: "Calendar", to: "/admin/calendar" },
       { label: "Events", to: "/events" },
       { label: "My Applications", to: "/jobs/applications" },
     ],
