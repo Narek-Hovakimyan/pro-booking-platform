@@ -20,23 +20,29 @@ const getMenuGroups = (canShowManageHiring, canManageSalon) => [
       { label: "My Applications", to: "/jobs/applications" },
     ],
   },
+  ...(canManageSalon
+    ? [
+        {
+          key: "salon",
+          label: "Salon",
+          children: [
+            { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
+            { label: "Salon Calendar", to: "/admin/salon/calendar" },
+            { label: "Salon Reports", to: "/admin/salon/reports" },
+            { label: "Salon Promotions", to: "/admin/salon/promotions" },
+            { label: "Salon Billing", to: "/admin/salon/billing" },
+            { label: "Salon Settings", to: "/admin/settings/salon" },
+          ],
+        },
+      ]
+    : []),
   {
     key: "settings",
     label: "Settings",
     children: [
       { label: "Profile", to: "/admin/profile" },
       { label: "Billing", to: "/admin/billing" },
-      ...(canManageSalon
-        ? [
-            { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
-            { label: "Salon Calendar", to: "/admin/salon/calendar" },
-            { label: "Salon Reports", to: "/admin/salon/reports" },
-            { label: "Salon Promotions", to: "/admin/salon/promotions" },
-            { label: "Salon Billing", to: "/admin/salon/billing" },
-          ]
-        : []),
       { label: "Settings Hub", to: "/admin/settings" },
-      { label: "Salon Settings", to: "/admin/settings/salon" },
       { label: "Default Schedule", to: "/admin/settings/default-schedule" },
       { label: "Deposit", to: "/admin/settings/deposit" },
       { label: "Certifications", to: "/admin/settings/certifications" },

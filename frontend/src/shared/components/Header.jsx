@@ -106,9 +106,6 @@ export default function Header() {
     { label: "Bookings", to: "/admin/bookings" },
     { label: "Clients", to: "/admin/clients" },
     { label: "Calendar", to: "/admin/calendar" },
-    ...(canManageSalon
-      ? [{ label: "Salon Calendar", to: "/admin/salon/calendar" }]
-      : []),
     { label: "Profile", to: "/admin/profile" },
   ];
 
