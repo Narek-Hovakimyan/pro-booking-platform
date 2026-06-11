@@ -1,6 +1,11 @@
 import { useEffect } from "react";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { cn } from "@/shared/lib/utils";
+import {
+  getSalonAddressFromEntry,
+  getSalonIdFromEntry,
+  getSalonNameFromEntry,
+} from "@/barber/utils/scheduleHelpers";
 
 export default function ScheduleSalonDrawer({
   isOpen,
@@ -20,6 +25,17 @@ export default function ScheduleSalonDrawer({
       document.body.style.overflow = "";
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSelect = (salonId) => {
     onSelect(salonId);
@@ -71,12 +87,10 @@ export default function ScheduleSalonDrawer({
           ) : (
             <div className="space-y-2">
               {salons.map((salon) => {
-                const salonId = salon._id || salon.id;
-                const isSelected = salonId === selectedId;
-                const displayName = salon.name || "Salon";
-                const displayAddress = [salon.address, salon.city]
-                  .filter(Boolean)
-                  .join(", ");
+                const salonId = getSalonIdFromEntry(salon);
+                const isSelected = String(salonId) === String(selectedId);
+                const displayName = getSalonNameFromEntry(salon);
+                const displayAddress = getSalonAddressFromEntry(salon);
                 const roleLabel = salon._role || salon.role || salon.status || "";
 
                 return (

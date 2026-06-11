@@ -7,6 +7,51 @@ export const getSalonNameFromEntry = (entry) => {
   return "Salon";
 };
 
+export const getSalonIdFromEntry = (entry) => {
+  if (!entry) return null;
+
+  if (entry.salon && typeof entry.salon === "object") {
+    return (
+      entry.salon._id ||
+      entry.salon.id ||
+      entry.salonId ||
+      entry._id ||
+      entry.id ||
+      null
+    );
+  }
+
+  return entry.salon || entry.salonId || entry._id || entry.id || null;
+};
+
+export const isSelectableScheduleSalonEntry = (entry) => {
+  const salonId = getSalonIdFromEntry(entry);
+  if (!salonId) return false;
+
+  const status = entry?.status || entry?.salonStatus || entry?.salon?.status;
+  const relationshipStatus =
+    entry?.relationshipStatus || entry?.salon?.relationshipStatus;
+
+  if (relationshipStatus && relationshipStatus !== "accepted") return false;
+
+  return status === "approved" || (!status && relationshipStatus === "accepted");
+};
+
+export const mergeScheduleSalonEntries = (...entryLists) => {
+  const entriesBySalonId = new Map();
+
+  entryLists.flat().forEach((entry) => {
+    if (!isSelectableScheduleSalonEntry(entry)) return;
+
+    const salonId = String(getSalonIdFromEntry(entry));
+    if (!entriesBySalonId.has(salonId)) {
+      entriesBySalonId.set(salonId, entry);
+    }
+  });
+
+  return Array.from(entriesBySalonId.values());
+};
+
 export const getSalonDataFromEntry = (entry) => entry?.salon || entry;
 
 export const getSalonAddressFromEntry = (entry) => {

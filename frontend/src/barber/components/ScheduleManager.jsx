@@ -20,8 +20,11 @@ import DefaultScheduleSection from "@/barber/components/schedule/DefaultSchedule
 import SalonScheduleSection from "@/barber/components/schedule/SalonScheduleSection";
 import ScheduleSkeleton from "@/barber/components/ScheduleSkeleton";
 import {
+  getSalonIdFromEntry,
   getSalonNameFromEntry,
   getSalonAddressFromEntry,
+  isSelectableScheduleSalonEntry,
+  mergeScheduleSalonEntries,
   normalizeManageableSalonEntries,
   normalizeSchedule,
   areSchedulesEqual,
@@ -80,16 +83,6 @@ export default function ScheduleManager({
   const hasNoUserRef = useRef(false);
   const servicesFetchAttemptedRef = useRef("");
 
-  const getSalonIdFromEntry = useCallback((entry) => {
-    if (!entry) return null;
-    if (typeof entry.salon === "object" && (entry.salon?._id || entry.salon?.id)) {
-      return entry.salon._id || entry.salon.id;
-    }
-    if (typeof entry.salon === "string") return entry.salon;
-    if (entry._id || entry.id) return entry._id || entry.id;
-    return null;
-  }, []);
-
   // Fetch barber's salons from API
   useEffect(() => {
     let cancelled = false;
@@ -118,23 +111,25 @@ export default function ScheduleManager({
             ? normalizeManageableSalonEntries(manageableResult.value.data)
             : [];
         const approvedEntries = (statusData.salons || []).filter(
-          (s) => s.status === "approved"
+          isSelectableScheduleSalonEntry
         );
-        const nextEntries =
-          manageableEntries.length > 0 ? manageableEntries : approvedEntries;
+        const legacyEntries =
+          statusData.salon && statusData.salonStatus === "approved"
+            ? [
+                {
+                  salon: statusData.salon,
+                  status: "approved",
+                  isPrimary: true,
+                },
+              ]
+            : [];
+        const nextEntries = mergeScheduleSalonEntries(
+          approvedEntries,
+          legacyEntries,
+          manageableEntries
+        );
 
         if (nextEntries.length > 0) {
-          setSalonEntries((currentEntries) =>
-            JSON.stringify(currentEntries) === JSON.stringify(nextEntries)
-              ? currentEntries
-              : nextEntries
-          );
-        } else if (statusData.salon && statusData.salonStatus === "approved") {
-          const nextEntries = [{
-            salon: statusData.salon,
-            status: "approved",
-            isPrimary: true,
-          }];
           setSalonEntries((currentEntries) =>
             JSON.stringify(currentEntries) === JSON.stringify(nextEntries)
               ? currentEntries
@@ -172,14 +167,14 @@ export default function ScheduleManager({
   }, []);
 
   const approvedSalons = useMemo(
-    () => (salonEntries || []).filter((s) => s.status === "approved"),
+    () => (salonEntries || []).filter(isSelectableScheduleSalonEntry),
     [salonEntries]
   );
   const initialSalonId = useMemo(() => {
     if (approvedSalons.length === 0) return null;
     const primary = approvedSalons.find((s) => s.isPrimary) || approvedSalons[0];
     return getSalonIdFromEntry(primary);
-  }, [approvedSalons, getSalonIdFromEntry]);
+  }, [approvedSalons]);
   const activeSalonId = selectedSalonId || initialSalonId;
   const barberServices = useMemo(
     () =>
@@ -193,7 +188,7 @@ export default function ScheduleManager({
       approvedSalons.find(
         (entry) => String(getSalonIdFromEntry(entry)) === String(activeSalonId)
       ) || null,
-    [activeSalonId, approvedSalons, getSalonIdFromEntry]
+    [activeSalonId, approvedSalons]
   );
 
   useEffect(() => {
@@ -640,12 +635,24 @@ export default function ScheduleManager({
   }, []);
 
   const handleSalonSelect = useCallback((salonId) => {
-    setSelectedSalonId(salonId);
+    if (!salonId) {
+      setIsDrawerOpen(false);
+      return;
+    }
+
+    if (String(activeSalonId) === String(salonId)) {
+      setIsDrawerOpen(false);
+      return;
+    }
+
+    const nextSalonId = String(salonId);
+    setSelectedSalonId(nextSalonId);
     setPerSalonSchedule(null);
     setLoadedScheduleSalonId(null);
     setIsPerSalonLoading(true);
     setSaveSuccess("");
-  }, []);
+    setIsDrawerOpen(false);
+  }, [activeSalonId]);
 
   const isLoadingEffective =
     isLoading ||
