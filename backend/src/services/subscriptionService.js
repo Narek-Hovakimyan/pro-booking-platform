@@ -15,6 +15,7 @@ import {
   getConfiguredPaymentProviderName,
   getPaymentProvider,
 } from "./payment/paymentProviderFactory.js";
+import { isAcceptedStaffMember } from "./salon/salonRelationshipService.js";
 
 const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
@@ -22,6 +23,8 @@ const GRACE_DAYS = 30;
 const PAID_SUBSCRIPTION_STATUSES = ["trialing", "active"];
 const MANUAL_PROVIDER = "manual";
 const PAYMENT_ATTEMPT_EXPIRY_HOURS = 24;
+const SUBSCRIPTION_SEAT_BARBER_FIELDS =
+  "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -64,17 +67,54 @@ const fetchBarberMemberships = async (barberIds) => {
 const getSeatSalonId = (seat) =>
   getIdString(seat?.salonId || seat?.subscriptionId?.ownerId);
 
-const isApprovedSalonMember = (barber, salonId) => {
+const isAcceptedSalonStaffMember = (barber, salonId) => {
   const stringId = getIdString(salonId);
   if (!barber || !stringId) return false;
 
-  return (
-    (barber.salons || []).some(
-      (s) => getIdString(s.salon) === stringId && s.status === "approved"
-    ) ||
-    (getIdString(barber.salon) === stringId &&
-      barber.salonStatus === "approved")
+  const salonEntry = (barber.salons || []).find(
+    (s) => getIdString(s.salon) === stringId
   );
+
+  if (salonEntry) {
+    return isAcceptedStaffMember(salonEntry);
+  }
+
+  return (
+    getIdString(barber.salon) === stringId && barber.salonStatus === "approved"
+  );
+};
+
+const sanitizeApprovedMember = (member) => {
+  const { salons, salon, salonStatus, ...safeMember } = member || {};
+  return safeMember;
+};
+
+const isAcceptedStaffSeat = (seat, salonId) =>
+  isAcceptedSalonStaffMember(seat?.barberId, salonId);
+
+const sanitizeBillingSeat = (seat) => {
+  if (!seat?.barberId || typeof seat.barberId !== "object") return seat;
+
+  return {
+    ...seat,
+    barberId: sanitizeApprovedMember(seat.barberId),
+  };
+};
+
+const filterAcceptedStaffSeats = (seats = [], salonId) =>
+  seats
+    .filter((seat) => isAcceptedStaffSeat(seat, salonId))
+    .map(sanitizeBillingSeat);
+
+const countActiveAcceptedStaffSeats = async ({ subscriptionId, salonId }) => {
+  const activeSeats = await SubscriptionSeat.find({
+    subscriptionId,
+    status: "active",
+  })
+    .populate("barberId", SUBSCRIPTION_SEAT_BARBER_FIELDS)
+    .lean();
+
+  return filterAcceptedStaffSeats(activeSeats, salonId).length;
 };
 
 /* ───────────────────────────────────────────────────────────
@@ -679,7 +719,7 @@ export const barberHasPaidAccess = async (barberId) => {
   const seatSalonId = getSeatSalonId(activeSeat);
   const barber = await fetchBarberMembership(barberId);
 
-  return isApprovedSalonMember(barber, seatSalonId);
+  return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
 
 export const getPaidAccessByBarberIds = async (barberIds = []) => {
@@ -727,7 +767,7 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
     const seatSalonId = getSeatSalonId(seat);
     const barber = barbersById.get(barberId);
 
-    if (barberId && isApprovedSalonMember(barber, seatSalonId)) {
+    if (barberId && isAcceptedSalonStaffMember(barber, seatSalonId)) {
       accessByBarberId.set(barberId, true);
     }
   }
@@ -1048,7 +1088,7 @@ export const getMySubscriptionAccess = async (user) => {
 
     if (
       (parentStatus === "active" || parentStatus === "trialing") &&
-      isApprovedSalonMember(barber, seatSalonId)
+      isAcceptedSalonStaffMember(barber, seatSalonId)
     ) {
       hasAccess = true;
       salonSeatCoverage = {
@@ -1117,10 +1157,10 @@ const requireSalonOwnerOrAdmin = async (salonId, requesterId) => {
 };
 
 /**
- * Check if a barber user is an approved member of the given salon.
+ * Check if a barber user is accepted staff for the given salon.
  */
 const isApprovedMember = (barber, salonId) => {
-  return isApprovedSalonMember(barber, salonId);
+  return isAcceptedSalonStaffMember(barber, salonId);
 };
 
 /* ── Public service functions ───────────────────────────── */
@@ -1181,22 +1221,24 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
   const serializedSubscription = serializeSubscriptionStatus(subscription, plan);
 
   // Fetch active and revoked seats, populated with barber basic info
-  const [activeSeats, revokedSeats] = await Promise.all([
+  const [rawActiveSeats, rawRevokedSeats] = await Promise.all([
     SubscriptionSeat.find({
       subscriptionId: subscription?._id,
       status: "active",
     })
-      .populate("barberId", "name phone avatarUrl profession")
+      .populate("barberId", SUBSCRIPTION_SEAT_BARBER_FIELDS)
       .lean(),
     SubscriptionSeat.find({
       subscriptionId: subscription?._id,
       status: "revoked",
     })
-      .populate("barberId", "name phone avatarUrl profession")
+      .populate("barberId", SUBSCRIPTION_SEAT_BARBER_FIELDS)
       .sort({ revokedAt: -1 })
       .limit(20)
       .lean(),
   ]);
+  const activeSeats = filterAcceptedStaffSeats(rawActiveSeats, salon._id);
+  const revokedSeats = filterAcceptedStaffSeats(rawRevokedSeats, salon._id);
 
   // Compute available seat count
   const activeSeatCount = activeSeats.length;
@@ -1204,17 +1246,41 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
     ? Math.max(0, serializedSubscription.seatCount - activeSeatCount)
     : 0;
 
-  // Fetch approved members (barbers whose salons array has this salon as "approved")
-  const approvedMembers = await User.find(
+  // Fetch accepted staff only; chair renters remain independently billed.
+  const approvedMemberDocs = await User.find(
     {
       role: "barber",
       $or: [
-        { "salons.salon": salon._id, "salons.status": "approved" },
+        {
+          salons: {
+            $elemMatch: {
+              salon: salon._id,
+              status: "approved",
+              $and: [
+                {
+                  $or: [
+                    { relationshipType: "staff" },
+                    { relationshipType: { $exists: false } },
+                  ],
+                },
+                {
+                  $or: [
+                    { relationshipStatus: "accepted" },
+                    { relationshipStatus: { $exists: false } },
+                  ],
+                },
+              ],
+            },
+          },
+        },
         { salon: salon._id, salonStatus: "approved" },
       ],
     },
-    "name phone avatarUrl profession"
+    "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus"
   ).lean();
+  const approvedMembers = approvedMemberDocs
+    .filter((member) => isAcceptedSalonStaffMember(member, salon._id))
+    .map(sanitizeApprovedMember);
 
   return {
     subscription: serializedSubscription,
@@ -1274,10 +1340,10 @@ export const assignSalonSubscriptionSeat = async ({
     throw err;
   }
 
-  // Verify barber is an approved member of this salon
+  // Verify barber is accepted staff for this salon.
   if (!isApprovedMember(barber, salonId)) {
     const err = new Error(
-      "Barber is not an approved member of this salon"
+      "Barber is not an accepted staff member of this salon"
     );
     err.statusCode = 400;
     throw err;
@@ -1296,9 +1362,9 @@ export const assignSalonSubscriptionSeat = async ({
 
   // Count currently active seats after duplicate detection so repeated
   // assignment attempts for the same barber remain idempotent.
-  const activeSeatCount = await SubscriptionSeat.countDocuments({
+  const activeSeatCount = await countActiveAcceptedStaffSeats({
     subscriptionId: subscription._id,
-    status: "active",
+    salonId: salon._id,
   });
 
   if (activeSeatCount >= subscription.seatCount) {

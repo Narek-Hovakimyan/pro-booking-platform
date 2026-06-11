@@ -197,6 +197,28 @@ const makeBarberUser = (overrides = {}) => ({
   ...overrides,
 });
 
+const makeSalonRelationshipUser = ({
+  _id = barberId,
+  name = "Test Barber",
+  relationshipType = "staff",
+  relationshipStatus = "accepted",
+  status = "approved",
+} = {}) =>
+  makeBarberUser({
+    _id,
+    name,
+    salon: null,
+    salonStatus: "none",
+    salons: [
+      {
+        salon: salonId,
+        status,
+        relationshipType,
+        relationshipStatus,
+      },
+    ],
+  });
+
 const makeSubscriptionSeat = (overrides = {}) => ({
   _id: new mongoose.Types.ObjectId(),
   subscriptionId: makeSubDoc({
@@ -213,6 +235,25 @@ const makeSubscriptionSeat = (overrides = {}) => ({
   },
   ...overrides,
 });
+
+const makeBillingSeat = ({
+  seatBarberId = new mongoose.Types.ObjectId(),
+  name = "Test Barber",
+  relationshipType = "staff",
+  relationshipStatus = "accepted",
+  memberStatus = "approved",
+  ...overrides
+} = {}) =>
+  makeSubscriptionSeat({
+    ...overrides,
+    barberId: makeSalonRelationshipUser({
+      _id: seatBarberId,
+      name,
+      relationshipType,
+      relationshipStatus,
+      status: memberStatus,
+    }),
+  });
 
 const makePaymentAttempt = (overrides = {}) => ({
   _id: new mongoose.Types.ObjectId(),
@@ -1015,6 +1056,63 @@ test("salon admin can view subscription seat details", async () => {
   assert.equal(result.availableSeatCount, 3);
 });
 
+test("salon billing member list includes accepted staff only", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 5,
+    totalPrice: 25000,
+  });
+  const chairRenterId = new mongoose.Types.ObjectId();
+  const pendingStaffId = new mongoose.Types.ObjectId();
+  const rejectedStaffId = new mongoose.Types.ObjectId();
+  let memberQuery = null;
+  let memberProjection = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  User.find = (query, projection) => {
+    memberQuery = query;
+    memberProjection = projection;
+    return chainableQuery([
+      makeSalonRelationshipUser({ name: "Accepted Staff" }),
+      makeSalonRelationshipUser({
+        _id: chairRenterId,
+        name: "Chair Renter",
+        relationshipType: "chair_renter",
+      }),
+      makeSalonRelationshipUser({
+        _id: pendingStaffId,
+        name: "Pending Staff",
+        relationshipStatus: "pending",
+      }),
+      makeSalonRelationshipUser({
+        _id: rejectedStaffId,
+        name: "Rejected Staff",
+        relationshipStatus: "rejected",
+      }),
+    ]);
+  };
+
+  const result = await getSalonSubscriptionDetails({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(result.approvedMembers.length, 1);
+  assert.equal(result.approvedMembers[0].name, "Accepted Staff");
+  assert.equal(result.approvedMembers[0].salons, undefined);
+  assert.equal(result.approvedMembers[0].salon, undefined);
+  assert.equal(result.approvedMembers[0].salonStatus, undefined);
+  assert.deepEqual(memberQuery.role, "barber");
+  assert.ok(memberQuery.$or[0].salons.$elemMatch.$and);
+  assert.match(memberProjection, /salons\.relationshipType/);
+  assert.match(memberProjection, /salons\.relationshipStatus/);
+});
+
 test("non-owner/non-admin cannot view details", async () => {
   const salonDoc = makeSalonDoc({ ownerId, admins: [] });
 
@@ -1078,6 +1176,7 @@ test("owner can assign seat to approved member", async () => {
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.countDocuments = async () => 2; // 2 active, 5 max → can assign
+  SubscriptionSeat.find = () => chainableQuery([makeBillingSeat(), makeBillingSeat()]);
   SubscriptionSeat.findOne = async (query) => {
     // Check if query has barberId and status "active" → no existing active seat
     if (query.status === "active") return null;
@@ -1111,7 +1210,7 @@ test("revoked seat frees available seat count", async () => {
     seatCount: 2,
     totalPrice: 10000,
   });
-  const revokedSeat = makeSubscriptionSeat({
+  const revokedSeat = makeBillingSeat({
     subscriptionId: salonSub._id,
     status: "revoked",
     revokedAt: new Date(),
@@ -1132,6 +1231,52 @@ test("revoked seat frees available seat count", async () => {
   assert.equal(result.activeSeats.length, 0);
   assert.equal(result.revokedSeats.length, 1);
   assert.equal(result.availableSeatCount, 2);
+});
+
+test("salon billing seat details exclude chair renter seats", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 2,
+    totalPrice: 10000,
+  });
+  const acceptedSeat = makeBillingSeat({
+    subscriptionId: salonSub._id,
+    name: "Accepted Staff",
+  });
+  const chairRenterSeat = makeBillingSeat({
+    subscriptionId: salonSub._id,
+    relationshipType: "chair_renter",
+  });
+  const revokedChairRenterSeat = makeBillingSeat({
+    subscriptionId: salonSub._id,
+    relationshipType: "chair_renter",
+    status: "revoked",
+    revokedAt: new Date(),
+  });
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = (query) =>
+    chainableQuery(
+      query.status === "active"
+        ? [acceptedSeat, chairRenterSeat]
+        : [revokedChairRenterSeat]
+    );
+  User.find = () => chainableQuery([]);
+
+  const result = await getSalonSubscriptionDetails({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(result.activeSeats.length, 1);
+  assert.equal(result.activeSeats[0].barberId.name, "Accepted Staff");
+  assert.equal(result.activeSeats[0].barberId.salons, undefined);
+  assert.equal(result.revokedSeats.length, 0);
+  assert.equal(result.availableSeatCount, 1);
 });
 
 test("cannot assign seat to non-approved member", async () => {
@@ -1167,10 +1312,104 @@ test("cannot assign seat to non-approved member", async () => {
       }),
     (err) => {
       assert.equal(err.statusCode, 400);
-      assert.ok(err.message.includes("not an approved member"));
+      assert.ok(err.message.includes("not an accepted staff member"));
       return true;
     }
   );
+});
+
+test("cannot assign salon billing seat to chair renter", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 5,
+    totalPrice: 25000,
+    status: "active",
+  });
+
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.countDocuments = async () => 0;
+  SubscriptionSeat.findOne = async () => null;
+  User.findById = async () =>
+    makeSalonRelationshipUser({ relationshipType: "chair_renter" });
+
+  await assert.rejects(
+    () =>
+      assignSalonSubscriptionSeat({
+        salonId,
+        barberId,
+        assignedBy: { _id: ownerId, role: "barber" },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.ok(err.message.includes("not an accepted staff member"));
+      return true;
+    }
+  );
+});
+
+test("cannot assign salon billing seat to pending staff", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 5,
+    totalPrice: 25000,
+    status: "active",
+  });
+
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.countDocuments = async () => 0;
+  SubscriptionSeat.findOne = async () => null;
+  User.findById = async () =>
+    makeSalonRelationshipUser({ relationshipStatus: "pending" });
+
+  await assert.rejects(
+    () =>
+      assignSalonSubscriptionSeat({
+        salonId,
+        barberId,
+        assignedBy: { _id: ownerId, role: "barber" },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.ok(err.message.includes("not an accepted staff member"));
+      return true;
+    }
+  );
+});
+
+test("chair renter active seat does not consume accepted staff seat cap", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 1,
+    totalPrice: 5000,
+    status: "active",
+  });
+
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = () =>
+    chainableQuery([makeBillingSeat({ relationshipType: "chair_renter" })]);
+  SubscriptionSeat.findOne = async () => null;
+  User.findById = async () => makeSalonRelationshipUser();
+  SubscriptionSeat.create = async (data) => ({
+    ...data,
+    _id: new mongoose.Types.ObjectId(),
+  });
+
+  const seat = await assignSalonSubscriptionSeat({
+    salonId,
+    barberId,
+    assignedBy: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(seat.status, "active");
 });
 
 test("cannot assign more seats than subscription.seatCount", async () => {
@@ -1186,6 +1425,8 @@ test("cannot assign more seats than subscription.seatCount", async () => {
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.countDocuments = async () => 3; // already full
+  SubscriptionSeat.find = () =>
+    chainableQuery([makeBillingSeat(), makeBillingSeat(), makeBillingSeat()]);
   SubscriptionSeat.findOne = async () => null;
   User.findById = async () => makeBarberUser();
 
@@ -1219,6 +1460,10 @@ test("cannot exceed paid seatCount under repeated assignment attempts", async ()
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
   SubscriptionSeat.countDocuments = async () => activeSeatCount;
+  SubscriptionSeat.find = () =>
+    chainableQuery(
+      Array.from({ length: activeSeatCount }, () => makeBillingSeat())
+    );
   SubscriptionSeat.findOne = async () => null;
   SubscriptionSeat.create = async (data) => {
     activeSeatCount += 1;
@@ -1313,6 +1558,54 @@ test("active seat grants barberHasPaidAccess", async () => {
   const activeSeat = makeSubscriptionSeat();
   SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
   User.findById = () => chainableQuery(makeBarberUser());
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, true);
+});
+
+test("active salon seat does not grant chair renter paid access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return null;
+    return null;
+  };
+
+  const activeSeat = makeSubscriptionSeat();
+  SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
+  User.findById = () =>
+    chainableQuery(makeSalonRelationshipUser({ relationshipType: "chair_renter" }));
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
+});
+
+test("active salon seat does not grant pending or rejected staff paid access", async () => {
+  const activeSeat = makeSubscriptionSeat();
+
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return null;
+    return null;
+  };
+  SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
+
+  User.findById = () =>
+    chainableQuery(makeSalonRelationshipUser({ relationshipStatus: "pending" }));
+  const pendingAccess = await barberHasPaidAccess(barberId);
+  assert.equal(pendingAccess, false);
+
+  User.findById = () =>
+    chainableQuery(makeSalonRelationshipUser({ relationshipStatus: "rejected" }));
+  const rejectedAccess = await barberHasPaidAccess(barberId);
+  assert.equal(rejectedAccess, false);
+});
+
+test("chair renter own active subscription still grants paid access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return makeSubDoc({ status: "active" });
+    return null;
+  };
+  SubscriptionSeat.findOne = () => {
+    assert.fail("Salon seat should not be checked after active individual subscription");
+  };
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, true);

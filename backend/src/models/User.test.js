@@ -1,18 +1,23 @@
 import assert from "node:assert/strict";
 import { before, after, describe, test } from "node:test";
 import mongoose from "mongoose";
-import User from "./User.js";
+import UserModel from "./User.js";
 
 const TEST_MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/hairbook_test";
+const TEST_RUN_ID = `${process.pid.toString(36)}${(Date.now() % 46656).toString(36)}`;
+const TEST_PHONE_PREFIX = `umt${TEST_RUN_ID}`;
+const phone = (suffix) =>
+  `${TEST_PHONE_PREFIX}${String(suffix).replace(/[^a-z0-9]/gi, "").slice(0, 16)}`;
+let connection;
+let User;
 
 before(async () => {
-  await mongoose.connect(TEST_MONGO_URI);
-  await User.deleteMany({});
+  connection = await mongoose.createConnection(TEST_MONGO_URI).asPromise();
+  User = connection.model("User", UserModel.schema, "users");
 });
 
 after(async () => {
-  await User.deleteMany({});
-  await mongoose.disconnect();
+  await connection.close();
 });
 
 describe("User profession/barberType invariants", () => {
@@ -22,7 +27,7 @@ describe("User profession/barberType invariants", () => {
     test("non-barber profession clears barberType", async () => {
       const user = await User.create({
         name: "Nail Master",
-        phone: "test-1",
+        phone: phone("test-1"),
         password: "pass",
         role: "barber",
         profession: "nail_master",
@@ -36,7 +41,7 @@ describe("User profession/barberType invariants", () => {
     test("barber profession with missing barberType defaults to unisex", async () => {
       const user = await User.create({
         name: "Default Barber",
-        phone: "test-2",
+        phone: phone("test-2"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -49,7 +54,7 @@ describe("User profession/barberType invariants", () => {
     test("barber profession with barberType aligns specialty", async () => {
       const user = await User.create({
         name: "Men Barber",
-        phone: "test-3",
+        phone: phone("test-3"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -63,7 +68,7 @@ describe("User profession/barberType invariants", () => {
     test("existing barber clearing barberType resets to unisex", async () => {
       const user = await User.create({
         name: "Cleared",
-        phone: "test-4",
+        phone: phone("test-4"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -77,7 +82,7 @@ describe("User profession/barberType invariants", () => {
     test("barber profession with barberType=unisex aligns specialty=unisex", async () => {
       const user = await User.create({
         name: "Unisex Barber",
-        phone: "test-5",
+        phone: phone("test-5"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -93,7 +98,7 @@ describe("User profession/barberType invariants", () => {
       // then load + save to verify the hook normalizes it
       const user = await User.create({
         name: "Invalid Specialty",
-        phone: "test-6",
+        phone: phone("test-6"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -113,10 +118,10 @@ describe("User profession/barberType invariants", () => {
 
     test("old user with only specialty derives profession=barber and barberType from specialty", async () => {
       // Insert raw doc without profession/barberType via the native driver
-      const collection = mongoose.connection.collection("users");
+      const collection = connection.collection("users");
       const rawResult = await collection.insertOne({
         name: "Legacy",
-        phone: "test-legacy-1",
+        phone: phone("test-legacy-1"),
         password: "pass",
         role: "barber",
         specialty: "women",
@@ -132,10 +137,10 @@ describe("User profession/barberType invariants", () => {
     });
 
     test("old user with specialty=men derives correctly", async () => {
-      const collection = mongoose.connection.collection("users");
+      const collection = connection.collection("users");
       const rawResult = await collection.insertOne({
         name: "Legacy Men",
-        phone: "test-legacy-2",
+        phone: phone("test-legacy-2"),
         password: "pass",
         role: "barber",
         specialty: "men",
@@ -152,7 +157,7 @@ describe("User profession/barberType invariants", () => {
     test("user with explicit profession is NOT overwritten by pre('init')", async () => {
       const user = await User.create({
         name: "Explicit Nail",
-        phone: "test-legacy-3",
+        phone: phone("test-legacy-3"),
         password: "pass",
         role: "barber",
         profession: "nail_master",
@@ -171,7 +176,7 @@ describe("User profession/barberType invariants", () => {
     test("update to non-barber profession clears barberType", async () => {
       const user = await User.create({
         name: "ToNail",
-        phone: "test-upd-1",
+        phone: phone("test-upd-1"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -191,7 +196,7 @@ describe("User profession/barberType invariants", () => {
     test("update to non-barber with barberType NEVER overrides specialty", async () => {
       const user = await User.create({
         name: "NailOverride",
-        phone: "test-upd-5",
+        phone: phone("test-upd-5"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -217,7 +222,7 @@ describe("User profession/barberType invariants", () => {
     test("update to barber with empty barberType defaults to unisex", async () => {
       const user = await User.create({
         name: "ToBarberEmpty",
-        phone: "test-upd-2",
+        phone: phone("test-upd-2"),
         password: "pass",
         role: "barber",
         profession: "nail_master",
@@ -237,7 +242,7 @@ describe("User profession/barberType invariants", () => {
     test("update barberType aligns specialty", async () => {
       const user = await User.create({
         name: "UpdateBarberType",
-        phone: "test-upd-3",
+        phone: phone("test-upd-3"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -257,7 +262,7 @@ describe("User profession/barberType invariants", () => {
     test("update barberType=men aligns specialty=men", async () => {
       const user = await User.create({
         name: "UpdateBarberType2",
-        phone: "test-upd-4",
+        phone: phone("test-upd-4"),
         password: "pass",
         role: "barber",
         profession: "barber",
@@ -281,7 +286,7 @@ describe("User profession/barberType invariants", () => {
     test("save non-barber clears barberType, preserves valid legacy specialty", async () => {
       const user = await User.create({
         name: "SaveNail",
-        phone: "test-save-1",
+        phone: phone("test-save-1"),
         password: "pass",
         role: "barber",
         profession: "barber",
