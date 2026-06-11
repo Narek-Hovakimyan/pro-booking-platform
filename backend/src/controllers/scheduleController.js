@@ -13,6 +13,7 @@ import {
   cleanPastScheduleDates,
   getIdString,
   getTodayKey,
+  markExplicitAllDaysOffWeeklySchedule,
   normalizeAutoClosedWeeklySchedule,
   sanitizeDateSchedules,
   sanitizeDefaultSchedule,
@@ -253,7 +254,7 @@ export const upsertScheduleByBarberAndSalon = async (req, res) => {
     }
 
     const sanitizedWeeklySchedule = normalizeAutoClosedWeeklySchedule(
-      sanitizeWeeklySchedule(weeklySchedule)
+      markExplicitAllDaysOffWeeklySchedule(sanitizeWeeklySchedule(weeklySchedule))
     );
     const sanitizedDateSchedules = sanitizeDateSchedules(dateSchedules);
     const sanitizedScheduleOverrides =

@@ -12,6 +12,7 @@ import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import User from "../models/User.js";
+import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
 
 const originalMethods = {
   barberProfileFindOne: BarberProfile.findOne,
@@ -298,39 +299,6 @@ test("saving salon schedule persists defaultSchedule and GET returns it", async 
   assert.deepEqual(getResponse.body.defaultSchedule, selectedDefaultSchedule);
 });
 
-test("saving old all-days closed weekly schedule cleans it back to default fallback", async () => {
-  const res = createResponse();
-  let savedWeeklySchedule = null;
-
-  mockSchedulePermissionDependencies();
-
-  Schedule.findOneAndUpdate = async (query, payload) => {
-    savedWeeklySchedule = payload.weeklySchedule;
-    return {
-      ...payload,
-      _id: "schedule-a",
-      toObject() {
-        return this;
-      },
-    };
-  };
-
-  await upsertScheduleByBarberAndSalon(
-    {
-      user: { _id: barberId, role: "barber" },
-      params: { barberId, salonId: salonAId },
-      body: createScheduleBody({
-        defaultSchedule: selectedDefaultSchedule,
-        weeklySchedule: oldAutoClosedWeeklySchedule,
-      }),
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(savedWeeklySchedule, {});
-});
-
 test("saving explicit Sunday day off does not require hours", async () => {
   const res = createResponse();
   let savedWeeklySchedule = null;
@@ -364,6 +332,41 @@ test("saving explicit Sunday day off does not require hours", async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(savedWeeklySchedule, {
     sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  });
+});
+
+test("saving explicit all-days-off weekly schedule does not reopen default hours", async () => {
+  const res = createResponse();
+  let savedWeeklySchedule = null;
+
+  mockSchedulePermissionDependencies();
+
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    savedWeeklySchedule = payload.weeklySchedule;
+    return {
+      ...payload,
+      _id: "schedule-a",
+      toObject() {
+        return this;
+      },
+    };
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
+      body: createScheduleBody({
+        weeklySchedule: oldAutoClosedWeeklySchedule,
+      }),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(savedWeeklySchedule, {
+    ...oldAutoClosedWeeklySchedule,
+    [explicitAllDaysOffMarker]: true,
   });
 });
 

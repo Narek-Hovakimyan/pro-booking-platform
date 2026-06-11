@@ -15,6 +15,7 @@ import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js"
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 import { handleReferenceImageUploadError } from "../middleware/uploadMiddleware.js";
+import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
 
 import {
   barber,
@@ -333,6 +334,35 @@ test("booking availability returns no slots for Sunday when Sunday is off", asyn
     barberId,
     barber,
     bookingDate: "2026-06-14",
+    time: "10:20",
+    duration: 20,
+  });
+
+  assert.equal(result.message, "Barber is not working this day");
+});
+
+test("booking availability returns no slots for explicitly saved all-days-off schedule", async () => {
+  Schedule.findOne = async () => ({
+    weeklySchedule: {
+      ...oldAutoClosedWeeklySchedule,
+      [explicitAllDaysOffMarker]: true,
+    },
+    scheduleOverrides: {},
+    nonWorkingDays: [],
+    defaultSchedule: {
+      startTime: "10:00",
+      endTime: "20:00",
+      hasBreak: false,
+      breakStart: "",
+      breakEnd: "",
+    },
+  });
+  Booking.find = mockBookingFind([]);
+
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate,
     time: "10:20",
     duration: 20,
   });

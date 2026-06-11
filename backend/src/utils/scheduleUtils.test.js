@@ -3,7 +3,9 @@ import { mock, test } from "node:test";
 
 import {
   cleanCurrentAndFutureDateKeys,
+  explicitAllDaysOffMarker,
   getTodayKey,
+  markExplicitAllDaysOffWeeklySchedule,
   normalizeAutoClosedWeeklySchedule,
   normalizeScheduleForAvailability,
   sanitizeDateSchedules,
@@ -224,6 +226,20 @@ test("normalizeAutoClosedWeeklySchedule clears old all-days closed sanitizer out
   assert.deepEqual(
     normalizeAutoClosedWeeklySchedule(oldAutoClosedWeeklySchedule),
     {}
+  );
+});
+
+test("normalizeAutoClosedWeeklySchedule preserves explicitly saved all-days-off schedule", () => {
+  const explicitAllDaysOffWeeklySchedule =
+    markExplicitAllDaysOffWeeklySchedule(oldAutoClosedWeeklySchedule);
+
+  assert.deepEqual(explicitAllDaysOffWeeklySchedule, {
+    ...oldAutoClosedWeeklySchedule,
+    [explicitAllDaysOffMarker]: true,
+  });
+  assert.deepEqual(
+    normalizeAutoClosedWeeklySchedule(explicitAllDaysOffWeeklySchedule),
+    explicitAllDaysOffWeeklySchedule
   );
 });
 

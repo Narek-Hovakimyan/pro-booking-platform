@@ -7,6 +7,7 @@ import { getArmeniaDateKey } from "./bookingDateTime.js";
 
 // ─── Constants ───
 export const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+export const explicitAllDaysOffMarker = "__explicitAllDaysOff";
 export const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
 export const timeKeyPattern = /^\d{2}:\d{2}$/;
 export const defaultScheduleFallback = {
@@ -217,17 +218,12 @@ export const sanitizeWeeklySchedule = (weeklySchedule) => {
   return sanitized;
 };
 
-export const normalizeAutoClosedWeeklySchedule = (weeklySchedule = {}) => {
-  const hasAllDays = dayKeys.every((dayKey) =>
-    Object.hasOwn(weeklySchedule || {}, dayKey)
-  );
-
-  if (!hasAllDays) return weeklySchedule || {};
-
-  const isOldAutoClosedShape = dayKeys.every((dayKey) => {
+const isAllDaysOffShape = (weeklySchedule = {}) =>
+  dayKeys.every((dayKey) => {
     const daySchedule = weeklySchedule?.[dayKey] || {};
 
     return (
+      Object.hasOwn(weeklySchedule || {}, dayKey) &&
       daySchedule.working === false &&
       !daySchedule.from &&
       !daySchedule.to &&
@@ -235,6 +231,24 @@ export const normalizeAutoClosedWeeklySchedule = (weeklySchedule = {}) => {
       !daySchedule.breakTo
     );
   });
+
+export const markExplicitAllDaysOffWeeklySchedule = (weeklySchedule = {}) =>
+  isAllDaysOffShape(weeklySchedule)
+    ? { ...weeklySchedule, [explicitAllDaysOffMarker]: true }
+    : weeklySchedule || {};
+
+export const normalizeAutoClosedWeeklySchedule = (weeklySchedule = {}) => {
+  if (weeklySchedule?.[explicitAllDaysOffMarker] && isAllDaysOffShape(weeklySchedule)) {
+    return weeklySchedule || {};
+  }
+
+  const hasAllDays = dayKeys.every((dayKey) =>
+    Object.hasOwn(weeklySchedule || {}, dayKey)
+  );
+
+  if (!hasAllDays) return weeklySchedule || {};
+
+  const isOldAutoClosedShape = isAllDaysOffShape(weeklySchedule);
 
   return isOldAutoClosedShape ? {} : weeklySchedule || {};
 };

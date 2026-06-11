@@ -17,6 +17,7 @@ import {
 } from "../utils/salonUtils.js";
 import { normalizeSalonDefaultSchedule } from "../utils/salonScheduleUtils.js";
 import {
+  markExplicitAllDaysOffWeeklySchedule,
   normalizeAutoClosedWeeklySchedule,
   sanitizeWeeklySchedule,
 } from "../utils/scheduleUtils.js";
@@ -345,7 +346,9 @@ export const updateSalonDefaultSchedule = async (req, res) => {
       req.body.weeklySchedule === undefined
         ? undefined
         : normalizeAutoClosedWeeklySchedule(
-            sanitizeWeeklySchedule(req.body.weeklySchedule)
+            markExplicitAllDaysOffWeeklySchedule(
+              sanitizeWeeklySchedule(req.body.weeklySchedule)
+            )
           );
 
     // 1. Save to barber.salons[X].defaultSchedule

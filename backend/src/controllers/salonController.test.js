@@ -8,6 +8,7 @@ import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import User from "../models/User.js";
+import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
 
 const originalMethods = {
   barberProfileFind: BarberProfile.find,
@@ -61,6 +62,15 @@ const selectedDefaultSchedule = {
   hasBreak: true,
   breakStart: "14:00",
   breakEnd: "15:00",
+};
+const allDaysOffWeeklySchedule = {
+  sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  mon: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  tue: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  wed: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  thu: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  fri: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
 };
 
 test("listManageableSalons returns only owner/admin salons, not approved memberships", async () => {
@@ -216,6 +226,53 @@ test("updateSalonDefaultSchedule saves Sunday as a weekly day off", async () => 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(schedulePayload.$set.weeklySchedule, sanitizedWeeklySchedule);
   assert.deepEqual(res.body.defaultSchedule, selectedDefaultSchedule);
+  assert.deepEqual(res.body.weeklySchedule, sanitizedWeeklySchedule);
+});
+
+test("updateSalonDefaultSchedule preserves explicit all-days-off weekly schedule", async () => {
+  const res = createResponse();
+  let schedulePayload = null;
+  const sanitizedWeeklySchedule = {
+    ...allDaysOffWeeklySchedule,
+    [explicitAllDaysOffMarker]: true,
+  };
+
+  User.findOneAndUpdate = async () => ({
+    _id: barberId,
+    salons: [
+      {
+        salon: {
+          toString: () => salonAId,
+        },
+        defaultSchedule: selectedDefaultSchedule,
+      },
+    ],
+  });
+
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    assert.deepEqual(query, { barberId, salonId: salonAId });
+    schedulePayload = payload;
+
+    return {
+      _id: "schedule-a",
+      weeklySchedule: sanitizedWeeklySchedule,
+    };
+  };
+
+  await updateSalonDefaultSchedule(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId: salonAId },
+      body: {
+        ...selectedDefaultSchedule,
+        weeklySchedule: allDaysOffWeeklySchedule,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(schedulePayload.$set.weeklySchedule, sanitizedWeeklySchedule);
   assert.deepEqual(res.body.weeklySchedule, sanitizedWeeklySchedule);
 });
 
