@@ -7,6 +7,31 @@ import {
   isAcceptedStaffMember,
 } from "./salonRelationshipService.js";
 
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const reportAppointmentDateField = "reportAppointmentDate";
+const reportAppointmentDateExpression = {
+  $cond: [
+    {
+      $and: [
+        { $ne: ["$bookingDate", null] },
+        { $ne: ["$bookingDate", ""] },
+      ],
+    },
+    "$bookingDate",
+    "$dayKey",
+  ],
+};
+
+const isValidDateString = (value) => {
+  if (!DATE_PATTERN.test(value || "")) return false;
+
+  const parsedDate = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(parsedDate.getTime()) &&
+    parsedDate.toISOString().slice(0, 10) === value
+  );
+};
+
 export class ReportError extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -23,19 +48,47 @@ const parseDateRange = (from, to) => {
     throw new ReportError(400, "from and to query params are required (YYYY-MM-DD)");
   }
 
-  const fromDate = new Date(from + "T00:00:00.000Z");
-  const toDate = new Date(to + "T23:59:59.999Z");
-
-  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+  if (!isValidDateString(from) || !isValidDateString(to)) {
     throw new ReportError(400, "Invalid date format. Use YYYY-MM-DD.");
   }
 
-  if (fromDate.getTime() > toDate.getTime()) {
+  if (from > to) {
     throw new ReportError(400, "from date must be before or equal to to date");
   }
 
-  return { fromDate, toDate, from, to };
+  return { from, to };
 };
+
+const appointmentDateQuery = (from, to) => ({
+  $or: [
+    {
+      bookingDate: { $gte: from, $lte: to },
+    },
+    {
+      $or: [
+        { bookingDate: { $exists: false } },
+        { bookingDate: null },
+        { bookingDate: "" },
+      ],
+      dayKey: { $gte: from, $lte: to },
+    },
+  ],
+});
+
+// Reports are appointment-period views: prefer canonical bookingDate, with
+// dayKey as a legacy fallback for old records that did not persist bookingDate.
+const appointmentDateAggregationStages = (from, to) => [
+  {
+    $addFields: {
+      [reportAppointmentDateField]: reportAppointmentDateExpression,
+    },
+  },
+  {
+    $match: {
+      [reportAppointmentDateField]: { $gte: from, $lte: to },
+    },
+  },
+];
 
 /**
  * Get approved salon member IDs grouped by relationship type.
@@ -100,16 +153,16 @@ const getSalonMembers = async (salonId) => {
 /**
  * Count bookings by status in a given date range for given barber IDs.
  */
-const getStatusBreakdown = async (barberIds, fromDate, toDate) => {
+const getStatusBreakdown = async (barberIds, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
         barberId: { $in: barberIds },
-        createdAt: { $gte: fromDate, $lte: toDate },
       },
     },
+    ...appointmentDateAggregationStages(from, to),
     {
       $group: {
         _id: "$status",
@@ -169,19 +222,19 @@ const getBookingRevenueAmount = (booking) => {
 /**
  * Get booking counts by day for given barber IDs in date range.
  */
-const getByDayBreakdown = async (barberIds, fromDate, toDate) => {
+const getByDayBreakdown = async (barberIds, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
         barberId: { $in: barberIds },
-        createdAt: { $gte: fromDate, $lte: toDate },
       },
     },
+    ...appointmentDateAggregationStages(from, to),
     {
       $group: {
-        _id: { $ifNull: ["$bookingDate", "$dayKey"] },
+        _id: `$${reportAppointmentDateField}`,
         total: { $sum: 1 },
         completed: {
           $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] },
@@ -221,16 +274,16 @@ const getByDayBreakdown = async (barberIds, fromDate, toDate) => {
 /**
  * Get per-staff breakdown for given barber IDs in date range.
  */
-const getByStaffBreakdown = async (barberIds, membersById, fromDate, toDate) => {
+const getByStaffBreakdown = async (barberIds, membersById, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
         barberId: { $in: barberIds },
-        createdAt: { $gte: fromDate, $lte: toDate },
       },
     },
+    ...appointmentDateAggregationStages(from, to),
     {
       $group: {
         _id: "$barberId",
@@ -286,17 +339,17 @@ const getByStaffBreakdown = async (barberIds, membersById, fromDate, toDate) => 
 /**
  * Get top services for given barber IDs in date range.
  */
-const getTopServices = async (barberIds, fromDate, toDate) => {
+const getTopServices = async (barberIds, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
         barberId: { $in: barberIds },
-        createdAt: { $gte: fromDate, $lte: toDate },
         serviceName: { $exists: true, $ne: "" },
       },
     },
+    ...appointmentDateAggregationStages(from, to),
     {
       $group: {
         _id: "$serviceName",
@@ -345,7 +398,7 @@ export const getSalonReport = async (
     throw new ReportError(403, "Only salon owner or admin can access reports");
   }
 
-  const { fromDate, toDate } = parseDateRange(from, to);
+  parseDateRange(from, to);
 
   // Get accepted staff members only
   const { staffIds, membersById } = await getSalonMembers(salonId);
@@ -370,14 +423,14 @@ export const getSalonReport = async (
     topServices,
     allBookings,
   ] = await Promise.all([
-    getStatusBreakdown(effectiveStaffIds, fromDate, toDate),
-    getByDayBreakdown(effectiveStaffIds, fromDate, toDate),
-    getByStaffBreakdown(effectiveStaffIds, membersById, fromDate, toDate),
-    getTopServices(effectiveStaffIds, fromDate, toDate),
+    getStatusBreakdown(effectiveStaffIds, from, to),
+    getByDayBreakdown(effectiveStaffIds, from, to),
+    getByStaffBreakdown(effectiveStaffIds, membersById, from, to),
+    getTopServices(effectiveStaffIds, from, to),
     // Fetch all bookings in range for summary
     Booking.find({
       barberId: { $in: effectiveStaffIds },
-      createdAt: { $gte: fromDate, $lte: toDate },
+      ...appointmentDateQuery(from, to),
     })
       .select(
         "status price finalPrice promotionId voucherId promotionCode voucherCode discountAmount voucherDiscount clientId barberId"

@@ -116,6 +116,43 @@ const makeLegacyStaffUser = () => ({
 const fromDate = "2026-01-01";
 const toDate = "2026-06-30";
 
+const setupOwnerReportAccess = (members = [makeStaffUser(staffOneId, "staff", "accepted")]) => {
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins: [],
+    name: "Test Salon",
+  });
+  User.findById = () => makeLeanQuery([{ _id: ownerId }]);
+  User.find = () => ({ select: async () => members });
+};
+
+const getAppointmentDate = (booking) => booking.bookingDate || booking.dayKey || "";
+
+const bookingMatchesReportQuery = (booking, query) => {
+  const date = getAppointmentDate(booking);
+  const bookingDateRange = query.$or?.[0]?.bookingDate || {};
+  const dayKeyRange = query.$or?.[1]?.dayKey || {};
+
+  if (booking.bookingDate) {
+    return date >= bookingDateRange.$gte && date <= bookingDateRange.$lte;
+  }
+
+  return date >= dayKeyRange.$gte && date <= dayKeyRange.$lte;
+};
+
+const getAggregateGroupId = (pipeline) =>
+  pipeline.find((stage) => stage.$group)?.$group?._id;
+
+const assertPipelineUsesAppointmentRange = (pipeline, from, to) => {
+  assert.equal(JSON.stringify(pipeline).includes("createdAt"), false);
+  assert.deepEqual(
+    pipeline.find((stage) => stage.$match?.reportAppointmentDate)?.$match
+      ?.reportAppointmentDate,
+    { $gte: from, $lte: to }
+  );
+};
+
 afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   User.find = originalMethods.userFind;
@@ -238,7 +275,7 @@ test("accepted staff bookings included", async () => {
     select: async () => [makeStaffUser(staffOneId, "staff", "accepted")],
   });
   Booking.aggregate = async (pipeline) => {
-    if (pipeline[1]?.$group?._id === "$status") {
+    if (getAggregateGroupId(pipeline) === "$status") {
       return [{ _id: "completed", count: 1 }];
     }
     return [];
@@ -441,6 +478,196 @@ test("barberId filter rejects chair_renter", async () => {
   );
 });
 
+test("summary uses appointment date range instead of booking createdAt", async () => {
+  setupOwnerReportAccess();
+  Booking.aggregate = async () => [];
+
+  let capturedQuery = null;
+  const bookings = [
+    {
+      _id: "appointment-inside-created-outside",
+      barberId: staffOneId,
+      status: "completed",
+      price: 100,
+      clientId: clientIdClient,
+      bookingDate: "2026-06-15",
+      createdAt: new Date("2026-06-01T12:00:00.000Z"),
+    },
+    {
+      _id: "appointment-outside-created-inside",
+      barberId: staffOneId,
+      status: "completed",
+      price: 900,
+      clientId: "client-2",
+      bookingDate: "2026-06-20",
+      createdAt: new Date("2026-06-15T12:00:00.000Z"),
+    },
+  ];
+
+  Booking.find = (query) => {
+    capturedQuery = query;
+    return makeLeanQuery(bookings.filter((booking) => bookingMatchesReportQuery(booking, query)));
+  };
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assert.equal(capturedQuery.createdAt, undefined);
+  assert.equal(result.summary.totalBookings, 1);
+  assert.equal(result.summary.completedBookings, 1);
+  assert.equal(result.summary.totalRevenue, 100);
+});
+
+test("summary falls back to dayKey only when bookingDate is missing", async () => {
+  setupOwnerReportAccess();
+  Booking.aggregate = async () => [];
+
+  const bookings = [
+    {
+      _id: "day-key-fallback",
+      barberId: staffOneId,
+      status: "completed",
+      price: 70,
+      clientId: clientIdClient,
+      bookingDate: "",
+      dayKey: "2026-06-15",
+      createdAt: new Date("2026-06-01T12:00:00.000Z"),
+    },
+    {
+      _id: "booking-date-wins",
+      barberId: staffOneId,
+      status: "completed",
+      price: 500,
+      clientId: "client-2",
+      bookingDate: "2026-06-20",
+      dayKey: "2026-06-15",
+      createdAt: new Date("2026-06-15T12:00:00.000Z"),
+    },
+  ];
+
+  Booking.find = (query) =>
+    makeLeanQuery(bookings.filter((booking) => bookingMatchesReportQuery(booking, query)));
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assert.equal(result.summary.totalBookings, 1);
+  assert.equal(result.summary.totalRevenue, 70);
+});
+
+test("status breakdown uses appointment date range", async () => {
+  setupOwnerReportAccess();
+  let statusPipeline = null;
+
+  Booking.aggregate = async (pipeline) => {
+    if (getAggregateGroupId(pipeline) === "$status") {
+      statusPipeline = pipeline;
+      return [{ _id: "completed", count: 1 }];
+    }
+    return [];
+  };
+  Booking.find = () => makeLeanQuery([]);
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assertPipelineUsesAppointmentRange(statusPipeline, "2026-06-15", "2026-06-15");
+  assert.deepEqual(result.byStatus, [{ status: "completed", count: 1 }]);
+});
+
+test("daily breakdown groups and filters by appointment date", async () => {
+  setupOwnerReportAccess();
+  let dayPipeline = null;
+
+  Booking.aggregate = async (pipeline) => {
+    if (getAggregateGroupId(pipeline) === "$reportAppointmentDate") {
+      dayPipeline = pipeline;
+      return [
+        {
+          _id: "2026-06-15",
+          total: 1,
+          completed: 1,
+          cancelled: 0,
+          noShow: 0,
+          pending: 0,
+          revenue: 100,
+        },
+      ];
+    }
+    return [];
+  };
+  Booking.find = () => makeLeanQuery([]);
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assertPipelineUsesAppointmentRange(dayPipeline, "2026-06-15", "2026-06-15");
+  assert.equal(result.byDay[0]._id, "2026-06-15");
+});
+
+test("staff breakdown uses appointment date range", async () => {
+  setupOwnerReportAccess();
+  let staffPipeline = null;
+
+  Booking.aggregate = async (pipeline) => {
+    if (getAggregateGroupId(pipeline) === "$barberId") {
+      staffPipeline = pipeline;
+      return [
+        {
+          _id: staffOneId,
+          totalBookings: 1,
+          completed: 1,
+          cancelled: 0,
+          noShow: 0,
+          revenue: 100,
+          uniqueClients: [clientIdClient],
+        },
+      ];
+    }
+    return [];
+  };
+  Booking.find = () => makeLeanQuery([]);
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assertPipelineUsesAppointmentRange(staffPipeline, "2026-06-15", "2026-06-15");
+  assert.equal(result.byStaff[0].barberId, staffOneId);
+  assert.equal(result.byStaff[0].totalBookings, 1);
+});
+
+test("top services uses appointment date range", async () => {
+  setupOwnerReportAccess();
+  let servicesPipeline = null;
+
+  Booking.aggregate = async (pipeline) => {
+    if (getAggregateGroupId(pipeline) === "$serviceName") {
+      servicesPipeline = pipeline;
+      return [{ _id: "Haircut", count: 1, revenue: 100 }];
+    }
+    return [];
+  };
+  Booking.find = () => makeLeanQuery([]);
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assertPipelineUsesAppointmentRange(servicesPipeline, "2026-06-15", "2026-06-15");
+  assert.deepEqual(result.topServices, [{ _id: "Haircut", count: 1, revenue: 100 }]);
+});
+
 test("revenue counts completed only", async () => {
   Salon.findById = async () => ({
     _id: salonId,
@@ -534,7 +761,7 @@ test("top services are calculated correctly", async () => {
     select: async () => [makeStaffUser(staffOneId, "staff", "accepted")],
   });
   Booking.aggregate = async (pipeline) => {
-    if (pipeline[1]?.$group?._id === "$serviceName") {
+    if (getAggregateGroupId(pipeline) === "$serviceName") {
       return [
         { _id: "Haircut", count: 5, revenue: 250 },
         { _id: "Color", count: 3, revenue: 450 },
