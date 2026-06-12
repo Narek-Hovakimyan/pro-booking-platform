@@ -30,6 +30,7 @@ import voucherRoutes from "./routes/voucherRoutes.js";
 import revenueRoutes from "./routes/revenueRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
+import platformRoutes from "./routes/platformRoutes.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
@@ -152,6 +153,7 @@ app.use("/api/portfolio", portfolioPhotoRoutes);
 app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/vouchers", voucherRoutes);
 app.use("/api/revenue", revenueRoutes);
+app.use("/api/platform", platformRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use((error, _req, res, next) => {
   if (res.headersSent) {

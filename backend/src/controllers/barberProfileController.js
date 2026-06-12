@@ -333,6 +333,7 @@ export const getBarberCardSummary = async (req, res) => {
       delete publicBarber.emailVerificationTokenHash;
       delete publicBarber.emailVerificationExpires;
       delete publicBarber.emailVerificationSentAt;
+      delete publicBarber.platformRole;
 
       responseBarbers.push({
         ...publicBarber,

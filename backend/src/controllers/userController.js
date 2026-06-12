@@ -190,6 +190,7 @@ export const getBarbers = async (_req, res) => {
         delete publicBarber.emailVerificationTokenHash;
         delete publicBarber.emailVerificationExpires;
         delete publicBarber.emailVerificationSentAt;
+        delete publicBarber.platformRole;
 
         return {
           ...publicBarber,

@@ -241,6 +241,7 @@ test("card summary returns barber card data without per-barber requests", async 
     city: "City",
     avatarUrl: "/uploads/avatars/barber.png",
     role: "barber",
+    platformRole: "admin",
     salonStatus: "none",
     salons: [
       {
@@ -291,6 +292,7 @@ test("card summary returns barber card data without per-barber requests", async 
   assert.equal(res.body.reviewStats[0].count, 1);
   assert.equal(res.body.availability[0].barberId, barberId);
   assert.equal(res.body.availability[0].status, "ready");
+  assert.equal(res.body.barbers[0].platformRole, undefined);
 });
 
 test("card summary filters specialists by active service category and tags", async () => {

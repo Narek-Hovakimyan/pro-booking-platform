@@ -119,8 +119,11 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
   assert.equal(res.body.some((barber) => barber.name === "Unpaid Barber"), false);
 });
 
-test("getBarbers includes safe deposit settings for booking estimates", async () => {
-  const paidBarber = makeBarber({ name: "Deposit Barber" });
+test("getBarbers includes safe deposit settings and hides platformRole", async () => {
+  const paidBarber = makeBarber({
+    name: "Deposit Barber",
+    platformRole: "admin",
+  });
 
   User.find = () => chainableQuery([paidBarber]);
   Subscription.find = () =>
@@ -157,6 +160,7 @@ test("getBarbers includes safe deposit settings for booking estimates", async ()
     noShowPolicyText: "Deposit applies before booking.",
   });
   assert.equal(res.body[0].email, undefined);
+  assert.equal(res.body[0].platformRole, undefined);
 });
 
 test("getBarbers hides barber with stale salon seat", async () => {

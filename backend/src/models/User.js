@@ -124,6 +124,12 @@ const userSchema = new mongoose.Schema({
     enum: ["client", "barber"],
     default: "client",
   },
+  // Platform-level admin role (optional — independent of app business role)
+  platformRole: {
+    type: String,
+    enum: ["admin"],
+    default: null,
+  },
   // Legacy single-salon fields (kept for backward compatibility)
   salon: {
     type: mongoose.Schema.Types.ObjectId,

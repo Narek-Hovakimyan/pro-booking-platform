@@ -45,6 +45,7 @@ export const serializeUser = (user) => {
   const rawUser = user.toObject ? user.toObject() : user;
 
   delete rawUser.password;
+  delete rawUser.platformRole;
 
   return {
     ...rawUser,
@@ -63,6 +64,7 @@ export const buildPublicBarbers = (barbers, profiles, salon) => {
     const publicBarber = barber.toObject();
 
     delete publicBarber.workHistory;
+    delete publicBarber.platformRole;
 
     // Include approved salons info
     const approvedSalons = (barber.salons || [])

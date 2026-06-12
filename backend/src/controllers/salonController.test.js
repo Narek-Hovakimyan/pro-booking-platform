@@ -682,6 +682,7 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
     _id: id,
     name,
     role: "barber",
+    platformRole: "admin",
     avatarUrl: "",
     specialty: "unisex",
     city: "Yerevan",
@@ -713,6 +714,7 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
   assert.equal(Array.isArray(salonResult.barbers), true);
   assert.equal(salonResult.barbers.length, 1, "only paid barber included");
   assert.equal(salonResult.barbers[0].id || salonResult.barbers[0]._id, paidBarberId);
+  assert.equal(salonResult.barbers[0].platformRole, undefined);
 
   __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
   __salonControllerTestHooks.resetGetSalonReviewStats();
