@@ -819,6 +819,36 @@ test("salon without subscription returns null subscription and zero seats", asyn
   assert.equal(detail.latestPendingAttempt, null, "no pending attempt");
 });
 
+test("salon billing detail includes latest pending or requires_action subscription attempt", async () => {
+  let capturedFilter = null;
+  const requiresActionAttempt = {
+    ...subscriptionPaymentDoc,
+    status: "requires_action",
+    paidAt: null,
+    confirmedAt: null,
+    createdAt: new Date("2025-06-15"),
+  };
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(User, "findById", () => qc(ownerDoc));
+  mockQuery(Subscription, "findOne", subscriptionDoc);
+  mockMethod(User, "find", () => qc([acceptedStaffDoc]));
+  mockMethod(SubscriptionSeat, "find", () => qc([]));
+  mockMethod(SubscriptionPaymentAttempt, "findOne", (filter) => {
+    capturedFilter = filter;
+    return {
+      sort: () => ({ lean: async () => requiresActionAttempt }),
+    };
+  });
+
+  const detail = await getSalonBillingDetail(salonIdStr);
+
+  assert.deepEqual(capturedFilter.status, { $in: ["pending", "requires_action"] });
+  assert.equal(detail.latestPendingAttempt.status, "requires_action");
+  assert.equal(detail.latestPendingAttempt.purpose, "subscription");
+  assert.equal(detail.latestPendingAttempt.ownerType, "salon");
+});
+
 /* ════════════════════════════════════════════════════════ */
 /* Test 15: expired subscription returns clear state       */
 /* ════════════════════════════════════════════════════════ */

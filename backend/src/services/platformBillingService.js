@@ -450,13 +450,13 @@ export const getSalonBillingDetail = async (salonId) => {
     };
   }
 
-  // Latest pending attempt
+  // Latest actionable payment attempt
   const latestPendingAttempt = subscription
     ? await SubscriptionPaymentAttempt.findOne({
         ownerType: "salon",
         ownerId: salon._id,
         purpose: "subscription",
-        status: "pending",
+        status: { $in: ["pending", "requires_action"] },
       })
         .sort({ createdAt: -1 })
         .lean()
@@ -697,7 +697,7 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
  *
  * @param {string} salonId
  * @param {Object} options
- * @param {number} options.seatCount - New seat count (must be >= 0)
+ * @param {number} options.seatCount - New seat count (must be >= 1)
  * @param {string} options.note - Required reason
  * @param {Object} options.actor - req.user
  * @returns {Object} Updated billing detail

@@ -8,16 +8,29 @@ import {
   XCircle,
   Users,
   ShieldAlert,
+  Plus,
+  MinusCircle,
+  UserPlus,
+  CreditCard,
+  RefreshCw,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
   getPlatformBillingSalonDetail,
   getPlatformBillingSalonPayments,
+  activatePlatformSalonSubscription,
+  updatePlatformSalonSeatCount,
+  assignPlatformSalonSeat,
+  revokePlatformSalonSeat,
+  confirmPlatformSalonPayment,
 } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { Button } from "@/shared/components/ui/button";
+
+/* ─── Helpers ─────────────────────────────────────────── */
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -94,6 +107,132 @@ function StatCard({ icon: Icon, label, value, sub }) {
   );
 }
 
+/* ─── Note Modal ──────────────────────────────────────── */
+
+function PlatformActionModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  warning,
+  confirmLabel = "Confirm",
+  isSubmitting = false,
+  error = "",
+  children,
+}) {
+  const [note, setNote] = useState("");
+
+  const handleConfirm = () => {
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    onConfirm(trimmed);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="w-full max-w-md space-y-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:rounded-3xl sm:p-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold sm:text-2xl">{title}</h2>
+            {warning && (
+              <p className="mt-2 text-sm text-neutral-600">{warning}</p>
+            )}
+          </div>
+          <Button
+            aria-label="Close modal"
+            disabled={isSubmitting}
+            onClick={onClose}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <XCircle className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Extra form fields */}
+        {children}
+
+        {/* Note field */}
+        <div>
+          <label
+            htmlFor="action-note"
+            className="mb-1 block text-xs font-medium text-neutral-700"
+          >
+            Audit note <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            id="action-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Required reason for this action..."
+            rows={3}
+            className="w-full resize-none rounded-xl border border-neutral-200 p-3 text-sm outline-none placeholder:text-neutral-400 focus:border-neutral-400"
+            disabled={isSubmitting}
+          />
+        </div>
+
+        {/* Error */}
+        {error && (
+          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+
+        {/* Buttons */}
+        <div className="grid gap-2 sm:flex sm:justify-end">
+          <Button
+            className="w-full sm:w-auto"
+            disabled={isSubmitting}
+            onClick={onClose}
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            className="w-full sm:w-auto"
+            disabled={isSubmitting || !note.trim()}
+            onClick={handleConfirm}
+            type="button"
+          >
+            {isSubmitting ? "Processing..." : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Action Button Component ─────────────────────────── */
+
+function ActionButton({ icon: Icon, label, onClick, variant = "default" }) {
+  const base =
+    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition";
+  const variants = {
+    default: "bg-neutral-950 text-white hover:bg-neutral-800",
+    outline: "border border-neutral-300 text-neutral-700 hover:bg-neutral-50",
+    danger: "bg-red-600 text-white hover:bg-red-700",
+    success: "bg-emerald-600 text-white hover:bg-emerald-700",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={`${base} ${variants[variant] || variants.default}`}
+      type="button"
+    >
+      {Icon && <Icon className="h-3.5 w-3.5" />}
+      {label}
+    </button>
+  );
+}
+
+/* ─── Page Component ──────────────────────────────────── */
+
 export default function PlatformSalonBillingDetailPage() {
   const navigate = useNavigate();
   const { salonId } = useParams();
@@ -107,49 +246,71 @@ export default function PlatformSalonBillingDetailPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  // Fetch salon billing detail
+  /* ── Modal state ── */
+  const [modal, setModal] = useState(null); // { type, extra }
+
+  /* ── Data fetching ── */
+
+  const fetchDetail = useCallback(async () => {
+    try {
+      const result = await getPlatformBillingSalonDetail(salonId);
+      setDetail(result);
+      return result;
+    } catch (err) {
+      if (err.response?.status === 403) {
+        setError("Access denied. Platform admin privileges required.");
+      } else if (err.response?.status === 404) {
+        setError("Salon not found.");
+      } else {
+        setError(err.response?.data?.message || "Failed to load salon billing detail.");
+      }
+      return null;
+    }
+  }, [salonId]);
+
+  const fetchPayments = useCallback(async () => {
+    if (!salonId) return;
+    try {
+      const result = await getPlatformBillingSalonPayments(salonId, {
+        page: paymentsPage,
+        limit: 10,
+      });
+      setPayments(result.payments || []);
+      setPaymentsTotal(result.total || 0);
+    } catch {
+      // Payments fetch is secondary
+    }
+  }, [salonId, paymentsPage]);
+
+  // Initial fetch
   useEffect(() => {
     let isMounted = true;
 
-    async function fetchDetail() {
+    async function load() {
       if (!isMounted) return;
       setIsLoading(true);
       setError("");
-
-      try {
-        const result = await getPlatformBillingSalonDetail(salonId);
-        if (!isMounted) return;
-        setDetail(result);
-      } catch (err) {
-        if (!isMounted) return;
-        if (err.response?.status === 403) {
-          setError("Access denied. Platform admin privileges required.");
-        } else if (err.response?.status === 404) {
-          setError("Salon not found.");
-        } else {
-          setError(err.response?.data?.message || "Failed to load salon billing detail.");
-        }
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
+      await fetchDetail();
+      if (!isMounted) return;
+      setIsLoading(false);
     }
 
-    fetchDetail();
+    load();
 
     return () => {
       isMounted = false;
     };
-  }, [salonId]);
+  }, [fetchDetail]);
 
   // Fetch payments once detail is loaded
   useEffect(() => {
     if (!salonId || !detail) return;
     let isMounted = true;
 
-    async function fetchPayments() {
+    async function loadPayments() {
       if (!isMounted) return;
-
       try {
         const result = await getPlatformBillingSalonPayments(salonId, {
           page: paymentsPage,
@@ -163,18 +324,141 @@ export default function PlatformSalonBillingDetailPage() {
       }
     }
 
-    fetchPayments();
+    loadPayments();
 
     return () => {
       isMounted = false;
     };
   }, [salonId, paymentsPage, detail]);
 
+  /* ── Mutation handlers ── */
+
+  const [isSubmitting, setSubmitting] = useState(false);
+  const [modalError, setModalError] = useState("");
+
+  const closeModal = () => {
+    setModal(null);
+    setModalError("");
+    setSubmitting(false);
+  };
+
+  const handleMutation = async (apiCall, note) => {
+    setSubmitting(true);
+    setModalError("");
+
+    try {
+      await apiCall(note);
+      // Success — refresh data
+      await fetchDetail();
+      fetchPayments();
+      setSuccessMessage("Action completed successfully.");
+      closeModal();
+      setTimeout(() => setSuccessMessage(""), 5000);
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 403 || status === 401) {
+        setModalError("Forbidden. Platform admin privileges required.");
+      } else if (status === 400) {
+        setModalError(err.response?.data?.message || "Validation error.");
+      } else {
+        setModalError(err.response?.data?.message || "An unexpected error occurred.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ── Activate / Renew ── */
+  const handleActivateConfirm = (note) => {
+    handleMutation(async (n) => {
+      return activatePlatformSalonSubscription(salonId, {
+        note: n,
+        seatCount: modal.extra?.seatCount || 1,
+        months: modal.extra?.months || 1,
+      });
+    }, note);
+  };
+
+  /* ── Update seat count ── */
+  const handleSeatCountConfirm = (note) => {
+    const newCount = Number(modal.extra?.newSeatCount);
+    if (!Number.isInteger(newCount) || newCount < 1) {
+      setModalError("Seat count must be a positive integer.");
+      return;
+    }
+    handleMutation(async (n) => {
+      return updatePlatformSalonSeatCount(salonId, {
+        seatCount: newCount,
+        note: n,
+      });
+    }, note);
+  };
+
+  /* ── Assign seat ── */
+  const handleAssignConfirm = (note) => {
+    const barberId = modal.extra?.barberId;
+    if (!barberId) {
+      setModalError("No staff member selected.");
+      return;
+    }
+    handleMutation(async (n) => {
+      return assignPlatformSalonSeat(salonId, {
+        barberId,
+        note: n,
+      });
+    }, note);
+  };
+
+  /* ── Revoke seat ── */
+  const handleRevokeConfirm = (note) => {
+    const barberId = modal.extra?.barberId;
+    if (!barberId) {
+      setModalError("No staff member selected.");
+      return;
+    }
+    handleMutation(async (n) => {
+      return revokePlatformSalonSeat(salonId, {
+        barberId,
+        note: n,
+      });
+    }, note);
+  };
+
+  /* ── Confirm payment ── */
+  const handlePaymentConfirm = (note) => {
+    const paymentId = modal.extra?.paymentId;
+    if (!paymentId) {
+      setModalError("No payment selected.");
+      return;
+    }
+    handleMutation(async (n) => {
+      return confirmPlatformSalonPayment(paymentId, {
+        note: n,
+      });
+    }, note);
+  };
+
+  /* ── Derived data ── */
+
   const subscription = detail?.subscription;
   const seats = detail?.seats;
   const acceptedStaff = detail?.acceptedStaff || [];
   const latestPendingAttempt = detail?.latestPendingAttempt;
   const totalPaymentsPages = Math.max(1, Math.ceil(paymentsTotal / 10));
+  const assignedBarberIds = new Set(
+    (seats?.assignments || []).map((a) => String(a.barber?._id || a.barber))
+  );
+
+  // Determine if a payment attempt is eligible for manual confirmation
+  const isConfirmablePayment = latestPendingAttempt
+    ? latestPendingAttempt.purpose === "subscription" &&
+      latestPendingAttempt.ownerType === "salon" &&
+      latestPendingAttempt.provider === "manual" &&
+      (latestPendingAttempt.status === "pending" ||
+        latestPendingAttempt.status === "requires_action")
+    : false;
+
+  /* ── Loading ── */
 
   if (isLoading) {
     return (
@@ -184,7 +468,8 @@ export default function PlatformSalonBillingDetailPage() {
     );
   }
 
-  // Error state (including 403 for non-platform admin)
+  /* ── Error state (including 403 for non-platform admin) ── */
+
   if (error) {
     return (
       <Card>
@@ -227,6 +512,14 @@ export default function PlatformSalonBillingDetailPage() {
         Back to Platform Billing
       </button>
 
+      {/* Success message */}
+      {successMessage && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{successMessage}</span>
+        </div>
+      )}
+
       {/* Salon header card */}
       <Card>
         <CardContent className="space-y-4">
@@ -267,6 +560,30 @@ export default function PlatformSalonBillingDetailPage() {
                         ? "Trial"
                         : subscription.status}
                 </span>
+              )}
+
+              {/* ── Action buttons (platform admin only) ── */}
+              {isPlatformAdmin && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <ActionButton
+                    icon={RefreshCw}
+                    label={
+                      subscription
+                        ? "Renew subscription"
+                        : "Activate subscription"
+                    }
+                    onClick={() => setModal({ type: "activate" })}
+                    variant={subscription ? "outline" : "default"}
+                  />
+                  {subscription && (
+                    <ActionButton
+                      icon={Users}
+                      label="Update seat count"
+                      onClick={() => setModal({ type: "seatCount" })}
+                      variant="outline"
+                    />
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -367,9 +684,21 @@ export default function PlatformSalonBillingDetailPage() {
       {/* Accepted staff + seat assignments */}
       <Card>
         <CardContent>
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-neutral-500">
-            Accepted Staff & Seat Assignments
-          </h2>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-500">
+              Accepted Staff & Seat Assignments
+            </h2>
+            {isPlatformAdmin && subscription && (
+              <div className="flex flex-wrap gap-2">
+                <ActionButton
+                  icon={UserPlus}
+                  label="Assign seat"
+                  onClick={() => setModal({ type: "assign" })}
+                  variant="outline"
+                />
+              </div>
+            )}
+          </div>
 
           {acceptedStaff.length === 0 ? (
             <p className="text-sm text-neutral-400">No accepted staff members.</p>
@@ -383,9 +712,7 @@ export default function PlatformSalonBillingDetailPage() {
               </div>
 
               {acceptedStaff.map((staff) => {
-                const hasSeat = (seats?.assignments || []).some(
-                  (a) => String(a.barber?._id || a.barber) === String(staff._id)
-                );
+                const hasSeat = assignedBarberIds.has(String(staff._id));
 
                 return (
                   <div
@@ -413,17 +740,51 @@ export default function PlatformSalonBillingDetailPage() {
                     <div className="col-span-2 text-neutral-500">
                       {staff.barberType || staff.profession || "—"}
                     </div>
-                    <div className="col-span-3">
+                    <div className="col-span-3 flex items-center gap-2">
                       {hasSeat ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                          <CheckCircle2 className="h-3 w-3" />
-                          Seat assigned
-                        </span>
+                        <>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Seat assigned
+                          </span>
+                          {isPlatformAdmin && (
+                            <button
+                              onClick={() =>
+                                setModal({
+                                  type: "revoke",
+                                  extra: { barberId: staff._id, barberName: staff.name },
+                                })
+                              }
+                              className="rounded-lg p-1 text-red-400 transition hover:bg-red-50 hover:text-red-600"
+                              title="Revoke seat"
+                              type="button"
+                            >
+                              <MinusCircle className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-neutral-400">
-                          <XCircle className="h-3 w-3" />
-                          No seat
-                        </span>
+                        <>
+                          <span className="inline-flex items-center gap-1 text-xs text-neutral-400">
+                            <XCircle className="h-3 w-3" />
+                            No seat
+                          </span>
+                          {isPlatformAdmin && seats?.available > 0 && (
+                            <button
+                              onClick={() =>
+                                setModal({
+                                  type: "assign",
+                                  extra: { barberId: staff._id, barberName: staff.name },
+                                })
+                              }
+                              className="rounded-lg p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                              title="Assign seat"
+                              type="button"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -438,9 +799,24 @@ export default function PlatformSalonBillingDetailPage() {
       {latestPendingAttempt && (
         <Card>
           <CardContent>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-neutral-500">
-              Pending Payment
-            </h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-500">
+                Pending Payment
+              </h2>
+              {isPlatformAdmin && isConfirmablePayment && (
+                <ActionButton
+                  icon={CreditCard}
+                  label="Confirm manual payment"
+                  onClick={() =>
+                    setModal({
+                      type: "confirmPayment",
+                      extra: { paymentId: latestPendingAttempt._id },
+                    })
+                  }
+                  variant="success"
+                />
+              )}
+            </div>
             <div className="space-y-2 text-sm">
               <InfoRow
                 label="Amount"
@@ -560,6 +936,251 @@ export default function PlatformSalonBillingDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ─── Modals ─── */}
+
+      {/* Activate / Renew */}
+      <PlatformActionModal
+        key={modal?.type === "activate" ? "activate-open" : "activate-closed"}
+        isOpen={modal?.type === "activate"}
+        onClose={closeModal}
+        onConfirm={handleActivateConfirm}
+        title={subscription ? "Renew subscription" : "Activate subscription"}
+        warning={`This will ${subscription ? "renew" : "activate"} the salon subscription${subscription ? ` (${subscription.seatCount} seats, ${getProviderLabel(subscription.provider)})` : " (manual provider)"}. An audit note is required.`}
+        confirmLabel={subscription ? "Renew" : "Activate"}
+        isSubmitting={isSubmitting}
+        error={modalError}
+      >
+        {!subscription && (
+          <div className="space-y-3">
+            <div>
+              <label
+                htmlFor="activate-seats"
+                className="mb-1 block text-xs font-medium text-neutral-700"
+              >
+                Seat count
+              </label>
+              <input
+                id="activate-seats"
+                type="number"
+                min="1"
+                defaultValue="1"
+                onChange={(e) =>
+                  setModal((prev) =>
+                    prev
+                      ? { ...prev, extra: { ...prev.extra, seatCount: Number(e.target.value) } }
+                      : prev
+                  )
+                }
+                className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="activate-months"
+                className="mb-1 block text-xs font-medium text-neutral-700"
+              >
+                Period (months)
+              </label>
+              <input
+                id="activate-months"
+                type="number"
+                min="1"
+                defaultValue="1"
+                onChange={(e) =>
+                  setModal((prev) =>
+                    prev
+                      ? { ...prev, extra: { ...prev.extra, months: Number(e.target.value) } }
+                      : prev
+                  )
+                }
+                className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              />
+            </div>
+          </div>
+        )}
+        {subscription && (
+          <p className="text-sm text-neutral-500">
+            Renewing extends the current period. Current seat count:{" "}
+            <strong>{subscription.seatCount}</strong>.
+          </p>
+        )}
+      </PlatformActionModal>
+
+      {/* Update seat count */}
+      <PlatformActionModal
+        key={modal?.type === "seatCount" ? "seat-count-open" : "seat-count-closed"}
+        isOpen={modal?.type === "seatCount"}
+        onClose={closeModal}
+        onConfirm={handleSeatCountConfirm}
+        title="Update seat count"
+        warning={`Current: ${seats?.total ?? 0} total, ${seats?.used ?? 0} used. New count must be positive and cannot be lower than used seats.`}
+        confirmLabel="Update"
+        isSubmitting={isSubmitting}
+        error={modalError}
+      >
+        <div>
+          <label
+            htmlFor="seatcount-input"
+            className="mb-1 block text-xs font-medium text-neutral-700"
+          >
+            New seat count
+          </label>
+          <input
+            id="seatcount-input"
+            type="number"
+            min={Math.max(1, seats?.used ?? 0)}
+            defaultValue={Math.max(1, seats?.total ?? 1)}
+            onChange={(e) =>
+              setModal((prev) =>
+                prev
+                  ? { ...prev, extra: { ...prev.extra, newSeatCount: Number(e.target.value) } }
+                  : prev
+              )
+            }
+            className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+          />
+          <p className="mt-1 text-xs text-neutral-500">
+            Used seats: <strong>{seats?.used ?? 0}</strong>
+          </p>
+        </div>
+      </PlatformActionModal>
+
+      {/* Assign seat */}
+      <PlatformActionModal
+        key={modal?.type === "assign" ? `assign-${modal?.extra?.barberId || "select"}` : "assign-closed"}
+        isOpen={modal?.type === "assign"}
+        onClose={closeModal}
+        onConfirm={handleAssignConfirm}
+        title="Assign seat"
+        warning={
+          modal?.extra?.barberName
+            ? `Assign a subscription seat to "${modal.extra.barberName}".`
+            : "Select a staff member from the list below."
+        }
+        confirmLabel="Assign"
+        isSubmitting={isSubmitting}
+        error={modalError}
+      >
+        {!modal?.extra?.barberId ? (
+          <div>
+            <label
+              htmlFor="assign-staff"
+              className="mb-1 block text-xs font-medium text-neutral-700"
+            >
+              Select staff member
+            </label>
+            <select
+              id="assign-staff"
+              className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              defaultValue=""
+              onChange={(e) =>
+                setModal((prev) => {
+                  const selected = acceptedStaff.find((s) => s._id === e.target.value);
+                  return prev
+                    ? {
+                        ...prev,
+                        extra: {
+                          barberId: e.target.value,
+                          barberName: selected?.name || "Selected staff",
+                        },
+                      }
+                    : prev;
+                })
+              }
+            >
+              <option value="" disabled>
+                -- Select staff --
+              </option>
+              {acceptedStaff
+                .filter((s) => !assignedBarberIds.has(String(s._id)))
+                .map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name || "Unnamed"} {s.email ? `(${s.email})` : ""}
+                  </option>
+                ))}
+            </select>
+            <p className="mt-1 text-xs text-neutral-500">
+              Only accepted staff without an active seat are shown.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-neutral-600">
+            Assign seat to <strong>{modal.extra.barberName}</strong>.
+          </p>
+        )}
+      </PlatformActionModal>
+
+      {/* Revoke seat */}
+      <PlatformActionModal
+        key={modal?.type === "revoke" ? `revoke-${modal?.extra?.barberId || "select"}` : "revoke-closed"}
+        isOpen={modal?.type === "revoke"}
+        onClose={closeModal}
+        onConfirm={handleRevokeConfirm}
+        title="Revoke seat"
+        warning={
+          modal?.extra?.barberName
+            ? `Revoke the subscription seat from "${modal.extra.barberName}". This action cannot be undone manually. The barber will lose access to subscription benefits.`
+            : "Revoke seat from a staff member."
+        }
+        confirmLabel="Revoke"
+        isSubmitting={isSubmitting}
+        error={modalError}
+      >
+        {!modal?.extra?.barberId && (
+          <div>
+            <label
+              htmlFor="revoke-staff"
+              className="mb-1 block text-xs font-medium text-neutral-700"
+            >
+              Select staff member with active seat
+            </label>
+            <select
+              id="revoke-staff"
+              className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              defaultValue=""
+              onChange={(e) =>
+                setModal((prev) => {
+                  const selected = acceptedStaff.find((s) => s._id === e.target.value);
+                  return prev
+                    ? {
+                        ...prev,
+                        extra: {
+                          barberId: e.target.value,
+                          barberName: selected?.name || "Selected staff",
+                        },
+                      }
+                    : prev;
+                })
+              }
+            >
+              <option value="" disabled>
+                -- Select staff --
+              </option>
+              {acceptedStaff
+                .filter((s) => assignedBarberIds.has(String(s._id)))
+                .map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name || "Unnamed"} {s.email ? `(${s.email})` : ""}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+      </PlatformActionModal>
+
+      {/* Confirm payment */}
+      <PlatformActionModal
+        key={modal?.type === "confirmPayment" ? "confirm-payment-open" : "confirm-payment-closed"}
+        isOpen={modal?.type === "confirmPayment"}
+        onClose={closeModal}
+        onConfirm={handlePaymentConfirm}
+        title="Confirm manual payment"
+        warning={`This will mark the pending ${formatCurrency(latestPendingAttempt?.amount || 0)} payment as paid and activate/extend the subscription period.`}
+        confirmLabel="Confirm payment"
+        isSubmitting={isSubmitting}
+        error={modalError}
+      />
     </div>
   );
 }
