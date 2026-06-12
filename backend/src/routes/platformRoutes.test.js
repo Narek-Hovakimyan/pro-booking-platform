@@ -33,6 +33,79 @@ test("platform routes apply protect and requirePlatformAdmin middleware", () => 
   );
 });
 
+/* ── Billing route structure tests ───────────────────── */
+
+test("all billing routes are registered and use protect + requirePlatformAdmin", () => {
+  const billingRoutes = [
+    "/billing/salons",
+    "/billing/salons/:salonId",
+    "/billing/salons/:salonId/payments",
+    "/billing/payments",
+  ];
+
+  for (const billingPath of billingRoutes) {
+    const route = platformRoutes.stack.find(
+      (layer) => layer.route && layer.route.path === billingPath
+    );
+    assert.ok(route, `Route ${billingPath} should exist`);
+
+    const middlewareNames = route.route.stack.map((s) => s.name);
+    assert.ok(
+      middlewareNames.includes("protect"),
+      `${billingPath} should use protect middleware`
+    );
+    assert.ok(
+      middlewareNames.includes("requirePlatformAdmin"),
+      `${billingPath} should use requirePlatformAdmin middleware`
+    );
+
+    // All billing routes are GET
+    const methods = route.route.methods;
+    assert.ok(methods.get, `${billingPath} should be GET`);
+  }
+});
+
+test("billing/salons route has listSalonBillingSummaries handler", () => {
+  const route = platformRoutes.stack.find(
+    (layer) => layer.route && layer.route.path === "/billing/salons"
+  );
+  assert.ok(route, "/billing/salons route should exist");
+
+  const handlerName = route.route.stack[2].name;
+  assert.equal(handlerName, "listSalonBillingSummaries");
+});
+
+test("billing/salons/:salonId route has getSalonBillingDetailHandler handler", () => {
+  const route = platformRoutes.stack.find(
+    (layer) => layer.route && layer.route.path === "/billing/salons/:salonId"
+  );
+  assert.ok(route, "/billing/salons/:salonId route should exist");
+
+  const handlerName = route.route.stack[2].name;
+  assert.equal(handlerName, "getSalonBillingDetailHandler");
+});
+
+test("billing/salons/:salonId/payments route has getSalonPaymentsHandler handler", () => {
+  const route = platformRoutes.stack.find(
+    (layer) =>
+      layer.route && layer.route.path === "/billing/salons/:salonId/payments"
+  );
+  assert.ok(route, "/billing/salons/:salonId/payments route should exist");
+
+  const handlerName = route.route.stack[2].name;
+  assert.equal(handlerName, "getSalonPaymentsHandler");
+});
+
+test("billing/payments route has listAllSalonPayments handler", () => {
+  const route = platformRoutes.stack.find(
+    (layer) => layer.route && layer.route.path === "/billing/payments"
+  );
+  assert.ok(route, "/billing/payments route should exist");
+
+  const handlerName = route.route.stack[2].name;
+  assert.equal(handlerName, "listAllSalonPayments");
+});
+
 /* ── Simulated request/response handler tests ─────────── */
 
 const makeReqRes = (userOverrides = {}) => {
@@ -115,6 +188,23 @@ const callAccessCheck = async (req, res) => {
   // Run handler
   await handlerFn(req, res, next);
   return res.body;
+};
+
+const runRoutePlatformGate = async (routePath, req, res) => {
+  const routeLayer = platformRoutes.stack.find(
+    (layer) => layer.route && layer.route.path === routePath
+  );
+  assert.ok(routeLayer, `${routePath} route not found`);
+
+  const stack = routeLayer.route.stack;
+  const requirePlatformAdminFn = stack[1].handle;
+
+  let nextCalled = false;
+  await requirePlatformAdminFn(req, res, () => {
+    nextCalled = true;
+  });
+
+  return nextCalled;
 };
 
 /* ── Route handler tests ──────────────────────────────── */
@@ -225,4 +315,84 @@ test("env allowlisted id allowed and returns identity info", async () => {
   assert.ok(body, "Body should be defined");
   assert.equal(body.id, "64b000000000000000000010");
   assert.equal(body.name, "Allowlisted By ID");
+});
+
+test("billing route rejects normal client", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000020",
+    role: "client",
+    platformRole: null,
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/salons", req, res);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, "FORBIDDEN");
+});
+
+test("billing route rejects normal barber", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000021",
+    role: "barber",
+    platformRole: null,
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/salons", req, res);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
+test("billing route rejects salon owner/admin without platform admin role", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000022",
+    role: "barber",
+    platformRole: null,
+    salon: "64b000000000000000010000",
+    salonStatus: "approved",
+    salons: [
+      {
+        salon: "64b000000000000000010000",
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "accepted",
+      },
+    ],
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/salons", req, res);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
+test("billing route allows platformRole admin", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000023",
+    role: "barber",
+    platformRole: "admin",
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/salons", req, res);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+});
+
+test("billing route allows env allowlisted platform admin", async () => {
+  process.env.PLATFORM_ADMIN_EMAILS = "billing-admin@example.com";
+  resetAllowlistCache();
+
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000024",
+    role: "client",
+    email: "billing-admin@example.com",
+    platformRole: null,
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/payments", req, res);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
 });

@@ -296,3 +296,51 @@ describe("User profession/barberType invariants", () => {
   });
 
 });
+
+describe("User platform admin role model", () => {
+  const makeUser = (overrides = {}) =>
+    new User({
+      name: "Role Model User",
+      phone: phone(overrides.role || overrides.platformRole || "role-model"),
+      password: "password123",
+      ...overrides,
+    });
+
+  test("business role rejects platform_admin", () => {
+    const user = makeUser({ role: "platform_admin" });
+    const error = user.validateSync();
+
+    assert.ok(error?.errors?.role, "role validation error expected");
+    assert.match(error.errors.role.message, /platform_admin/);
+  });
+
+  test("business role rejects user", () => {
+    const user = makeUser({ role: "user" });
+    const error = user.validateSync();
+
+    assert.ok(error?.errors?.role, "role validation error expected");
+    assert.match(error.errors.role.message, /user/);
+  });
+
+  test("existing client and barber business roles remain valid without platformRole", () => {
+    const client = makeUser({ role: "client" });
+    const barber = makeUser({ role: "barber" });
+
+    assert.equal(client.platformRole, null);
+    assert.equal(barber.platformRole, null);
+    assert.equal(client.validateSync(), undefined);
+    assert.equal(barber.validateSync(), undefined);
+  });
+
+  test("platformRole admin is separate from business role", () => {
+    const clientAdmin = makeUser({ role: "client", platformRole: "admin" });
+    const barberAdmin = makeUser({ role: "barber", platformRole: "admin" });
+
+    assert.equal(clientAdmin.validateSync(), undefined);
+    assert.equal(barberAdmin.validateSync(), undefined);
+    assert.equal(clientAdmin.role, "client");
+    assert.equal(barberAdmin.role, "barber");
+    assert.equal(clientAdmin.platformRole, "admin");
+    assert.equal(barberAdmin.platformRole, "admin");
+  });
+});
