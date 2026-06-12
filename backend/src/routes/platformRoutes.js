@@ -6,6 +6,11 @@ import {
   getSalonBillingDetailHandler,
   getSalonPaymentsHandler,
   listAllSalonPayments,
+  activateSubscription,
+  updateSeatCount,
+  assignSeat,
+  revokeSeat,
+  confirmPayment,
 } from "../controllers/platformBillingController.js";
 
 const router = express.Router();
@@ -70,6 +75,71 @@ router.get(
   protect,
   requirePlatformAdmin,
   listAllSalonPayments
+);
+
+/**
+ * PATCH /api/platform/billing/salons/:salonId/subscription/activate
+ * Activate or renew a salon subscription manually.
+ * Protected — platform admin only.
+ * Body: { seatCount?, months?, note }
+ */
+router.patch(
+  "/billing/salons/:salonId/subscription/activate",
+  protect,
+  requirePlatformAdmin,
+  activateSubscription
+);
+
+/**
+ * PATCH /api/platform/billing/salons/:salonId/subscription/seat-count
+ * Update the seat count on a salon subscription.
+ * Protected — platform admin only.
+ * Body: { seatCount, note }
+ */
+router.patch(
+  "/billing/salons/:salonId/subscription/seat-count",
+  protect,
+  requirePlatformAdmin,
+  updateSeatCount
+);
+
+/**
+ * POST /api/platform/billing/salons/:salonId/seats/assign
+ * Assign a subscription seat to an accepted staff barber.
+ * Protected — platform admin only.
+ * Body: { barberId, note }
+ */
+router.post(
+  "/billing/salons/:salonId/seats/assign",
+  protect,
+  requirePlatformAdmin,
+  assignSeat
+);
+
+/**
+ * POST /api/platform/billing/salons/:salonId/seats/revoke
+ * Revoke a subscription seat from an assigned staff barber.
+ * Protected — platform admin only.
+ * Body: { barberId, note }
+ */
+router.post(
+  "/billing/salons/:salonId/seats/revoke",
+  protect,
+  requirePlatformAdmin,
+  revokeSeat
+);
+
+/**
+ * POST /api/platform/billing/payments/:paymentId/confirm
+ * Manually confirm a salon subscription payment (manual provider only).
+ * Protected — platform admin only.
+ * Body: { note }
+ */
+router.post(
+  "/billing/payments/:paymentId/confirm",
+  protect,
+  requirePlatformAdmin,
+  confirmPayment
 );
 
 export default router;

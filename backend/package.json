@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test src/models/User.test.js && node --test --test-concurrency=1 \"src/controllers/**/*.test.js\" \"src/middleware/**/*.test.js\" \"src/models/EventRegistration.test.js\" \"src/routes/**/*.test.js\" \"src/services/**/*.test.js\" \"src/socket.test.js\" \"src/utils/**/*.test.js\"",
+    "test": "node --test src/models/User.test.js && node --test --test-concurrency=1 \"src/controllers/**/*.test.js\" \"src/middleware/**/*.test.js\" \"src/models/EventRegistration.test.js\" \"src/models/PlatformAuditLog.test.js\" \"src/routes/**/*.test.js\" \"src/services/**/*.test.js\" \"src/socket.test.js\" \"src/utils/**/*.test.js\"",
     "migrate:salons": "node migrations/migrateToMultipleSalons.js",
     "migrate:fix-work-history": "node migrations/fixWorkHistory.js",
     "migrate:schedule-per-salon": "node migrations/migrateScheduleToPerSalon.js",

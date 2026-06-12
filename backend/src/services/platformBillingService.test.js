@@ -5,9 +5,16 @@ import mongoose from "mongoose";
 import Salon from "../models/Salon.js";
 import User from "../models/User.js";
 import Subscription from "../models/Subscription.js";
+import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
+import PlatformAuditLog from "../models/PlatformAuditLog.js";
 import {
+  activateSalonSubscription,
+  updateSalonSeatCount,
+  assignSalonSeat,
+  revokeSalonSeat,
+  confirmSalonPayment,
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
   getSalonPayments,
@@ -351,7 +358,7 @@ const restoreOriginals = () => {
   for (const [key, value] of Object.entries(originals)) {
     const [modelName, method] = key.split("__");
     const modelMap = {
-      Salon, User, Subscription, SubscriptionSeat, SubscriptionPaymentAttempt,
+      Salon, User, Subscription, SubscriptionPlan, SubscriptionSeat, SubscriptionPaymentAttempt, PlatformAuditLog,
     };
     if (modelMap[modelName] && value !== undefined) {
       modelMap[modelName][method] = value;
@@ -427,7 +434,15 @@ const qc = (result, selectedFields = null) => ({
   lean: async () =>
     Array.isArray(result)
       ? result.map((item) => projectDoc(item, selectedFields))
-      : projectDoc(result, selectedFields),
+	    : projectDoc(result, selectedFields),
+});
+
+const saveableDoc = (doc, onSave = null) => ({
+  ...cloneValue(doc),
+  async save() {
+    if (onSave) onSave(this);
+    return this;
+  },
 });
 
 /**
@@ -960,4 +975,370 @@ test("getAllSalonBillingSummaries applies none subscription filter before pagina
   );
   assert.equal(result.total, 1);
   assert.equal(result.salons.length, 0);
+});
+
+/* ════════════════════════════════════════════════════════ */
+/* Phase 3 mutation safety tests                            */
+/* ════════════════════════════════════════════════════════ */
+
+const platformActor = { _id: oid("64b0000000000000000a0001") };
+const requestIp = "203.0.113.10";
+const planDoc = {
+  _id: oid("64b0000000000000000b0001"),
+  pricePerSeat: 100,
+};
+
+const acceptedStaffWithRole = { ...acceptedStaffDoc, role: "barber" };
+const chairRenterWithRole = { ...chairRenterDoc, role: "barber" };
+
+const mockPostMutationDetail = (subscription = subscriptionDoc, seats = []) => {
+  mockMethod(User, "findById", () => qc(ownerDoc));
+  mockMethod(User, "find", () => qc([]));
+  mockMethod(SubscriptionSeat, "find", () => qc(seats));
+  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
+    sort: () => ({ lean: async () => null }),
+  }));
+  return subscription;
+};
+
+test("activateSalonSubscription requires note before mutation", async () => {
+  let salonRead = false;
+  mockMethod(Salon, "findById", () => {
+    salonRead = true;
+    return qc(salonDoc);
+  });
+
+  await assert.rejects(
+    () => activateSalonSubscription(salonIdStr, { actor: platformActor, note: " " }),
+    { statusCode: 400, message: "note is required" }
+  );
+
+  assert.equal(salonRead, false);
+});
+
+test("activateSalonSubscription creates one audit log with subscriptionId and requestIp", async () => {
+  let auditPayload;
+  const subscription = saveableDoc(subscriptionDoc);
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(SubscriptionPlan, "findOne", () => qc(planDoc));
+  let subscriptionFindCalls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls += 1;
+    return subscriptionFindCalls === 1 ? Promise.resolve(subscription) : qc(subscription);
+  });
+  mockMethod(PlatformAuditLog, "create", async (payload) => {
+    auditPayload = payload;
+    return payload;
+  });
+  mockPostMutationDetail(subscription);
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Manual renewal",
+    seatCount: 2,
+    months: 1,
+    requestIp,
+  });
+
+  assert.equal(auditPayload.action, "salon_subscription.activate");
+  assert.equal(auditPayload.actorId, platformActor._id);
+  assert.equal(auditPayload.salonId.toString(), salonIdStr);
+  assert.equal(auditPayload.subscriptionId.toString(), subscriptionId.toString());
+  assert.equal(auditPayload.note, "Manual renewal");
+  assert.equal(auditPayload.requestIp, requestIp);
+});
+
+test("updateSalonSeatCount requires note and validates positive integer", async () => {
+  await assert.rejects(
+    () => updateSalonSeatCount(salonIdStr, { actor: platformActor, seatCount: 2, note: "" }),
+    { statusCode: 400, message: "note is required" }
+  );
+
+  mockQuery(Salon, "findById", salonDoc);
+  let subscriptionFindCalls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls += 1;
+    return subscriptionFindCalls === 1
+      ? Promise.resolve(saveableDoc(subscriptionDoc))
+      : qc(subscriptionDoc);
+  });
+
+  await assert.rejects(
+    () => updateSalonSeatCount(salonIdStr, { actor: platformActor, seatCount: 1.5, note: "Bad count" }),
+    { statusCode: 400, message: "seatCount must be a positive integer" }
+  );
+});
+
+test("updateSalonSeatCount rejects count below used seats and does not audit", async () => {
+  let auditCalled = false;
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc({ ...subscriptionDoc, seatCount: 3 })));
+  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc, legacySeatDoc]));
+  mockMethod(User, "find", () => qc([acceptedStaffWithRole, { ...legacyStaffDoc, role: "barber" }]));
+  mockMethod(PlatformAuditLog, "create", async () => {
+    auditCalled = true;
+  });
+
+  await assert.rejects(
+    () => updateSalonSeatCount(salonIdStr, { actor: platformActor, seatCount: 1, note: "Too low" }),
+    { statusCode: 400 }
+  );
+
+  assert.equal(auditCalled, false);
+});
+
+test("updateSalonSeatCount audits and rolls back when audit creation fails", async () => {
+  const subscription = saveableDoc({ ...subscriptionDoc, seatCount: 3 });
+  const savedValues = [];
+
+  subscription.save = async function save() {
+    savedValues.push(this.seatCount);
+    return this;
+  };
+
+  mockQuery(Salon, "findById", salonDoc);
+  let subscriptionFindCalls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls += 1;
+    return subscriptionFindCalls === 1 ? Promise.resolve(subscription) : qc(subscription);
+  });
+  mockMethod(SubscriptionSeat, "find", () => qc([]));
+  mockMethod(User, "find", () => qc([]));
+  mockMethod(PlatformAuditLog, "create", async () => {
+    throw new Error("audit unavailable");
+  });
+
+  await assert.rejects(
+    () => updateSalonSeatCount(salonIdStr, {
+      actor: platformActor,
+      seatCount: 4,
+      note: "Increase seats",
+      requestIp,
+    }),
+    /audit unavailable/
+  );
+
+  assert.deepEqual(savedValues, [4, 3]);
+  assert.equal(subscription.seatCount, 3);
+});
+
+test("assignSalonSeat rejects chair_renter, duplicate, and over-cap without audit", async () => {
+  let auditCalls = 0;
+  let seatCreates = 0;
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc({ ...subscriptionDoc, seatCount: 1 })));
+  mockMethod(PlatformAuditLog, "create", async () => {
+    auditCalls += 1;
+  });
+  mockMethod(SubscriptionSeat, "create", async () => {
+    seatCreates += 1;
+  });
+
+  mockMethod(User, "findById", () => qc(chairRenterWithRole));
+  await assert.rejects(
+    () => assignSalonSeat(salonIdStr, { actor: platformActor, barberId: chairRenterId, note: "Assign" }),
+    { statusCode: 400, message: "Cannot assign a seat to a chair_renter" }
+  );
+
+  mockMethod(User, "findById", () => qc(acceptedStaffWithRole));
+  mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(acceptedSeatDoc));
+  await assert.rejects(
+    () => assignSalonSeat(salonIdStr, { actor: platformActor, barberId: acceptedStaffId, note: "Assign" }),
+    { statusCode: 400, message: "Barber already has an active seat on this subscription" }
+  );
+
+  mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(null));
+  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc]));
+  mockMethod(User, "find", () => qc([acceptedStaffWithRole]));
+  await assert.rejects(
+    () => assignSalonSeat(salonIdStr, { actor: platformActor, barberId: acceptedStaffId, note: "Assign" }),
+    { statusCode: 400 }
+  );
+
+  assert.equal(auditCalls, 0);
+  assert.equal(seatCreates, 0);
+});
+
+test("assignSalonSeat creates active seat and audit log for accepted staff", async () => {
+  let auditPayload;
+  const newSeat = {
+    _id: oid("64b000000000000000070010"),
+    subscriptionId,
+    salonId,
+    barberId: acceptedStaffId,
+    status: "active",
+    assignedAt: new Date("2026-06-01"),
+  };
+
+  mockQuery(Salon, "findById", salonDoc);
+  let subscriptionFindCalls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls += 1;
+    return subscriptionFindCalls === 1
+      ? Promise.resolve(saveableDoc(subscriptionDoc))
+      : qc(subscriptionDoc);
+  });
+  let userFindByIdCalls = 0;
+  mockMethod(User, "findById", () => {
+    userFindByIdCalls += 1;
+    return userFindByIdCalls === 1 ? qc(acceptedStaffWithRole) : qc(ownerDoc);
+  });
+  mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(null));
+  mockMethod(SubscriptionSeat, "find", () => qc([]));
+  mockMethod(SubscriptionSeat, "create", async () => newSeat);
+  mockMethod(User, "find", () => qc([acceptedStaffWithRole]));
+  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
+    sort: () => ({ lean: async () => null }),
+  }));
+  mockMethod(PlatformAuditLog, "create", async (payload) => {
+    auditPayload = payload;
+    return payload;
+  });
+
+  await assignSalonSeat(salonIdStr, {
+    actor: platformActor,
+    barberId: acceptedStaffId,
+    note: "Assign accepted staff",
+    requestIp,
+  });
+
+  assert.equal(auditPayload.action, "salon_subscription.seat_assign");
+  assert.equal(auditPayload.targetUserId.toString(), acceptedStaffId.toString());
+  assert.equal(auditPayload.subscriptionId.toString(), subscriptionId.toString());
+  assert.equal(auditPayload.newValue.seatId.toString(), newSeat._id.toString());
+  assert.equal(auditPayload.requestIp, requestIp);
+});
+
+test("revokeSalonSeat rejects non-assigned staff and audits successful revoke", async () => {
+  let auditPayload;
+  const activeSeat = saveableDoc({ ...acceptedSeatDoc, barberId: acceptedStaffId, revokedAt: null });
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc(subscriptionDoc)));
+  mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(null));
+
+  await assert.rejects(
+    () => revokeSalonSeat(salonIdStr, { actor: platformActor, barberId: acceptedStaffId, note: "Revoke" }),
+    { statusCode: 400, message: "Barber does not have an active seat on this subscription" }
+  );
+
+  let subscriptionFindCalls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls += 1;
+    return subscriptionFindCalls === 1
+      ? Promise.resolve(saveableDoc(subscriptionDoc))
+      : qc(subscriptionDoc);
+  });
+  mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(activeSeat));
+  mockMethod(SubscriptionSeat, "find", () => qc([]));
+  mockMethod(User, "find", () => qc([]));
+  mockMethod(User, "findById", () => qc(ownerDoc));
+  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
+    sort: () => ({ lean: async () => null }),
+  }));
+  mockMethod(PlatformAuditLog, "create", async (payload) => {
+    auditPayload = payload;
+    return payload;
+  });
+
+  await revokeSalonSeat(salonIdStr, {
+    actor: platformActor,
+    barberId: acceptedStaffId,
+    note: "Revoke accepted staff",
+    requestIp,
+  });
+
+  assert.equal(activeSeat.status, "revoked");
+  assert.ok(activeSeat.revokedAt);
+  assert.equal(auditPayload.action, "salon_subscription.seat_revoke");
+  assert.equal(auditPayload.targetUserId.toString(), acceptedStaffId.toString());
+  assert.equal(auditPayload.requestIp, requestIp);
+});
+
+test("confirmSalonPayment rejects missing note, booking deposits, disabled provider, and non-confirmable statuses", async () => {
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: " " }),
+    { statusCode: 400, message: "note is required" }
+  );
+
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
+    saveableDoc({ ...depositPaymentDoc, ownerType: "salon", status: "pending" })
+  );
+  await assert.rejects(
+    () => confirmSalonPayment(depositPaymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 400, message: "Only subscription payment attempts can be confirmed" }
+  );
+
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
+    saveableDoc({ ...subscriptionPaymentDoc, status: "pending", provider: "disabled" })
+  );
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 400 }
+  );
+
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
+    saveableDoc({ ...subscriptionPaymentDoc, status: "paid", provider: "manual" })
+  );
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 400 }
+  );
+
+  let savedMismatchedAttempt = false;
+  const mismatchedAttempt = saveableDoc({
+    ...subscriptionPaymentDoc,
+    status: "pending",
+    provider: "manual",
+  });
+  mismatchedAttempt.save = async () => {
+    savedMismatchedAttempt = true;
+    return mismatchedAttempt;
+  };
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () => mismatchedAttempt);
+  mockMethod(Subscription, "findById", async () =>
+    saveableDoc({ ...subscriptionDoc, ownerId: otherSalonId })
+  );
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 400, message: "Payment attempt subscription does not match the salon owner" }
+  );
+  assert.equal(savedMismatchedAttempt, false);
+});
+
+test("confirmSalonPayment manually confirms subscription payment with audit and sanitized response", async () => {
+  let auditPayload;
+  const attempt = saveableDoc({
+    ...subscriptionPaymentDoc,
+    status: "pending",
+    paidAt: null,
+    confirmedAt: null,
+    subscriptionId: null,
+    metadata: { private: true },
+    rawProviderResponse: { private: true },
+  });
+
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () => attempt);
+  mockMethod(PlatformAuditLog, "create", async (payload) => {
+    auditPayload = payload;
+    return payload;
+  });
+
+  const result = await confirmSalonPayment(paymentId.toString(), {
+    actor: platformActor,
+    note: "Manual payment verified",
+    requestIp,
+  });
+
+  assert.equal(attempt.status, "paid");
+  assert.ok(attempt.paidAt);
+  assert.ok(attempt.confirmedAt);
+  assert.equal(auditPayload.action, "salon_subscription.payment_confirm");
+  assert.equal(auditPayload.paymentAttemptId.toString(), paymentId.toString());
+  assert.equal(auditPayload.salonId.toString(), salonId.toString());
+  assert.equal(auditPayload.note, "Manual payment verified");
+  assert.equal(auditPayload.requestIp, requestIp);
+  assert.equal(result.paymentAttempt.metadata, undefined);
+  assert.equal(result.paymentAttempt.rawProviderResponse, undefined);
 });

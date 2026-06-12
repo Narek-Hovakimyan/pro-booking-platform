@@ -22,6 +22,16 @@ const platformAuditLogSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    subscriptionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Subscription",
+      default: null,
+    },
+    paymentAttemptId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubscriptionPaymentAttempt",
+      default: null,
+    },
     oldValue: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
@@ -35,6 +45,11 @@ const platformAuditLogSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    requestIp: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   {
     timestamps: true,
@@ -43,6 +58,8 @@ const platformAuditLogSchema = new mongoose.Schema(
 
 platformAuditLogSchema.index({ actorId: 1, createdAt: -1 });
 platformAuditLogSchema.index({ salonId: 1, createdAt: -1 });
+platformAuditLogSchema.index({ subscriptionId: 1, createdAt: -1 });
+platformAuditLogSchema.index({ paymentAttemptId: 1, createdAt: -1 });
 platformAuditLogSchema.index({ action: 1, createdAt: -1 });
 
 const PlatformAuditLog = mongoose.model(

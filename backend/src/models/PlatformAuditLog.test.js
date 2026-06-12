@@ -1,86 +1,68 @@
 import assert from "node:assert/strict";
-import { before, after, test } from "node:test";
+import { test } from "node:test";
 import mongoose from "mongoose";
-import PlatformAuditLogModel from "./PlatformAuditLog.js";
+import PlatformAuditLog from "./PlatformAuditLog.js";
 
-const TEST_MONGO_URI =
-  process.env.MONGO_URI || "mongodb://localhost:27017/hairbook_test";
-
-let connection;
-let PlatformAuditLog;
-
-before(async () => {
-  connection = await mongoose.createConnection(TEST_MONGO_URI).asPromise();
-  PlatformAuditLog = connection.model(
-    "PlatformAuditLog",
-    PlatformAuditLogModel.schema,
-    "platformauditlogs"
-  );
-});
-
-after(async () => {
-  await connection.close();
-});
-
-test("creates a valid audit log entry", async () => {
-  const entry = await PlatformAuditLog.create({
+test("creates a valid audit log entry shape", () => {
+  const entry = new PlatformAuditLog({
     actorId: new mongoose.Types.ObjectId(),
     action: "subscription_activated",
     salonId: new mongoose.Types.ObjectId(),
     targetUserId: new mongoose.Types.ObjectId(),
+    subscriptionId: new mongoose.Types.ObjectId(),
+    paymentAttemptId: new mongoose.Types.ObjectId(),
     oldValue: { status: "expired" },
     newValue: { status: "active", seatCount: 5 },
     note: "Manual activation after payment confirmation",
+    requestIp: "127.0.0.1",
   });
 
-  assert.ok(entry._id);
+  assert.equal(entry.validateSync(), undefined);
   assert.equal(entry.action, "subscription_activated");
   assert.equal(entry.note, "Manual activation after payment confirmation");
+  assert.ok(entry.subscriptionId);
+  assert.ok(entry.paymentAttemptId);
+  assert.equal(entry.requestIp, "127.0.0.1");
   assert.deepStrictEqual(entry.oldValue, { status: "expired" });
   assert.deepStrictEqual(entry.newValue, { status: "active", seatCount: 5 });
-  assert.ok(entry.createdAt);
-  assert.ok(entry.updatedAt);
-
-  await PlatformAuditLog.deleteOne({ _id: entry._id });
 });
 
-test("requires actorId", async () => {
-  await assert.rejects(
-    () =>
-      PlatformAuditLog.create({
-        action: "seat_assigned",
-      }),
-    { name: "ValidationError" }
-  );
+test("requires actorId", () => {
+  const entry = new PlatformAuditLog({
+    action: "seat_assigned",
+  });
+
+  const error = entry.validateSync();
+  assert.ok(error?.errors?.actorId);
 });
 
-test("requires action", async () => {
-  await assert.rejects(
-    () =>
-      PlatformAuditLog.create({
-        actorId: new mongoose.Types.ObjectId(),
-      }),
-    { name: "ValidationError" }
-  );
+test("requires action", () => {
+  const entry = new PlatformAuditLog({
+    actorId: new mongoose.Types.ObjectId(),
+  });
+
+  const error = entry.validateSync();
+  assert.ok(error?.errors?.action);
 });
 
-test("allows minimal entry with only required fields", async () => {
-  const entry = await PlatformAuditLog.create({
+test("allows minimal entry with only required fields", () => {
+  const entry = new PlatformAuditLog({
     actorId: new mongoose.Types.ObjectId(),
     action: "test_action",
   });
 
-  assert.ok(entry._id);
+  assert.equal(entry.validateSync(), undefined);
   assert.equal(entry.salonId, null);
   assert.equal(entry.targetUserId, null);
+  assert.equal(entry.subscriptionId, null);
+  assert.equal(entry.paymentAttemptId, null);
   assert.equal(entry.oldValue, null);
   assert.equal(entry.newValue, null);
   assert.equal(entry.note, "");
-
-  await PlatformAuditLog.deleteOne({ _id: entry._id });
+  assert.equal(entry.requestIp, "");
 });
 
-test("supports all known action values", async () => {
+test("supports all known action values", () => {
   const actions = [
     "subscription_activated",
     "subscription_extended",
@@ -89,17 +71,22 @@ test("supports all known action values", async () => {
     "seat_revoked",
     "payment_confirmed_manual",
     "payment_marked_paid",
+    "salon_subscription.activate",
+    "salon_subscription.seat_count_update",
+    "salon_subscription.seat_assign",
+    "salon_subscription.seat_revoke",
+    "salon_subscription.payment_confirm",
   ];
 
   for (const action of actions) {
-    const entry = await PlatformAuditLog.create({
+    const entry = new PlatformAuditLog({
       actorId: new mongoose.Types.ObjectId(),
       action,
       note: `test ${action}`,
     });
 
+    assert.equal(entry.validateSync(), undefined);
     assert.equal(entry.action, action);
-    await PlatformAuditLog.deleteOne({ _id: entry._id });
   }
 });
 
@@ -114,11 +101,19 @@ test("has expected indexes", () => {
   const hasSalonIndex = indexFields.some(
     (keys) => keys.includes("salonId") && keys.includes("createdAt")
   );
+  const hasSubscriptionIndex = indexFields.some(
+    (keys) => keys.includes("subscriptionId") && keys.includes("createdAt")
+  );
+  const hasPaymentAttemptIndex = indexFields.some(
+    (keys) => keys.includes("paymentAttemptId") && keys.includes("createdAt")
+  );
   const hasActionIndex = indexFields.some(
     (keys) => keys.includes("action") && keys.includes("createdAt")
   );
 
   assert.ok(hasActorIndex, "Missing actorId+createdAt index");
   assert.ok(hasSalonIndex, "Missing salonId+createdAt index");
+  assert.ok(hasSubscriptionIndex, "Missing subscriptionId+createdAt index");
+  assert.ok(hasPaymentAttemptIndex, "Missing paymentAttemptId+createdAt index");
   assert.ok(hasActionIndex, "Missing action+createdAt index");
 });

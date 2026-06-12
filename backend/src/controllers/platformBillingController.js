@@ -4,7 +4,14 @@ import {
   getSalonBillingDetail,
   getSalonPayments,
   getAllSalonPayments,
+  activateSalonSubscription,
+  updateSalonSeatCount,
+  assignSalonSeat,
+  revokeSalonSeat,
+  confirmSalonPayment,
 } from "../services/platformBillingService.js";
+
+const getRequestIp = (req) => req.ip || req.socket?.remoteAddress || "";
 
 /**
  * GET /api/platform/billing/salons
@@ -77,6 +84,116 @@ export const listAllSalonPayments = async (req, res, next) => {
       page: Number(page) || 1,
       limit: Number(limit) || 20,
     });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /api/platform/billing/salons/:salonId/subscription/activate
+ * Activate or renew a salon subscription manually.
+ */
+export const activateSubscription = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    const { seatCount, months, note } = req.body;
+
+    const result = await activateSalonSubscription(salonId, {
+      seatCount,
+      months,
+      note,
+      actor: req.user,
+      requestIp: getRequestIp(req),
+    });
+
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /api/platform/billing/salons/:salonId/subscription/seat-count
+ * Update salon subscription seat count.
+ */
+export const updateSeatCount = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    const { seatCount, note } = req.body;
+
+    const result = await updateSalonSeatCount(salonId, {
+      seatCount,
+      note,
+      actor: req.user,
+      requestIp: getRequestIp(req),
+    });
+
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/platform/billing/salons/:salonId/seats/assign
+ * Assign a subscription seat to an accepted staff barber.
+ */
+export const assignSeat = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    const { barberId, note } = req.body;
+
+    const result = await assignSalonSeat(salonId, {
+      barberId,
+      note,
+      actor: req.user,
+      requestIp: getRequestIp(req),
+    });
+
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/platform/billing/salons/:salonId/seats/revoke
+ * Revoke a subscription seat from an assigned staff barber.
+ */
+export const revokeSeat = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    const { barberId, note } = req.body;
+
+    const result = await revokeSalonSeat(salonId, {
+      barberId,
+      note,
+      actor: req.user,
+      requestIp: getRequestIp(req),
+    });
+
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/platform/billing/payments/:paymentId/confirm
+ * Manually confirm a salon subscription payment.
+ */
+export const confirmPayment = async (req, res, next) => {
+  try {
+    const { paymentId } = req.params;
+    const { note } = req.body;
+
+    const result = await confirmSalonPayment(paymentId, {
+      note,
+      actor: req.user,
+      requestIp: getRequestIp(req),
+    });
+
     return res.json(result);
   } catch (error) {
     next(error);
