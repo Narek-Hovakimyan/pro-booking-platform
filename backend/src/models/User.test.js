@@ -322,6 +322,14 @@ describe("User platform admin role model", () => {
     assert.match(error.errors.role.message, /user/);
   });
 
+  test("platformRole rejects user", () => {
+    const user = makeUser({ role: "client", platformRole: "user" });
+    const error = user.validateSync();
+
+    assert.ok(error?.errors?.platformRole, "platformRole validation error expected");
+    assert.match(error.errors.platformRole.message, /user/);
+  });
+
   test("existing client and barber business roles remain valid without platformRole", () => {
     const client = makeUser({ role: "client" });
     const barber = makeUser({ role: "barber" });

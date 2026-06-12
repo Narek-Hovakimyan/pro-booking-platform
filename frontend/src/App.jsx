@@ -64,6 +64,10 @@ const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
 const SalonCalendarPage = lazy(() => import("./barber/pages/SalonCalendarPage"));
 const SalonDashboardPage = lazy(() => import("./barber/pages/SalonDashboardPage"));
 const SalonReportsPage = lazy(() => import("./barber/pages/SalonReportsPage"));
+const PlatformBillingPage = lazy(() => import("./platform/pages/PlatformBillingPage"));
+const PlatformSalonBillingDetailPage = lazy(() =>
+  import("./platform/pages/PlatformSalonBillingDetailPage")
+);
 
 export default function App() {
   const dispatch = useDispatch();
@@ -958,6 +962,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <MyEventsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/platform/billing"
+              element={
+                <ProtectedRoute>
+                  <PlatformBillingPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/platform/billing/salons/:salonId"
+              element={
+                <ProtectedRoute>
+                  <PlatformSalonBillingDetailPage />
                 </ProtectedRoute>
               }
             />

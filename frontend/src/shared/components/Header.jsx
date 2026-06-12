@@ -61,6 +61,7 @@ export default function Header() {
   const moreMenuRef = useRef(null);
   const isClient = currentUser?.role === "client";
   const isBarber = currentUser?.role === "barber";
+  const isPlatformAdmin = Boolean(currentUser?.platformRole === "admin");
   const currentUserId = currentUser?.id || currentUser?._id;
   const canShowManageHiring =
     isAuthenticated && isBarber && Boolean(currentUserId) && Boolean(token) && canManageSalon;
@@ -351,8 +352,8 @@ export default function Header() {
                 {userInitials}
               </div>
 
-              {/* More menu (desktop) — barber only */}
-              {isBarber && (
+              {/* More menu (desktop) — barber or platform admin */}
+              {(isBarber || isPlatformAdmin) && (
                 <div className="relative" ref={moreMenuRef}>
                   <button
                     className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
@@ -374,12 +375,14 @@ export default function Header() {
                     onLogout={logout}
                     canShowManageHiring={canShowManageHiring}
                     canManageSalon={canManageSalon}
+                    isPlatformAdmin={isPlatformAdmin}
+                    showBusinessGroups={isBarber}
                   />
                 </div>
               )}
 
               {/* Client simple dropdown */}
-              {isClient && (
+              {isClient && !isPlatformAdmin && (
                 <div className="relative">
                   <button
                     className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
@@ -462,8 +465,8 @@ export default function Header() {
                 </Link>
               ))}
 
-            {/* Barber nested menu for Work / Settings / Account */}
-            {isBarber && (
+            {/* Nested admin/account menu */}
+            {(isBarber || isPlatformAdmin) && (
               <NestedHeaderMenu
                 variant="mobile"
                 isOpen
@@ -473,6 +476,8 @@ export default function Header() {
                 onLogout={logout}
                 canShowManageHiring={canShowManageHiring}
                 canManageSalon={canManageSalon}
+                isPlatformAdmin={isPlatformAdmin}
+                showBusinessGroups={isBarber}
               />
             )}
 

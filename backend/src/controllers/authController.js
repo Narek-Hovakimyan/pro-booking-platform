@@ -13,6 +13,7 @@ const getUserData = (user) => ({
   city: user.city || "",
   avatarUrl: user.avatarUrl || "",
   role: user.role,
+  platformRole: user.platformRole || null,
   salon: user.salon || null,
   salonStatus: user.salonStatus || "none",
   salons: user.salons || [],

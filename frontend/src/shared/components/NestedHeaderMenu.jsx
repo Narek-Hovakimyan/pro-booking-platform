@@ -2,51 +2,71 @@ import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
-const getMenuGroups = (canShowManageHiring, canManageSalon) => [
-  {
-    key: "work",
-    label: "Work",
-    children: [
-      { label: "Find Jobs", to: "/jobs" },
-      ...(canShowManageHiring
-        ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
-        : []),
-      { label: "Promo Codes", to: "/admin/vouchers" },
-      { label: "Revenue", to: "/admin/revenue" },
-      { label: "Portfolio", to: "/admin/portfolio" },
-      { label: "Waitlist", to: "/admin/waitlist" },
-      { label: "Events", to: "/events" },
-      { label: "My Applications", to: "/jobs/applications" },
-    ],
-  },
-  ...(canManageSalon
+const getMenuGroups = (
+  canShowManageHiring,
+  canManageSalon,
+  isPlatformAdmin,
+  showBusinessGroups
+) => [
+  ...(isPlatformAdmin
     ? [
         {
-          key: "salon",
-          label: "Salon",
+          key: "platform",
+          label: "Platform Admin",
           children: [
-            { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
-            { label: "Salon Calendar", to: "/admin/salon/calendar" },
-            { label: "Salon Reports", to: "/admin/salon/reports" },
-            { label: "Salon Promotions", to: "/admin/salon/promotions" },
-            { label: "Salon Billing", to: "/admin/salon/billing" },
-            { label: "Salon Settings", to: "/admin/settings/salon" },
+            { label: "Platform Billing", to: "/admin/platform/billing" },
           ],
         },
       ]
     : []),
-  {
-    key: "settings",
-    label: "Settings",
-    children: [
-      { label: "Profile", to: "/admin/profile" },
-      { label: "Billing", to: "/admin/billing" },
-      { label: "Settings Hub", to: "/admin/settings" },
-      { label: "Default Schedule", to: "/admin/settings/default-schedule" },
-      { label: "Deposit", to: "/admin/settings/deposit" },
-      { label: "Certifications", to: "/admin/settings/certifications" },
-    ],
-  },
+  ...(showBusinessGroups
+    ? [
+        {
+          key: "work",
+          label: "Work",
+          children: [
+            { label: "Find Jobs", to: "/jobs" },
+            ...(canShowManageHiring
+              ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
+              : []),
+            { label: "Promo Codes", to: "/admin/vouchers" },
+            { label: "Revenue", to: "/admin/revenue" },
+            { label: "Portfolio", to: "/admin/portfolio" },
+            { label: "Waitlist", to: "/admin/waitlist" },
+            { label: "Events", to: "/events" },
+            { label: "My Applications", to: "/jobs/applications" },
+          ],
+        },
+        ...(canManageSalon
+          ? [
+              {
+                key: "salon",
+                label: "Salon",
+                children: [
+                  { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
+                  { label: "Salon Calendar", to: "/admin/salon/calendar" },
+                  { label: "Salon Reports", to: "/admin/salon/reports" },
+                  { label: "Salon Promotions", to: "/admin/salon/promotions" },
+                  { label: "Salon Billing", to: "/admin/salon/billing" },
+                  { label: "Salon Settings", to: "/admin/settings/salon" },
+                ],
+              },
+            ]
+          : []),
+        {
+          key: "settings",
+          label: "Settings",
+          children: [
+            { label: "Profile", to: "/admin/profile" },
+            { label: "Billing", to: "/admin/billing" },
+            { label: "Settings Hub", to: "/admin/settings" },
+            { label: "Default Schedule", to: "/admin/settings/default-schedule" },
+            { label: "Deposit", to: "/admin/settings/deposit" },
+            { label: "Certifications", to: "/admin/settings/certifications" },
+          ],
+        },
+      ]
+    : []),
 ];
 
 const linkClass = (isActive) =>
@@ -70,6 +90,8 @@ export default function NestedHeaderMenu({
   onLogout,
   canShowManageHiring = false,
   canManageSalon = false,
+  isPlatformAdmin = false,
+  showBusinessGroups = true,
 }) {
   const { pathname } = useLocation();
   const [activeGroup, setActiveGroup] = useState(null);
@@ -143,7 +165,12 @@ export default function NestedHeaderMenu({
         role="menu"
       >
         <div onMouseLeave={handleMenuLeave}>
-          {getMenuGroups(canShowManageHiring, canManageSalon).map((group) => (
+          {getMenuGroups(
+            canShowManageHiring,
+            canManageSalon,
+            isPlatformAdmin,
+            showBusinessGroups
+          ).map((group) => (
             <div key={group.key} className="relative">
               {/* Group header (trigger for submenu) */}
               <button
@@ -200,7 +227,12 @@ export default function NestedHeaderMenu({
   /* ── Mobile render ── */
   return (
     <div className="flex flex-col gap-0.5">
-      {getMenuGroups(canShowManageHiring, canManageSalon).map((group) => {
+      {getMenuGroups(
+        canShowManageHiring,
+        canManageSalon,
+        isPlatformAdmin,
+        showBusinessGroups
+      ).map((group) => {
         const isExpanded = expandedGroup === group.key;
 
         return (
