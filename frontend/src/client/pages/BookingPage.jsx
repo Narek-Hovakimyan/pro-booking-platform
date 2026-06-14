@@ -1,5 +1,5 @@
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
@@ -77,6 +77,7 @@ export default function BookingPage({
     location.state?.selectedSalonId || getEntityId(location.state?.salon) || null;
   const [rebookContext, setRebookContext] = useState(initialRebookContext);
   const [isLoading, setIsLoading] = useState(true);
+  const [isServicesLoading, setIsServicesLoading] = useState(true);
   const [isBarberLoading, setIsBarberLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedDate, setSelectedDate] = useState(() =>
@@ -121,9 +122,11 @@ export default function BookingPage({
       ),
     [barberId, services]
   );
-  const selectedService = barberServices.find(
-    (service) => String(service?.id || service?._id) === String(selectedServiceId)
-  ) || null;
+  const selectedService = isServicesLoading
+    ? null
+    : barberServices.find(
+        (service) => String(service?.id || service?._id) === String(selectedServiceId)
+      ) || null;
   const barberScheduleEntry = useMemo(
     () =>
       schedule?.[barberId] || {
@@ -181,6 +184,7 @@ export default function BookingPage({
     const initialDateOption = dateOptions[0];
 
     const resetId = window.setTimeout(() => {
+      setIsServicesLoading(true);
       setStep(isRebooking ? 3 : 2);
       setSelectedServiceId(isRebooking ? rebookContext.serviceId : null);
       setSelectedTime("");
@@ -203,6 +207,30 @@ export default function BookingPage({
     setSelectedTime,
     setStep,
   ]);
+
+  const refreshServices = useCallback(async () => {
+    setIsServicesLoading(true);
+    setError("");
+
+    try {
+      const servicesResponse = await api.get(`/services/${barberId}`);
+      dispatch(
+        setServices({
+          barberId,
+          services: servicesResponse.data,
+        })
+      );
+      return servicesResponse.data;
+    } catch (requestError) {
+      const message =
+        requestError.response?.data?.message ||
+        "Could not load services. Please try again.";
+      setError(message);
+      throw new Error(message, { cause: requestError });
+    } finally {
+      setIsServicesLoading(false);
+    }
+  }, [barberId, dispatch]);
 
   useEffect(() => {
     if (!needsEnrichedBarber) return undefined;
@@ -284,6 +312,7 @@ export default function BookingPage({
 
     async function fetchBookingData() {
       setIsLoading(true);
+      setIsServicesLoading(true);
       setError("");
 
       try {
@@ -303,6 +332,10 @@ export default function BookingPage({
             requestError.response?.data?.message ||
               "Could not load services. Please try again."
           );
+        }
+      } finally {
+        if (isMounted) {
+          setIsServicesLoading(false);
         }
       }
 
@@ -519,16 +552,20 @@ export default function BookingPage({
           selectedSalonId={selectedSalonId}
           onSalonSelect={setSelectedSalonId}
           onPriceAdjustmentChange={setPriceAdjustment}
+          isServiceDataLoading={isServicesLoading}
+          onRefreshServices={refreshServices}
         />
 
         <BookingSummary
           selectedService={selectedService}
+          selectedServiceId={selectedServiceId}
           selectedDayKey={selectedDayKey}
           selectedDateLabel={selectedDateLabel}
           selectedTime={selectedTime}
           client={client}
           depositSettings={barber?.depositSettings}
           discountPreview={priceAdjustment.discountPreview}
+          isServiceLoading={isServicesLoading}
         />
       </div>
     </div>

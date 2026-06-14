@@ -56,6 +56,7 @@ export default function ClientDetailsStep({
   onVoucherCodeChange,
   onApplyVoucher,
   onRemoveVoucher,
+  isPreparingConfirmation = false,
 }) {
   const [showConsultation, setShowConsultation] = useState(false);
   const [localConsultation, setLocalConsultation] = useState(
@@ -596,10 +597,10 @@ export default function ClientDetailsStep({
 
         <Button
           className="w-full sm:w-auto"
-          disabled={!canConfirm}
+          disabled={!canConfirm || isPreparingConfirmation}
           onClick={onContinue}
         >
-          Հաստատել ամրագրումը
+          {isPreparingConfirmation ? "Refreshing price..." : "Հաստատել ամրագրումը"}
         </Button>
       </div>
     </div>

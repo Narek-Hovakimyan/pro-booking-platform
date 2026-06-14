@@ -14,6 +14,7 @@ export default function BookingConfirmationModal({
   barberName = "",
   canConfirm = false,
   isSubmitting = false,
+  isServiceLoading = false,
   error = "",
   consultation = null,
   consent = null,
@@ -56,18 +57,30 @@ export default function BookingConfirmationModal({
               {barberName || "Specialist"}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <span className="text-neutral-500">Service</span>
-            <span className="font-semibold text-neutral-950">
-              {selectedService?.name || "Service"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <span className="text-neutral-500">Duration</span>
-            <span className="font-semibold text-neutral-950">
-              {selectedService?.duration || 0} min
-            </span>
-          </div>
+          {isServiceLoading ? (
+            <div className="px-4 py-3 text-neutral-500">
+              Refreshing service price...
+            </div>
+          ) : selectedService ? (
+            <>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-neutral-500">Service</span>
+                <span className="font-semibold text-neutral-950">
+                  {selectedService.name || "Service"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-neutral-500">Duration</span>
+                <span className="font-semibold text-neutral-950">
+                  {selectedService.duration || 0} min
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="px-4 py-3 text-red-600">
+              Selected service is no longer available.
+            </div>
+          )}
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <span className="text-neutral-500">Date</span>
             <span className="font-semibold text-neutral-950">
@@ -80,7 +93,7 @@ export default function BookingConfirmationModal({
               {selectedTime}
             </span>
           </div>
-          {priceInfo.hasDiscount ? (
+          {selectedService && priceInfo.hasDiscount ? (
             <>
               <div className="flex items-center justify-between gap-4 px-4 py-3">
                 <span className="text-neutral-500">Original price</span>
@@ -104,7 +117,7 @@ export default function BookingConfirmationModal({
               </div>
             </>
           ) : null}
-          {promoDiscount > 0 && voucherCode && (
+          {selectedService && promoDiscount > 0 && voucherCode && (
             <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-sm text-amber-800">
               <span className="font-medium">Promo code discount ({voucherCode})</span>
               <span className="font-semibold">
@@ -112,16 +125,18 @@ export default function BookingConfirmationModal({
               </span>
             </div>
           )}
-          <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
-            <span className="font-medium">Total</span>
-            <span className="text-lg font-bold">
-              {finalTotal.toLocaleString()}{" "}
-              դրամ
-            </span>
-          </div>
+          {selectedService && (
+            <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
+              <span className="font-medium">Total</span>
+              <span className="text-lg font-bold">
+                {finalTotal.toLocaleString()}{" "}
+                դրամ
+              </span>
+            </div>
+          )}
         </div>
 
-        {depositEstimate.depositRequired && (
+        {selectedService && depositEstimate.depositRequired && (
           <DepositNotice
             className="mt-5"
             originalPrice={priceInfo.originalPrice}
@@ -203,7 +218,7 @@ export default function BookingConfirmationModal({
         <div className="mt-5 grid gap-2 sm:flex sm:flex-row-reverse">
           <Button
             className="w-full sm:w-auto sm:min-w-[160px]"
-            disabled={!canConfirm || isSubmitting}
+            disabled={!canConfirm || isSubmitting || isServiceLoading || !selectedService}
             onClick={onConfirm}
           >
             {isSubmitting ? "Booking..." : "Confirm booking"}

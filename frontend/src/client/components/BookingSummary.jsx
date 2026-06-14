@@ -6,11 +6,13 @@ import { calculateDepositEstimate } from "@/shared/utils/deposit";
 
 export default function BookingSummary({
   selectedService,
+  selectedServiceId = "",
   selectedDateLabel,
   selectedTime,
   client,
   depositSettings = null,
   discountPreview = 0,
+  isServiceLoading = false,
 }) {
   const priceInfo = getServicePriceInfo(selectedService);
   const promoDiscount = Math.max(0, Number(discountPreview || 0));
@@ -30,7 +32,12 @@ export default function BookingSummary({
           <p className="flex items-center gap-3 rounded-xl bg-neutral-50 p-3">
             <Scissors className="h-4 w-4 shrink-0 text-neutral-500" />
             <span className="font-medium text-neutral-900">
-              {selectedService?.name || "Ծառայություն ընտրված չէ"}
+              {isServiceLoading && selectedServiceId
+                ? "Refreshing service price..."
+                : selectedService?.name ||
+                  (selectedServiceId
+                    ? "Selected service is no longer available"
+                    : "Ծառայություն ընտրված չէ")}
             </span>
           </p>
 
@@ -51,7 +58,7 @@ export default function BookingSummary({
             {client.name || "Հաճախորդ"}
           </p>
 
-          {depositEstimate.depositRequired && (
+          {selectedService && depositEstimate.depositRequired && (
             <DepositNotice
               className="rounded-xl p-3"
               originalPrice={priceInfo.originalPrice}

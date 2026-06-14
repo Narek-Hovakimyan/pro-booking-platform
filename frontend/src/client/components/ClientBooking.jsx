@@ -41,12 +41,16 @@ export default function ClientBooking({
   selectedSalonId: externalSelectedSalonId,
   onSalonSelect,
   onPriceAdjustmentChange,
+  isServiceDataLoading = false,
+  onRefreshServices,
 }) {
   const navigate = useNavigate();
   const { createBooking } = useBooking();
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [confirmationService, setConfirmationService] = useState(null);
+  const [isPreparingConfirmation, setIsPreparingConfirmation] = useState(false);
   const [showWaitlistForm, setShowWaitlistForm] = useState(false);
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
   const [salonSelectorOpen, setSalonSelectorOpen] = useState(false);
@@ -60,7 +64,8 @@ export default function ClientBooking({
   const [voucherError, setVoucherError] = useState("");
   const [voucherLoading, setVoucherLoading] = useState(false);
   const selectedBarberId = barber?._id || barber?.id || "";
-  const selectedServiceEntityId = selectedService?._id || selectedService?.id || "";
+  const selectedServiceEntityId =
+    selectedService?._id || selectedService?.id || selectedServiceId || "";
   const previousServiceIdRef = useRef(selectedServiceEntityId);
   const previousSalonIdRef = useRef(externalSelectedSalonId);
   const todayKey = formatDateKey(new Date());
@@ -95,6 +100,9 @@ export default function ClientBooking({
       selectedDateDayKey &&
       selectedTime &&
       currentUser &&
+      selectedService &&
+      !isServiceDataLoading &&
+      !isPreparingConfirmation &&
       !isSaving
   );
   const selectedServicePriceInfo = getServicePriceInfo(selectedService);
@@ -141,6 +149,7 @@ export default function ClientBooking({
     const initialDateOption = dateOptions[0];
 
     setShowConfirmation(false);
+    setConfirmationService(null);
     setError("");
     setStep(2);
     setSelectedServiceId(null);
@@ -343,7 +352,6 @@ export default function ClientBooking({
         clientId: currentUser.id || currentUser._id,
         serviceId: selectedServiceEntityId,
         serviceName: selectedService.name,
-        price: selectedService.price,
         duration: selectedService?.duration || 20,
         dayKey: selectedDateDayKey,
         bookingDate: selectedDate,
@@ -388,6 +396,43 @@ export default function ClientBooking({
       );
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const openConfirmation = async () => {
+    if (!canConfirmBooking || isPreparingConfirmation) return;
+
+    setIsPreparingConfirmation(true);
+    setError("");
+
+    try {
+      const latestServices = await onRefreshServices?.();
+      const latestSelectedService = Array.isArray(latestServices)
+        ? latestServices.find(
+            (service) =>
+              String(service?.id || service?._id) === String(selectedServiceEntityId)
+          )
+        : selectedService;
+
+      if (!latestSelectedService || latestSelectedService.active === false) {
+        setError(
+          "Selected service is no longer available. Please choose another service."
+        );
+        setStep(2);
+        setSelectedTime("");
+        setConfirmationService(null);
+        return;
+      }
+
+      setConfirmationService(latestSelectedService);
+      setShowConfirmation(true);
+    } catch (requestError) {
+      setError(
+        requestError.message ||
+          "Could not refresh service price. Please try again."
+      );
+    } finally {
+      setIsPreparingConfirmation(false);
     }
   };
 
@@ -463,6 +508,7 @@ export default function ClientBooking({
             services={services}
             selectedServiceId={selectedServiceId}
             onSelectService={(serviceId) => {
+              setConfirmationService(null);
               setSelectedServiceId(serviceId);
               setSelectedTime("");
             }}
@@ -627,7 +673,7 @@ export default function ClientBooking({
             error={error}
             onChange={setClient}
             onBack={() => setStep(3)}
-            onContinue={() => setShowConfirmation(true)}
+            onContinue={openConfirmation}
             rebookSummary={rebookServiceSummary}
             referenceFiles={referenceFiles}
             onReferenceFilesChange={setReferenceFiles}
@@ -644,6 +690,7 @@ export default function ClientBooking({
             onVoucherCodeChange={voucherCodeChange}
             onApplyVoucher={applyVoucher}
             onRemoveVoucher={removeVoucher}
+            isPreparingConfirmation={isPreparingConfirmation}
           />
         )}
 
@@ -711,7 +758,8 @@ export default function ClientBooking({
           isOpen={showConfirmation}
           onClose={resetBookingFlow}
           onConfirm={submitBooking}
-          selectedService={selectedService}
+          selectedService={confirmationService || selectedService}
+          isServiceLoading={isServiceDataLoading}
           selectedDate={selectedDateLabel || selectedDate}
           selectedTime={selectedTime}
           selectedSalonName={selectedSalonName}
