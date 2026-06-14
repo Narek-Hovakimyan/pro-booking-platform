@@ -8,15 +8,10 @@ export default function ProfileFormCard({
   isProfileSaving,
   saved,
   profileError,
-  galleryUrl,
-  galleryImages,
   currentUser,
   onUpdateField,
   onSaveProfile,
   onAvatarUploaded,
-  onGalleryUrlChange,
-  onAddGalleryImage,
-  onRemoveGalleryImage,
 }) {
   return (
     <Card className="rounded-2xl sm:rounded-3xl">
@@ -52,17 +47,6 @@ export default function ProfileFormCard({
               />
             </label>
           </div>
-
-          <label className="grid gap-2 text-sm font-semibold">
-            Bio
-            <textarea
-              className="w-full rounded-2xl border p-3 font-normal"
-              disabled={isProfileSaving}
-              placeholder="Bio"
-              value={profile.bio}
-              onChange={(event) => onUpdateField("bio", event.target.value)}
-            />
-          </label>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-semibold">
@@ -106,6 +90,17 @@ export default function ProfileFormCard({
             )}
           </div>
 
+          <label className="grid gap-2 text-sm font-semibold">
+            Bio
+            <textarea
+              className="min-h-28 w-full rounded-2xl border p-3 font-normal"
+              disabled={isProfileSaving}
+              placeholder="Short introduction for clients"
+              value={profile.bio}
+              onChange={(event) => onUpdateField("bio", event.target.value)}
+            />
+          </label>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-semibold">
               City
@@ -141,76 +136,34 @@ export default function ProfileFormCard({
                 onChange={(event) => onUpdateField("instagram", event.target.value)}
               />
             </label>
-
-            <label className="grid gap-2 text-sm font-semibold">
-              Avatar URL
-              <input
-                className="w-full rounded-2xl border p-3 font-normal"
-                disabled={isProfileSaving}
-                placeholder="Avatar URL"
-                value={profile.imageUrl}
-                onChange={(event) => onUpdateField("imageUrl", event.target.value)}
-              />
-            </label>
           </div>
 
-          <AvatarUploadButton
-            disabled={isProfileSaving}
-            label={profile.imageUrl ? "Change image" : "Add image"}
-            uploadUrl={`/barbers/profile/${currentUser.id}`}
-            onUploaded={onAvatarUploaded}
-          />
-
-          <div className="space-y-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-            <h2 className="text-lg font-bold">Gallery</h2>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <label className="grid gap-2 text-sm font-semibold">
-                Work image URL
-                <input
-                  className="w-full rounded-2xl border p-3 font-normal"
-                  disabled={isProfileSaving}
-                  placeholder="Work image URL"
-                  value={galleryUrl}
-                  onChange={(event) => onGalleryUrlChange(event.target.value)}
-                />
-              </label>
-              <Button
-                className="self-end"
-                disabled={isProfileSaving}
-                type="button"
-                variant="outline"
-                onClick={onAddGalleryImage}
-              >
-                Add image
-              </Button>
-            </div>
-
-            {galleryImages.length === 0 ? (
-              <p className="text-sm text-neutral-500">No gallery images yet.</p>
+          <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:grid-cols-[112px_1fr] sm:items-center">
+            {profile.imageUrl ? (
+              <img
+                alt={profile.name || "Profile photo"}
+                className="aspect-square w-28 rounded-2xl object-cover"
+                src={getMediaUrl(profile.imageUrl)}
+              />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {galleryImages.map((imageUrl) => (
-                  <div className="overflow-hidden rounded-2xl border" key={imageUrl}>
-                    <img
-                      alt="Gallery work"
-                      className="aspect-[4/3] w-full object-cover"
-                      src={getMediaUrl(imageUrl)}
-                    />
-                    <div className="p-2">
-                      <Button
-                        className="w-full"
-                        disabled={isProfileSaving}
-                        type="button"
-                        variant="outline"
-                        onClick={() => onRemoveGalleryImage(imageUrl)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+              <div className="flex aspect-square w-28 items-center justify-center rounded-2xl bg-white text-sm text-neutral-400">
+                No photo
               </div>
             )}
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-neutral-900">
+                Profile photo
+              </p>
+              <p className="text-sm text-neutral-500">
+                Upload the image clients see on your public profile.
+              </p>
+              <AvatarUploadButton
+                disabled={isProfileSaving}
+                label={profile.imageUrl ? "Change photo" : "Upload photo"}
+                uploadUrl={`/barbers/profile/${currentUser.id}`}
+                onUploaded={onAvatarUploaded}
+              />
+            </div>
           </div>
 
           {saved && (

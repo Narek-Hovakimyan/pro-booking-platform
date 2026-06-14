@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { Link } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import AccountEmailSection from "@/shared/components/AccountEmailSection";
@@ -13,7 +14,6 @@ import ProfileSidebarCard from "@/barber/components/profile/ProfileSidebarCard";
 import ProfileFormCard from "@/barber/components/profile/ProfileFormCard";
 import CertificationsSection from "@/barber/components/profile/CertificationsSection";
 import ReviewsSection from "@/barber/components/profile/ReviewsSection";
-import GallerySection from "@/barber/components/profile/GallerySection";
 import ProfileWorkHistorySection from "@/barber/components/profile/ProfileWorkHistorySection";
 
 function getPrimarySalonId(user) {
@@ -61,7 +61,6 @@ export default function BarberProfilePage() {
   const [isProfileSaving, setIsProfileSaving] = useState(false);
   const [isReviewsLoading, setIsReviewsLoading] = useState(true);
   const [reviewsError, setReviewsError] = useState("");
-  const [galleryUrl, setGalleryUrl] = useState("");
   const [certifications, setCertifications] = useState([]);
   const [eventCertifications, setEventCertifications] = useState([]);
   const [salonRating, setSalonRating] = useState(null);
@@ -103,7 +102,6 @@ export default function BarberProfilePage() {
     salonStatus: savedProfile?.salonStatus || currentUser?.salonStatus || "none",
     workHistory: savedProfile?.workHistory || currentUser?.workHistory || [],
   });
-  const galleryImages = profile?.galleryImages || [];
   const hasCertifications =
     certifications.length > 0 || eventCertifications.length > 0;
 
@@ -322,16 +320,16 @@ export default function BarberProfilePage() {
     const nextProfile = {
       name: data.name || profile.name,
       phone: data.phone || profile.phone,
-      bio: data.bio || "",
-      city: data.city || "",
-      address: data.address || "",
-      instagram: data.instagram || "",
+      bio: data.bio ?? profile.bio ?? "",
+      city: data.city ?? profile.city ?? "",
+      address: data.address ?? profile.address ?? "",
+      instagram: data.instagram ?? profile.instagram ?? "",
       profession: data.profession || profile.profession || "barber",
       barberType: data.barberType || profile.barberType || "",
       specialty: data.specialty || profile.specialty || "unisex",
-      imageUrl: data.imageUrl || data.avatarUrl || "",
+      imageUrl: data.imageUrl || data.avatarUrl || profile.imageUrl || "",
       avatarUrl: data.avatarUrl || data.imageUrl || "",
-      galleryImages: data.galleryImages || [],
+      galleryImages: data.galleryImages || profile.galleryImages || [],
       defaultSchedule: data.defaultSchedule || profile.defaultSchedule,
       salon: data.salon || profile.salon || null,
       salonStatus: data.salonStatus || profile.salonStatus || "none",
@@ -352,29 +350,6 @@ export default function BarberProfilePage() {
     setProfile(nextProfile);
     setSaved(true);
     setProfileError("");
-  };
-
-  const addGalleryImage = () => {
-    const nextUrl = galleryUrl.trim();
-
-    if (!nextUrl || galleryImages.includes(nextUrl)) return;
-
-    setSaved(false);
-    setProfile((currentProfile) => ({
-      ...currentProfile,
-      galleryImages: [...(currentProfile.galleryImages || []), nextUrl],
-    }));
-    setGalleryUrl("");
-  };
-
-  const removeGalleryImage = (imageUrl) => {
-    setSaved(false);
-    setProfile((currentProfile) => ({
-      ...currentProfile,
-      galleryImages: (currentProfile.galleryImages || []).filter(
-        (item) => item !== imageUrl
-      ),
-    }));
   };
 
   //── Email handlers (use /users/me, not /barbers/profile/:id) ──────
@@ -451,15 +426,10 @@ export default function BarberProfilePage() {
           isProfileSaving={isProfileSaving}
           saved={saved}
           profileError={profileError}
-          galleryUrl={galleryUrl}
-          galleryImages={galleryImages}
           currentUser={currentUser}
           onUpdateField={updateField}
           onSaveProfile={saveProfile}
           onAvatarUploaded={handleAvatarUploaded}
-          onGalleryUrlChange={setGalleryUrl}
-          onAddGalleryImage={addGalleryImage}
-          onRemoveGalleryImage={removeGalleryImage}
         />
 
         <ProfileSidebarCard
@@ -468,13 +438,29 @@ export default function BarberProfilePage() {
           showSalonLink={showSalonLink}
           salonName={salonName}
           salonId={salonId}
+          reviewsAverage={averageRating}
+          reviewsCount={barberReviews.length}
           salonRating={salonRating}
           salonReviewsCount={salonReviewsCount}
         />
       </div>
 
       <section className="w-full">
-        <GallerySection images={galleryImages} />
+        <Card className="rounded-2xl sm:rounded-3xl">
+          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div>
+              <h2 className="text-xl font-bold text-neutral-950">
+                Portfolio
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">
+                Manage your portfolio and before/after photos.
+              </p>
+            </div>
+            <Button as={Link} to="/admin/portfolio" variant="outline">
+              Manage portfolio
+            </Button>
+          </CardContent>
+        </Card>
       </section>
 
       {hasCertifications && (

@@ -107,7 +107,6 @@ export default function Header() {
     { label: "Bookings", to: "/admin/bookings" },
     { label: "Clients", to: "/admin/clients" },
     { label: "Calendar", to: "/admin/calendar" },
-    { label: "Profile", to: "/admin/profile" },
   ];
 
   useEffect(() => {
