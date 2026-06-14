@@ -13,7 +13,12 @@ import {
 import CalendarBookingCard from "@/barber/components/calendar/CalendarBookingCard";
 
 // ─── Constants ───
-const HOUR_HEIGHT_PX = 72; // ↑ bigger = more readable
+const HOUR_HEIGHT_PX = 80;
+const PIXELS_PER_MINUTE = HOUR_HEIGHT_PX / 60;
+const GRID_INSET_PX = 10;
+const EVENT_COLUMN_GAP_PX = 6;
+const EVENT_VERTICAL_GAP_PX = 4;
+const MIN_EVENT_HEIGHT_PX = 64;
 
 // ─── Color helpers (solid soft backgrounds with subtle borders) ───
 function getBlockAppearance(status) {
@@ -72,42 +77,107 @@ function getBlockAppearance(status) {
   }
 }
 
-// ─── Overlap grouping ───
-function groupOverlappingBookings(bookings) {
-  if (bookings.length === 0) return [];
+function minutesToPixels(minutes) {
+  return Math.round(minutes * PIXELS_PER_MINUTE);
+}
 
-  const sorted = [...bookings].sort((a, b) => {
-    const aMin = timeToMinutes(getBookingTime(a)) ?? 0;
-    const bMin = timeToMinutes(getBookingTime(b)) ?? 0;
-    return aMin - bMin;
-  });
+function getBookingLayout(booking, rangeStart) {
+  const start = timeToMinutes(getBookingTime(booking));
+  if (start === null) return null;
+  const end = start + getBookingDuration(booking);
+  const topPx = minutesToPixels(start - rangeStart);
+  const rawHeightPx = minutesToPixels(end - start);
+  const visualHeightPx = Math.max(
+    MIN_EVENT_HEIGHT_PX,
+    rawHeightPx - EVENT_VERTICAL_GAP_PX
+  );
 
-  const groups = [];
-  for (const booking of sorted) {
-    const bookingStart = timeToMinutes(getBookingTime(booking)) ?? 0;
-    const bookingEnd = bookingStart + getBookingDuration(booking);
+  return {
+    booking,
+    start,
+    end,
+    topPx,
+    visualHeightPx,
+    bottomPx: topPx + visualHeightPx,
+    columnIndex: 0,
+    columnCount: 1,
+  };
+}
 
-    let placed = false;
-    for (const group of groups) {
-      const overlaps = group.some((existing) => {
-        const existingStart = timeToMinutes(getBookingTime(existing)) ?? 0;
-        const existingEnd = existingStart + getBookingDuration(existing);
-        return bookingStart < existingEnd && bookingEnd > existingStart;
-      });
+function visualBoxesOverlap(a, b) {
+  return a.topPx < b.bottomPx && a.bottomPx > b.topPx;
+}
 
-      if (!overlaps) {
-        group.push(booking);
-        placed = true;
-        break;
-      }
-    }
+// ─── Overlap column assignment ───
+function computeOverlapColumns(bookings, rangeStart) {
+  if (!bookings.length) return [];
 
-    if (!placed) {
-      groups.push([booking]);
+  const items = bookings
+    .map((booking) => getBookingLayout(booking, rangeStart))
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+
+  // Build clusters from rendered visual collisions, not just time overlap.
+  const clusters = [];
+  let activeCluster = [];
+
+  for (const item of items) {
+    const overlapsActiveCluster = activeCluster.some((existing) =>
+      visualBoxesOverlap(item, existing)
+    );
+
+    if (activeCluster.length === 0 || !overlapsActiveCluster) {
+      if (activeCluster.length) clusters.push(activeCluster);
+      activeCluster = [item];
+    } else {
+      activeCluster.push(item);
     }
   }
 
-  return groups;
+  if (activeCluster.length) clusters.push(activeCluster);
+
+  for (const cluster of clusters) {
+    const columnBottoms = [];
+
+    for (const item of cluster) {
+      let columnIndex = columnBottoms.findIndex(
+        (bottomPx) => bottomPx <= item.topPx
+      );
+
+      if (columnIndex === -1) {
+        columnIndex = columnBottoms.length;
+      }
+
+      item.columnIndex = columnIndex;
+      columnBottoms[columnIndex] = item.bottomPx;
+    }
+
+    for (const item of cluster) {
+      const events = cluster.flatMap((other) => {
+        if (!visualBoxesOverlap(item, other) && other !== item) {
+          return [];
+        }
+
+        return [
+          { position: other.topPx, delta: 1 },
+          { position: other.bottomPx, delta: -1 },
+        ];
+      });
+
+      events.sort((a, b) => a.position - b.position || a.delta - b.delta);
+
+      let current = 0;
+      let maxConcurrent = 1;
+      for (const event of events) {
+        current += event.delta;
+        if (current > maxConcurrent) maxConcurrent = current;
+      }
+
+      item.columnCount = maxConcurrent;
+    }
+  }
+
+  return items;
 }
 
 // ─── Derive visible range from schedule + bookings (via shared helper) ───
@@ -139,8 +209,8 @@ function useBreakOverlay(selectedDaySchedule, rangeStart) {
     const bt = timeToMinutes(selectedDaySchedule.breakTo);
     if (bf === null || bt === null || bf >= bt) return null;
     return {
-      top: Math.max(0, bf - rangeStart),
-      height: bt - bf,
+      top: minutesToPixels(Math.max(0, bf - rangeStart)),
+      height: minutesToPixels(bt - bf),
     };
   }, [selectedDaySchedule, rangeStart]);
 }
@@ -186,7 +256,14 @@ function getStatusLabel(status) {
 }
 
 // ─── Sub-component: Event block ───
-function EventBlock({ booking, topPx, heightPx, isSelected, onClick }) {
+function EventBlock({
+  booking,
+  topPx,
+  heightPx,
+  isSelected,
+  onClick,
+  styleOverride = {},
+}) {
   const time = getBookingTime(booking);
   const duration = getBookingDuration(booking);
   const startMinutes = timeToMinutes(time);
@@ -200,14 +277,13 @@ function EventBlock({ booking, topPx, heightPx, isSelected, onClick }) {
   const isTerminal = ["rejected", "cancelled", "expired"].includes(status);
   const isNoShow = ["no_show", "late_cancelled"].includes(status);
 
-  // For very short blocks (< 60px), show a compact layout
-  const isCompact = heightPx < 64;
+  const isCompact = heightPx < 72;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`absolute left-0 right-0 overflow-hidden rounded-xl border text-left shadow-sm transition-all hover:shadow-md hover:brightness-95 active:brightness-90 ${app.bg} ${app.border} ${
+      className={`absolute min-w-0 overflow-hidden rounded-lg border text-left shadow-sm transition-all hover:shadow-md hover:brightness-95 active:brightness-90 ${app.bg} ${app.border} ${
         isTerminal || isNoShow ? "opacity-75" : ""
       } ${isTerminal ? "line-through" : ""} ${
         isSelected ? "ring-2 ring-neutral-900 ring-offset-1" : ""
@@ -215,42 +291,48 @@ function EventBlock({ booking, topPx, heightPx, isSelected, onClick }) {
       style={{
         top: `${topPx}px`,
         height: `${heightPx}px`,
-        minHeight: "44px",
         zIndex: 20,
+        ...styleOverride,
       }}
     >
       {/* Left color bar */}
       <div
-        className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl ${app.bar}`}
+        className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-lg ${app.bar}`}
       />
 
       {/* Content */}
       {isCompact ? (
-        /* ── Compact layout (< 64px) ── */
-        <div className="ml-2.5 flex h-full items-center gap-1.5 overflow-hidden py-1 pr-2">
-          <span className={`truncate text-xs font-semibold ${app.text}`}>
-            {clientName}
-          </span>
-          <span className="shrink-0 text-[10px] text-neutral-500">
-            {time}
-          </span>
-          <span className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase leading-tight ${app.badge}`}>
-            {getStatusLabel(status)}
-          </span>
+        /* ── Compact layout (< 72px) ── */
+        <div className="ml-2.5 flex h-full min-w-0 flex-col justify-center gap-0.5 overflow-hidden px-2 py-1">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className={`min-w-0 flex-1 truncate text-[11px] font-semibold ${app.text}`}>
+              {clientName}
+            </span>
+            <span className={`shrink-0 rounded px-1 py-0.5 text-[8px] font-medium uppercase leading-tight ${app.badge}`}>
+              {getStatusLabel(status)}
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center gap-1 text-[9px] text-neutral-600">
+            <span className="min-w-0 flex-1 truncate">{serviceName}</span>
+            <span className="shrink-0 font-medium text-neutral-500">
+              {time}–{endTime}
+            </span>
+          </div>
         </div>
       ) : (
-        /* ── Normal layout (≥ 64px) ── */
-        <div className="ml-2.5 flex flex-col justify-center gap-0.5 overflow-hidden py-2 pr-2">
-          <div className="flex items-center gap-2">
-            <span className={`truncate text-sm font-semibold ${app.text}`}>
+        /* ── Normal layout (≥ 72px) ── */
+        <div className="ml-2.5 flex h-full min-w-0 flex-col justify-center gap-0.5 overflow-hidden px-2.5 py-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className={`min-w-0 flex-1 truncate text-sm font-semibold ${app.text}`}>
               {clientName}
             </span>
             <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase leading-tight ${app.badge}`}>
               {getStatusLabel(status)}
             </span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-neutral-600">
-            <span className="truncate">{serviceName}</span>
+
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-neutral-600">
+            <span className="min-w-0 flex-1 truncate">{serviceName}</span>
             <span className="shrink-0 font-medium text-neutral-500">
               {time} – {endTime}
             </span>
@@ -365,14 +447,14 @@ export default function DayTimelineView({
     if (!isToday) return null;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     if (nowMin < range.start || nowMin > range.end) return null;
-    return nowMin - range.start;
+    return minutesToPixels(nowMin - range.start);
   }, [isToday, now, range]);
 
   const breakOverlay = useBreakOverlay(selectedDaySchedule, range.start);
 
-  const overlapGroups = useMemo(
-    () => groupOverlappingBookings(bookings),
-    [bookings]
+  const bookedSlots = useMemo(
+    () => computeOverlapColumns(bookings, range.start),
+    [bookings, range.start]
   );
 
   const totalHeight = range.hours * HOUR_HEIGHT_PX;
@@ -504,53 +586,55 @@ export default function DayTimelineView({
                   </div>
                 )}
 
-                {/* Booking blocks */}
-                {overlapGroups.length > 0 && (
-                  <div className="absolute inset-0">
-                    {overlapGroups.map((group, groupIdx) => {
-                      const subCount = overlapGroups.length;
-                      const subWidth =
-                        subCount > 1 ? `${100 / subCount}%` : "100%";
-                      const subLeft = `${(groupIdx / subCount) * 100}%`;
+                {/* Booking blocks with overlap column layout */}
+                {bookedSlots.length > 0 && (
+                  <div
+                    className="absolute inset-y-0"
+                    style={{
+                      left: `${GRID_INSET_PX}px`,
+                      right: `${GRID_INSET_PX}px`,
+                    }}
+                  >
+                    {bookedSlots.map((item) => {
+                      const colCount = item.columnCount;
+                      const colIndex = item.columnIndex;
+                      const isSelected =
+                        selected &&
+                        getBookingId(selected.booking) ===
+                          getBookingId(item.booking);
+
+                      const totalGapPx = (colCount - 1) * EVENT_COLUMN_GAP_PX;
+                      const columnWidth =
+                        colCount > 1
+                          ? `calc((100% - ${totalGapPx}px) / ${colCount})`
+                          : "100%";
+                      const left =
+                        colCount > 1
+                          ? `calc(${(colIndex / colCount) * 100}% + ${
+                              (colIndex * EVENT_COLUMN_GAP_PX) / colCount
+                            }px)`
+                          : "0";
 
                       return (
-                        <div
-                          key={`group-${groupIdx}`}
-                          className="absolute top-0 h-full"
-                          style={{
-                            left: subLeft,
-                            width: subWidth,
-                            zIndex: 10 + groupIdx,
-                          }}
-                        >
-                          {group.map((booking) => {
-                            const time = getBookingTime(booking);
-                            const duration = getBookingDuration(booking);
-                            const startMinutes = timeToMinutes(time);
-                            if (startMinutes === null) return null;
-
-                            const topPx = Math.max(0, startMinutes - range.start);
-                            const heightPx = Math.max(44, Math.round(duration));
-                            const isSelected =
-                              selected &&
-                              getBookingId(selected.booking) ===
-                                getBookingId(booking);
-
-                            return (
-                              <EventBlock
-                                key={getBookingId(booking)}
-                                booking={booking}
-                                topPx={topPx}
-                                heightPx={heightPx}
-                                isSelected={isSelected}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleBookingClick(booking, topPx, heightPx);
-                                }}
-                              />
+                        <EventBlock
+                          key={getBookingId(item.booking)}
+                          booking={item.booking}
+                          topPx={item.topPx}
+                          heightPx={item.visualHeightPx}
+                          isSelected={isSelected}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleBookingClick(
+                              item.booking,
+                              item.topPx,
+                              item.visualHeightPx
                             );
-                          })}
-                        </div>
+                          }}
+                          styleOverride={{
+                            left,
+                            width: columnWidth,
+                          }}
+                        />
                       );
                     })}
                   </div>
