@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import Booking from "../../models/Booking.js";
 import Salon from "../../models/Salon.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import {
   getSalonCalendar,
@@ -21,6 +23,8 @@ const chairRenterId = "64c000000000000000000107";
 const originalMethods = {
   bookingFind: Booking.find,
   salonFindById: Salon.findById,
+  subscriptionFind: Subscription.find,
+  subscriptionSeatFind: SubscriptionSeat.find,
   userFind: User.find,
   userFindById: User.findById,
 };
@@ -73,9 +77,28 @@ const createBooking = (overrides = {}) => ({
   ...overrides,
 });
 
+beforeEach(() => {
+  Subscription.find = () => ({
+    select: () => ({
+      lean: async () => [
+        { ownerId: staffOneId },
+        { ownerId: staffTwoId },
+        { ownerId: chairRenterId },
+      ],
+    }),
+  });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
+});
+
 afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Salon.findById = originalMethods.salonFindById;
+  Subscription.find = originalMethods.subscriptionFind;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
 });

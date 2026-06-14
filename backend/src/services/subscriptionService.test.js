@@ -2571,7 +2571,7 @@ test("requireBarberSubscription blocks unpaid barber with 403", async () => {
   });
 });
 
-test("booking creation is blocked for unpaid barber (barberHasPaidAccess check)", async () => {
+test("booking creation is blocked for unpaid barber (salon-scoped paid access check)", async () => {
   // When barber has no subscription and no seat, createBooking should return 403
   Subscription.findOne = async (query) => {
     if (query.ownerType === "barber") return null;
@@ -2581,11 +2581,14 @@ test("booking creation is blocked for unpaid barber (barberHasPaidAccess check)"
 
   const bookingCtrl = await import("../controllers/bookingController.js");
   assert.ok(bookingCtrl.createBooking);
-  // The check is within createBooking – we verify the function exists and imports barberHasPaidAccess
+  // The check is within createBooking – verify it uses the salon-scoped helper.
   // This is a structural test to confirm the enforcement was added
   const fs = await import("fs");
   const source = fs.readFileSync("./src/controllers/bookingController.js", "utf-8");
-  assert.ok(source.includes("barberHasPaidAccess(barberId)"), "createBooking must call barberHasPaidAccess");
+  assert.ok(
+    source.includes("barberHasPaidAccessForSalon("),
+    "createBooking must call barberHasPaidAccessForSalon"
+  );
   assert.ok(source.includes('"BARBER_UNAVAILABLE"'), "createBooking must return BARBER_UNAVAILABLE code");
   assert.ok(source.includes("not currently accepting bookings"), "createBooking must return user-friendly message");
 });

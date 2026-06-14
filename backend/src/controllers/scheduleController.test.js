@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, mock, test } from "node:test";
+import { afterEach, beforeEach, mock, test } from "node:test";
 
 import {
   getScheduleByBarber,
@@ -11,6 +11,8 @@ import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
 
@@ -20,6 +22,8 @@ const originalMethods = {
   scheduleFindOneAndUpdate: Schedule.findOneAndUpdate,
   salonFindById: Salon.findById,
   joinRequestFindOne: SalonJoinRequest.findOne,
+  subscriptionFindOne: Subscription.findOne,
+  subscriptionSeatFind: SubscriptionSeat.find,
   userFindById: User.findById,
   userFindOneAndUpdate: User.findOneAndUpdate,
 };
@@ -29,12 +33,23 @@ const clientId = "64b000000000000000000003";
 const salonAId = "64b000000000000000000004";
 const salonBId = "64b000000000000000000005";
 
+beforeEach(() => {
+  Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
+});
+
 afterEach(() => {
   BarberProfile.findOne = originalMethods.barberProfileFindOne;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Schedule.findOneAndUpdate = originalMethods.scheduleFindOneAndUpdate;
   Salon.findById = originalMethods.salonFindById;
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   User.findById = originalMethods.userFindById;
   User.findOneAndUpdate = originalMethods.userFindOneAndUpdate;
 });

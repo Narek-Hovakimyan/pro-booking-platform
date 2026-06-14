@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import { updateBooking } from "./bookingController.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Schedule from "../models/Schedule.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 
 import {
@@ -22,6 +24,15 @@ import {
 
 const originalConsoleError = console.error;
 
+beforeEach(() => {
+  Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
+});
+
 afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
   Booking.countDocuments = originalMethods.bookingCountDocuments;
@@ -30,6 +41,9 @@ afterEach(() => {
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
   Notification.create = originalMethods.notificationCreate;
   Schedule.findOne = originalMethods.scheduleFindOne;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
+  SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
   console.error = originalConsoleError;
 });

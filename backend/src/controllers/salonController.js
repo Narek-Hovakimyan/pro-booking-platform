@@ -3,7 +3,7 @@ import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import Schedule from "../models/Schedule.js";
 import User from "../models/User.js";
-import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
+import { getPaidAccessByBarberIdsForSalon } from "../services/subscriptionService.js";
 import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
 import {
   findManageableSalonsForUser,
@@ -28,11 +28,11 @@ import {
 import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
 
 // Test hooks — allows tests to override dependencies without a DI framework
-let getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIds;
+let getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIdsForSalon;
 let getSalonReviewStatsForSalons = getSalonReviewStats;
 export const __salonControllerTestHooks = {
   resetGetPaidAccessByBarberIds() {
-    getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIds;
+    getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIdsForSalon;
   },
   setGetPaidAccessByBarberIds(fn) {
     getPaidAccessByBarberIdsForSalons = fn;
@@ -162,10 +162,16 @@ export const listSalons = async (req, res) => {
       barberId: { $in: barbers.map((barber) => barber._id) },
     });
 
-    // Phase 10: Only include barbers with active subscription/seat access
+    // Phase 10: Only include barbers with active subscription/seat access for each salon
     const barberIds = barbers.map((b) => b._id);
-    const paidAccessMap = await getPaidAccessByBarberIdsForSalons(barberIds);
-    const paidBarbers = barbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
+    const paidAccessBySalonId = new Map(
+      await Promise.all(
+        salonIds.map(async (salonId) => [
+          String(salonId),
+          await getPaidAccessByBarberIdsForSalons(barberIds, salonId),
+        ])
+      )
+    );
 
     const [reviewStatsBySalonId] = await Promise.all([
       getSalonReviewStatsForSalons(salonIds),
@@ -177,21 +183,32 @@ export const listSalons = async (req, res) => {
       barbersBySalonId.set(String(salon._id), []);
     });
 
-    paidBarbers.forEach((barber) => {
+    barbers.forEach((barber) => {
       // Check new salons array first
       if (Array.isArray(barber.salons) && barber.salons.length > 0) {
         const approvedEntries = barber.salons.filter((s) => s.status === "approved");
         approvedEntries.forEach((entry) => {
           const salonId = String(entry.salon);
+          if (
+            paidAccessBySalonId.get(salonId)?.get(String(barber._id)) !== true
+          ) {
+            return;
+          }
           const salonBarbers = barbersBySalonId.get(salonId) || [];
           salonBarbers.push(barber);
           barbersBySalonId.set(salonId, salonBarbers);
         });
       } else if (barber.salonStatus === "approved" && barber.salon) {
         // Fallback to legacy
-        const salonBarbers = barbersBySalonId.get(String(barber.salon)) || [];
+        const salonId = String(barber.salon);
+        if (
+          paidAccessBySalonId.get(salonId)?.get(String(barber._id)) !== true
+        ) {
+          return;
+        }
+        const salonBarbers = barbersBySalonId.get(salonId) || [];
         salonBarbers.push(barber);
-        barbersBySalonId.set(String(barber.salon), salonBarbers);
+        barbersBySalonId.set(salonId, salonBarbers);
       }
     });
 
@@ -241,7 +258,10 @@ export const getSalonProfile = async (req, res) => {
 
     // Phase 10: Only include barbers with active subscription/seat access
     const barberIds = barbers.map((b) => b._id);
-    const paidAccessMap = await getPaidAccessByBarberIdsForSalons(barberIds);
+    const paidAccessMap = await getPaidAccessByBarberIdsForSalons(
+      barberIds,
+      salon._id
+    );
     const paidBarbers = barbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
 
     const profiles = await BarberProfile.find({

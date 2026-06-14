@@ -7,6 +7,7 @@ import {
   hasAcceptedSalonJoinRequest,
   isUserApprovedForSalon,
 } from "../services/salon/salonMembershipService.js";
+import { barberHasPaidAccessForSalon } from "../services/subscriptionService.js";
 import { createCrudController } from "./crudController.js";
 import {
   cleanCurrentAndFutureDateKeys,
@@ -175,6 +176,14 @@ export const getScheduleByBarberAndSalon = async (req, res) => {
       Schedule.findOne({ barberId, salonId }),
       User.findById(barberId).select("-password"),
     ]);
+
+    const hasPaidAccess = await barberHasPaidAccessForSalon(barberId, salonId);
+    if (!hasPaidAccess) {
+      return res.status(403).json({
+        code: "BARBER_UNAVAILABLE",
+        message: "This specialist is not currently accepting bookings.",
+      });
+    }
 
     // Find the salon entry in barber's salons array to get defaultSchedule
     const salonEntry = (barber?.salons || []).find(

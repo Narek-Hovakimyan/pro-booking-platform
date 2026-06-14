@@ -4,7 +4,7 @@ import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Schedule from "../models/Schedule.js";
 import User from "../models/User.js";
-import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
+import { getPaidAccessByBarberIdsForSalon } from "../services/subscriptionService.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
@@ -13,7 +13,7 @@ import { sendControllerError } from "../utils/controllerError.js";
 import { defaultScheduleFallback } from "../utils/scheduleUtils.js";
 
 const asPlainObject = (doc) => doc?.toObject?.() || doc || {};
-let getPaidAccessByBarberIdsForPublicBooking = getPaidAccessByBarberIds;
+let getPaidAccessByBarberIdsForPublicBooking = getPaidAccessByBarberIdsForSalon;
 let getSalonReviewStatsForPublicBooking = getSalonReviewStats;
 
 const getApprovedSalonEntry = (barber, salonId, salon) => {
@@ -110,7 +110,8 @@ export const getPublicSalonBooking = async (req, res) => {
     // Filter by paid access
     const barberIds = barbers.map((b) => b._id);
     const paidAccessMap = await getPaidAccessByBarberIdsForPublicBooking(
-      barberIds
+      barberIds,
+      salon._id
     );
     const paidBarbers = barbers.filter(
       (b) => paidAccessMap.get(String(b._id)) === true
@@ -269,10 +270,10 @@ export const getPublicSalonBooking = async (req, res) => {
 export const __publicSalonBookingTestHooks = {
   setGetPaidAccessByBarberIds(nextGetPaidAccessByBarberIds) {
     getPaidAccessByBarberIdsForPublicBooking =
-      nextGetPaidAccessByBarberIds || getPaidAccessByBarberIds;
+      nextGetPaidAccessByBarberIds || getPaidAccessByBarberIdsForSalon;
   },
   resetGetPaidAccessByBarberIds() {
-    getPaidAccessByBarberIdsForPublicBooking = getPaidAccessByBarberIds;
+    getPaidAccessByBarberIdsForPublicBooking = getPaidAccessByBarberIdsForSalon;
   },
   setGetSalonReviewStats(nextGetSalonReviewStats) {
     getSalonReviewStatsForPublicBooking =

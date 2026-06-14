@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 import fs from "fs";
 import path from "path";
 
-import { __bookingTestHooks, createBooking } from "./bookingController.js";
+import { __bookingTestHooks, createBooking, updateBooking } from "./bookingController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
@@ -62,6 +62,7 @@ afterEach(() => {
   Service.findOne = originalMethods.serviceFindOne;
   Subscription.findOne = originalMethods.subscriptionFindOne;
   SubscriptionPaymentAttempt.create = originalMethods.subscriptionPaymentAttemptCreate;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
   if (originalPaymentProvider === undefined) {
@@ -79,6 +80,46 @@ const createReferenceUploadFile = (filename) => {
   const filePath = path.join(bookingReferenceDir, filename);
   fs.writeFileSync(filePath, "reference image", "utf8");
   return filePath;
+};
+
+const staffMembership = (id, overrides = {}) => ({
+  salon: id,
+  status: "approved",
+  relationshipType: "staff",
+  relationshipStatus: "accepted",
+  ...overrides,
+});
+
+const mockSalonScopedSeatAccess = ({
+  seatSalonId = salonId,
+  resolvedBarber = {
+    ...barber,
+    salons: [staffMembership(salonId), staffMembership(salonBId)],
+  },
+} = {}) => {
+  Subscription.findOne = async () => null;
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [
+        {
+          _id: "seat-1",
+          barberId,
+          salonId: seatSalonId,
+          status: "active",
+          subscriptionId: {
+            _id: "salon-subscription-1",
+            ownerId: seatSalonId,
+            status: "active",
+          },
+        },
+      ],
+    }),
+  });
+  User.findById = () => ({
+    select: async (fields) =>
+      fields === "name" ? { name: "Barber" } : resolvedBarber,
+  });
+  Salon.exists = async ({ _id }) => [salonId, salonBId].includes(String(_id));
 };
 
 // ── Slot validation and booking conflicts ──────────────────────────
@@ -333,7 +374,7 @@ test("booking availability returns no slots for Sunday when Sunday is off", asyn
   const result = await __bookingTestHooks.validateBookingSlot({
     barberId,
     barber,
-    bookingDate: "2026-06-14",
+    bookingDate: "2026-06-21",
     time: "10:20",
     duration: 20,
   });
@@ -750,30 +791,181 @@ test("client-sent paid/paymentStatus/depositPaid fields do not bypass paid acces
   assert.equal(createdBookings.length, 0);
 });
 
-test("createBooking blocks target barber with stale salon seat", async () => {
+test("createBooking allows active salon seat only in the matching salon", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings);
+  mockSalonScopedSeatAccess({ seatSalonId: salonId });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(String(createdBookings[0].salonId), salonId);
+});
+
+test("createBooking blocks active seat from another salon", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings);
+  mockSalonScopedSeatAccess({ seatSalonId: salonId });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId: salonBId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(createdBookings.length, 0);
+});
+
+test("createBooking keeps personal subscription access across approved salons", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barber,
+    salons: [staffMembership(salonId), staffMembership(salonBId)],
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId: salonBId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(String(createdBookings[0].salonId), salonBId);
+});
+
+test("createBooking blocks chair renter from salon staff seat access", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings);
+  mockSalonScopedSeatAccess({
+    seatSalonId: salonBId,
+    resolvedBarber: {
+      ...barber,
+      salons: [
+        staffMembership(salonBId, {
+          relationshipType: "chair_renter",
+          relationshipStatus: "accepted",
+        }),
+      ],
+    },
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId: salonBId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("updateBooking blocks accepting with paid seat from another salon", async () => {
+  mockSalonScopedSeatAccess({ seatSalonId: salonId });
+  const booking = createMutableBooking({ status: "pending", salonId: salonBId });
+  Booking.findById = async () => booking;
+
+  const res = createResponse();
+
+  await updateBooking(
+    {
+      user: barber,
+      params: { id: booking._id },
+      body: { status: "accepted" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(booking.status, "pending");
+  assert.equal(booking.saveCalled, false);
+});
+
+test("createBooking blocks target barber with inactive salon seat subscription", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
   Subscription.findOne = async () => null;
-  SubscriptionSeat.findOne = () => ({
-    populate: async () => ({
-      _id: "seat-1",
-      barberId,
-      salonId,
-      status: "active",
-      subscriptionId: {
-        _id: "salon-subscription-1",
-        ownerId: salonId,
-        status: "active",
-      },
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [
+        {
+          _id: "seat-1",
+          barberId,
+          salonId,
+          status: "active",
+          subscriptionId: {
+            _id: "salon-subscription-1",
+            ownerId: salonId,
+            status: "expired",
+          },
+        },
+      ],
     }),
   });
   User.findById = () => ({
-    select: async () => ({
-      ...barberWithSalon,
-      salons: [{ salon: salonId, status: "rejected" }],
-      salon: null,
-      salonStatus: "none",
-    }),
+    select: async (fields) =>
+      fields === "name" ? { name: "Barber" } : barberWithSalon,
   });
 
   let serviceLookedUp = false;

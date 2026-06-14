@@ -6,7 +6,7 @@ import ServiceCategory from "../models/ServiceCategory.js";
 import { createCrudController } from "./crudController.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
 import { sendControllerError } from "../utils/controllerError.js";
-import { barberHasPaidAccess as _barberHasPaidAccess } from "../services/subscriptionService.js";
+import { barberHasPaidAccessForSalon as _barberHasPaidAccess } from "../services/subscriptionService.js";
 
 // Test hooks — allows tests to override dependencies without a DI framework
 let barberHasPaidAccess = _barberHasPaidAccess;
@@ -313,7 +313,10 @@ const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
 export const getServicesByBarber = async (req, res) => {
   try {
     // Phase 11: Hide unpaid/expired barbers from public endpoint
-    const hasAccess = await barberHasPaidAccess(req.params.barberId);
+    const hasAccess = await barberHasPaidAccess(
+      req.params.barberId,
+      req.query?.salonId || null
+    );
     if (!hasAccess) {
       return res.status(404).json({ message: "Barber not found" });
     }

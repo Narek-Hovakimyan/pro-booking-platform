@@ -118,6 +118,25 @@ const countActiveAcceptedStaffSeats = async ({ subscriptionId, salonId }) => {
   return filterAcceptedStaffSeats(activeSeats, salonId).length;
 };
 
+const getActiveSeatsForBarber = async (barberId) => {
+  const query = SubscriptionSeat.find({
+    barberId,
+    status: "active",
+  });
+  const populated =
+    query && typeof query.populate === "function"
+      ? query.populate("subscriptionId")
+      : query;
+
+  return resolveQuery(populated);
+};
+
+const seatHasActiveParentSubscription = (seat) =>
+  PAID_SUBSCRIPTION_STATUSES.includes(seat?.subscriptionId?.status);
+
+const seatMatchesSalon = (seat, salonId) =>
+  !salonId || getSeatSalonId(seat) === getIdString(salonId);
+
 /* ───────────────────────────────────────────────────────────
  *  Default plan & basic subscription helpers (Phase 1)
  * ─────────────────────────────────────────────────────────── */
@@ -737,6 +756,33 @@ export const barberHasPaidAccess = async (barberId) => {
   return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
 
+export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
+  // Individual barber subscriptions preserve existing global access behavior.
+  const individualSub = await Subscription.findOne({
+    ownerType: "barber",
+    ownerId: barberId,
+    status: { $in: PAID_SUBSCRIPTION_STATUSES },
+  });
+
+  if (individualSub) {
+    return true;
+  }
+
+  const activeSeats = await getActiveSeatsForBarber(barberId);
+  const matchingSeat = (activeSeats || []).find(
+    (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
+  );
+
+  if (!matchingSeat) {
+    return false;
+  }
+
+  const seatSalonId = getSeatSalonId(matchingSeat);
+  const barber = await fetchBarberMembership(barberId);
+
+  return isAcceptedSalonStaffMember(barber, seatSalonId);
+};
+
 export const getPaidAccessByBarberIds = async (barberIds = []) => {
   const ids = [
     ...new Set(barberIds.map((id) => getIdString(id)).filter(Boolean)),
@@ -777,6 +823,62 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
   for (const seat of activeSeats || []) {
     const parentStatus = seat?.subscriptionId?.status;
     if (!PAID_SUBSCRIPTION_STATUSES.includes(parentStatus)) continue;
+
+    const barberId = getIdString(seat.barberId);
+    const seatSalonId = getSeatSalonId(seat);
+    const barber = barbersById.get(barberId);
+
+    if (barberId && isAcceptedSalonStaffMember(barber, seatSalonId)) {
+      accessByBarberId.set(barberId, true);
+    }
+  }
+
+  return accessByBarberId;
+};
+
+export const getPaidAccessByBarberIdsForSalon = async (
+  barberIds = [],
+  salonId = null
+) => {
+  const ids = [
+    ...new Set(barberIds.map((id) => getIdString(id)).filter(Boolean)),
+  ];
+  const accessByBarberId = new Map(ids.map((id) => [id, false]));
+
+  if (ids.length === 0) {
+    return accessByBarberId;
+  }
+
+  const queryIds = getIdsForQuery(ids);
+
+  const [individualSubscriptions, activeSeats, barbers] = await Promise.all([
+    Subscription.find({
+      ownerType: "barber",
+      ownerId: { $in: queryIds },
+      status: { $in: PAID_SUBSCRIPTION_STATUSES },
+    })
+      .select("ownerId")
+      .lean(),
+    SubscriptionSeat.find({
+      barberId: { $in: queryIds },
+      status: "active",
+    })
+      .populate("subscriptionId")
+      .lean(),
+    fetchBarberMemberships(ids),
+  ]);
+  const barbersById = new Map(
+    (barbers || []).map((barber) => [getIdString(barber._id), barber])
+  );
+
+  for (const subscription of individualSubscriptions || []) {
+    const ownerId = getIdString(subscription.ownerId);
+    if (ownerId) accessByBarberId.set(ownerId, true);
+  }
+
+  for (const seat of activeSeats || []) {
+    if (!seatHasActiveParentSubscription(seat)) continue;
+    if (!seatMatchesSalon(seat, salonId)) continue;
 
     const barberId = getIdString(seat.barberId);
     const seatSalonId = getSeatSalonId(seat);

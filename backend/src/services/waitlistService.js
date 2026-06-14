@@ -28,7 +28,7 @@ import {
   throwDuplicateWaitlistEntryError,
   createWaitlistActionError,
 } from "./waitlistValidation.js";
-import { barberHasPaidAccess } from "./subscriptionService.js";
+import { barberHasPaidAccessForSalon } from "./subscriptionService.js";
 
 const waitlistCreationLocks = new Map();
 const waitlistDisplayPopulate = [
@@ -391,7 +391,10 @@ export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
   }
 
   // Block booking creation for unpaid/expired barbers
-  const barberHasAccess = await barberHasPaidAccess(claimedEntry.barberId);
+  const barberHasAccess = await barberHasPaidAccessForSalon(
+    claimedEntry.barberId,
+    claimedEntry.salonId || null
+  );
   if (!barberHasAccess) {
     // Restore to offered so client can retry when barber is active again
     await WaitlistEntry.findOneAndUpdate(
@@ -549,7 +552,10 @@ export const approveWaitlistEntry = async ({ entryId, barberId, time }) => {
   }
 
   // Block booking creation for unpaid/expired barbers
-  const barberHasAccess = await barberHasPaidAccess(claimedEntry.barberId);
+  const barberHasAccess = await barberHasPaidAccessForSalon(
+    claimedEntry.barberId,
+    claimedEntry.salonId || null
+  );
   if (!barberHasAccess) {
     await WaitlistEntry.findOneAndUpdate(
       { _id: claimedEntry._id, status: "converting" },

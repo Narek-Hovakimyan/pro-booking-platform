@@ -29,6 +29,7 @@ export const originalMethods = {
   scheduleFindOne: Schedule.findOne,
   serviceFindOne: Service.findOne,
   subscriptionFindOne: Subscription.findOne,
+  subscriptionSeatFind: SubscriptionSeat.find,
   subscriptionPaymentAttemptCreate: SubscriptionPaymentAttempt.create,
   subscriptionSeatFindOne: SubscriptionSeat.findOne,
   userFindById: User.findById,
@@ -137,6 +138,11 @@ export const mockCreateBookingDependencies = (createdBookings) => {
   });
   SubscriptionSeat.findOne = () => ({
     populate: async () => null,
+  });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
   });
   BarberProfile.findOne = () => ({
     lean: async () => null,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import path from "path";
 
 import {
@@ -19,6 +19,8 @@ import mongoose from "mongoose";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 import { protect } from "../middleware/authMiddleware.js";
 import {
@@ -37,6 +39,15 @@ import {
 
 const originalConsoleError = console.error;
 
+beforeEach(() => {
+  Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
+});
+
 afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
   Booking.countDocuments = originalMethods.bookingCountDocuments;
@@ -48,6 +59,9 @@ afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
+  SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
   console.error = originalConsoleError;
 });

@@ -26,7 +26,7 @@ import {
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
-import { barberHasPaidAccess } from "../services/subscriptionService.js";
+import { barberHasPaidAccessForSalon } from "../services/subscriptionService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
@@ -467,8 +467,23 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // Phase 3: Block booking creation for unpaid barbers
-    const barberPaidAccess = await barberHasPaidAccess(barberId);
+    const salonResolution = await resolveBookingSalon({
+      barberId,
+      salonId: req.body.salonId,
+    });
+
+    if (salonResolution.message) {
+      cleanup();
+      return res.status(400).json({
+        message: salonResolution.message,
+      });
+    }
+
+    // Block booking creation for unpaid barbers in the selected salon context.
+    const barberPaidAccess = await barberHasPaidAccessForSalon(
+      barberId,
+      salonResolution.salonId
+    );
     if (!barberPaidAccess) {
       cleanup();
       return res.status(403).json({
@@ -488,18 +503,6 @@ export const createBooking = async (req, res) => {
 
     const bookingDuration = Number(service.duration);
     const { discountedPrice: bookingPrice } = calculateServiceDiscountedPrice(service);
-
-    const salonResolution = await resolveBookingSalon({
-      barberId,
-      salonId: req.body.salonId,
-    });
-
-    if (salonResolution.message) {
-      cleanup();
-      return res.status(400).json({
-        message: salonResolution.message,
-      });
-    }
 
     const slotValidation = await validateBookingSlot({
       barberId,
@@ -741,6 +744,18 @@ export const updateBooking = async (req, res) => {
       if (booking.status !== "pending") {
         return res.status(400).json({
           message: "Only pending bookings can be accepted",
+        });
+      }
+
+      const hasPaidAccess = await barberHasPaidAccessForSalon(
+        booking.barberId,
+        booking.salonId || null
+      );
+
+      if (!hasPaidAccess) {
+        return res.status(403).json({
+          code: "BARBER_UNAVAILABLE",
+          message: "This specialist is not currently accepting bookings.",
         });
       }
 

@@ -11,6 +11,7 @@ import {
   getRelationshipType,
   isAcceptedStaffMember,
 } from "./salonRelationshipService.js";
+import { getPaidAccessByBarberIdsForSalon } from "../subscriptionService.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CALENDAR_VIEWS = new Set(["day", "week"]);
@@ -96,8 +97,15 @@ const getStaffMembers = async (salonId) => {
     ],
   }).select("_id name avatarUrl salons salon salonStatus");
 
+  const paidAccessMap = await getPaidAccessByBarberIdsForSalon(
+    barbers.map((barber) => barber._id),
+    salonId
+  );
+
   return barbers
     .map((barber) => {
+      if (paidAccessMap.get(String(barber._id)) !== true) return null;
+
       const approvedSalonEntry = getApprovedSalonEntry(barber, salonId);
       if (!approvedSalonEntry) return null;
 
