@@ -7,67 +7,90 @@ const getMenuGroups = (
   canManageSalon,
   isPlatformAdmin,
   showBusinessGroups
-) => [
-  ...(isPlatformAdmin
-    ? [
-        {
-          key: "platform",
-          label: "Platform Admin",
-          children: [
-            { label: "Platform Billing", to: "/admin/platform/billing" },
-          ],
-        },
-      ]
-    : []),
-  ...(showBusinessGroups
-    ? [
-        {
-          key: "work",
-          label: "Work",
-          children: [
-            { label: "Find Jobs", to: "/jobs" },
-            ...(canShowManageHiring
-              ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
-              : []),
-            { label: "Promo Codes", to: "/admin/vouchers" },
+) => {
+  const groups = [];
+
+  if (isPlatformAdmin) {
+    groups.push({
+      key: "platform",
+      label: "Platform",
+      children: [
+        { label: "Platform Billing", to: "/admin/platform/billing" },
+      ],
+    });
+  }
+
+  if (showBusinessGroups) {
+    groups.push({
+      key: "account",
+      label: "Account",
+      children: [
+        { label: "Profile", to: "/admin/profile" },
+        { label: "Settings Hub", to: "/admin/settings" },
+        { label: "Default Schedule", to: "/admin/settings/default-schedule" },
+        { label: "Deposit", to: "/admin/settings/deposit" },
+        { label: "Certifications", to: "/admin/settings/certifications" },
+        { label: "Billing", to: "/admin/billing" },
+      ],
+    });
+  }
+
+  if (canManageSalon) {
+    groups.push({
+      key: "salon",
+      label: "Salon",
+      children: [
+        { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
+        { label: "Salon Calendar", to: "/admin/salon/calendar" },
+        { label: "Salon Reports", to: "/admin/salon/reports" },
+        { label: "Salon Billing", to: "/admin/salon/billing" },
+        { label: "Salon Settings", to: "/admin/settings/salon" },
+      ],
+    });
+  }
+
+  if (showBusinessGroups) {
+    const marketingLinks = [
+      ...(canManageSalon
+        ? [
+            { label: "Salon Promotions", to: "/admin/salon/promotions" },
             { label: "Revenue", to: "/admin/revenue" },
-            { label: "Portfolio", to: "/admin/portfolio" },
-            { label: "Waitlist", to: "/admin/waitlist" },
-            { label: "Events", to: "/events" },
-            { label: "My Applications", to: "/jobs/applications" },
-          ],
-        },
-        ...(canManageSalon
-          ? [
-              {
-                key: "salon",
-                label: "Salon",
-                children: [
-                  { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
-                  { label: "Salon Calendar", to: "/admin/salon/calendar" },
-                  { label: "Salon Reports", to: "/admin/salon/reports" },
-                  { label: "Salon Promotions", to: "/admin/salon/promotions" },
-                  { label: "Salon Billing", to: "/admin/salon/billing" },
-                  { label: "Salon Settings", to: "/admin/settings/salon" },
-                ],
-              },
-            ]
-          : []),
-        {
-          key: "settings",
-          label: "Settings",
-          children: [
-            { label: "Profile", to: "/admin/profile" },
-            { label: "Billing", to: "/admin/billing" },
-            { label: "Settings Hub", to: "/admin/settings" },
-            { label: "Default Schedule", to: "/admin/settings/default-schedule" },
-            { label: "Deposit", to: "/admin/settings/deposit" },
-            { label: "Certifications", to: "/admin/settings/certifications" },
-          ],
-        },
-      ]
-    : []),
-];
+          ]
+        : []),
+      { label: "Promo Codes", to: "/admin/vouchers" },
+    ];
+
+    groups.push(
+      {
+        key: "marketing",
+        label: "Marketing",
+        children: marketingLinks,
+      },
+      {
+        key: "hiring",
+        label: "Hiring / Jobs",
+        children: [
+          { label: "Find Jobs", to: "/jobs" },
+          ...(canShowManageHiring
+            ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
+            : []),
+          { label: "My Applications", to: "/jobs/applications" },
+        ],
+      },
+      {
+        key: "work",
+        label: "Work",
+        children: [
+          { label: "Portfolio", to: "/admin/portfolio" },
+          { label: "Events", to: "/events" },
+          { label: "Waitlist", to: "/admin/waitlist" },
+        ],
+      }
+    );
+  }
+
+  return groups;
+};
 
 const linkClass = (isActive) =>
   `block w-full rounded-lg px-3 py-2 text-sm font-medium text-left transition ${
