@@ -711,6 +711,11 @@ test("createBooking blocks unpaid target barber with BARBER_UNAVAILABLE", async 
   SubscriptionSeat.findOne = () => ({
     populate: async () => null,
   });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
 
   let serviceLookedUp = false;
   Service.findOne = async () => {
@@ -751,6 +756,11 @@ test("client-sent paid/paymentStatus/depositPaid fields do not bypass paid acces
   Subscription.findOne = async () => null;
   SubscriptionSeat.findOne = () => ({
     populate: async () => null,
+  });
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
   });
 
   let serviceLookedUp = false;
@@ -848,9 +858,57 @@ test("createBooking blocks active seat from another salon", async () => {
     message: "This specialist is not currently accepting bookings.",
   });
   assert.equal(createdBookings.length, 0);
+
+  const paidSalonRes = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    paidSalonRes
+  );
+
+  assert.equal(paidSalonRes.statusCode, 201);
+  assert.equal(String(createdBookings[0].salonId), salonId);
 });
 
-test("createBooking keeps personal subscription access across approved salons", async () => {
+test("createBooking requires explicit salon for multi-salon barber", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings);
+  mockSalonScopedSeatAccess({ seatSalonId: salonId });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "Salon is required for this barber" });
+  assert.equal(createdBookings.length, 0);
+});
+
+test("createBooking blocks personal subscription in explicit unpaid salon context", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, {
     ...barber,
@@ -875,8 +933,12 @@ test("createBooking keeps personal subscription access across approved salons", 
     res
   );
 
-  assert.equal(res.statusCode, 201);
-  assert.equal(String(createdBookings[0].salonId), salonBId);
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(createdBookings.length, 0);
 });
 
 test("createBooking blocks chair renter from salon staff seat access", async () => {

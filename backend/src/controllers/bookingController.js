@@ -26,7 +26,10 @@ import {
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
-import { barberHasPaidAccessForSalon } from "../services/subscriptionService.js";
+import {
+  barberHasPaidAccessForSalon,
+  barberHasPaidSeatAccessForSalon,
+} from "../services/subscriptionService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
@@ -109,6 +112,7 @@ const resolveBookingSalon = async ({ barberId, salonId }) => {
   }
 
   const requestedSalonId = salonId ? String(salonId) : "";
+  const approvedSalonIds = getApprovedUserSalonIds(barber);
 
   if (requestedSalonId) {
     if (!isValidObjectId(requestedSalonId)) {
@@ -121,13 +125,15 @@ const resolveBookingSalon = async ({ barberId, salonId }) => {
       return { message: "Salon not found" };
     }
 
-    const approvedSalonIds = getApprovedUserSalonIds(barber);
-
     if (!approvedSalonIds.includes(requestedSalonId)) {
       return { message: "Barber does not work in selected salon" };
     }
 
     return { barber, salonId: requestedSalonId };
+  }
+
+  if (approvedSalonIds.length > 1) {
+    return { message: "Salon is required for this barber" };
   }
 
   const inferredSalonId = getPrimaryApprovedSalonId(barber);
@@ -480,10 +486,10 @@ export const createBooking = async (req, res) => {
     }
 
     // Block booking creation for unpaid barbers in the selected salon context.
-    const barberPaidAccess = await barberHasPaidAccessForSalon(
-      barberId,
-      salonResolution.salonId
-    );
+    const hasExplicitSalonContext = Boolean(req.body.salonId);
+    const barberPaidAccess = hasExplicitSalonContext
+      ? await barberHasPaidSeatAccessForSalon(barberId, salonResolution.salonId)
+      : await barberHasPaidAccessForSalon(barberId, salonResolution.salonId);
     if (!barberPaidAccess) {
       cleanup();
       return res.status(403).json({

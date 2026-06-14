@@ -783,6 +783,26 @@ export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
   return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
 
+export const barberHasPaidSeatAccessForSalon = async (barberId, salonId) => {
+  if (!salonId) {
+    return barberHasPaidAccess(barberId);
+  }
+
+  const activeSeats = await getActiveSeatsForBarber(barberId);
+  const matchingSeat = (activeSeats || []).find(
+    (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
+  );
+
+  if (!matchingSeat) {
+    return false;
+  }
+
+  const seatSalonId = getSeatSalonId(matchingSeat);
+  const barber = await fetchBarberMembership(barberId);
+
+  return isAcceptedSalonStaffMember(barber, seatSalonId);
+};
+
 export const getPaidAccessByBarberIds = async (barberIds = []) => {
   const ids = [
     ...new Set(barberIds.map((id) => getIdString(id)).filter(Boolean)),

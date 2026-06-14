@@ -141,7 +141,19 @@ export const mockCreateBookingDependencies = (createdBookings) => {
   });
   SubscriptionSeat.find = () => ({
     populate: () => ({
-      lean: async () => [],
+      lean: async () => [
+        {
+          _id: "seat-1",
+          barberId,
+          salonId,
+          status: "active",
+          subscriptionId: {
+            _id: "salon-subscription-1",
+            ownerId: salonId,
+            status: "active",
+          },
+        },
+      ],
     }),
   });
   BarberProfile.findOne = () => ({

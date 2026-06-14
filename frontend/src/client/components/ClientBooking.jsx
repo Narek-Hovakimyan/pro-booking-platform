@@ -93,18 +93,55 @@ export default function ClientBooking({
   const parsedSelectedDate = selectedDate ? parseDateKey(selectedDate) : null;
   const selectedDateDayKey =
     selectedDayKey || (parsedSelectedDate ? getDayKeyFromDate(parsedSelectedDate) : "");
-  const canConfirmBooking = Boolean(
+  const hasRequiredBookingData = Boolean(
     selectedBarberId &&
       selectedServiceEntityId &&
       selectedDate &&
       selectedDateDayKey &&
       selectedTime &&
+      isSelectedTimeValid &&
       currentUser &&
       selectedService &&
-      !isServiceDataLoading &&
-      !isPreparingConfirmation &&
+      client.name?.trim() &&
+      client.phone?.trim() &&
       !isSaving
   );
+  const canPrepareConfirmation = Boolean(
+    hasRequiredBookingData && !isServiceDataLoading && !isPreparingConfirmation
+  );
+  const canSubmitConfirmation = Boolean(
+    selectedBarberId &&
+      selectedServiceEntityId &&
+      selectedDate &&
+      selectedDateDayKey &&
+      selectedTime &&
+      isSelectedTimeValid &&
+      currentUser &&
+      (confirmationService || selectedService) &&
+      client.name?.trim() &&
+      client.phone?.trim() &&
+      !isSaving
+  );
+  const confirmDisabledReason = [
+    !selectedBarberId && "No specialist selected",
+    !selectedServiceEntityId && "No service selected",
+    !selectedDate && "No date selected",
+    !selectedTime && "Please select a time first.",
+    selectedTime && !isSelectedTimeValid && "Selected time is no longer available.",
+    !currentUser && "Please log in to confirm.",
+    !selectedService && "Selected service is no longer available.",
+    !client.name?.trim() && "Please enter your name.",
+    !client.phone?.trim() && "Please enter your phone number.",
+    isSaving && "Booking in progress…",
+    isServiceDataLoading && "Service details are still loading.",
+    isPreparingConfirmation && "Preparing booking details…",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const canRenderConfirmationModal = Boolean(
+    showConfirmation && selectedTime && isSelectedTimeValid
+  );
+
   const selectedServicePriceInfo = getServicePriceInfo(selectedService);
 
   /* ── Public vouchers ── */
@@ -204,6 +241,8 @@ export default function ClientBooking({
   }, [barber?.id]);
 
   useEffect(() => {
+    if (isServiceDataLoading) return;
+
     if (!hasActiveServices && step > 2) {
       setStep(2);
       setSelectedServiceId(null);
@@ -211,6 +250,7 @@ export default function ClientBooking({
     }
   }, [
     hasActiveServices,
+    isServiceDataLoading,
     setSelectedServiceId,
     setSelectedTime,
     setStep,
@@ -230,7 +270,7 @@ export default function ClientBooking({
     setVoucherLoading(true);
     setVoucherError("");
     try {
-      const salonId = getSalonId(selectedSalon) || externalSelectedSalonId || "";
+      const salonId = externalSelectedSalonId || getSalonId(selectedSalon) || "";
       const { data } = await api.post("/vouchers/validate", {
         code,
         barberId: selectedBarberId,
@@ -330,13 +370,36 @@ export default function ClientBooking({
     setSelectedTime("");
   };
 
+  const selectTime = (time) => {
+    setSelectedTime(time);
+    setError("");
+  };
+
+  const goToClientDetails = () => {
+    if (!selectedTime || !isSelectedTimeValid) {
+      setError("Please select a time first.");
+      setShowConfirmation(false);
+      // Internal step 3 is the date/time selection screen.
+      setStep(3);
+      return;
+    }
+
+    setError("");
+    setStep(4);
+  };
+
   const submitBooking = async () => {
     if (
       isSaving ||
       !selectedBarberId ||
       !currentUser ||
       !selectedService ||
-      !selectedTime
+      !selectedDate ||
+      !selectedDateDayKey ||
+      !selectedTime ||
+      !isSelectedTimeValid ||
+      !client.name?.trim() ||
+      !client.phone?.trim()
     ) {
       return;
     }
@@ -345,7 +408,7 @@ export default function ClientBooking({
     setError("");
 
     try {
-      const salonId = getSalonId(selectedSalon) || externalSelectedSalonId || "";
+      const salonId = externalSelectedSalonId || getSalonId(selectedSalon) || "";
 
       const bookingPayload = {
         barberId: selectedBarberId,
@@ -400,7 +463,17 @@ export default function ClientBooking({
   };
 
   const openConfirmation = async () => {
-    if (!canConfirmBooking || isPreparingConfirmation) return;
+    if (isPreparingConfirmation) return;
+
+    if (!selectedTime || !isSelectedTimeValid) {
+      setError("Please select a time first.");
+      setShowConfirmation(false);
+      // Internal step 3 is the date/time selection screen.
+      setStep(3);
+      return;
+    }
+
+    if (!canPrepareConfirmation) return;
 
     setIsPreparingConfirmation(true);
     setError("");
@@ -421,6 +494,14 @@ export default function ClientBooking({
         setStep(2);
         setSelectedTime("");
         setConfirmationService(null);
+        return;
+      }
+
+      if (!selectedTime || !isSelectedTimeValid) {
+        setError("Please select a time first.");
+        setShowConfirmation(false);
+        // Internal step 3 is the date/time selection screen.
+        setStep(3);
         return;
       }
 
@@ -615,7 +696,7 @@ export default function ClientBooking({
                     <Button
                       key={time}
                       variant={selectedTime === time ? "default" : "outline"}
-                      onClick={() => setSelectedTime(time)}
+                      onClick={() => selectTime(time)}
                     >
                       {time}
                     </Button>
@@ -658,7 +739,7 @@ export default function ClientBooking({
               <Button
                 className="w-full sm:w-auto"
                 disabled={!isSelectedTimeValid}
-                onClick={() => setStep(4)}
+                onClick={goToClientDetails}
               >
                 Շարունակել
               </Button>
@@ -669,7 +750,7 @@ export default function ClientBooking({
         {step === 4 && hasActiveServices && (
           <ClientDetailsStep
             client={client}
-            canConfirm={canConfirmBooking}
+            canConfirm={canPrepareConfirmation}
             error={error}
             onChange={setClient}
             onBack={() => setStep(3)}
@@ -755,7 +836,7 @@ export default function ClientBooking({
         )}
 
         <BookingConfirmationModal
-          isOpen={showConfirmation}
+          isOpen={canRenderConfirmationModal}
           onClose={resetBookingFlow}
           onConfirm={submitBooking}
           selectedService={confirmationService || selectedService}
@@ -764,7 +845,7 @@ export default function ClientBooking({
           selectedTime={selectedTime}
           selectedSalonName={selectedSalonName}
           barberName={barber?.name || "Specialist"}
-          canConfirm={canConfirmBooking}
+          canConfirm={canSubmitConfirmation}
           isSubmitting={isSaving}
           error={error}
           consultation={consultation}
@@ -772,12 +853,13 @@ export default function ClientBooking({
           voucherCode={voucherCode}
           discountPreview={discountPreview}
           depositSettings={barber?.depositSettings}
+          disabledReason={confirmDisabledReason}
         />
 
         {showWaitlistForm && selectedBarberId && selectedService && selectedDate && (
           <WaitlistForm
             barberId={selectedBarberId}
-            salonId={getSalonId(selectedSalon) || externalSelectedSalonId || ""}
+            salonId={externalSelectedSalonId || getSalonId(selectedSalon) || ""}
             serviceId={selectedServiceEntityId}
             date={selectedDate}
             onClose={() => setShowWaitlistForm(false)}
