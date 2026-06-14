@@ -1,8 +1,15 @@
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Navigate,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
+import { getFriendlyApiError, isBarberUnavailableError } from "@/shared/api/errors";
 import BookingSummary from "@/client/components/BookingSummary";
 import ClientBooking from "@/client/components/ClientBooking";
 import initialSchedule, {
@@ -71,20 +78,27 @@ export default function BookingPage({
   const { barberId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const dispatch = useDispatch();
   const initialRebookContext = getRebookContext(location.state);
+  const querySelectedSalonId = searchParams.get("salonId");
   const initialSelectedSalonId =
-    location.state?.selectedSalonId || getEntityId(location.state?.salon) || null;
+    querySelectedSalonId ||
+    location.state?.selectedSalonId ||
+    getEntityId(location.state?.salon) ||
+    null;
   const [rebookContext, setRebookContext] = useState(initialRebookContext);
   const [isLoading, setIsLoading] = useState(true);
   const [isServicesLoading, setIsServicesLoading] = useState(true);
   const [isBarberLoading, setIsBarberLoading] = useState(false);
+  const [isScheduleBlocked, setIsScheduleBlocked] = useState(false);
   const [error, setError] = useState("");
   const [selectedDate, setSelectedDate] = useState(() =>
     initialRebookContext?.serviceId ? "" : getNext7Days()[0].value
   );
   const [activeBarberId, setActiveBarberId] = useState(null);
   const [selectedSalonId, setSelectedSalonId] = useState(initialSelectedSalonId);
+  const activeSelectedSalonId = querySelectedSalonId || selectedSalonId;
   const [priceAdjustment, setPriceAdjustment] = useState({
     discountPreview: 0,
     voucherCode: "",
@@ -180,6 +194,25 @@ export default function BookingPage({
     });
   }, [location.pathname, location.state, navigate]);
 
+  const handleSalonSelect = useCallback(
+    (nextSalonId) => {
+      setSelectedSalonId(nextSalonId);
+
+      if (!nextSalonId) return;
+
+      const nextSearchParams = new URLSearchParams(location.search);
+      nextSearchParams.set("salonId", nextSalonId);
+      navigate(
+        {
+          pathname: location.pathname,
+          search: `?${nextSearchParams.toString()}`,
+        },
+        { replace: true, state: location.state }
+      );
+    },
+    [location.pathname, location.search, location.state, navigate]
+  );
+
   useEffect(() => {
     const initialDateOption = dateOptions[0];
 
@@ -210,10 +243,13 @@ export default function BookingPage({
 
   const refreshServices = useCallback(async () => {
     setIsServicesLoading(true);
-    setError("");
+      setError("");
 
     try {
-      const servicesResponse = await api.get(`/services/${barberId}`);
+      const servicesUrl = activeSelectedSalonId
+        ? `/services/${barberId}?salonId=${activeSelectedSalonId}`
+        : `/services/${barberId}`;
+      const servicesResponse = await api.get(servicesUrl);
       dispatch(
         setServices({
           barberId,
@@ -223,14 +259,16 @@ export default function BookingPage({
       return servicesResponse.data;
     } catch (requestError) {
       const message =
-        requestError.response?.data?.message ||
-        "Could not load services. Please try again.";
+        isBarberUnavailableError(requestError)
+          ? getFriendlyApiError(requestError)
+          : requestError.response?.data?.message ||
+            "Could not load services. Please try again.";
       setError(message);
       throw new Error(message, { cause: requestError });
     } finally {
       setIsServicesLoading(false);
     }
-  }, [barberId, dispatch]);
+  }, [activeSelectedSalonId, barberId, dispatch]);
 
   useEffect(() => {
     if (!needsEnrichedBarber) return undefined;
@@ -313,10 +351,14 @@ export default function BookingPage({
     async function fetchBookingData() {
       setIsLoading(true);
       setIsServicesLoading(true);
+      setIsScheduleBlocked(false);
       setError("");
 
       try {
-        const servicesResponse = await api.get(`/services/${barberId}`);
+        const servicesUrl = activeSelectedSalonId
+          ? `/services/${barberId}?salonId=${activeSelectedSalonId}`
+          : `/services/${barberId}`;
+        const servicesResponse = await api.get(servicesUrl);
 
         if (!isMounted) return;
 
@@ -328,10 +370,13 @@ export default function BookingPage({
         );
       } catch (requestError) {
         if (isMounted) {
-          setError(
-            requestError.response?.data?.message ||
-              "Could not load services. Please try again."
-          );
+          const message = isBarberUnavailableError(requestError)
+            ? getFriendlyApiError(requestError)
+            : requestError.response?.data?.message ||
+              "Could not load services. Please try again.";
+          setError(message);
+          setSelectedServiceId(null);
+          setSelectedTime("");
         }
       } finally {
         if (isMounted) {
@@ -341,8 +386,8 @@ export default function BookingPage({
 
       try {
         // Fetch per-salon schedule if a salon is selected, otherwise use legacy route
-        const scheduleUrl = selectedSalonId
-          ? `/schedules/${barberId}/${selectedSalonId}`
+        const scheduleUrl = activeSelectedSalonId
+          ? `/schedules/${barberId}/${activeSelectedSalonId}`
           : `/schedules/${barberId}`;
         const scheduleResponse = await api.get(scheduleUrl);
 
@@ -361,10 +406,15 @@ export default function BookingPage({
         );
       } catch (requestError) {
         if (isMounted) {
-          setError(
-            requestError.response?.data?.message ||
-              "Could not load schedule. Please try again."
-          );
+          const message = isBarberUnavailableError(requestError)
+            ? getFriendlyApiError(requestError)
+            : requestError.response?.data?.message ||
+              "Could not load schedule. Please try again.";
+          setIsScheduleBlocked(true);
+          setSelectedDate("");
+          setSelectedDayKey("");
+          setSelectedTime("");
+          setError(message);
         }
       }
 
@@ -398,7 +448,14 @@ export default function BookingPage({
     return () => {
       isMounted = false;
     };
-  }, [barberId, dispatch, selectedSalonId]);
+  }, [
+    barberId,
+    dispatch,
+    activeSelectedSalonId,
+    setSelectedDayKey,
+    setSelectedServiceId,
+    setSelectedTime,
+  ]);
 
   useEffect(() => {
     if (!isRebooking || isLoading) return;
@@ -447,6 +504,7 @@ export default function BookingPage({
       !selectedService ||
       !selectedDate ||
       !selectedDateDayKey ||
+      isScheduleBlocked ||
       isBarberNotWorking
     ) {
       return EMPTY_SLOT_SUMMARY;
@@ -465,6 +523,7 @@ export default function BookingPage({
     barber,
     barberBookings,
     isBarberNotWorking,
+    isScheduleBlocked,
     selectedDate,
     selectedDateDayKey,
     selectedDaySchedule,
@@ -474,12 +533,16 @@ export default function BookingPage({
   const availableSlots = slotSummary.availableSlots;
 
   useEffect(() => {
+    if (isLoading || isServicesLoading) return;
+
     if (selectedTime && !availableSlots.includes(selectedTime)) {
       setSelectedTime("");
     }
-  }, [availableSlots, selectedTime, setSelectedTime]);
+  }, [availableSlots, isLoading, isServicesLoading, selectedTime, setSelectedTime]);
 
-  const slotMessage = !selectedService
+  const slotMessage = isScheduleBlocked
+    ? "This barber is not currently accepting bookings at this salon."
+    : !selectedService
     ? "Select service first"
     : !selectedDate
       ? "Choose a date first"
@@ -549,8 +612,8 @@ export default function BookingPage({
           client={client}
           currentUser={currentUser}
           setClient={setClient}
-          selectedSalonId={selectedSalonId}
-          onSalonSelect={setSelectedSalonId}
+          selectedSalonId={activeSelectedSalonId}
+          onSalonSelect={handleSalonSelect}
           onPriceAdjustmentChange={setPriceAdjustment}
           isServiceDataLoading={isServicesLoading}
           onRefreshServices={refreshServices}

@@ -6,7 +6,7 @@ import { MapPin, Phone, Star, Store, UserRound, LogIn, CalendarDays, Scissors, X
 
 import { getPublicSalonBooking } from "@/shared/api/publicSalonBooking";
 import api from "@/shared/api/axios";
-import { getFriendlyApiError } from "@/shared/api/errors";
+import { getFriendlyApiError, isBarberUnavailableError } from "@/shared/api/errors";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import DepositNotice from "@/shared/components/booking/DepositNotice";
@@ -75,6 +75,7 @@ export default function SalonPublicBookingPage() {
   // Schedule data (fetched per-barber)
   const [barberScheduleEntry, setBarberScheduleEntry] = useState(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
   const [barberBookings, setBarberBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
 
@@ -153,10 +154,38 @@ export default function SalonPublicBookingPage() {
     };
   }, [salonId]);
 
+  useEffect(() => {
+    if (!selectedBarberId) return;
+
+    const barberIds = (barbers || []).map((barber) =>
+      String(barber.id || barber._id)
+    );
+
+    if (!barberIds.includes(String(selectedBarberId))) {
+      const resetId = window.setTimeout(() => {
+        setSelectedBarber(null);
+        setSelectedServiceId(null);
+        setSelectedDate("");
+        setSelectedTime("");
+        setBarberScheduleEntry(null);
+        setAvailabilityError("");
+      }, 0);
+
+      return () => window.clearTimeout(resetId);
+    }
+
+    return undefined;
+  }, [barbers, selectedBarberId]);
+
   // ── Fetch schedule when barber is selected ──
   useEffect(() => {
     if (!selectedBarber) {
-      return;
+      const resetId = window.setTimeout(() => {
+        setBarberScheduleEntry(null);
+        setAvailabilityError("");
+      }, 0);
+
+      return () => window.clearTimeout(resetId);
     }
 
     let isMounted = true;
@@ -165,6 +194,7 @@ export default function SalonPublicBookingPage() {
       setScheduleLoading(true);
       setBookingsLoading(true);
       setBarberBookings([]);
+      setAvailabilityError("");
 
       try {
         const barberId = selectedBarber.id || selectedBarber._id;
@@ -185,17 +215,17 @@ export default function SalonPublicBookingPage() {
           nonWorkingDays: scheduleResponse.data?.nonWorkingDays || [],
         });
         setBarberBookings(bookingsResponse.data || []);
-      } catch {
-        // If schedule can't be loaded, use defaults
+      } catch (requestError) {
         if (isMounted) {
-          setBarberScheduleEntry({
-            weeklySchedule: initialSchedule,
-            dateSchedules: {},
-            scheduleOverrides: {},
-            defaultSchedule: defaultPersonalSchedule,
-            nonWorkingDays: [],
-          });
+          setBarberScheduleEntry(null);
           setBarberBookings([]);
+          setSelectedDate("");
+          setSelectedTime("");
+          setAvailabilityError(
+            isBarberUnavailableError(requestError)
+              ? getFriendlyApiError(requestError)
+              : "Could not load availability for this specialist."
+          );
         }
       } finally {
         if (isMounted) {
@@ -281,6 +311,9 @@ export default function SalonPublicBookingPage() {
       !selectedService ||
       !selectedDate ||
       !selectedDateDayKey ||
+      !barberScheduleEntry ||
+      availabilityError ||
+      scheduleLoading ||
       isSelectedDateNonWorking ||
       isWeeklyDayOff
     ) {
@@ -300,6 +333,9 @@ export default function SalonPublicBookingPage() {
     selectedService,
     selectedDate,
     selectedDateDayKey,
+    barberScheduleEntry,
+    availabilityError,
+    scheduleLoading,
     isSelectedDateNonWorking,
     isWeeklyDayOff,
     selectedDaySchedule,
@@ -312,7 +348,9 @@ export default function SalonPublicBookingPage() {
   const validSelectedTime =
     selectedTime && availableSlots.includes(selectedTime) ? selectedTime : "";
 
-  const slotMessage = !selectedService
+  const slotMessage = availabilityError
+    ? availabilityError
+    : !selectedService
     ? "Select service first"
     : !selectedDate
       ? "Choose a date first"
@@ -452,6 +490,19 @@ export default function SalonPublicBookingPage() {
       client.phone &&
       !isSaving
   );
+  const confirmDisabledReason = [
+    !currentUser && "Please log in to confirm.",
+    !(selectedBarber?.id || selectedBarber?._id) && "No specialist selected",
+    !selectedService && "No service selected",
+    !selectedDate && "No date selected",
+    !selectedDateDayKey && "Invalid date.",
+    !validSelectedTime && "Please select a time first.",
+    !client.name && "Please enter your name.",
+    !client.phone && "Please enter your phone number.",
+    isSaving && "Booking in progress…",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   // ── Loading state ──
 
@@ -1154,6 +1205,12 @@ export default function SalonPublicBookingPage() {
                 {submitError && (
                   <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     {submitError}
+                  </p>
+                )}
+
+                {!canConfirmBooking && confirmDisabledReason && (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    {confirmDisabledReason}
                   </p>
                 )}
 

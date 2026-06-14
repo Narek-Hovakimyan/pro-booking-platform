@@ -163,6 +163,9 @@ export default function BarberCard({
   const bookingState = bookingSalonId
     ? { barber, selectedSalonId: bookingSalonId, salon: bookingSalon }
     : { barber };
+  const bookingPath = bookingSalonId
+    ? `/booking/${barberId}?salonId=${encodeURIComponent(bookingSalonId)}`
+    : `/booking/${barberId}`;
 
   return (
     <Card className="rounded-2xl transition-shadow hover:shadow-md sm:rounded-3xl">
@@ -318,7 +321,7 @@ export default function BarberCard({
             </Button>
 
             {hasBookableServices ? (
-              <Button as={Link} className="w-full" state={bookingState} to={`/booking/${barberId}`}>
+              <Button as={Link} className="w-full" state={bookingState} to={bookingPath}>
                 Book now
               </Button>
             ) : (

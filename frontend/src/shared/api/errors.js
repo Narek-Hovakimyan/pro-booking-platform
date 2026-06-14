@@ -13,7 +13,7 @@ export const getFriendlyApiError = (
   }
 
   if (isBarberUnavailableError(error)) {
-    return "This specialist is not currently accepting bookings.";
+    return "This barber is not currently accepting bookings at this salon.";
   }
 
   return error?.response?.data?.message || fallback;

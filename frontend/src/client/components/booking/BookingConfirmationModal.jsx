@@ -21,6 +21,7 @@ export default function BookingConfirmationModal({
   voucherCode = "",
   discountPreview = 0,
   depositSettings = null,
+  disabledReason = "",
 }) {
   if (!isOpen) return null;
 
@@ -212,6 +213,12 @@ export default function BookingConfirmationModal({
         {error && (
           <p className="mt-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
+          </p>
+        )}
+
+        {!canConfirm && disabledReason && (
+          <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            {disabledReason}
           </p>
         )}
 
