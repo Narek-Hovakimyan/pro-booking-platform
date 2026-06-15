@@ -16,6 +16,7 @@ import {
   cancelSubscriptionPaymentAttempt,
   createSubscriptionPaymentIntent,
   devConfirmSubscriptionPaymentAttempt,
+  devConfirmSubscriptionSeatUpdate,
   extendManualSubscription,
   getSalonSubscription,
   getSalonSubscriptionPayments,
@@ -108,7 +109,6 @@ export default function SalonBillingPage() {
   const [loadingSalons, setLoadingSalons] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [paymentIntent, setPaymentIntent] = useState(null);
   const [pendingAttempt, setPendingAttempt] = useState(null);
   const [attemptActionError, setAttemptActionError] = useState("");
   const [payments, setPayments] = useState([]);
@@ -131,7 +131,6 @@ export default function SalonBillingPage() {
       try {
         const data = await getSalonSubscription(salonId);
         setDetails(data);
-        setPaymentIntent(null);
         setPendingAttempt(data?.pendingPaymentAttempt || null);
         setAttemptActionError("");
         setPaymentsError("");
@@ -267,7 +266,7 @@ export default function SalonBillingPage() {
     }
   };
 
-  const handlePreparePayment = async () => {
+  const handlePreparePayment = async (action = "renew") => {
     const nextSeatCount = Number(seatCountInput || 1);
     const months = Number(paymentMonths || 1);
 
@@ -276,7 +275,7 @@ export default function SalonBillingPage() {
       return;
     }
 
-    if (!Number.isInteger(months) || months < 1) {
+    if (action === "renew" && (!Number.isInteger(months) || months < 1)) {
       setError("Months must be at least 1.");
       return;
     }
@@ -285,19 +284,18 @@ export default function SalonBillingPage() {
     setError("");
     setSuccess("");
     setAttemptActionError("");
-    setPaymentIntent(null);
 
     try {
       const data = await createSubscriptionPaymentIntent({
         ownerType: "salon",
         ownerId: selectedSalonId,
         seatCount: nextSeatCount,
-        months,
+        months: action === "renew" ? months : 1,
+        action,
       });
-      setPaymentIntent(data);
       setPendingAttempt(data.paymentAttempt || null);
     } catch (requestError) {
-      setError(normalizeError(requestError, "Could not prepare manual payment."));
+      setError(normalizeError(requestError, "Could not prepare payment."));
     } finally {
       setPreparingPayment(false);
     }
@@ -311,9 +309,12 @@ export default function SalonBillingPage() {
     setAttemptActionError("");
 
     try {
-      const result = await devConfirmSubscriptionPaymentAttempt(attemptId);
+      const isSeatUpdate = pendingAttempt?.metadata?.action === "update_seats";
+      const result = isSeatUpdate
+        ? await devConfirmSubscriptionSeatUpdate(attemptId)
+        : await devConfirmSubscriptionPaymentAttempt(attemptId);
       setPendingAttempt(result.paymentAttempt || null);
-      setSuccess("Payment attempt confirmed manually.");
+      setSuccess(isSeatUpdate ? "Seats updated successfully." : "Payment confirmed.");
       await loadDetails(selectedSalonId, { keepMessage: true });
     } catch (requestError) {
       setAttemptActionError(
@@ -334,7 +335,6 @@ export default function SalonBillingPage() {
     try {
       await cancelSubscriptionPaymentAttempt(attemptId);
       setPendingAttempt(null);
-      setPaymentIntent(null);
       setSuccess("Prepared payment cancelled.");
       await loadDetails(selectedSalonId, { keepMessage: true });
     } catch (requestError) {
@@ -384,6 +384,8 @@ export default function SalonBillingPage() {
       setManualActivating(false);
     }
   };
+
+  const attemptIsSeatUpdate = pendingAttempt?.metadata?.action === "update_seats";
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -640,20 +642,21 @@ export default function SalonBillingPage() {
               </Card>
 
               <div className="space-y-4">
+                {/* ── Renew subscription card ── */}
                 <Card>
                   <CardContent className="space-y-4">
                     <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-neutral-500" />
+                      <RefreshCw className="h-4 w-4 text-neutral-500" />
                       <h2 className="font-semibold text-neutral-950">
-                        Salon payment
+                        Renew subscription
                       </h2>
                     </div>
                     <p className="text-sm text-neutral-500">
-                      You are buying seats for your salon specialists.
+                      Extends your subscription period. Choose seats and months.
                     </p>
                     <label className="block">
                       <span className="text-sm font-medium text-neutral-700">
-                        Seats to pay for monthly
+                        Seats
                       </span>
                       <input
                         className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
@@ -689,96 +692,130 @@ export default function SalonBillingPage() {
                     <Button
                       className="w-full"
                       disabled={preparingPayment || !selectedSalonId}
-                      onClick={handlePreparePayment}
+                      onClick={() => handlePreparePayment("renew")}
                       variant="outline"
                     >
-                      {preparingPayment ? "Preparing..." : "Prepare salon payment"}
+                      {preparingPayment ? "Preparing..." : "Prepare renewal payment"}
                     </Button>
                     <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
-                      Prepare payment does not activate subscription. After
-                      payment is confirmed, subscription will be activated.
-                      Payment does not assign seats automatically.
+                      Renewal extends your subscription period. After payment is confirmed,
+                      subscription will be extended by the selected months.
                     </div>
-                    {paymentIntent && (
-                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-                        <div className="font-semibold">
-                          {paymentIntent.message ||
-                            "Manual payment activation is required."}
-                        </div>
-                        <p className="mt-1">
-                          Amount:{" "}
-                          {formatCurrency(paymentIntent.amount, paymentIntent.currency)}
-                        </p>
-                        <p className="mt-1">
-                          Seats: {paymentIntent.seatCount} at{" "}
-                          {formatCurrency(paymentIntent.pricePerSeat, paymentIntent.currency)}
-                          /seat
-                        </p>
-                      </div>
-                    )}
-                    {pendingAttempt && (
-                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-                        <div className="font-semibold">
-                          Payment prepared but not active yet
-                        </div>
-                        <p className="mt-1">
-                          Attempt: {pendingAttempt.id || pendingAttempt._id}
-                        </p>
-                        <p className="mt-1 capitalize">
-                          Status: {pendingAttempt.status}
-                        </p>
-                        <p className="mt-1 capitalize">
-                          Provider: {pendingAttempt.provider || "manual"}
-                        </p>
-                        <p className="mt-1">
-                          {pendingAttempt.seatCount || 1} seat(s),{" "}
-                          {pendingAttempt.months || 1} month(s),{" "}
-                          {formatCurrency(pendingAttempt.amount, pendingAttempt.currency)}
-                        </p>
-                        <p className="mt-1">
-                          Subscription activates only after payment confirmation.
-                        </p>
-                        <p className="mt-1">
-                          This is not marked as paid until confirmation succeeds.
-                        </p>
-                        <div className="mt-3 flex flex-col gap-2">
-                          {showManualActivationPanel &&
-                            pendingAttempt.status === "pending" && (
-                              <Button
-                                disabled={confirmingAttempt}
-                                onClick={handleConfirmAttempt}
-                              >
-                                {confirmingAttempt
-                                  ? "Confirming..."
-                                  : "Confirm manually"}
-                              </Button>
-                            )}
-                          {pendingAttempt.status === "pending" && (
-                            <Button
-                              disabled={cancellingAttempt}
-                              onClick={handleCancelAttempt}
-                              variant="outline"
-                            >
-                              {cancellingAttempt
-                                ? "Cancelling..."
-                                : "Cancel prepared payment"}
-                            </Button>
-                          )}
-                        </div>
-                        {showManualActivationPanel && (
-                          <p className="mt-2 text-blue-700">
-                            Manual confirm is development-only.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {attemptActionError && (
-                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-                        {attemptActionError}
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
+
+                {/* ── Update seats card ── */}
+                {subscription && (
+                  <Card>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-neutral-500" />
+                        <h2 className="font-semibold text-neutral-950">
+                          Update seats
+                        </h2>
+                      </div>
+                      <p className="text-sm text-neutral-500">
+                        Changes how many specialists can be covered. Expiry date will not change.
+                      </p>
+                      <label className="block">
+                        <span className="text-sm font-medium text-neutral-700">
+                          New seat count
+                        </span>
+                        <input
+                          className="mt-1 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
+                          min="1"
+                          onChange={(event) => setSeatCountInput(event.target.value)}
+                          type="number"
+                          value={seatCountInput}
+                        />
+                      </label>
+                      <div className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-700">
+                        <div>Current seats: <strong>{paidSeatCount}</strong></div>
+                        <div>New seats: <strong>{purchaseSeatCount}</strong></div>
+                        <div className="mt-1 font-semibold text-neutral-950">
+                          Extra cost: {formatCurrency(
+                            Math.max(0, purchaseSeatCount - paidSeatCount) * pricePerSeat,
+                            currency
+                          )}
+                        </div>
+                        <div className="text-xs text-neutral-500 mt-1">
+                          Expiry: {formatDate(subscription?.currentPeriodEnd)}
+                        </div>
+                      </div>
+                      <Button
+                        className="w-full"
+                        disabled={preparingPayment || !selectedSalonId}
+                        onClick={() => handlePreparePayment("update_seats")}
+                        variant="outline"
+                      >
+                        {preparingPayment ? "Preparing..." : "Prepare seat update"}
+                      </Button>
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                        Seat updates only change capacity. Subscription period remains unchanged.
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* ── Pending attempt / Confirm manually ── */}
+                {pendingAttempt && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                    <div className="font-semibold">
+                      {attemptIsSeatUpdate ? "Seat update" : "Payment"} prepared but not active yet
+                    </div>
+                    <p className="mt-1">
+                      Attempt: {pendingAttempt.id || pendingAttempt._id}
+                    </p>
+                    <p className="mt-1 capitalize">
+                      Status: {pendingAttempt.status}
+                    </p>
+                    <p className="mt-1 capitalize">
+                      Provider: {pendingAttempt.provider || "manual"}
+                    </p>
+                    <p className="mt-1">
+                      {pendingAttempt.seatCount || 1} seat(s),{" "}
+                      {attemptIsSeatUpdate ? "no period change" : `${pendingAttempt.months || 1} month(s)`},{" "}
+                      {formatCurrency(pendingAttempt.amount, pendingAttempt.currency)}
+                    </p>
+                    <p className="mt-1">
+                      Subscription activates only after payment confirmation.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-2">
+                      {showManualActivationPanel &&
+                        pendingAttempt.status === "pending" && (
+                          <Button
+                            disabled={confirmingAttempt}
+                            onClick={handleConfirmAttempt}
+                          >
+                            {confirmingAttempt
+                              ? "Confirming..."
+                              : `Confirm ${attemptIsSeatUpdate ? "seat update" : "manually"}`}
+                          </Button>
+                        )}
+                      {pendingAttempt.status === "pending" && (
+                        <Button
+                          disabled={cancellingAttempt}
+                          onClick={handleCancelAttempt}
+                          variant="outline"
+                        >
+                          {cancellingAttempt
+                            ? "Cancelling..."
+                            : "Cancel prepared payment"}
+                        </Button>
+                      )}
+                    </div>
+                    {showManualActivationPanel && (
+                      <p className="mt-2 text-blue-700">
+                        Manual confirm is development-only.
+                      </p>
+                    )}
+                  </div>
+                )}
+                {attemptActionError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {attemptActionError}
+                  </div>
+                )}
 
                 {showManualActivationPanel && (
                   <Card>

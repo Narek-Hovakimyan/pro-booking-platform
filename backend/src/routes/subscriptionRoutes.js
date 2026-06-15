@@ -16,6 +16,7 @@ import {
   getSalonSubscriptionPayments,
   getPaymentAttempt,
   cancelPaymentAttempt,
+  devConfirmSeatUpdate,
   devConfirmPaymentAttempt,
 } from "../controllers/subscriptionController.js";
 
@@ -44,6 +45,14 @@ router.get("/payment-attempts/:attemptId", protect, getPaymentAttempt);
 
 // POST /api/subscriptions/payment-attempts/:attemptId/cancel
 router.post("/payment-attempts/:attemptId/cancel", protect, paymentLimiter, cancelPaymentAttempt);
+
+// POST /api/subscriptions/payment-attempts/:attemptId/dev-confirm-seat-update
+router.post(
+  "/payment-attempts/:attemptId/dev-confirm-seat-update",
+  protect,
+  paymentLimiter,
+  devConfirmSeatUpdate
+);
 
 // POST /api/subscriptions/payment-attempts/:attemptId/dev-confirm
 router.post(

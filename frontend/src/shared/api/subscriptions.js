@@ -55,13 +55,22 @@ export const createSubscriptionPaymentIntent = async ({
   ownerId,
   seatCount = 1,
   months = 1,
+  action = "renew",
 }) => {
   const { data } = await api.post("/subscriptions/payment-intent", {
     ownerType,
     ownerId,
     seatCount,
     months,
+    action,
   });
+  return data;
+};
+
+export const devConfirmSubscriptionSeatUpdate = async (paymentAttemptId) => {
+  const { data } = await api.post(
+    `/subscriptions/payment-attempts/${paymentAttemptId}/dev-confirm-seat-update`
+  );
   return data;
 };
 

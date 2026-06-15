@@ -558,6 +558,81 @@ test("dev grant salon activates subscription with correct totalPrice", async () 
   assert.equal(createdSeat, false);
 });
 
+test("3 seats × 1 month sets seatCount=3 and extends periodEnd by exactly 1 month", async () => {
+  const now = new Date();
+  let createdSubscription = null;
+  let createdPayment = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => {
+    createdSubscription = {
+      _id: new mongoose.Types.ObjectId(),
+      ...payload,
+    };
+    return createdSubscription;
+  };
+  PaymentRecord.create = async (payload) => {
+    createdPayment = payload;
+    return payload;
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+    seatCount: 3,
+    months: 1,
+  });
+
+  assert.equal(result.status, "active");
+  assert.equal(result.seatCount, 3);
+  assert.equal(result.totalPrice, 15000);
+  // currentPeriodEnd must be exactly 1 month from now, NOT 3 months
+  const expectedPeriodEnd = new Date(now);
+  expectedPeriodEnd.setMonth(expectedPeriodEnd.getMonth() + 1);
+  assert.equal(result.currentPeriodEnd.getTime(), expectedPeriodEnd.getTime());
+  // Verify it is NOT 3 months
+  const threeMonths = new Date(now);
+  threeMonths.setMonth(threeMonths.getMonth() + 3);
+  assert.notEqual(result.currentPeriodEnd.getTime(), threeMonths.getTime());
+  assert.equal(createdPayment.amount, 15000);
+  assert.equal(createdPayment.seatCount, 3);
+});
+
+test("3 seats × 3 months sets seatCount=3 and extends periodEnd by exactly 3 months", async () => {
+  const now = new Date();
+  let createdPayment = null;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => null;
+  Subscription.create = async (payload) => ({
+    _id: new mongoose.Types.ObjectId(),
+    ...payload,
+  });
+  PaymentRecord.create = async (payload) => {
+    createdPayment = payload;
+    return payload;
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+    seatCount: 3,
+    months: 3,
+  });
+
+  assert.equal(result.status, "active");
+  assert.equal(result.seatCount, 3);
+  assert.equal(result.totalPrice, 15000);
+  const expectedPeriodEnd = new Date(now);
+  expectedPeriodEnd.setMonth(expectedPeriodEnd.getMonth() + 3);
+  assert.equal(result.currentPeriodEnd.getTime(), expectedPeriodEnd.getTime());
+  assert.equal(createdPayment.amount, 45000);
+  assert.equal(createdPayment.seatCount, 3);
+});
+
 test("extending active subscription extends from currentPeriodEnd, not now", async () => {
   const currentPeriodEnd = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
   const expectedPeriodEnd = new Date(currentPeriodEnd);
@@ -1852,6 +1927,7 @@ test("payment intent for barber calculates default plan amount and does not acti
     seatCount: 1,
     months: 1,
     planCode: defaultPlanDoc.code,
+    action: "renew",
   });
   assert.equal(result.paymentAttempt.status, "pending");
   assert.equal(result.paymentAttempt.amount, defaultPlanDoc.pricePerSeat);
@@ -1864,6 +1940,7 @@ test("payment intent for barber calculates default plan amount and does not acti
     months: 1,
     planCode: defaultPlanDoc.code,
     monthlyTotal: defaultPlanDoc.pricePerSeat,
+    action: "renew",
   });
   assert.equal(subscriptionCreated, false);
   assert.equal(paymentCreated, false);
@@ -1901,6 +1978,7 @@ test("salon owner can create payment intent for 4 seats", async () => {
     seatCount: 4,
     months: 1,
     planCode: defaultPlanDoc.code,
+    action: "renew",
   });
   assert.deepEqual(attemptStub.getCreatedAttempt().metadata, {
     ownerType: "salon",
@@ -1909,6 +1987,7 @@ test("salon owner can create payment intent for 4 seats", async () => {
     months: 1,
     planCode: defaultPlanDoc.code,
     monthlyTotal: defaultPlanDoc.pricePerSeat * 4,
+    action: "renew",
   });
 });
 

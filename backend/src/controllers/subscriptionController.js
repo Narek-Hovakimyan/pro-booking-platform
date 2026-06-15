@@ -14,6 +14,7 @@ import {
   getSubscriptionPaymentAttempt,
   cancelSubscriptionPaymentAttempt,
   confirmSubscriptionPaymentAttempt,
+  confirmSubscriptionSeatUpdate,
 } from "../services/subscriptionService.js";
 
 const isProduction = () => process.env.NODE_ENV === "production";
@@ -145,6 +146,23 @@ export const cancelPaymentAttempt = async (req, res) => {
     return res.status(status).json({
       code: error.code,
       message: error.message || "Could not cancel payment attempt",
+    });
+  }
+};
+
+export const devConfirmSeatUpdate = async (req, res) => {
+  try {
+    const result = await confirmSubscriptionSeatUpdate({
+      paymentAttemptId: req.params.attemptId,
+      confirmedBy: req.user,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      code: error.code,
+      message: error.message || "Could not confirm seat update",
     });
   }
 };

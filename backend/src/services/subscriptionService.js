@@ -950,9 +950,16 @@ export const createSubscriptionPaymentIntent = async ({
   ownerId,
   seatCount = 1,
   months = 1,
+  action = "renew",
   providerName = getConfiguredPaymentProviderName(),
   now = new Date(),
 }) => {
+  if (!["renew", "update_seats"].includes(action)) {
+    const error = new Error("action must be 'renew' or 'update_seats'");
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (!["barber", "salon"].includes(ownerType)) {
     const error = new Error("ownerType must be 'barber' or 'salon'");
     error.statusCode = 400;
@@ -998,8 +1005,9 @@ export const createSubscriptionPaymentIntent = async ({
       ownerType,
       ownerId: String(ownerId),
       seatCount: normalizedSeatCount,
-      months: normalizedMonths,
+      months: action === "update_seats" ? 0 : normalizedMonths,
       planCode: plan.code,
+      action,
     },
   });
   const attempt = await SubscriptionPaymentAttempt.create({
@@ -1022,9 +1030,10 @@ export const createSubscriptionPaymentIntent = async ({
       ownerType,
       ownerId: String(ownerId),
       seatCount: normalizedSeatCount,
-      months: normalizedMonths,
+      months: action === "update_seats" ? 0 : normalizedMonths,
       planCode: plan.code,
       monthlyTotal,
+      action,
     },
     createdBy: requester._id,
     expiresAt: buildPaymentAttemptExpiry(now),
@@ -1613,6 +1622,104 @@ export const revokeSalonSubscriptionSeat = async ({ seatId, requester }) => {
  * @param {Object} params.requester - Express req.user (must have _id)
  * @returns {Object} the updated Subscription
  */
+/**
+ * Confirm a subscription seat update (no period extension).
+ * Used for action=update_seats — updates seatCount without changing currentPeriodEnd.
+ */
+export const confirmSubscriptionSeatUpdate = async ({
+  paymentAttemptId,
+  confirmedBy,
+  now = new Date(),
+}) => {
+  if (!isDevPaymentConfirmationAvailable()) {
+    const error = new Error("Dev payment confirmation is disabled in production");
+    error.statusCode = 403;
+    error.code = "DEV_PAYMENT_CONFIRM_DISABLED";
+    throw error;
+  }
+
+  const attempt = await getAuthorizedPaymentAttempt({
+    paymentAttemptId,
+    requester: confirmedBy,
+    action: "confirm",
+  });
+
+  if (attempt.purpose !== "subscription") {
+    const error = new Error("Only subscription payment attempts can be dev-confirmed");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (attempt.metadata?.action !== "update_seats") {
+    const error = new Error("Only update_seats payment attempts can be confirmed through this endpoint");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (attempt.status === "paid") {
+    return { paymentAttempt: serializePaymentAttempt(attempt), idempotent: true };
+  }
+
+  if (!["pending", "requires_action"].includes(attempt.status)) {
+    const error = new Error("Only pending payment attempts can be confirmed");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (attempt.expiresAt && new Date(attempt.expiresAt) <= now) {
+    attempt.status = "expired";
+    await attempt.save();
+    const error = new Error("Payment attempt has expired");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Find subscription, only update seatCount — do NOT extend period
+  const subscription = await Subscription.findById(attempt.subscriptionId) ||
+    await Subscription.findOne({ ownerType: attempt.ownerType, ownerId: attempt.ownerId });
+
+  if (!subscription) {
+    const error = new Error("Subscription not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const oldSeatCount = subscription.seatCount;
+  const plan = await getOrCreateDefaultSubscriptionPlan();
+  subscription.seatCount = attempt.seatCount || subscription.seatCount;
+  subscription.totalPrice = plan.pricePerSeat * subscription.seatCount;
+  subscription.pricePerSeat = plan.pricePerSeat;
+  subscription.lastPaymentAt = now;
+  await subscription.save();
+
+  // PaymentRecord for seat-only change
+  const extraSeats = Math.max(0, (attempt.seatCount || subscription.seatCount) - oldSeatCount);
+  await PaymentRecord.create({
+    subscriptionId: subscription._id,
+    payerId: attempt.payerId,
+    ownerType: attempt.ownerType,
+    ownerId: attempt.ownerId,
+    amount: attempt.amount,
+    currency: attempt.currency,
+    seatCount: extraSeats,
+    periodStart: subscription.currentPeriodStart,
+    periodEnd: subscription.currentPeriodEnd,
+    status: "paid",
+    provider: attempt.provider || "manual",
+    paidAt: now,
+  });
+
+  applyPaymentAttemptTransition(attempt, "paid", now);
+  attempt.subscriptionId = subscription._id;
+  await attempt.save();
+
+  return {
+    paymentAttempt: serializePaymentAttempt(attempt),
+    subscription: serializeSubscriptionStatus(subscription, null, now),
+    idempotent: false,
+  };
+};
+
 export const updateSalonSubscriptionSeatCount = async ({
   salonId,
   seatCount,
