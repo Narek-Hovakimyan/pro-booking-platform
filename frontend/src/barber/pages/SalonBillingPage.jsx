@@ -945,6 +945,11 @@ export default function SalonBillingPage() {
                         Payment history
                       </h2>
                     </div>
+                    {subscriptionIsCancelled && (
+                      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
+                        Paid payments remain in history. Subscription is currently cancelled.
+                      </div>
+                    )}
                     {paymentsError && (
                       <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                         {paymentsError}

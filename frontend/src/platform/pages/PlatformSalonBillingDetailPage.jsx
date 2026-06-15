@@ -80,6 +80,16 @@ const getPaymentStatusLabel = (payment) => {
   return status.replace(/_/g, " ");
 };
 
+const getSubscriptionStatusLabel = (subscription) => {
+  if (!subscription) return "No subscription";
+  if (subscription.isExpired || subscription.status === "expired") return "Expired";
+  if (subscription.status === "active") return "Active";
+  if (subscription.status === "trialing") return "Trial";
+  if (subscription.status === "cancelled") return "Cancelled";
+  if (subscription.status === "past_due") return "Past due";
+  return subscription.status || "—";
+};
+
 const getProviderLabel = (provider) => {
   if (!provider || provider === "manual") return "Manual";
   if (provider === "disabled") return "Disabled";
@@ -454,6 +464,7 @@ export default function PlatformSalonBillingDetailPage() {
   const seats = detail?.seats;
   const acceptedStaff = detail?.acceptedStaff || [];
   const latestPendingAttempt = detail?.latestPendingAttempt;
+  const subscriptionIsCancelled = subscription?.status === "cancelled";
   const totalPaymentsPages = Math.max(1, Math.ceil(paymentsTotal / 10));
   const assignedBarberIds = new Set(
     (seats?.assignments || []).map((a) => String(a.barber?._id || a.barber))
@@ -562,13 +573,7 @@ export default function PlatformSalonBillingDetailPage() {
                     subscription.status
                   )}`}
                 >
-                  {subscription.isExpired
-                    ? "Expired"
-                    : subscription.status === "active"
-                      ? "Active"
-                      : subscription.status === "trialing"
-                        ? "Trial"
-                        : subscription.status}
+                  {getSubscriptionStatusLabel(subscription)}
                 </span>
               )}
 
@@ -638,15 +643,15 @@ export default function PlatformSalonBillingDetailPage() {
               <div className="space-y-2 text-sm">
                 <InfoRow
                   label="Status"
-                  value={
-                    subscription.isExpired
-                      ? "Expired"
-                      : subscription.status === "active"
-                        ? "Active"
-                        : subscription.status || "—"
-                  }
+                  value={getSubscriptionStatusLabel(subscription)}
                 />
                 <InfoRow label="Provider" value={getProviderLabel(subscription.provider)} />
+                {subscriptionIsCancelled && (
+                  <InfoRow
+                    label="Cancelled"
+                    value={formatDateTime(subscription.cancelledAt)}
+                  />
+                )}
                 <InfoRow
                   label="Period"
                   value={`${formatDate(subscription.currentPeriodStart)} — ${formatDate(subscription.currentPeriodEnd)}`}
@@ -875,6 +880,12 @@ export default function PlatformSalonBillingDetailPage() {
               </span>
             )}
           </div>
+
+          {subscriptionIsCancelled && (
+            <div className="mb-4 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
+              Paid payments remain in history. Subscription is currently cancelled.
+            </div>
+          )}
 
           {payments.length === 0 ? (
             <p className="text-sm text-neutral-400">No payment attempts found.</p>
