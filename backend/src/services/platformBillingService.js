@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
+import PaymentRecord from "../models/PaymentRecord.js";
 import PlatformAuditLog from "../models/PlatformAuditLog.js";
 import { isAcceptedStaffMember } from "./salon/salonRelationshipService.js";
 import { getDaysRemaining, getOrCreateDefaultSubscriptionPlan } from "./subscriptionService.js";
@@ -231,6 +232,7 @@ const SAFE_PAYMENT_FIELDS = [
   "seatCount", "months", "createdAt", "updatedAt",
   "paidAt", "confirmedAt", "failedAt", "cancelledAt",
   "refundedAt", "expiresAt", "checkoutUrl", "providerPaymentId",
+  "periodStart", "periodEnd", "source", "action",
 ];
 
 const serializePaymentAttempt = (attempt) => {
@@ -241,7 +243,24 @@ const serializePaymentAttempt = (attempt) => {
       safe[field] = attempt[field];
     }
   }
-  // Exclude sensitive metadata entirely
+  safe.source = "payment_attempt";
+  if (attempt.metadata?.action) {
+    safe.action = attempt.metadata.action;
+  }
+  // Exclude raw metadata entirely.
+  return safe;
+};
+
+const serializePaymentRecord = (record) => {
+  if (!record) return null;
+  const safe = {};
+  for (const field of SAFE_PAYMENT_FIELDS) {
+    if (record[field] !== undefined) {
+      safe[field] = record[field];
+    }
+  }
+  safe.source = "payment_record";
+  safe.purpose = "subscription";
   return safe;
 };
 
@@ -500,23 +519,49 @@ export const getSalonPayments = async (salonId, { page = 1, limit = 20 } = {}) =
   const safePage = Math.max(1, Number(page) || 1);
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
   const skip = (safePage - 1) * safeLimit;
+  const fetchLimit = skip + safeLimit;
 
   const filter = {
     ownerType: "salon",
     ownerId: new mongoose.Types.ObjectId(getIdString(salonId)),
     purpose: "subscription",
   };
+  const recordFilter = {
+    ownerType: "salon",
+    ownerId: new mongoose.Types.ObjectId(getIdString(salonId)),
+  };
 
-  const total = await SubscriptionPaymentAttempt.countDocuments(filter);
-  const attempts = await SubscriptionPaymentAttempt.find(filter)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(safeLimit)
-    .lean();
+  const [attemptTotal, recordTotal, attempts, records] = await Promise.all([
+    SubscriptionPaymentAttempt.countDocuments(filter),
+    PaymentRecord.countDocuments(recordFilter),
+    SubscriptionPaymentAttempt.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(fetchLimit)
+      .lean(),
+    PaymentRecord.find(recordFilter)
+      .sort({ paidAt: -1, createdAt: -1 })
+      .limit(fetchLimit)
+      .lean(),
+  ]);
+
+  const payments = [
+    ...attempts.map(serializePaymentAttempt),
+    ...records.map(serializePaymentRecord),
+  ]
+    .sort((left, right) => {
+      const rightTime = new Date(
+        right.paidAt || right.confirmedAt || right.createdAt || 0
+      ).getTime();
+      const leftTime = new Date(
+        left.paidAt || left.confirmedAt || left.createdAt || 0
+      ).getTime();
+      return rightTime - leftTime;
+    })
+    .slice(skip, skip + safeLimit);
 
   return {
-    payments: attempts.map(serializePaymentAttempt),
-    total,
+    payments,
+    total: attemptTotal + recordTotal,
     page: safePage,
     limit: safeLimit,
   };

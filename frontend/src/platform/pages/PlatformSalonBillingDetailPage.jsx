@@ -80,6 +80,13 @@ const getPaymentStatusLabel = (payment) => {
   return status.replace(/_/g, " ");
 };
 
+const getPaymentActionLabel = (payment) => {
+  if (payment?.action === "update_seats") return "Seat update";
+  if (payment?.action === "renew") return "Renewal";
+  if (payment?.source === "payment_record") return "Paid record";
+  return payment?.purpose === "subscription" ? "Subscription" : "—";
+};
+
 const getSubscriptionStatusLabel = (subscription) => {
   if (!subscription) return "No subscription";
   if (subscription.isExpired || subscription.status === "expired") return "Expired";
@@ -896,12 +903,14 @@ export default function PlatformSalonBillingDetailPage() {
                 <div className="col-span-2">Amount</div>
                 <div className="col-span-2">Status</div>
                 <div className="col-span-2">Provider</div>
-                <div className="col-span-3">Period</div>
+                <div className="col-span-2">Action</div>
+                <div className="col-span-1">Seats</div>
+                <div className="col-span-2">Period</div>
               </div>
 
               {payments.map((payment) => (
                 <div
-                  key={payment._id}
+                  key={`${payment.source || "payment"}-${payment._id}`}
                   className="grid grid-cols-12 gap-3 rounded-xl border border-neutral-100 px-3 py-2.5 text-sm"
                 >
                   <div className="col-span-3 text-neutral-500">
@@ -928,7 +937,14 @@ export default function PlatformSalonBillingDetailPage() {
                   <div className="col-span-2 text-neutral-500">
                     {getProviderLabel(payment.provider)}
                   </div>
-                  <div className="col-span-3 text-neutral-500">
+                  <div className="col-span-2 text-neutral-500">
+                    {getPaymentActionLabel(payment)}
+                  </div>
+                  <div className="col-span-1 text-neutral-500">
+                    {payment.seatCount || "—"}
+                    {payment.months ? ` / ${payment.months}m` : ""}
+                  </div>
+                  <div className="col-span-2 text-neutral-500">
                     {payment.periodStart && payment.periodEnd
                       ? `${formatDate(payment.periodStart)} — ${formatDate(payment.periodEnd)}`
                       : "—"}

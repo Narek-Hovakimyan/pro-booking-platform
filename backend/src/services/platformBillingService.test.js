@@ -8,6 +8,7 @@ import Subscription from "../models/Subscription.js";
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
+import PaymentRecord from "../models/PaymentRecord.js";
 import PlatformAuditLog from "../models/PlatformAuditLog.js";
 import {
   activateSalonSubscription,
@@ -309,6 +310,26 @@ const subscriptionPaymentDoc = {
   updatedAt: new Date("2025-06-01"),
   checkoutUrl: null,
   providerPaymentId: null,
+  metadata: { action: "renew", internal: "secret" },
+};
+
+const paymentRecordDoc = {
+  _id: oid("64b000000000000000060010"),
+  subscriptionId,
+  payerId: ownerId,
+  ownerType: "salon",
+  ownerId: salonId,
+  amount: 300,
+  currency: "AMD",
+  seatCount: 3,
+  periodStart: new Date("2025-06-01"),
+  periodEnd: new Date("2025-07-01"),
+  status: "paid",
+  provider: "manual",
+  providerPaymentId: null,
+  paidAt: new Date("2025-06-01"),
+  createdAt: new Date("2025-06-01"),
+  updatedAt: new Date("2025-06-01"),
 };
 
 const depositPaymentDoc = {
@@ -361,7 +382,7 @@ const restoreOriginals = () => {
   for (const [key, value] of Object.entries(originals)) {
     const [modelName, method] = key.split("__");
     const modelMap = {
-      Salon, User, Subscription, SubscriptionPlan, SubscriptionSeat, SubscriptionPaymentAttempt, PlatformAuditLog,
+      Salon, User, Subscription, SubscriptionPlan, SubscriptionSeat, SubscriptionPaymentAttempt, PaymentRecord, PlatformAuditLog,
     };
     if (modelMap[modelName] && value !== undefined) {
       modelMap[modelName][method] = value;
@@ -695,14 +716,14 @@ test("getSalonPayments filters by ownerType=salon, matching ownerId, purpose=sub
     capturedFilter = filter;
     return {
       sort: () => ({
-        skip: () => ({
-          limit: () => ({
-            lean: async () => [subscriptionPaymentDoc],
-          }),
+        limit: () => ({
+          lean: async () => [subscriptionPaymentDoc],
         }),
       }),
     };
   });
+  mockMethod(PaymentRecord, "countDocuments", async () => 0);
+  mockMethod(PaymentRecord, "find", () => qc([]));
 
   const result = await getSalonPayments(salonIdStr, { page: 1, limit: 20 });
   assert.ok(result, "Should return payments");
@@ -719,8 +740,10 @@ test("getSalonPayments filters by ownerType=salon, matching ownerId, purpose=sub
 test("getSalonPayments excludes booking deposit attempts", async () => {
   mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => 0);
   mockMethod(SubscriptionPaymentAttempt, "find", () => ({
-    sort: () => ({ skip: () => ({ limit: () => ({ lean: async () => [] }) }) }),
+    sort: () => ({ limit: () => ({ lean: async () => [] }) }),
   }));
+  mockMethod(PaymentRecord, "countDocuments", async () => 0);
+  mockMethod(PaymentRecord, "find", () => qc([]));
 
   const result = await getSalonPayments(salonIdStr, { page: 1, limit: 20 });
   assert.ok(result, "Should return payments");
@@ -762,8 +785,10 @@ test("getAllSalonPayments excludes booking deposit attempts", async () => {
 test("getSalonPayments excludes other salon subscription attempts", async () => {
   mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => 0);
   mockMethod(SubscriptionPaymentAttempt, "find", () => ({
-    sort: () => ({ skip: () => ({ limit: () => ({ lean: async () => [] }) }) }),
+    sort: () => ({ limit: () => ({ lean: async () => [] }) }),
   }));
+  mockMethod(PaymentRecord, "countDocuments", async () => 0);
+  mockMethod(PaymentRecord, "find", () => qc([]));
 
   const result = await getSalonPayments(salonIdStr, { page: 1, limit: 20 });
   assert.equal(result.total, 0, "Other salon payments excluded");
@@ -776,20 +801,20 @@ test("getSalonPayments excludes other salon subscription attempts", async () => 
 test("payment responses exclude sensitive metadata and tokens", async () => {
   const paymentWithMetadata = {
     ...subscriptionPaymentDoc,
-    metadata: { internal: "secret" },
+    metadata: { action: "renew", internal: "secret" },
     rawProviderResponse: { secret: true },
   };
 
   mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => 1);
   mockMethod(SubscriptionPaymentAttempt, "find", () => ({
     sort: () => ({
-      skip: () => ({
-        limit: () => ({
-          lean: async () => [paymentWithMetadata],
-        }),
+      limit: () => ({
+        lean: async () => [paymentWithMetadata],
       }),
     }),
   }));
+  mockMethod(PaymentRecord, "countDocuments", async () => 0);
+  mockMethod(PaymentRecord, "find", () => qc([]));
 
   const result = await getSalonPayments(salonIdStr, { page: 1, limit: 20 });
   assert.ok(result, "Should return payments");
@@ -798,8 +823,43 @@ test("payment responses exclude sensitive metadata and tokens", async () => {
   const payment = result.payments[0];
   assert.equal(payment.metadata, undefined, "metadata excluded");
   assert.equal(payment.rawProviderResponse, undefined, "rawProviderResponse excluded");
+  assert.equal(payment.action, "renew", "safe action present");
   assert.equal(payment.amount, 300, "amount present");
   assert.equal(payment.status, "paid", "status present");
+});
+
+test("getSalonPayments includes paid payment records with period details", async () => {
+  let capturedRecordFilter;
+
+  mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => 0);
+  mockMethod(SubscriptionPaymentAttempt, "find", () => ({
+    sort: () => ({ limit: () => ({ lean: async () => [] }) }),
+  }));
+  mockMethod(PaymentRecord, "countDocuments", async (filter) => {
+    capturedRecordFilter = filter;
+    return 1;
+  });
+  mockMethod(PaymentRecord, "find", (filter) => {
+    capturedRecordFilter = filter;
+    return {
+      sort: () => ({
+        limit: () => ({
+          lean: async () => [paymentRecordDoc],
+        }),
+      }),
+    };
+  });
+
+  const result = await getSalonPayments(salonIdStr, { page: 1, limit: 20 });
+
+  assert.equal(capturedRecordFilter.ownerType, "salon");
+  assert.equal(capturedRecordFilter.ownerId.toString(), salonIdStr);
+  assert.equal(result.total, 1);
+  assert.equal(result.payments.length, 1);
+  assert.equal(result.payments[0].source, "payment_record");
+  assert.equal(result.payments[0].status, "paid");
+  assert.equal(result.payments[0].purpose, "subscription");
+  assert.equal(result.payments[0].periodStart.getTime(), paymentRecordDoc.periodStart.getTime());
 });
 
 /* ════════════════════════════════════════════════════════ */
