@@ -39,6 +39,9 @@ const getIdsForQuery = (ids) =>
     mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id
   );
 
+const isSubscriptionStatusActive = (status) =>
+  PAID_SUBSCRIPTION_STATUSES.includes(status);
+
 const resolveQuery = async (query) => {
   if (query && typeof query.lean === "function") {
     return query.lean();
@@ -270,11 +273,13 @@ export const serializeSubscriptionStatus = (
   const raw = subscription.toObject ? subscription.toObject() : subscription;
   const planData = raw.planId && typeof raw.planId === "object" ? raw.planId : plan;
   const currentPeriodEnd = raw.currentPeriodEnd || raw.trialEndsAt || null;
-  const daysRemaining = getDaysRemaining(currentPeriodEnd, now);
+  const rawDaysRemaining = getDaysRemaining(currentPeriodEnd, now);
   const endDate = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
   const periodEnded =
     endDate && !Number.isNaN(endDate.getTime()) && endDate.getTime() <= now.getTime();
   const isExpired = raw.status === "expired" || Boolean(periodEnded);
+  const isActive = isSubscriptionStatusActive(raw.status) && !isExpired;
+  const daysRemaining = isActive ? rawDaysRemaining : 0;
   const seatCount = Number(raw.seatCount || 1);
   const pricePerSeat = Number(raw.pricePerSeat ?? planData?.pricePerSeat ?? 0);
   const monthlyTotal = Number(raw.totalPrice ?? pricePerSeat * seatCount);
@@ -283,9 +288,10 @@ export const serializeSubscriptionStatus = (
     ...raw,
     id: raw.id || raw._id,
     daysRemaining,
+    isActive,
     isExpired,
     isExpiringSoon:
-      daysRemaining !== null && daysRemaining <= 7 && !isExpired,
+      daysRemaining !== null && daysRemaining <= 7 && isActive,
     renewalRequiredAt: currentPeriodEnd,
     currentPeriodEnd,
     monthlyTotal,
@@ -996,6 +1002,24 @@ export const createSubscriptionPaymentIntent = async ({
 
   const plan = await getOrCreateDefaultSubscriptionPlan();
   const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
+
+  if (action === "update_seats") {
+    const existingSubscription = await Subscription.findOne({ ownerType, ownerId });
+    const serializedSubscription = serializeSubscriptionStatus(
+      existingSubscription,
+      plan,
+      now
+    );
+
+    if (!serializedSubscription?.isActive) {
+      const error = new Error(
+        "Subscription must be active before updating seats. Please renew first."
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
   const amount = monthlyTotal * normalizedMonths;
   const provider = getPaymentProvider(providerName);
   const paymentIntent = await provider.createPaymentIntent({
@@ -1389,9 +1413,10 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
 
   // Compute available seat count
   const activeSeatCount = activeSeats.length;
-  const availableSeatCount = serializedSubscription
-    ? Math.max(0, serializedSubscription.seatCount - activeSeatCount)
+  const activeCapacity = serializedSubscription?.isActive
+    ? serializedSubscription.seatCount
     : 0;
+  const availableSeatCount = Math.max(0, activeCapacity - activeSeatCount);
 
   // Fetch accepted staff only; chair renters remain independently billed.
   const approvedMemberDocs = await User.find(
@@ -1434,6 +1459,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
     activeSeats,
     revokedSeats,
     availableSeatCount,
+    activeCapacity,
     approvedMembers,
     pendingPaymentAttempt,
     defaultPlan: plan
@@ -1681,6 +1707,19 @@ export const confirmSubscriptionSeatUpdate = async ({
   if (!subscription) {
     const error = new Error("Subscription not found");
     error.statusCode = 404;
+    throw error;
+  }
+
+  const serializedSubscription = serializeSubscriptionStatus(
+    subscription,
+    null,
+    now
+  );
+  if (!serializedSubscription?.isActive) {
+    const error = new Error(
+      "Subscription must be active before updating seats. Please renew first."
+    );
+    error.statusCode = 400;
     throw error;
   }
 

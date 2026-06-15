@@ -776,6 +776,27 @@ test("expired salon subscription + active seat does NOT grant access", async () 
   assert.equal(hasAccess, false);
 });
 
+test("cancelled salon subscription + active seat does NOT grant access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return null;
+    return null;
+  };
+
+  const activeSeat = makeSubscriptionSeat({
+    subscriptionId: makeSubDoc({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "cancelled",
+      currentPeriodEnd: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+    }),
+  });
+
+  SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
+});
+
 test("revoked seat does NOT grant access", async () => {
   Subscription.findOne = async (query) => {
     if (query.ownerType === "barber") return null;
@@ -1107,6 +1128,44 @@ test("salon owner can view subscription seat details", async () => {
   assert.equal(result.availableSeatCount, 5);
   assert.equal(result.approvedMembers.length, 1);
   assert.equal(result.defaultPlan.pricePerSeat, defaultPlanDoc.pricePerSeat);
+});
+
+test("cancelled salon subscription with future period returns inactive billing summary", async () => {
+  const salonDoc = makeSalonDoc({ ownerId });
+  const salonSub = makeSubDoc({
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 4,
+    totalPrice: 20000,
+    status: "cancelled",
+    currentPeriodEnd: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+    cancelledAt: new Date(),
+  });
+  const seats = [
+    makeBillingSeat({ subscriptionId: salonSub._id, name: "Staff One" }),
+    makeBillingSeat({ subscriptionId: salonSub._id, name: "Staff Two" }),
+  ];
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => salonDoc;
+  Subscription.findOne = () => chainableQuery(salonSub);
+  SubscriptionSeat.find = (query) =>
+    chainableQuery(query.status === "active" ? seats : []);
+  SubscriptionPaymentAttempt.find = () => chainableQuery([]);
+  User.find = () => chainableQuery([makeBarberUser()]);
+
+  const result = await getSalonSubscriptionDetails({
+    salonId,
+    requester: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(result.subscription.status, "cancelled");
+  assert.equal(result.subscription.isActive, false);
+  assert.equal(result.subscription.daysRemaining, 0);
+  assert.equal(result.subscription.seatCount, 4);
+  assert.equal(result.activeSeats.length, 2);
+  assert.equal(result.activeCapacity, 0);
+  assert.equal(result.availableSeatCount, 0);
 });
 
 test("salon admin can view subscription seat details", async () => {
@@ -1989,6 +2048,34 @@ test("salon owner can create payment intent for 4 seats", async () => {
     monthlyTotal: defaultPlanDoc.pricePerSeat * 4,
     action: "renew",
   });
+});
+
+test("cancelled salon subscription can still prepare renewal payment", async () => {
+  const attemptStub = stubPaymentAttemptCreate();
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Salon.findById = async () => makeSalonDoc({ ownerId: barberId });
+  Subscription.findOne = () =>
+    chainableQuery(
+      makeSubDoc({
+        ownerType: "salon",
+        ownerId: salonId,
+        status: "cancelled",
+      })
+    );
+
+  const result = await createSubscriptionPaymentIntent({
+    requester: { _id: barberId, role: "barber" },
+    ownerType: "salon",
+    ownerId: salonId,
+    seatCount: 4,
+    months: 1,
+    action: "renew",
+  });
+
+  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.status, "pending");
+  assert.equal(result.paymentAttempt.status, "pending");
 });
 
 test("payment intent rejects non-integer salon seatCount", async () => {

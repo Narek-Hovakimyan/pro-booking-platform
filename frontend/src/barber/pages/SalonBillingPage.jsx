@@ -74,6 +74,7 @@ const getSubscriptionStatusLabel = (status) => {
   if (status === "trialing") return "Trial";
   if (status === "expired") return "Expired";
   if (status === "past_due") return "Past due";
+  if (status === "cancelled") return "Cancelled";
   return status ? status.replace("_", " ") : "No subscription";
 };
 
@@ -201,6 +202,8 @@ export default function SalonBillingPage() {
   const approvedMembers = details?.approvedMembers || [];
   const subscription = details?.subscription || null;
   const plan = details?.defaultPlan || null;
+  const subscriptionIsActive = subscription?.isActive === true;
+  const subscriptionIsCancelled = subscription?.status === "cancelled";
   const currency = subscription?.currency || plan?.currency || "AMD";
   const pricePerSeat =
     Number(subscription?.pricePerSeat || plan?.pricePerSeat || 0);
@@ -226,6 +229,7 @@ export default function SalonBillingPage() {
   );
   const canAssignSeat =
     Boolean(selectedMemberId) &&
+    subscriptionIsActive &&
     availableSeatCount > 0 &&
     Boolean(subscription) &&
     !saving;
@@ -500,7 +504,7 @@ export default function SalonBillingPage() {
                   <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
-                        Paid seats
+                        {subscriptionIsActive ? "Paid seats" : "Inactive paid seats"}
                       </div>
                       <div className="mt-1 text-2xl font-bold text-neutral-950">
                         {paidSeatCount}
@@ -508,7 +512,7 @@ export default function SalonBillingPage() {
                     </div>
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
-                        Used seats
+                        {subscriptionIsActive ? "Used seats" : "Assigned seats"}
                       </div>
                       <div className="mt-1 text-2xl font-bold text-neutral-950">
                         {usedSeatCount}
@@ -516,10 +520,10 @@ export default function SalonBillingPage() {
                     </div>
                     <div className="rounded-xl bg-neutral-50 p-4">
                       <div className="text-xs font-medium uppercase text-neutral-500">
-                        Available seats
+                        {subscriptionIsActive ? "Available seats" : "Usable seats"}
                       </div>
                       <div className="mt-1 text-2xl font-bold text-neutral-950">
-                        {availableSeatCount}
+                        {subscriptionIsActive ? availableSeatCount : 0}
                       </div>
                     </div>
                     <div className="rounded-xl bg-neutral-50 p-4">
@@ -527,7 +531,7 @@ export default function SalonBillingPage() {
                         Days remaining
                       </div>
                       <div className="mt-1 text-2xl font-bold text-neutral-950">
-                        {subscription?.daysRemaining ?? "0"}
+                        {subscriptionIsActive ? subscription?.daysRemaining ?? "0" : "0"}
                       </div>
                     </div>
                     <div className="rounded-xl bg-neutral-50 p-4">
@@ -544,11 +548,15 @@ export default function SalonBillingPage() {
                   </div>
 
                   <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-600">
-                    <p>Each active seat can be assigned to one approved salon member.</p>
+                    <p>
+                      {subscriptionIsActive
+                        ? "Each active seat can be assigned to one approved salon member."
+                        : "Seat assignments are inactive until the salon subscription is renewed."}
+                    </p>
                     <p className="mt-1">Payment does not assign seats automatically.</p>
                     {subscription && (
                       <p className="mt-2 font-medium text-neutral-800">
-                        Active monthly total:{" "}
+                        {subscriptionIsActive ? "Active monthly total: " : "Previous monthly total: "}
                         {formatCurrency(
                           subscription.monthlyTotal ?? subscription.totalPrice,
                           currency
@@ -557,7 +565,7 @@ export default function SalonBillingPage() {
                     )}
                   </div>
 
-                  {subscription?.isExpiringSoon && (
+                  {subscriptionIsActive && subscription?.isExpiringSoon && (
                     <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
                       <div className="flex items-center gap-2 font-semibold">
                         <AlertTriangle className="h-4 w-4" />
@@ -580,9 +588,19 @@ export default function SalonBillingPage() {
                     </div>
                   )}
 
+                  {subscriptionIsCancelled && (
+                    <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+                      <div className="font-semibold">Salon subscription cancelled</div>
+                      <p className="mt-1">
+                        Existing seat assignments remain listed for history, but they
+                        do not unlock specialist access until the subscription is renewed.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     <h3 className="font-semibold text-neutral-950">
-                      Active seats
+                      {subscriptionIsActive ? "Active seats" : "Inactive seat assignments"}
                     </h3>
                     {activeSeats.length === 0 ? (
                       <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-500">
@@ -600,7 +618,9 @@ export default function SalonBillingPage() {
                                 {getPersonName(seat)}
                               </div>
                               <div className="text-xs text-neutral-500">
-                                Assigned specialist
+                                {subscriptionIsActive
+                                  ? "Assigned specialist"
+                                  : "Inactive until renewal"}
                               </div>
                             </div>
                             <Button
@@ -705,7 +725,7 @@ export default function SalonBillingPage() {
                 </Card>
 
                 {/* ── Update seats card ── */}
-                {subscription && (
+                {subscription && subscriptionIsActive && (
                   <Card>
                     <CardContent className="space-y-4">
                       <div className="flex items-center gap-2">
@@ -887,7 +907,9 @@ export default function SalonBillingPage() {
                     >
                       <option value="">
                         {availableSeatCount <= 0
-                          ? "No available seats"
+                          ? subscriptionIsActive
+                            ? "No available seats"
+                            : "Renew subscription to assign seats"
                           : "Choose approved member"}
                       </option>
                       {assignableMembers.map((member) => (
@@ -904,10 +926,12 @@ export default function SalonBillingPage() {
                       <UserPlus className="h-4 w-4" />
                       Assign seat
                     </Button>
-                    {availableSeatCount <= 0 && (
+                    {(!subscriptionIsActive || availableSeatCount <= 0) && (
                       <p className="flex items-center gap-1.5 text-xs text-neutral-500">
                         <Minus className="h-3.5 w-3.5" />
-                        Prepare payment or activate more paid seats first.
+                        {subscriptionIsActive
+                          ? "Prepare payment or activate more paid seats first."
+                          : "Renew the subscription before assigning seats."}
                       </p>
                     )}
                   </CardContent>
