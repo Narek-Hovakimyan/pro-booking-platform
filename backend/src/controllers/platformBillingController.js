@@ -8,6 +8,7 @@ import {
   updateSalonSeatCount,
   assignSalonSeat,
   revokeSalonSeat,
+  cancelSalonSubscription,
   confirmSalonPayment,
 } from "../services/platformBillingService.js";
 
@@ -168,6 +169,27 @@ export const revokeSeat = async (req, res, next) => {
 
     const result = await revokeSalonSeat(salonId, {
       barberId,
+      note,
+      actor: req.user,
+      requestIp: getRequestIp(req),
+    });
+
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/platform/billing/salons/:salonId/subscription/cancel
+ * Cancel/deactivate a salon subscription (soft cancel only).
+ */
+export const cancelSubscription = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    const { note } = req.body;
+
+    const result = await cancelSalonSubscription(salonId, {
       note,
       actor: req.user,
       requestIp: getRequestIp(req),

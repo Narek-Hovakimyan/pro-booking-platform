@@ -881,6 +881,80 @@ export const assignSalonSeat = async (salonId, { barberId, note, actor, requestI
 };
 
 /**
+ * Cancel/deactivate a salon subscription.
+ * Soft cancel only — sets status to 'cancelled', keeps all payment history and seat assignments.
+ *
+ * @param {string} salonId
+ * @param {Object} options
+ * @param {string} options.note - Required reason for cancellation
+ * @param {Object} options.actor - req.user (platform admin)
+ * @returns {Object} Updated salon billing detail
+ */
+export const cancelSalonSubscription = async (salonId, { note, actor, requestIp } = {}) => {
+  if (!note || !note.trim()) {
+    const error = new Error("note is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const salon = await Salon.findById(salonId).lean();
+  if (!salon) {
+    const error = new Error("Salon not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const subscription = await Subscription.findOne({
+    ownerType: "salon",
+    ownerId: salon._id,
+  });
+
+  if (!subscription) {
+    const error = new Error("Salon does not have a subscription");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cancellableStatuses = ["trialing", "active", "past_due"];
+  if (!cancellableStatuses.includes(subscription.status)) {
+    const error = new Error(
+      `Subscription status "${subscription.status}" cannot be cancelled. Only trialing, active, or past_due subscriptions can be cancelled.`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const oldValue = {
+    status: subscription.status,
+    cancelledAt: subscription.cancelledAt,
+  };
+
+  subscription.status = "cancelled";
+  subscription.cancelledAt = new Date();
+  await subscription.save();
+
+  await createAuditLogOrRollback(
+    {
+      actorId: actor._id,
+      action: "salon_subscription.cancel",
+      salonId: salon._id,
+      subscriptionId: subscription._id,
+      oldValue,
+      newValue: { status: "cancelled", cancelledAt: subscription.cancelledAt },
+      note: note.trim(),
+      requestIp,
+    },
+    async () => {
+      subscription.status = oldValue.status;
+      subscription.cancelledAt = oldValue.cancelledAt;
+      await subscription.save();
+    }
+  );
+
+  return getSalonBillingDetail(salonId);
+};
+
+/**
  * Revoke a seat from an assigned staff barber.
  *
  * @param {string} salonId

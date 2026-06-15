@@ -25,6 +25,7 @@ import {
   updatePlatformSalonSeatCount,
   assignPlatformSalonSeat,
   revokePlatformSalonSeat,
+  cancelPlatformSalonSubscription,
   confirmPlatformSalonPayment,
 } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -424,6 +425,15 @@ export default function PlatformSalonBillingDetailPage() {
     }, note);
   };
 
+  /* ── Cancel subscription ── */
+  const handleCancelConfirm = (note) => {
+    handleMutation(async (n) => {
+      return cancelPlatformSalonSubscription(salonId, {
+        note: n,
+      });
+    }, note);
+  };
+
   /* ── Confirm payment ── */
   const handlePaymentConfirm = (note) => {
     const paymentId = modal.extra?.paymentId;
@@ -583,6 +593,15 @@ export default function PlatformSalonBillingDetailPage() {
                       variant="outline"
                     />
                   )}
+                  {subscription &&
+                    ["trialing", "active", "past_due"].includes(subscription.status) && (
+                      <ActionButton
+                        icon={XCircle}
+                        label="Cancel subscription"
+                        onClick={() => setModal({ type: "cancel" })}
+                        variant="danger"
+                      />
+                    )}
                 </div>
               )}
             </div>
@@ -1168,6 +1187,19 @@ export default function PlatformSalonBillingDetailPage() {
           </div>
         )}
       </PlatformActionModal>
+
+      {/* Cancel subscription */}
+      <PlatformActionModal
+        key={modal?.type === "cancel" ? "cancel-open" : "cancel-closed"}
+        isOpen={modal?.type === "cancel"}
+        onClose={closeModal}
+        onConfirm={handleCancelConfirm}
+        title="Cancel subscription"
+        warning="This will deactivate the salon subscription. Payment history and records will remain. Seats currently assigned will remain but access will be revoked."
+        confirmLabel="Cancel subscription"
+        isSubmitting={isSubmitting}
+        error={modalError}
+      />
 
       {/* Confirm payment */}
       <PlatformActionModal

@@ -82,6 +82,18 @@ export async function revokePlatformSalonSeat(salonId, payload) {
 }
 
 /**
+ * Cancel/deactivate a salon subscription (platform admin only).
+ * Soft cancel — sets status to 'cancelled', preserves payment history.
+ * @param {string} salonId
+ * @param {object} payload - { note }
+ * @returns {Promise<object>} Updated salon billing detail
+ */
+export async function cancelPlatformSalonSubscription(salonId, payload) {
+  const { data } = await api.post(`/platform/billing/salons/${salonId}/subscription/cancel`, payload);
+  return data;
+}
+
+/**
  * Manually confirm a salon subscription payment attempt (platform admin only).
  * @param {string} paymentId
  * @param {object} payload - { note }

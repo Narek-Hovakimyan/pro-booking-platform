@@ -10,6 +10,7 @@ import {
   updateSeatCount,
   assignSeat,
   revokeSeat,
+  cancelSubscription,
   confirmPayment,
 } from "../controllers/platformBillingController.js";
 
@@ -127,6 +128,19 @@ router.post(
   protect,
   requirePlatformAdmin,
   revokeSeat
+);
+
+/**
+ * POST /api/platform/billing/salons/:salonId/subscription/cancel
+ * Cancel/deactivate a salon subscription (soft cancel).
+ * Protected — platform admin only.
+ * Body: { note }
+ */
+router.post(
+  "/billing/salons/:salonId/subscription/cancel",
+  protect,
+  requirePlatformAdmin,
+  cancelSubscription
 );
 
 /**

@@ -14,6 +14,7 @@ import {
   updateSalonSeatCount,
   assignSalonSeat,
   revokeSalonSeat,
+  cancelSalonSubscription,
   confirmSalonPayment,
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
@@ -82,6 +83,8 @@ const subscriptionDoc = {
   currentPeriodStart: new Date("2025-06-01"),
   currentPeriodEnd: new Date("2025-07-01"),
   lastPaymentAt: new Date("2025-06-01"),
+  cancelledAt: null,
+  trialEndsAt: null,
   createdAt: new Date("2025-06-01"),
   updatedAt: new Date("2025-06-01"),
 };
@@ -800,7 +803,113 @@ test("payment responses exclude sensitive metadata and tokens", async () => {
 });
 
 /* ════════════════════════════════════════════════════════ */
-/* Test 14: no-subscription salon returns safe empty state */
+/* Test 14: cancelSalonSubscription soft cancels           */
+/* ════════════════════════════════════════════════════════ */
+
+test("cancelSalonSubscription sets status to cancelled and creates audit log", async () => {
+  const actor = { _id: ownerId };
+  let savedSubscriptionStatus = null;
+  let savedCancelledAt = null;
+  let logEntry = null;
+
+  const activeSub = saveableDoc(subscriptionDoc, (self) => {
+    savedSubscriptionStatus = self.status;
+    savedCancelledAt = self.cancelledAt;
+  });
+
+  mockQuery(Salon, "findById", salonDoc);
+  let subscriptionFindCalls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls++;
+    return subscriptionFindCalls === 1 ? Promise.resolve(activeSub) : qc(activeSub);
+  });
+  mockMethod(User, "findById", () => qc(ownerDoc));
+  mockMethod(User, "find", () => qc([]));
+  mockMethod(SubscriptionSeat, "find", () => qc([]));
+  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
+    sort: () => ({ lean: async () => null }),
+  }));
+  mockMethod(PlatformAuditLog, "create", async (entry) => {
+    logEntry = entry;
+    return entry;
+  });
+
+  const result = await cancelSalonSubscription(salonIdStr, {
+    note: "Salon owner violated terms",
+    actor,
+    requestIp: "127.0.0.1",
+  });
+
+  assert.equal(savedSubscriptionStatus, "cancelled");
+  assert.ok(savedCancelledAt instanceof Date);
+  assert.equal(result.subscription.status, "cancelled");
+  assert.ok(logEntry, "Audit log should be created");
+  assert.equal(logEntry.action, "salon_subscription.cancel");
+  assert.equal(logEntry.note, "Salon owner violated terms");
+  assert.equal(String(logEntry.actorId), String(ownerId));
+  assert.deepEqual(logEntry.oldValue, {
+    status: "active",
+    cancelledAt: null,
+  });
+  assert.equal(logEntry.newValue.status, "cancelled");
+  assert.ok(logEntry.newValue.cancelledAt);
+});
+
+test("cancelSalonSubscription rejects missing note", async () => {
+  await assert.rejects(
+    () =>
+      cancelSalonSubscription(salonIdStr, {
+        note: "",
+        actor: { _id: ownerId },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.equal(err.message, "note is required");
+      return true;
+    }
+  );
+});
+
+test("cancelSalonSubscription rejects already cancelled subscription", async () => {
+  const cancelledSub = saveableDoc({ ...subscriptionDoc, status: "cancelled", cancelledAt: new Date() });
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => qc(cancelledSub));
+
+  await assert.rejects(
+    () =>
+      cancelSalonSubscription(salonIdStr, {
+        note: "Trying to cancel twice",
+        actor: { _id: ownerId },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.ok(err.message.includes("cannot be cancelled"));
+      return true;
+    }
+  );
+});
+
+test("cancelSalonSubscription rejects salon without subscription", async () => {
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", async () => null);
+
+  await assert.rejects(
+    () =>
+      cancelSalonSubscription(salonIdStr, {
+        note: "No subscription to cancel",
+        actor: { _id: ownerId },
+      }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      assert.equal(err.message, "Salon does not have a subscription");
+      return true;
+    }
+  );
+});
+
+/* ════════════════════════════════════════════════════════ */
+/* Test 15: no-subscription salon returns safe empty state */
 /* ════════════════════════════════════════════════════════ */
 
 test("salon without subscription returns null subscription and zero seats", async () => {
@@ -850,7 +959,7 @@ test("salon billing detail includes latest pending or requires_action subscripti
 });
 
 /* ════════════════════════════════════════════════════════ */
-/* Test 15: expired subscription returns clear state       */
+/* Test 16: expired subscription returns clear state       */
 /* ════════════════════════════════════════════════════════ */
 
 test("expired subscription returns subscription with isExpired=true and 0 days remaining", async () => {
@@ -886,7 +995,7 @@ test("expired subscription returns subscription with isExpired=true and 0 days r
 });
 
 /* ════════════════════════════════════════════════════════ */
-/* Test 16: getAllSalonBillingSummaries pagination/search  */
+/* Test 17: getAllSalonBillingSummaries pagination/search  */
 /* ════════════════════════════════════════════════════════ */
 
 test("getAllSalonBillingSummaries returns paginated results", async () => {
