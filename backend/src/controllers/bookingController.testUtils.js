@@ -12,6 +12,10 @@ import Subscription from "../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
+import {
+  getArmeniaDateKey,
+  getDayKeyFromDate,
+} from "../utils/bookingDateTime.js";
 
 // ── Singleton model-method capture ──────────────────────────────────
 
@@ -47,8 +51,39 @@ export const serviceId = "64b000000000000000000002";
 export const clientId = "64b000000000000000000003";
 export const salonId = "64b000000000000000000004";
 export const salonBId = "64b000000000000000000005";
-export const bookingDate = "2026-06-15";
 export const pastBookingDate = "2020-01-15";
+
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+const addDaysToDateKey = (dateKey, days) => {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return formatDateKey(new Date(year, month - 1, day + days));
+};
+
+export const getFutureBookingDateForDay = (targetDayKey, minimumDaysFromToday = 7) => {
+  let candidate = addDaysToDateKey(
+    getArmeniaDateKey(new Date()),
+    minimumDaysFromToday
+  );
+
+  for (let offset = 0; offset < 7; offset += 1) {
+    if (getDayKeyFromDate(candidate) === targetDayKey) {
+      return candidate;
+    }
+    candidate = addDaysToDateKey(candidate, 1);
+  }
+
+  return candidate;
+};
+
+export const bookingDate = getFutureBookingDateForDay("mon");
+export const sundayBookingDate = getFutureBookingDateForDay("sun");
 
 // ── User fixtures ───────────────────────────────────────────────────
 

@@ -33,6 +33,7 @@ import {
   salonBId,
   salonId,
   serviceId,
+  sundayBookingDate,
 } from "./bookingController.testUtils.js";
 
 const originalConsoleError = console.error;
@@ -374,7 +375,7 @@ test("booking availability returns no slots for Sunday when Sunday is off", asyn
   const result = await __bookingTestHooks.validateBookingSlot({
     barberId,
     barber,
-    bookingDate: "2026-06-21",
+    bookingDate: sundayBookingDate,
     time: "10:20",
     duration: 20,
   });
