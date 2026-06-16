@@ -301,14 +301,6 @@ export const createSalon = async (req, res) => {
   try {
     if (!requireBarber(req, res)) return undefined;
 
-    // Check if barber already owns a salon (not just works in one)
-    const ownedSalon = await Salon.findOne({ ownerId: req.user._id });
-    if (ownedSalon) {
-      return res.status(400).json({
-        message: "You already own a salon. You cannot create another one.",
-      });
-    }
-
     const { name, city = "", address = "", phone = "", imageUrl = "" } = req.body;
     const safeImageUrl = sanitizeMediaUrl(imageUrl);
 
@@ -332,16 +324,19 @@ export const createSalon = async (req, res) => {
 
     // Update new salons array
     user.salons = user.salons || [];
+    const hasPrimary = user.salons.some((s) => s.isPrimary);
     user.salons.push({
       salon: salon._id,
       status: "approved",
       joinedAt: new Date(),
-      isPrimary: true,
+      isPrimary: !hasPrimary,
     });
 
-    // Update legacy fields
-    user.salon = salon._id;
-    user.salonStatus = "approved";
+    // Update legacy fields only if no primary exists yet
+    if (!hasPrimary) {
+      user.salon = salon._id;
+      user.salonStatus = "approved";
+    }
     openCurrentWorkHistory(user, salon);
     await user.save();
 

@@ -29,12 +29,14 @@ export default function SalonSettingsSection({
           {salonError}
         </p>
       )}
+
       {salonSaved && (
         <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
           {salonSaved}
         </p>
       )}
 
+      {/* Owned and approved member salons */}
       {allSalonEntries.length > 0 && (
         <div className="space-y-3">
           <h4 className="font-semibold">Your salons</h4>
@@ -42,13 +44,13 @@ export default function SalonSettingsSection({
             const salonData = entry.salon || {};
             const salonId = salonData?.id || salonData?._id || entry.salon;
             const salonName = salonData?.name || "Salon";
-            const isPrimary = entry.isPrimary;
             const isOwner =
-              String(salonData?.ownerId || "") === String(currentUserId || "");
+              salonData?.ownerId === currentUserId ||
+              String(salonData?.ownerId) === String(currentUserId);
 
             return (
               <div
-                className="rounded-2xl border border-neutral-200 p-4"
+                className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4"
                 key={salonId || index}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -56,31 +58,20 @@ export default function SalonSettingsSection({
                     <div className="font-semibold text-neutral-900">
                       {salonName}
                     </div>
-                    <div className="mt-1 text-sm text-emerald-600 font-medium">
-                      Approved
+                    <div className="mt-1 text-sm text-neutral-500">
+                      {salonData?.city || "No city"}
                     </div>
-                    {salonData?.city && (
-                      <div className="mt-1 text-sm text-neutral-500">
-                        {salonData.city}
-                        {salonData?.address ? `, ${salonData.address}` : ""}
-                      </div>
-                    )}
+                    <div className="mt-1 text-xs text-neutral-400">
+                      {isOwner ? "Owner" : "Member"}
+                      {entry.isPrimary ? " · Primary" : ""}
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {isPrimary && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                        ⭐ Primary
-                      </span>
-                    )}
-
                     {!isOwner && (
                       <Button
                         disabled={isSalonSaving}
-                        onClick={() =>
-                          onOpenLeaveConfirmation(salonName, salonId)
-                        }
-                        size="sm"
+                        onClick={() => onOpenLeaveConfirmation(salonName, salonId)}
                         variant="outline"
                       >
                         Leave
@@ -126,7 +117,6 @@ export default function SalonSettingsSection({
                   <Button
                     disabled={isSalonSaving}
                     onClick={() => onCancelSalonRequest(requestId)}
-                    size="sm"
                     variant="outline"
                   >
                     Cancel request
@@ -138,16 +128,18 @@ export default function SalonSettingsSection({
         </div>
       )}
 
-      {allSalonEntries.length === 0 &&
-        pendingEntries.length === 0 &&
-        salonStatus.salonStatus === "pending" && (
-          <div className="grid gap-2 sm:flex sm:items-center">
-            <p className="text-sm text-neutral-600">
-              Salon request pending
-              {salonStatus.pendingRequest?.salon?.name
-                ? `: ${salonStatus.pendingRequest.salon?.name}`
-                : ""}
-            </p>
+      {/* Pending legacy request */}
+      {salonStatus.pendingRequest && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="font-semibold text-neutral-900">
+                {salonStatus.pendingRequest.salonName || "Pending salon request"}
+              </div>
+              <div className="mt-1 text-sm text-amber-600 font-medium">
+                Waiting for approval
+              </div>
+            </div>
             <Button
               disabled={isSalonSaving}
               onClick={onCancelSalonRequest}
@@ -156,7 +148,8 @@ export default function SalonSettingsSection({
               Cancel pending request
             </Button>
           </div>
-        )}
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
         <label className="grid gap-2 text-sm font-semibold">
@@ -197,7 +190,7 @@ export default function SalonSettingsSection({
       <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
         <h4 className="font-semibold">Create your own salon</h4>
         <p className="mt-1 text-sm text-neutral-500">
-          You can only create one salon.
+          You can create multiple salons. Each salon has separate billing, staff, and schedules.
         </p>
 
         <form className="mt-4 grid gap-4 sm:grid-cols-2" onSubmit={onCreateSalon}>

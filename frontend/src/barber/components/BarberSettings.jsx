@@ -853,16 +853,21 @@ export default function BarberSettings({
         {settingsView === "salon" && (
           <>
             <h2 className="text-xl font-bold sm:text-2xl">Salon Settings</h2>
-            {error && (
-              <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {error}
-              </p>
-            )}
-            {isLoading || isProfileLoading ? (
-              <p className="text-neutral-500">Loading...</p>
-            ) : (
-              <>
-                <SalonSettingsSection
+          {error && (
+            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+          {isLoading || isProfileLoading ? (
+            <p className="text-neutral-500">Loading...</p>
+          ) : (
+            <>
+              {salonStatus.salonStatus !== "none" && (
+                <p className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                  You can create and manage multiple salons. Each salon has separate billing, staff, and schedules.
+                </p>
+              )}
+              <SalonSettingsSection
                   allSalonEntries={allSalonEntries}
                   availableSalons={availableSalons}
                   currentUserId={currentUserId}
