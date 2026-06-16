@@ -1,5 +1,75 @@
+import { Link } from "react-router-dom";
+import {
+  Building2,
+  CreditCard,
+  Calendar,
+  BarChart3,
+} from "lucide-react";
+
 import SettingsCard from "@/barber/components/settings/SettingsCard";
 import { Button } from "@/shared/components/ui/button";
+
+function ManageableSalonCard({ salonData, isPrimary, isOwner }) {
+  const salonName = salonData?.name || "Salon";
+
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-neutral-900 truncate">
+              {salonName}
+            </span>
+            {isPrimary && (
+              <span className="inline-flex shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                Primary
+              </span>
+            )}
+          </div>
+          {salonData?.city && (
+            <div className="mt-0.5 text-sm text-neutral-500">
+              {salonData.city}
+              {salonData?.address ? `, ${salonData.address}` : ""}
+            </div>
+          )}
+          <div className="mt-1 text-xs text-neutral-400">
+            {isOwner ? "Owner" : "Admin"}
+          </div>
+        </div>
+
+        {/* Quick actions — owner/admin only */}
+        {isOwner && (
+          <div className="flex shrink-0 flex-wrap gap-1.5">
+            <Link
+              to={`/admin/salon/billing`}
+              className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-700 transition hover:bg-neutral-100"
+              title="Billing"
+            >
+              <CreditCard className="h-3 w-3" />
+              Billing
+            </Link>
+            <Link
+              to={`/admin/salon/calendar`}
+              className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-700 transition hover:bg-neutral-100"
+              title="Calendar"
+            >
+              <Calendar className="h-3 w-3" />
+              Calendar
+            </Link>
+            <Link
+              to={`/admin/salon/reports`}
+              className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-700 transition hover:bg-neutral-100"
+              title="Reports"
+            >
+              <BarChart3 className="h-3 w-3" />
+              Reports
+            </Link>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function SalonSettingsSection({
   salonError,
@@ -19,10 +89,26 @@ export default function SalonSettingsSection({
   onSelectedSalonChange,
   onUpdateSalonDraft,
 }) {
+  // Separate manageable (owner/admin) from member-only entries
+  const manageableEntries = allSalonEntries.filter((entry) => {
+    const ownerId = entry.salon?.ownerId;
+    return (
+      String(ownerId) === String(currentUserId) ||
+      ownerId === currentUserId
+    );
+  });
+  const memberOnlyEntries = allSalonEntries.filter((entry) => {
+    const ownerId = entry.salon?.ownerId;
+    return (
+      String(ownerId) !== String(currentUserId) &&
+      ownerId !== currentUserId
+    );
+  });
+
   return (
     <SettingsCard
-      title="Salon"
-      description="Join a salon after owner approval, or create your own."
+      title="Salon settings"
+      description="Create and manage multiple salons. Each salon has separate billing, staff, schedules, and reports."
     >
       {salonError && (
         <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -36,105 +122,145 @@ export default function SalonSettingsSection({
         </p>
       )}
 
-      {/* Owned and approved member salons */}
-      {allSalonEntries.length > 0 && (
+      {/* ── Your salons (owner/admin) ── */}
+      {manageableEntries.length > 0 && (
         <div className="space-y-3">
-          <h4 className="font-semibold">Your salons</h4>
-          {allSalonEntries.map((entry, index) => {
-            const salonData = entry.salon || {};
-            const salonId = salonData?.id || salonData?._id || entry.salon;
-            const salonName = salonData?.name || "Salon";
-            const isOwner =
-              salonData?.ownerId === currentUserId ||
-              String(salonData?.ownerId) === String(currentUserId);
+          <div className="flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-neutral-500" />
+            <h4 className="font-semibold text-neutral-900">Your salons</h4>
+          </div>
+          <p className="text-xs text-neutral-500">
+            Primary salon is used only as your default salon. Billing and
+            bookings stay separate per salon.
+          </p>
+          <div className="space-y-2">
+            {manageableEntries.map((entry, index) => {
+              const salonData = entry.salon || {};
+              const salonId = salonData?.id || salonData?._id || entry.salon;
+              const isPrimary = entry.isPrimary;
+              const isOwner =
+                salonData?.ownerId === currentUserId ||
+                String(salonData?.ownerId) === String(currentUserId);
 
-            return (
-              <div
-                className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4"
-                key={salonId || index}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-neutral-900">
-                      {salonName}
-                    </div>
-                    <div className="mt-1 text-sm text-neutral-500">
-                      {salonData?.city || "No city"}
-                    </div>
-                    <div className="mt-1 text-xs text-neutral-400">
-                      {isOwner ? "Owner" : "Member"}
-                      {entry.isPrimary ? " · Primary" : ""}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {!isOwner && (
-                      <Button
-                        disabled={isSalonSaving}
-                        onClick={() => onOpenLeaveConfirmation(salonName, salonId)}
-                        variant="outline"
-                      >
-                        Leave
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              return (
+                <ManageableSalonCard
+                  key={salonId || index}
+                  salonData={salonData}
+                  isPrimary={isPrimary}
+                  isOwner={isOwner}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
 
+      {/* ── Memberships (staff/chair_renter — not owner/admin) ── */}
+      {memberOnlyEntries.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="font-semibold text-neutral-900">
+            Your memberships
+          </h4>
+          <div className="space-y-2">
+            {memberOnlyEntries.map((entry, index) => {
+              const salonData = entry.salon || {};
+              const salonId = salonData?.id || salonData?._id || entry.salon;
+              const salonName = salonData?.name || "Salon";
+
+              return (
+                <div
+                  className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4"
+                  key={salonId || index}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-neutral-900">
+                        {salonName}
+                      </div>
+                      {salonData?.city && (
+                        <div className="mt-0.5 text-sm text-neutral-500">
+                          {salonData.city}
+                        </div>
+                      )}
+                      <div className="mt-1 text-xs text-neutral-400">
+                        Member
+                        {entry.isPrimary ? " · Primary" : ""}
+                      </div>
+                    </div>
+
+                    <Button
+                      disabled={isSalonSaving}
+                      onClick={() =>
+                        onOpenLeaveConfirmation(salonName, salonId)
+                      }
+                      variant="outline"
+                    >
+                      Leave
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Pending requests ── */}
       {pendingEntries.length > 0 && (
         <div className="space-y-3">
-          <h4 className="font-semibold">Pending requests</h4>
-          {pendingEntries.map((entry, index) => {
-            const salonData = entry.salon || {};
-            const salonId = salonData?.id || salonData?._id || entry.salon;
-            const salonName = salonData?.name || "Salon";
-            const requestId = entry.requestId;
+          <h4 className="font-semibold text-neutral-900">
+            Pending requests
+          </h4>
+          <div className="space-y-2">
+            {pendingEntries.map((entry, index) => {
+              const salonData = entry.salon || {};
+              const salonId = salonData?.id || salonData?._id || entry.salon;
+              const salonName = salonData?.name || "Salon";
+              const requestId = entry.requestId;
 
-            return (
-              <div
-                className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4"
-                key={salonId || index}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-neutral-900">
-                      {salonName}
-                    </div>
-                    <div className="mt-1 text-sm text-amber-600 font-medium">
-                      Pending approval
-                    </div>
-                    {salonData?.city && (
-                      <div className="mt-1 text-sm text-neutral-500">
-                        {salonData.city}
+              return (
+                <div
+                  className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4"
+                  key={salonId || index}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-neutral-900">
+                        {salonName}
                       </div>
-                    )}
-                  </div>
+                      <div className="mt-1 text-sm text-amber-600 font-medium">
+                        Pending approval
+                      </div>
+                      {salonData?.city && (
+                        <div className="mt-1 text-sm text-neutral-500">
+                          {salonData.city}
+                        </div>
+                      )}
+                    </div>
 
-                  <Button
-                    disabled={isSalonSaving}
-                    onClick={() => onCancelSalonRequest(requestId)}
-                    variant="outline"
-                  >
-                    Cancel request
-                  </Button>
+                    <Button
+                      disabled={isSalonSaving}
+                      onClick={() => onCancelSalonRequest(requestId)}
+                      variant="outline"
+                    >
+                      Cancel request
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Pending legacy request */}
+      {/* ── Pending legacy request ── */}
       {salonStatus.pendingRequest && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="font-semibold text-neutral-900">
-                {salonStatus.pendingRequest.salonName || "Pending salon request"}
+                {salonStatus.pendingRequest.salonName ||
+                  "Pending salon request"}
               </div>
               <div className="mt-1 text-sm text-amber-600 font-medium">
                 Waiting for approval
@@ -151,6 +277,7 @@ export default function SalonSettingsSection({
         </div>
       )}
 
+      {/* ── Join salon ── */}
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
         <label className="grid gap-2 text-sm font-semibold">
           Request to join salon
@@ -187,13 +314,23 @@ export default function SalonSettingsSection({
         </Button>
       </div>
 
-      <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-        <h4 className="font-semibold">Create your own salon</h4>
+      {/* ── Create another salon ── */}
+      <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50 p-4">
+        <div className="flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-neutral-500" />
+          <h4 className="font-semibold text-neutral-900">
+            Create another salon
+          </h4>
+        </div>
         <p className="mt-1 text-sm text-neutral-500">
-          You can create multiple salons. Each salon has separate billing, staff, and schedules.
+          You can create multiple salons. Each salon has separate billing,
+          staff, schedules, and reports.
         </p>
 
-        <form className="mt-4 grid gap-4 sm:grid-cols-2" onSubmit={onCreateSalon}>
+        <form
+          className="mt-4 grid gap-4 sm:grid-cols-2"
+          onSubmit={onCreateSalon}
+        >
           <label className="grid gap-2 text-sm font-semibold">
             Salon name
             <input
@@ -201,7 +338,9 @@ export default function SalonSettingsSection({
               disabled={isSalonSaving}
               placeholder="Salon name"
               value={salonDraft.name}
-              onChange={(event) => onUpdateSalonDraft("name", event.target.value)}
+              onChange={(event) =>
+                onUpdateSalonDraft("name", event.target.value)
+              }
             />
           </label>
 
@@ -212,7 +351,9 @@ export default function SalonSettingsSection({
               disabled={isSalonSaving}
               placeholder="City"
               value={salonDraft.city}
-              onChange={(event) => onUpdateSalonDraft("city", event.target.value)}
+              onChange={(event) =>
+                onUpdateSalonDraft("city", event.target.value)
+              }
             />
           </label>
 
@@ -236,7 +377,9 @@ export default function SalonSettingsSection({
               disabled={isSalonSaving}
               placeholder="Phone"
               value={salonDraft.phone}
-              onChange={(event) => onUpdateSalonDraft("phone", event.target.value)}
+              onChange={(event) =>
+                onUpdateSalonDraft("phone", event.target.value)
+              }
             />
           </label>
 

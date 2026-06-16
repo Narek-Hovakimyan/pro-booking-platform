@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
+import { createSalon, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
 import { getSalonStaff } from "./salonStaffController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
@@ -13,6 +13,7 @@ import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
 const originalMethods = {
   barberProfileFind: BarberProfile.find,
   scheduleFindOneAndUpdate: Schedule.findOneAndUpdate,
+  salonCreate: Salon.create,
   salonFind: Salon.find,
   salonFindById: Salon.findById,
   joinRequestFind: SalonJoinRequest.find,
@@ -35,6 +36,7 @@ const staffUserId = "64b000000000000000000030";
 afterEach(() => {
   BarberProfile.find = originalMethods.barberProfileFind;
   Schedule.findOneAndUpdate = originalMethods.scheduleFindOneAndUpdate;
+  Salon.create = originalMethods.salonCreate;
   Salon.find = originalMethods.salonFind;
   Salon.findById = originalMethods.salonFindById;
   SalonJoinRequest.find = originalMethods.joinRequestFind;
@@ -117,6 +119,90 @@ test("listManageableSalons returns only owner/admin salons, not approved members
       { admins: barberId },
     ],
   });
+});
+
+test("createSalon lets an owner create a second salon without changing primary legacy fields", async () => {
+  const createdSalons = [];
+  const savedUsers = [];
+  const user = {
+    _id: ownerId,
+    role: "barber",
+    salon: null,
+    salonStatus: "none",
+    salons: [],
+    workHistory: [],
+    save: async () => {
+      savedUsers.push({
+        salon: user.salon,
+        salonStatus: user.salonStatus,
+        salons: user.salons.map((entry) => ({ ...entry })),
+      });
+      return user;
+    },
+  };
+
+  Salon.create = async (payload) => {
+    const salon = {
+      _id: createdSalons.length === 0 ? salonAId : salonBId,
+      ...payload,
+    };
+    createdSalons.push(salon);
+    return salon;
+  };
+  User.findById = async () => user;
+
+  const firstRes = createResponse();
+  await createSalon(
+    {
+      user: { _id: ownerId, role: "barber" },
+      body: { name: "First Salon" },
+    },
+    firstRes
+  );
+
+  const secondRes = createResponse();
+  await createSalon(
+    {
+      user: { _id: ownerId, role: "barber" },
+      body: { name: "Second Salon" },
+    },
+    secondRes
+  );
+
+  assert.equal(firstRes.statusCode, 201);
+  assert.equal(secondRes.statusCode, 201);
+  assert.equal(user.salons.length, 2);
+  assert.deepEqual(
+    user.salons.map((entry) => String(entry.salon)),
+    [salonAId, salonBId]
+  );
+  assert.equal(user.salons[0].isPrimary, true);
+  assert.equal(user.salons[1].isPrimary, false);
+  assert.equal(String(user.salon), salonAId);
+  assert.equal(user.salonStatus, "approved");
+  assert.equal(new Set(user.salons.map((entry) => String(entry.salon))).size, 2);
+  assert.equal(savedUsers.length, 2);
+
+  const manageableRes = createResponse();
+  let manageableQuery = null;
+  Salon.find = (query) => {
+    manageableQuery = query;
+    return { sort: async () => createdSalons };
+  };
+
+  await listManageableSalons(
+    { user: { _id: ownerId, role: "barber" } },
+    manageableRes
+  );
+
+  assert.equal(manageableRes.statusCode, 200);
+  assert.deepEqual(manageableQuery, {
+    $or: [{ ownerId }, { admins: ownerId }],
+  });
+  assert.deepEqual(
+    manageableRes.body.map((salon) => String(salon.id || salon._id)),
+    [salonAId, salonBId]
+  );
 });
 
 test("updateSalonDefaultSchedule creates salon-specific schedule document", async () => {
