@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link } from "react-router-dom";
 import { ArrowRight, BriefcaseBusiness, Calendar, Store, Clock, Award } from "lucide-react";
@@ -103,8 +103,15 @@ export default function BarberSettings({
   const [respondingRelationshipSalonId, setRespondingRelationshipSalonId] =
     useState("");
 
+  // Tracks whether initial profile fetch has been done (prevents re-fetch on derived dep changes)
+  const profileFetchedRef = useRef(false);
+
+  // Effect 1: Fetch profile from API once on mount/currentUser.id change only.
+  // Uses profileFetchedRef to avoid re-fetching when currentUser.name/phone change (derived deps).
   useEffect(() => {
     if (!currentUser?.id) return;
+    if (profileFetchedRef.current) return;
+    profileFetchedRef.current = true;
 
     let isMounted = true;
 
