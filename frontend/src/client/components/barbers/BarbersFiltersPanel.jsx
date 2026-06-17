@@ -20,6 +20,8 @@ export default function BarbersFiltersPanel({
   onBarberTypeChange,
   priceRange,
   onPriceRangeChange,
+  discountFilter,
+  onDiscountFilterChange,
   rating,
   onRatingChange,
   filterChips = [],
@@ -159,6 +161,18 @@ export default function BarbersFiltersPanel({
           />
         </label>
       </div>
+
+      <label className="grid gap-2 text-sm font-semibold">
+        Discounts
+        <select
+          className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+          value={discountFilter}
+          onChange={(event) => onDiscountFilterChange(event.target.value)}
+        >
+          <option value="">All</option>
+          <option value="with-discounts">With discounts</option>
+        </select>
+      </label>
 
       <label className="grid gap-2 text-sm font-semibold">
         Rating

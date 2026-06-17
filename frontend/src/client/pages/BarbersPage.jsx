@@ -7,7 +7,10 @@ import Drawer from "@/shared/components/common/Drawer";
 import BarbersFiltersPanel from "@/client/components/barbers/BarbersFiltersPanel";
 import BarbersGrid from "@/client/components/barbers/BarbersGrid";
 import { Button } from "@/shared/components/ui/button";
-import { getServiceCategoryLabel } from "@/shared/data/serviceCategories";
+import {
+  getServiceCategoryLabel,
+  getServicePriceInfo,
+} from "@/shared/data/serviceCategories";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import {
   addFavorite,
@@ -66,6 +69,16 @@ function getBarberPrices(services, barberId) {
     )
     .map((service) => Number(service?.price))
     .filter(Number.isFinite);
+}
+
+function hasActiveServiceDiscount(service) {
+  if (!service?.active) return false;
+  if (!["percent", "fixed"].includes(service?.discountType)) return false;
+
+  const discountValue = Number(service?.discountValue || 0);
+  if (!Number.isFinite(discountValue) || discountValue <= 0) return false;
+
+  return getServicePriceInfo(service).hasDiscount;
 }
 
 function getReviewStats(reviews, barberId) {
@@ -139,6 +152,7 @@ export default function BarbersPage() {
   const [selectedProfession, setSelectedProfession] = useState("");
   const [selectedBarberType, setSelectedBarberType] = useState("");
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
+  const [discountFilter, setDiscountFilter] = useState("");
   const [rating, setRating] = useState("");
   const initialCardSummary = useMemo(
     () =>
@@ -316,6 +330,7 @@ export default function BarbersPage() {
     setSelectedProfession("");
     setSelectedBarberType("");
     setPriceRange({ min: "", max: "" });
+    setDiscountFilter("");
     setRating("");
   };
   const hasActiveFilters =
@@ -327,6 +342,7 @@ export default function BarbersPage() {
     Boolean(selectedBarberType) ||
     Boolean(priceRange.min) ||
     Boolean(priceRange.max) ||
+    Boolean(discountFilter) ||
     Boolean(rating);
   const activeFiltersCount =
     (searchTerm.trim() ? 1 : 0) +
@@ -336,6 +352,7 @@ export default function BarbersPage() {
     (selectedProfession ? 1 : 0) +
     (selectedBarberType ? 1 : 0) +
     (priceRange.min || priceRange.max ? 1 : 0) +
+    (discountFilter ? 1 : 0) +
     (rating ? 1 : 0);
   const filterChips = [
     searchTerm.trim()
@@ -367,6 +384,9 @@ export default function BarbersPage() {
       : null,
     priceRange.max
       ? { label: `Max ${priceRange.max}`, onRemove: () => updatePriceRange("max", "") }
+      : null,
+    discountFilter
+      ? { label: "With discounts", onRemove: () => setDiscountFilter("") }
       : null,
     rating ? { label: `${rating}+ stars`, onRemove: () => setRating("") } : null,
   ].filter(Boolean);
@@ -468,6 +488,8 @@ export default function BarbersPage() {
           !priceRange.min || prices.some((price) => price >= minPrice);
         const maxMatches =
           !priceRange.max || prices.some((price) => price <= maxPrice);
+        const discountMatches =
+          !discountFilter || barberServices.some(hasActiveServiceDiscount);
         const ratingMatches =
           !rating || reviewStats.average >= minRating;
         const professionMatches =
@@ -484,12 +506,13 @@ export default function BarbersPage() {
           categoryMatches &&
           minMatches &&
           maxMatches &&
+          discountMatches &&
           ratingMatches &&
           professionMatches &&
           barberTypeMatches
         );
       }),
-    [barbers, priceRange.max, priceRange.min, rating, reviewStatsByBarberId, reviews, searchTerm, selectedCategory, selectedCity, selectedBarberType, selectedProfession, selectedService, servicesByBarberId]
+    [barbers, discountFilter, priceRange.max, priceRange.min, rating, reviewStatsByBarberId, reviews, searchTerm, selectedCategory, selectedCity, selectedBarberType, selectedProfession, selectedService, servicesByBarberId]
   );
   const barbersWithAvailability = useMemo(
     () =>
@@ -625,6 +648,8 @@ export default function BarbersPage() {
           onBarberTypeChange={setSelectedBarberType}
           priceRange={priceRange}
           onPriceRangeChange={updatePriceRange}
+          discountFilter={discountFilter}
+          onDiscountFilterChange={setDiscountFilter}
           rating={rating}
           onRatingChange={setRating}
           filterChips={filterChips}
