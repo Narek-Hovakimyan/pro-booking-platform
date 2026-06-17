@@ -1,7 +1,6 @@
 import { Search } from "lucide-react";
 
 import FilterChip from "@/shared/components/common/FilterChip";
-import { Button } from "@/shared/components/ui/button";
 
 export default function ClientsFiltersPanel({
   searchQuery,
@@ -15,28 +14,9 @@ export default function ClientsFiltersPanel({
   totalSpentRange,
   onTotalSpentRangeChange,
   filterChips = [],
-  onClearFilters,
 }) {
   return (
-    <div className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-neutral-950">Filters</h2>
-          <p className="text-sm text-neutral-500">
-            Narrow clients by booking activity and spend.
-          </p>
-        </div>
-        <Button
-          className="self-start sm:self-auto"
-          disabled={filterChips.length === 0}
-          onClick={onClearFilters}
-          type="button"
-          variant="outline"
-        >
-          Clear filters
-        </Button>
-      </div>
-
+    <>
       {filterChips.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {filterChips.map((chip) => (
@@ -49,9 +29,9 @@ export default function ClientsFiltersPanel({
         </div>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="space-y-4">
         <label className="grid gap-2 text-sm font-semibold">
-          Search
+          Search by name or phone
           <span className="relative">
             <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-neutral-400" />
             <input
@@ -78,7 +58,7 @@ export default function ClientsFiltersPanel({
         </label>
 
         <label className="grid gap-2 text-sm font-semibold">
-          Upcoming
+          Upcoming booking
           <select
             className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
             onChange={(event) => onUpcomingFilterChange(event.target.value)}
@@ -90,21 +70,7 @@ export default function ClientsFiltersPanel({
           </select>
         </label>
 
-        <label className="grid gap-2 text-sm font-semibold">
-          Last visit
-          <select
-            className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
-            onChange={(event) => onLastVisitFilterChange(event.target.value)}
-            value={lastVisitFilter}
-          >
-            <option value="">All</option>
-            <option value="last-30">Last 30 days</option>
-            <option value="last-90">Last 90 days</option>
-            <option value="no-recent">No recent visit</option>
-          </select>
-        </label>
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-semibold">
             Min total spent
             <input
@@ -133,7 +99,21 @@ export default function ClientsFiltersPanel({
             />
           </label>
         </div>
+
+        <label className="grid gap-2 text-sm font-semibold">
+          Last visit
+          <select
+            className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+            onChange={(event) => onLastVisitFilterChange(event.target.value)}
+            value={lastVisitFilter}
+          >
+            <option value="">All</option>
+            <option value="last-30">Last 30 days</option>
+            <option value="last-90">Last 90 days</option>
+            <option value="no-recent">No recent visit</option>
+          </select>
+        </label>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, SlidersHorizontal } from "lucide-react";
 
 import ClientsFiltersPanel from "@/barber/components/clients/ClientsFiltersPanel";
 import api from "@/shared/api/axios";
+import Drawer from "@/shared/components/common/Drawer";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -24,9 +25,25 @@ const formatBookingLabel = (booking) => {
 const normalizeSearch = (value) =>
   String(value || "").trim().toLowerCase();
 
+const DEFAULT_CLIENT_FILTERS = Object.freeze({
+  searchQuery: "",
+  visitType: "",
+  upcomingFilter: "",
+  lastVisitFilter: "",
+  totalSpentRange: Object.freeze({
+    min: "",
+    max: "",
+  }),
+});
+
 const getFiniteNumber = (value) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+};
+
+const getFilterNumber = (value) => {
+  if (String(value ?? "").trim() === "") return null;
+  return getFiniteNumber(value);
 };
 
 const getClientVisitCount = (client) => {
@@ -53,14 +70,20 @@ const getDaysSinceDate = (dateValue) => {
 export default function ClientsPage() {
   const navigate = useNavigate();
   const [clients, setClients] = useState([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [visitType, setVisitType] = useState("");
-  const [upcomingFilter, setUpcomingFilter] = useState("");
-  const [lastVisitFilter, setLastVisitFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState(
+    DEFAULT_CLIENT_FILTERS.searchQuery
+  );
+  const [visitType, setVisitType] = useState(DEFAULT_CLIENT_FILTERS.visitType);
+  const [upcomingFilter, setUpcomingFilter] = useState(
+    DEFAULT_CLIENT_FILTERS.upcomingFilter
+  );
+  const [lastVisitFilter, setLastVisitFilter] = useState(
+    DEFAULT_CLIENT_FILTERS.lastVisitFilter
+  );
   const [totalSpentRange, setTotalSpentRange] = useState({
-    min: "",
-    max: "",
+    ...DEFAULT_CLIENT_FILTERS.totalSpentRange,
   });
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -101,11 +124,11 @@ export default function ClientsPage() {
   };
 
   const clearFilters = () => {
-    setSearchQuery("");
-    setVisitType("");
-    setUpcomingFilter("");
-    setLastVisitFilter("");
-    setTotalSpentRange({ min: "", max: "" });
+    setSearchQuery(DEFAULT_CLIENT_FILTERS.searchQuery);
+    setVisitType(DEFAULT_CLIENT_FILTERS.visitType);
+    setUpcomingFilter(DEFAULT_CLIENT_FILTERS.upcomingFilter);
+    setLastVisitFilter(DEFAULT_CLIENT_FILTERS.lastVisitFilter);
+    setTotalSpentRange({ ...DEFAULT_CLIENT_FILTERS.totalSpentRange });
   };
 
   const filterChips = useMemo(() => {
@@ -169,10 +192,13 @@ export default function ClientsPage() {
     return chips;
   }, [lastVisitFilter, searchQuery, totalSpentRange, upcomingFilter, visitType]);
 
+  const hasActiveFilters = filterChips.length > 0;
+  const activeFiltersCount = filterChips.length;
+
   const filteredClients = useMemo(() => {
     const query = normalizeSearch(searchQuery);
-    const minSpent = getFiniteNumber(totalSpentRange.min);
-    const maxSpent = getFiniteNumber(totalSpentRange.max);
+    const minSpent = getFilterNumber(totalSpentRange.min);
+    const maxSpent = getFilterNumber(totalSpentRange.max);
 
     return clients.filter((client) => {
       const name = normalizeSearch(client.clientName);
@@ -251,25 +277,67 @@ export default function ClientsPage() {
           </p>
         </div>
 
-        <p className="text-sm font-medium text-neutral-600">
-          Showing {filteredClients.length} of {clients.length} clients
-        </p>
+        <div className="grid gap-2 sm:flex sm:items-center">
+          <Button
+            className="relative w-full sm:w-auto"
+            onClick={() => setIsFilterDrawerOpen(true)}
+            variant="outline"
+          >
+            <SlidersHorizontal className="mr-2 h-4 w-4" />
+            Filters
+            {activeFiltersCount > 0 && (
+              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">
+                {activeFiltersCount}
+              </span>
+            )}
+          </Button>
+          {hasActiveFilters && (
+            <Button
+              className="w-full sm:w-auto"
+              onClick={clearFilters}
+              variant="outline"
+            >
+              Clear Filters
+            </Button>
+          )}
+        </div>
       </div>
 
-      <ClientsFiltersPanel
-        filterChips={filterChips}
-        lastVisitFilter={lastVisitFilter}
-        onClearFilters={clearFilters}
-        onLastVisitFilterChange={setLastVisitFilter}
-        onSearchChange={setSearchQuery}
-        onTotalSpentRangeChange={handleTotalSpentRangeChange}
-        onUpcomingFilterChange={setUpcomingFilter}
-        onVisitTypeChange={setVisitType}
-        searchQuery={searchQuery}
-        totalSpentRange={totalSpentRange}
-        upcomingFilter={upcomingFilter}
-        visitType={visitType}
-      />
+      <p className="text-sm font-medium text-neutral-600">
+        Showing {filteredClients.length} of {clients.length} clients
+      </p>
+
+      <Drawer
+        closeLabel="Close filters"
+        description="Refine the client list instantly."
+        footer={
+          <>
+            <Button onClick={() => setIsFilterDrawerOpen(false)}>
+              Apply filters
+            </Button>
+            <Button onClick={clearFilters} variant="outline">
+              Clear filters
+            </Button>
+          </>
+        }
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        title="Filters"
+      >
+        <ClientsFiltersPanel
+          filterChips={filterChips}
+          lastVisitFilter={lastVisitFilter}
+          onLastVisitFilterChange={setLastVisitFilter}
+          onSearchChange={setSearchQuery}
+          onTotalSpentRangeChange={handleTotalSpentRangeChange}
+          onUpcomingFilterChange={setUpcomingFilter}
+          onVisitTypeChange={setVisitType}
+          searchQuery={searchQuery}
+          totalSpentRange={totalSpentRange}
+          upcomingFilter={upcomingFilter}
+          visitType={visitType}
+        />
+      </Drawer>
 
       {error && (
         <div
