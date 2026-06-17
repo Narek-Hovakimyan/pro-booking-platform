@@ -9,7 +9,7 @@ import {
 import SettingsCard from "@/barber/components/settings/SettingsCard";
 import { Button } from "@/shared/components/ui/button";
 
-function ManageableSalonCard({ salonData, isPrimary, isOwner }) {
+function ManageableSalonCard({ salonData = {}, isPrimary, isOwner }) {
   const salonName = salonData?.name || "Salon";
 
   return (
@@ -74,13 +74,13 @@ function ManageableSalonCard({ salonData, isPrimary, isOwner }) {
 export default function SalonSettingsSection({
   salonError,
   salonSaved,
-  allSalonEntries,
-  pendingEntries,
-  salonStatus,
+  allSalonEntries = [],
+  pendingEntries = [],
+  salonStatus = {},
   currentUserId,
-  availableSalons,
-  selectedSalonId,
-  salonDraft,
+  availableSalons = [],
+  selectedSalonId = "",
+  salonDraft = {},
   isSalonSaving,
   onCancelSalonRequest,
   onCreateSalon,
@@ -90,14 +90,20 @@ export default function SalonSettingsSection({
   onUpdateSalonDraft,
 }) {
   // Separate manageable (owner/admin) from member-only entries
-  const manageableEntries = allSalonEntries.filter((entry) => {
+  const safeSalonEntries = Array.isArray(allSalonEntries) ? allSalonEntries : [];
+  const safePendingEntries = Array.isArray(pendingEntries) ? pendingEntries : [];
+  const safeAvailableSalons = Array.isArray(availableSalons) ? availableSalons : [];
+  const safeSalonDraft = salonDraft || {};
+  const safeSalonStatus = salonStatus || {};
+
+  const manageableEntries = safeSalonEntries.filter((entry) => {
     const ownerId = entry.salon?.ownerId;
     return (
       String(ownerId) === String(currentUserId) ||
       ownerId === currentUserId
     );
   });
-  const memberOnlyEntries = allSalonEntries.filter((entry) => {
+  const memberOnlyEntries = safeSalonEntries.filter((entry) => {
     const ownerId = entry.salon?.ownerId;
     return (
       String(ownerId) !== String(currentUserId) &&
@@ -206,13 +212,13 @@ export default function SalonSettingsSection({
       )}
 
       {/* ── Pending requests ── */}
-      {pendingEntries.length > 0 && (
+      {safePendingEntries.length > 0 && (
         <div className="space-y-3">
           <h4 className="font-semibold text-neutral-900">
             Pending requests
           </h4>
           <div className="space-y-2">
-            {pendingEntries.map((entry, index) => {
+            {safePendingEntries.map((entry, index) => {
               const salonData = entry.salon || {};
               const salonId = salonData?.id || salonData?._id || entry.salon;
               const salonName = salonData?.name || "Salon";
@@ -254,12 +260,12 @@ export default function SalonSettingsSection({
       )}
 
       {/* ── Pending legacy request ── */}
-      {salonStatus.pendingRequest && (
+      {safeSalonStatus.pendingRequest && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="font-semibold text-neutral-900">
-                {salonStatus.pendingRequest.salonName ||
+                {safeSalonStatus.pendingRequest.salonName ||
                   "Pending salon request"}
               </div>
               <div className="mt-1 text-sm text-amber-600 font-medium">
@@ -288,12 +294,12 @@ export default function SalonSettingsSection({
             onChange={(event) => onSelectedSalonChange(event.target.value)}
           >
             <option value="">Select salon</option>
-            {availableSalons.length === 0 ? (
+            {safeAvailableSalons.length === 0 ? (
               <option disabled value="">
                 No new salons available
               </option>
             ) : (
-              availableSalons.map((salon) => (
+              safeAvailableSalons.map((salon) => (
                 <option
                   key={salon.id || salon._id}
                   value={salon.id || salon._id}
@@ -337,7 +343,7 @@ export default function SalonSettingsSection({
               className="rounded-2xl border bg-white p-3 font-normal"
               disabled={isSalonSaving}
               placeholder="Salon name"
-              value={salonDraft.name}
+              value={safeSalonDraft.name || ""}
               onChange={(event) =>
                 onUpdateSalonDraft("name", event.target.value)
               }
@@ -350,7 +356,7 @@ export default function SalonSettingsSection({
               className="rounded-2xl border bg-white p-3 font-normal"
               disabled={isSalonSaving}
               placeholder="City"
-              value={salonDraft.city}
+              value={safeSalonDraft.city || ""}
               onChange={(event) =>
                 onUpdateSalonDraft("city", event.target.value)
               }
@@ -363,7 +369,7 @@ export default function SalonSettingsSection({
               className="rounded-2xl border bg-white p-3 font-normal"
               disabled={isSalonSaving}
               placeholder="Address"
-              value={salonDraft.address}
+              value={safeSalonDraft.address || ""}
               onChange={(event) =>
                 onUpdateSalonDraft("address", event.target.value)
               }
@@ -376,7 +382,7 @@ export default function SalonSettingsSection({
               className="rounded-2xl border bg-white p-3 font-normal"
               disabled={isSalonSaving}
               placeholder="Phone"
-              value={salonDraft.phone}
+              value={safeSalonDraft.phone || ""}
               onChange={(event) =>
                 onUpdateSalonDraft("phone", event.target.value)
               }
@@ -389,7 +395,7 @@ export default function SalonSettingsSection({
               className="rounded-2xl border bg-white p-3 font-normal"
               disabled={isSalonSaving}
               placeholder="Image URL"
-              value={salonDraft.imageUrl}
+              value={safeSalonDraft.imageUrl || ""}
               onChange={(event) =>
                 onUpdateSalonDraft("imageUrl", event.target.value)
               }
@@ -398,7 +404,7 @@ export default function SalonSettingsSection({
 
           <Button
             className="sm:col-span-2"
-            disabled={!salonDraft.name.trim() || isSalonSaving}
+            disabled={!safeSalonDraft.name?.trim() || isSalonSaving}
             type="submit"
           >
             {isSalonSaving ? "Creating..." : "Create salon"}

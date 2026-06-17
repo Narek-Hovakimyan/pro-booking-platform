@@ -110,7 +110,10 @@ export default function BarberSettings({
   // Uses profileFetchedRef to avoid re-fetching when currentUser.name/phone change (derived deps).
   useEffect(() => {
     if (!currentUser?.id) return;
-    if (profileFetchedRef.current) return;
+    if (profileFetchedRef.current) {
+      setIsProfileLoading(false);
+      return;
+    }
     profileFetchedRef.current = true;
 
     let isMounted = true;
