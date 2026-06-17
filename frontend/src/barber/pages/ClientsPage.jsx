@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Search } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 
+import ClientsFiltersPanel from "@/barber/components/clients/ClientsFiltersPanel";
 import api from "@/shared/api/axios";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { Button } from "@/shared/components/ui/button";
@@ -23,10 +24,43 @@ const formatBookingLabel = (booking) => {
 const normalizeSearch = (value) =>
   String(value || "").trim().toLowerCase();
 
+const getFiniteNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const getClientVisitCount = (client) => {
+  const totalBookings = getFiniteNumber(client?.bookingCount);
+  if (totalBookings !== null) return totalBookings;
+
+  return getFiniteNumber(client?.completedBookingsCount) || 0;
+};
+
+const hasUpcomingBooking = (client) => Boolean(client?.nextBooking?.date);
+
+const getDaysSinceDate = (dateValue) => {
+  if (!dateValue) return null;
+
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return Math.floor((today.getTime() - date.getTime()) / 86400000);
+};
+
 export default function ClientsPage() {
   const navigate = useNavigate();
   const [clients, setClients] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [visitType, setVisitType] = useState("");
+  const [upcomingFilter, setUpcomingFilter] = useState("");
+  const [lastVisitFilter, setLastVisitFilter] = useState("");
+  const [totalSpentRange, setTotalSpentRange] = useState({
+    min: "",
+    max: "",
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -59,17 +93,136 @@ export default function ClientsPage() {
     };
   }, []);
 
+  const handleTotalSpentRangeChange = (field, value) => {
+    setTotalSpentRange((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setVisitType("");
+    setUpcomingFilter("");
+    setLastVisitFilter("");
+    setTotalSpentRange({ min: "", max: "" });
+  };
+
+  const filterChips = useMemo(() => {
+    const chips = [];
+
+    if (searchQuery.trim()) {
+      chips.push({
+        label: `Search: ${searchQuery.trim()}`,
+        onRemove: () => setSearchQuery(""),
+      });
+    }
+
+    if (visitType) {
+      chips.push({
+        label:
+          visitType === "first-time"
+            ? "First-time clients"
+            : "Returning clients",
+        onRemove: () => setVisitType(""),
+      });
+    }
+
+    if (upcomingFilter) {
+      chips.push({
+        label:
+          upcomingFilter === "has-upcoming"
+            ? "Has upcoming booking"
+            : "No upcoming booking",
+        onRemove: () => setUpcomingFilter(""),
+      });
+    }
+
+    if (lastVisitFilter) {
+      const labels = {
+        "last-30": "Last 30 days",
+        "last-90": "Last 90 days",
+        "no-recent": "No recent visit",
+      };
+      chips.push({
+        label: labels[lastVisitFilter],
+        onRemove: () => setLastVisitFilter(""),
+      });
+    }
+
+    if (totalSpentRange.min) {
+      chips.push({
+        label: `Min spent: ${formatCurrency(totalSpentRange.min)}`,
+        onRemove: () =>
+          setTotalSpentRange((current) => ({ ...current, min: "" })),
+      });
+    }
+
+    if (totalSpentRange.max) {
+      chips.push({
+        label: `Max spent: ${formatCurrency(totalSpentRange.max)}`,
+        onRemove: () =>
+          setTotalSpentRange((current) => ({ ...current, max: "" })),
+      });
+    }
+
+    return chips;
+  }, [lastVisitFilter, searchQuery, totalSpentRange, upcomingFilter, visitType]);
+
   const filteredClients = useMemo(() => {
     const query = normalizeSearch(searchQuery);
-    if (!query) return clients;
+    const minSpent = getFiniteNumber(totalSpentRange.min);
+    const maxSpent = getFiniteNumber(totalSpentRange.max);
 
     return clients.filter((client) => {
       const name = normalizeSearch(client.clientName);
       const phone = normalizeSearch(client.phone);
+      const visitCount = getClientVisitCount(client);
+      const spent = getFiniteNumber(client.totalSpent) || 0;
+      const daysSinceLastVisit = getDaysSinceDate(client?.lastBooking?.date);
 
-      return name.includes(query) || phone.includes(query);
+      if (query && !name.includes(query) && !phone.includes(query)) {
+        return false;
+      }
+
+      if (visitType === "first-time" && visitCount > 1) return false;
+      if (visitType === "returning" && visitCount <= 1) return false;
+
+      if (upcomingFilter === "has-upcoming" && !hasUpcomingBooking(client)) {
+        return false;
+      }
+
+      if (upcomingFilter === "no-upcoming" && hasUpcomingBooking(client)) {
+        return false;
+      }
+
+      if (lastVisitFilter === "last-30") {
+        if (daysSinceLastVisit === null || daysSinceLastVisit > 30) return false;
+      }
+
+      if (lastVisitFilter === "last-90") {
+        if (daysSinceLastVisit === null || daysSinceLastVisit > 90) return false;
+      }
+
+      if (lastVisitFilter === "no-recent") {
+        if (daysSinceLastVisit !== null && daysSinceLastVisit <= 90) {
+          return false;
+        }
+      }
+
+      if (minSpent !== null && spent < minSpent) return false;
+      if (maxSpent !== null && spent > maxSpent) return false;
+
+      return true;
     });
-  }, [clients, searchQuery]);
+  }, [
+    clients,
+    lastVisitFilter,
+    searchQuery,
+    totalSpentRange,
+    upcomingFilter,
+    visitType,
+  ]);
 
   const openMessage = (client) => {
     if (!client?.clientId) return;
@@ -98,17 +251,25 @@ export default function ClientsPage() {
           </p>
         </div>
 
-        <label className="relative block w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-          <input
-            className="h-11 w-full rounded-xl border border-neutral-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search name or phone"
-            type="search"
-            value={searchQuery}
-          />
-        </label>
+        <p className="text-sm font-medium text-neutral-600">
+          Showing {filteredClients.length} of {clients.length} clients
+        </p>
       </div>
+
+      <ClientsFiltersPanel
+        filterChips={filterChips}
+        lastVisitFilter={lastVisitFilter}
+        onClearFilters={clearFilters}
+        onLastVisitFilterChange={setLastVisitFilter}
+        onSearchChange={setSearchQuery}
+        onTotalSpentRangeChange={handleTotalSpentRangeChange}
+        onUpcomingFilterChange={setUpcomingFilter}
+        onVisitTypeChange={setVisitType}
+        searchQuery={searchQuery}
+        totalSpentRange={totalSpentRange}
+        upcomingFilter={upcomingFilter}
+        visitType={visitType}
+      />
 
       {error && (
         <div
@@ -143,7 +304,7 @@ export default function ClientsPage() {
               description={
                 clients.length === 0
                   ? "Clients will appear here after they book with you."
-                  : "Try a different name or phone search."
+                  : "No clients match these filters."
               }
             />
           </CardContent>
