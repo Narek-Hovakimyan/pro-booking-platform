@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
@@ -10,6 +11,7 @@ import { loginUser } from "@/store/slices/authSlice";
 export default function LoginPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const { currentUser, isAuthenticated } = useSelector((state) => state.auth);
   const redirectPath = searchParams.get("redirect") || "";
@@ -39,7 +41,7 @@ export default function LoginPage() {
     setError("");
 
     if (!form.phone || !form.password) {
-      setError("Լրացրու հեռախոսահամարը և գաղտնաբառը։");
+      setError(t("auth.login.missingFields"));
       return;
     }
 
@@ -56,7 +58,7 @@ export default function LoginPage() {
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
-          "Մուտքը չհաջողվեց։ Փորձիր կրկին։"
+          t("auth.login.failed")
       );
     } finally {
       setIsLoading(false);
@@ -67,18 +69,20 @@ export default function LoginPage() {
     <Card className="mx-auto w-full max-w-xl rounded-2xl sm:rounded-3xl">
       <CardContent className="space-y-6 p-4 sm:p-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Մուտք</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {t("auth.login.title")}
+          </h1>
           <p className="mt-2 text-neutral-500">
-            Մուտք գործիր հեռախոսահամարով և գաղտնաբառով։
+            {t("auth.login.description")}
           </p>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="grid gap-2 text-sm font-semibold">
-            Phone
+            {t("auth.fields.phone")}
             <input
               className="w-full rounded-2xl border p-3 font-normal"
-              placeholder="Հեռախոսահամար"
+              placeholder={t("auth.fields.phone")}
               disabled={isLoading}
               value={form.phone}
               onChange={(event) => updateField("phone", event.target.value)}
@@ -86,10 +90,10 @@ export default function LoginPage() {
           </label>
 
           <label className="grid gap-2 text-sm font-semibold">
-            Password
+            {t("auth.fields.password")}
             <input
               className="w-full rounded-2xl border p-3 font-normal"
-              placeholder="Գաղտնաբառ"
+              placeholder={t("auth.fields.password")}
               type="password"
               disabled={isLoading}
               value={form.password}
@@ -104,17 +108,17 @@ export default function LoginPage() {
           )}
 
           <Button className="w-full" type="submit" disabled={isLoading}>
-            {isLoading ? "Մուտք է կատարվում..." : "Մուտք գործել"}
+            {isLoading ? t("auth.login.submitting") : t("auth.login.submit")}
           </Button>
         </form>
 
         <p className="text-sm text-neutral-500">
-          Չունե՞ս հաշիվ։{" "}
+          {t("auth.login.noAccount")}{" "}
           <Link
             className="font-medium text-neutral-900"
             to={redirectPath ? `/register?redirect=${encodeURIComponent(redirectPath)}` : "/register"}
           >
-            Գրանցվիր
+            {t("auth.login.registerLink")}
           </Link>
         </p>
       </CardContent>

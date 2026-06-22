@@ -1,21 +1,23 @@
 import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 
 const getMenuGroups = (
   canShowManageHiring,
   canManageSalon,
   isPlatformAdmin,
-  showBusinessGroups
+  showBusinessGroups,
+  t
 ) => {
   const groups = [];
 
   if (isPlatformAdmin) {
     groups.push({
       key: "platform",
-      label: "Platform",
+      label: t("nav.platform"),
       children: [
-        { label: "Platform Billing", to: "/admin/platform/billing" },
+        { label: t("nav.platformBilling"), to: "/admin/platform/billing" },
       ],
     });
   }
@@ -23,14 +25,14 @@ const getMenuGroups = (
   if (showBusinessGroups) {
     groups.push({
       key: "account",
-      label: "Account",
+      label: t("nav.account"),
       children: [
-        { label: "Profile", to: "/admin/profile" },
-        { label: "Settings Hub", to: "/admin/settings" },
-        { label: "Default Schedule", to: "/admin/settings/default-schedule" },
-        { label: "Deposit", to: "/admin/settings/deposit" },
-        { label: "Certifications", to: "/admin/settings/certifications" },
-        { label: "Billing", to: "/admin/billing" },
+        { label: t("nav.profile"), to: "/admin/profile" },
+        { label: t("nav.settingsHub"), to: "/admin/settings" },
+        { label: t("nav.defaultSchedule"), to: "/admin/settings/default-schedule" },
+        { label: t("nav.deposit"), to: "/admin/settings/deposit" },
+        { label: t("nav.certifications"), to: "/admin/settings/certifications" },
+        { label: t("nav.billing"), to: "/admin/billing" },
       ],
     });
   }
@@ -38,13 +40,13 @@ const getMenuGroups = (
   if (canManageSalon) {
     groups.push({
       key: "salon",
-      label: "Salon",
+      label: t("nav.salon"),
       children: [
-        { label: "Salon Dashboard", to: "/admin/salon/dashboard" },
-        { label: "Salon Calendar", to: "/admin/salon/calendar" },
-        { label: "Salon Reports", to: "/admin/salon/reports" },
-        { label: "Salon Billing", to: "/admin/salon/billing" },
-        { label: "Salon Settings", to: "/admin/settings/salon" },
+        { label: t("nav.salonDashboard"), to: "/admin/salon/dashboard" },
+        { label: t("nav.salonCalendar"), to: "/admin/salon/calendar" },
+        { label: t("nav.salonReports"), to: "/admin/salon/reports" },
+        { label: t("nav.salonBilling"), to: "/admin/salon/billing" },
+        { label: t("nav.salonSettings"), to: "/admin/settings/salon" },
       ],
     });
   }
@@ -53,37 +55,37 @@ const getMenuGroups = (
     const marketingLinks = [
       ...(canManageSalon
         ? [
-            { label: "Salon Promotions", to: "/admin/salon/promotions" },
-            { label: "Revenue", to: "/admin/revenue" },
+            { label: t("nav.salonPromotions"), to: "/admin/salon/promotions" },
+            { label: t("nav.revenue"), to: "/admin/revenue" },
           ]
         : []),
-      { label: "Promo Codes", to: "/admin/vouchers" },
+      { label: t("nav.promoCodes"), to: "/admin/vouchers" },
     ];
 
     groups.push(
       {
         key: "marketing",
-        label: "Marketing",
+        label: t("nav.marketing"),
         children: marketingLinks,
       },
       {
         key: "hiring",
-        label: "Hiring / Jobs",
+        label: t("nav.hiring"),
         children: [
-          { label: "Find Jobs", to: "/jobs" },
+          { label: t("nav.findJobs"), to: "/jobs" },
           ...(canShowManageHiring
-            ? [{ label: "Manage Hiring", to: "/admin/jobs" }]
+            ? [{ label: t("nav.manageHiring"), to: "/admin/jobs" }]
             : []),
-          { label: "My Applications", to: "/jobs/applications" },
+          { label: t("nav.myApplications"), to: "/jobs/applications" },
         ],
       },
       {
         key: "work",
-        label: "Work",
+        label: t("nav.work"),
         children: [
-          { label: "Portfolio", to: "/admin/portfolio" },
-          { label: "Events", to: "/events" },
-          { label: "Waitlist", to: "/admin/waitlist" },
+          { label: t("nav.portfolio"), to: "/admin/portfolio" },
+          { label: t("nav.events"), to: "/events" },
+          { label: t("nav.waitlist"), to: "/admin/waitlist" },
         ],
       }
     );
@@ -117,6 +119,7 @@ export default function NestedHeaderMenu({
   showBusinessGroups = true,
 }) {
   const { pathname } = useLocation();
+  const { t } = useTranslation();
   const [activeGroup, setActiveGroup] = useState(null);
   const [expandedGroup, setExpandedGroup] = useState(null);
   const menuRef = useRef(null);
@@ -192,7 +195,8 @@ export default function NestedHeaderMenu({
             canShowManageHiring,
             canManageSalon,
             isPlatformAdmin,
-            showBusinessGroups
+            showBusinessGroups,
+            t
           ).map((group) => (
             <div key={group.key} className="relative">
               {/* Group header (trigger for submenu) */}
@@ -233,7 +237,7 @@ export default function NestedHeaderMenu({
         {/* Divider + Account */}
         <div className="my-1.5 border-t border-neutral-800" />
         <div className="px-3 py-1.5 text-xs font-medium text-neutral-500">
-          {currentUser?.name || currentUser?.email || "User"}
+          {currentUser?.name || currentUser?.email || t("common.user")}
         </div>
         <button
           className="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
@@ -241,7 +245,7 @@ export default function NestedHeaderMenu({
           role="menuitem"
           type="button"
         >
-          Logout
+          {t("nav.logout")}
         </button>
       </div>
     );
@@ -254,7 +258,8 @@ export default function NestedHeaderMenu({
         canShowManageHiring,
         canManageSalon,
         isPlatformAdmin,
-        showBusinessGroups
+        showBusinessGroups,
+        t
       ).map((group) => {
         const isExpanded = expandedGroup === group.key;
 
@@ -294,14 +299,14 @@ export default function NestedHeaderMenu({
       {/* Account section */}
       <div className="my-1.5 border-t border-neutral-800" />
       <div className="px-3 py-1.5 text-xs font-medium text-neutral-500">
-        {currentUser?.name || currentUser?.email || "User"}
+        {currentUser?.name || currentUser?.email || t("common.user")}
       </div>
       <button
         className="flex items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
         onClick={handleLogout}
         type="button"
       >
-        Logout
+        {t("nav.logout")}
       </button>
     </div>
   );

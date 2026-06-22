@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
@@ -10,6 +11,7 @@ import { registerUser } from "@/store/slices/authSlice";
 export default function RegisterPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const { currentUser, isAuthenticated } = useSelector((state) => state.auth);
   const redirectPath = searchParams.get("redirect") || "";
@@ -41,7 +43,7 @@ export default function RegisterPage() {
     setError("");
 
     if (!form.name || !form.phone || !form.password || !form.role) {
-      setError("Լրացրու բոլոր դաշտերը։");
+      setError(t("auth.register.missingFields"));
       return;
     }
 
@@ -60,7 +62,7 @@ export default function RegisterPage() {
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
-          "Գրանցումը չհաջողվեց։ Փորձիր կրկին։"
+          t("auth.register.failed")
       );
     } finally {
       setIsLoading(false);
@@ -71,18 +73,20 @@ export default function RegisterPage() {
     <Card className="mx-auto w-full max-w-xl rounded-2xl sm:rounded-3xl">
       <CardContent className="space-y-6 p-4 sm:p-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Գրանցում</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {t("auth.register.title")}
+          </h1>
           <p className="mt-2 text-neutral-500">
-            Ստեղծիր հաշիվ՝ որպես հաճախորդ կամ վարսահարդար։
+            {t("auth.register.description")}
           </p>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="grid gap-2 text-sm font-semibold">
-            Name
+            {t("auth.fields.name")}
             <input
               className="w-full rounded-2xl border p-3 font-normal"
-              placeholder="Անուն"
+              placeholder={t("auth.fields.name")}
               disabled={isLoading}
               value={form.name}
               onChange={(event) => updateField("name", event.target.value)}
@@ -90,10 +94,10 @@ export default function RegisterPage() {
           </label>
 
           <label className="grid gap-2 text-sm font-semibold">
-            Phone
+            {t("auth.fields.phone")}
             <input
               className="w-full rounded-2xl border p-3 font-normal"
-              placeholder="Հեռախոսահամար"
+              placeholder={t("auth.fields.phone")}
               disabled={isLoading}
               value={form.phone}
               onChange={(event) => updateField("phone", event.target.value)}
@@ -101,10 +105,10 @@ export default function RegisterPage() {
           </label>
 
           <label className="grid gap-2 text-sm font-semibold">
-            Password
+            {t("auth.fields.password")}
             <input
               className="w-full rounded-2xl border p-3 font-normal"
-              placeholder="Գաղտնաբառ"
+              placeholder={t("auth.fields.password")}
               type="password"
               disabled={isLoading}
               value={form.password}
@@ -113,15 +117,15 @@ export default function RegisterPage() {
           </label>
 
           <label className="grid gap-2 text-sm font-semibold">
-            Account type
+            {t("auth.fields.accountType")}
             <select
               className="w-full rounded-2xl border bg-white p-3 font-normal"
               disabled={isLoading}
               value={form.role}
               onChange={(event) => updateField("role", event.target.value)}
             >
-              <option value="client">Client</option>
-              <option value="barber">Specialist</option>
+              <option value="client">{t("auth.roles.client")}</option>
+              <option value="barber">{t("auth.roles.barber")}</option>
             </select>
           </label>
 
@@ -132,17 +136,17 @@ export default function RegisterPage() {
           )}
 
           <Button className="w-full" type="submit" disabled={isLoading}>
-            {isLoading ? "Գրանցվում է..." : "Գրանցվել"}
+            {isLoading ? t("auth.register.submitting") : t("auth.register.submit")}
           </Button>
         </form>
 
         <p className="text-sm text-neutral-500">
-          Արդեն ունե՞ս հաշիվ։{" "}
+          {t("auth.register.hasAccount")}{" "}
           <Link
             className="font-medium text-neutral-900"
             to={redirectPath ? `/login?redirect=${encodeURIComponent(redirectPath)}` : "/login"}
           >
-            Մուտք գործիր
+            {t("auth.register.loginLink")}
           </Link>
         </p>
       </CardContent>
