@@ -284,3 +284,213 @@ test("createBooking with discounted service + high-value voucher caps at 0", asy
   assert.equal(createdBookings[0].price, 0);
   assert.equal(createdBookings[0].finalPrice, 0);
 });
+
+test("createBooking applies loyalty discount after service discount", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 10,
+      maxDiscountPercent: 30,
+    },
+  });
+
+  let countQuery = null;
+  Booking.countDocuments = async (query) => {
+    countQuery = query;
+    return 5;
+  };
+  Service.findOne = async () => ({
+    _id: serviceId,
+    barberId,
+    name: "Discounted Cut",
+    duration: 30,
+    price: 100,
+    discountType: "percent",
+    discountValue: 20,
+  });
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(countQuery, {
+    barberId,
+    clientId,
+    status: "completed",
+  });
+  assert.equal(createdBookings[0].price, 72);
+  assert.equal(createdBookings[0].originalPrice, 80);
+  assert.equal(createdBookings[0].finalPrice, 72);
+  assert.equal(createdBookings[0].discountAmount, 8);
+  assert.equal(createdBookings[0].loyaltyDiscountApplied, true);
+  assert.equal(createdBookings[0].loyaltyDiscountPercent, 10);
+  assert.equal(createdBookings[0].loyaltyDiscountAmount, 8);
+  assert.equal(createdBookings[0].loyaltyEligibleCompletedBookings, 5);
+  assert.deepEqual(createdBookings[0].loyaltyRuleSnapshot, {
+    thresholdCompletedBookings: 5,
+    discountPercent: 10,
+    maxDiscountPercent: 30,
+    scope: "barber",
+  });
+});
+
+test("createBooking skips loyalty discount when client is below threshold", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 10,
+      maxDiscountPercent: 30,
+    },
+  });
+  Booking.countDocuments = async () => 4;
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].price, 100);
+  assert.equal(createdBookings[0].loyaltyDiscountApplied, undefined);
+  assert.equal(createdBookings[0].loyaltyEligibleCompletedBookings, 4);
+});
+
+test("createBooking does not stack loyalty discount with voucher", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 10,
+      maxDiscountPercent: 30,
+    },
+  });
+  let countDocumentsCalled = false;
+  Booking.countDocuments = async () => {
+    countDocumentsCalled = true;
+    return 5;
+  };
+
+  const voucher = {
+    _id: "voucher-loyalty",
+    ownerType: "barber",
+    ownerId: barberId,
+    code: "WELCOME10",
+    title: "Welcome 10",
+    type: "amount",
+    amount: 10,
+    maxUses: 5,
+    currentUses: 0,
+    active: true,
+    expiresAt: null,
+    redemptionBookingIds: [],
+  };
+  Voucher.findOne = async () => voucher;
+  Voucher.findOneAndUpdate = async () => voucher;
+  Voucher.findByIdAndUpdate = async () => voucher;
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        voucherCode: "WELCOME10",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(countDocumentsCalled, false);
+  assert.equal(createdBookings[0].price, 90);
+  assert.equal(createdBookings[0].voucherDiscount, 10);
+  assert.equal(createdBookings[0].loyaltyDiscountApplied, undefined);
+});
+
+test("createBooking calculates deposit from loyalty-discounted final price", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 10,
+      maxDiscountPercent: 30,
+    },
+  });
+  Booking.countDocuments = async () => 5;
+  BarberProfile.findOne = () => ({
+    lean: async () => ({
+      depositSettings: {
+        enabled: true,
+        mode: "percentage",
+        value: 50,
+        minimumBookingPrice: null,
+        noShowPolicyText: "",
+      },
+    }),
+  });
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings[0].price, 90);
+  assert.equal(createdBookings[0].finalPrice, 90);
+  assert.equal(createdBookings[0].depositRequired, true);
+  assert.equal(createdBookings[0].depositAmount, 45);
+});

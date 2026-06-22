@@ -18,6 +18,7 @@ import {
   getApprovedUserSalonIds,
   getPrimaryApprovedSalonId,
 } from "../services/salon/salonMembershipService.js";
+import { calculateLoyaltyDiscountForBooking } from "../services/barberClientService.js";
 import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
@@ -104,7 +105,7 @@ const attemptsDateTimeChange = (body, booking) => {
 
 const resolveBookingSalon = async ({ barberId, salonId }) => {
   const barber = await User.findById(barberId).select(
-    "salon salonStatus salons role"
+    "salon salonStatus salons role loyaltyDiscountSettings"
   );
 
   if (!barber || barber.role !== "barber") {
@@ -561,7 +562,16 @@ export const createBooking = async (req, res) => {
         }
       }
 
-      const effectivePrice = voucherClaim ? voucherClaim.finalPrice : bookingPrice;
+      const loyaltyDiscount = await calculateLoyaltyDiscountForBooking({
+        barber: salonResolution.barber,
+        barberId,
+        clientId: isManualBooking ? null : clientId,
+        serviceDiscountedPrice: bookingPrice,
+        hasVoucher: Boolean(voucherClaim),
+      });
+      const effectivePrice = voucherClaim
+        ? voucherClaim.finalPrice
+        : loyaltyDiscount.finalPrice;
 
       // ── Deposit calculation ──
       // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
@@ -605,6 +615,24 @@ export const createBooking = async (req, res) => {
           status,
           consultation,
           consent,
+          ...(loyaltyDiscount.applied
+            ? {
+              originalPrice: bookingPrice,
+              finalPrice: loyaltyDiscount.finalPrice,
+              discountAmount: loyaltyDiscount.amount,
+              loyaltyDiscountApplied: true,
+              loyaltyDiscountPercent: loyaltyDiscount.percent,
+              loyaltyDiscountAmount: loyaltyDiscount.amount,
+              loyaltyEligibleCompletedBookings:
+                loyaltyDiscount.eligibleCompletedBookings,
+              loyaltyRuleSnapshot: loyaltyDiscount.ruleSnapshot,
+            }
+            : loyaltyDiscount.eligibleCompletedBookings > 0
+              ? {
+                loyaltyEligibleCompletedBookings:
+                  loyaltyDiscount.eligibleCompletedBookings,
+              }
+              : {}),
           // Voucher fields (if applicable)
           ...(voucherClaim
             ? {

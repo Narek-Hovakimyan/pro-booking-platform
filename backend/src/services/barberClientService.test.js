@@ -5,16 +5,22 @@ import Booking from "../models/Booking.js";
 import ClientRelationship from "../models/ClientRelationship.js";
 import User from "../models/User.js";
 import {
+  calculateLoyaltyDiscountForBooking,
+  getBarberLoyaltyDiscountSettings,
   getBarberClients,
+  updateBarberLoyaltyDiscountSettings,
   updateBarberClientLoyalty,
 } from "./barberClientService.js";
 
 const originalMethods = {
   bookingFind: Booking.find,
   bookingFindOne: Booking.findOne,
+  bookingCountDocuments: Booking.countDocuments,
   clientRelationshipFind: ClientRelationship.find,
   clientRelationshipFindOneAndUpdate: ClientRelationship.findOneAndUpdate,
   userFind: User.find,
+  userFindById: User.findById,
+  userFindByIdAndUpdate: User.findByIdAndUpdate,
 };
 
 const barberId = "64b000000000000000000001";
@@ -47,10 +53,13 @@ beforeEach(() => {
 afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findOne = originalMethods.bookingFindOne;
+  Booking.countDocuments = originalMethods.bookingCountDocuments;
   ClientRelationship.find = originalMethods.clientRelationshipFind;
   ClientRelationship.findOneAndUpdate =
     originalMethods.clientRelationshipFindOneAndUpdate;
   User.find = originalMethods.userFind;
+  User.findById = originalMethods.userFindById;
+  User.findByIdAndUpdate = originalMethods.userFindByIdAndUpdate;
 });
 
 const makeBooking = (overrides = {}) => ({
@@ -455,4 +464,181 @@ test("updateBarberClientLoyalty validates payload", async () => {
       return true;
     }
   );
+});
+
+test("barber loyalty discount settings can be fetched and updated", async () => {
+  User.findById = (id) => {
+    assert.equal(String(id), barberId);
+    return createSelectQuery({
+      _id: barberId,
+      role: "barber",
+      loyaltyDiscountSettings: {
+        enabled: true,
+        thresholdCompletedBookings: 4,
+        discountPercent: 15,
+        maxDiscountPercent: 30,
+      },
+    });
+  };
+
+  const existing = await getBarberLoyaltyDiscountSettings({
+    requester: { _id: barberId, role: "barber" },
+  });
+
+  assert.deepEqual(existing, {
+    enabled: true,
+    thresholdCompletedBookings: 4,
+    discountPercent: 15,
+    maxDiscountPercent: 30,
+  });
+
+  let updatePayload = null;
+  User.findByIdAndUpdate = (id, payload) => {
+    assert.equal(String(id), barberId);
+    updatePayload = payload;
+    return createSelectQuery({
+      loyaltyDiscountSettings: payload.$set.loyaltyDiscountSettings,
+    });
+  };
+
+  const updated = await updateBarberLoyaltyDiscountSettings({
+    requester: { _id: barberId, role: "barber" },
+    updates: {
+      enabled: false,
+      thresholdCompletedBookings: 6,
+      discountPercent: 20,
+      maxDiscountPercent: 25,
+    },
+  });
+
+  assert.deepEqual(updatePayload, {
+    $set: {
+      loyaltyDiscountSettings: {
+        enabled: false,
+        thresholdCompletedBookings: 6,
+        discountPercent: 20,
+        maxDiscountPercent: 25,
+      },
+    },
+  });
+  assert.deepEqual(updated, {
+    enabled: false,
+    thresholdCompletedBookings: 6,
+    discountPercent: 20,
+    maxDiscountPercent: 25,
+  });
+});
+
+test("loyalty discount settings validation rejects unsafe percentages", async () => {
+  User.findById = () =>
+    createSelectQuery({
+      _id: barberId,
+      role: "barber",
+      loyaltyDiscountSettings: {
+        enabled: true,
+        thresholdCompletedBookings: 5,
+        discountPercent: 10,
+        maxDiscountPercent: 30,
+      },
+    });
+
+  await assert.rejects(
+    () =>
+      updateBarberLoyaltyDiscountSettings({
+        requester: { _id: barberId, role: "barber" },
+        updates: {
+          discountPercent: 40,
+          maxDiscountPercent: 30,
+        },
+      }),
+    (error) => {
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.message, "discountPercent cannot exceed maxDiscountPercent");
+      return true;
+    }
+  );
+});
+
+test("calculateLoyaltyDiscountForBooking counts completed bookings only", async () => {
+  let countQuery = null;
+  Booking.countDocuments = async (query) => {
+    countQuery = query;
+    return 5;
+  };
+
+  const result = await calculateLoyaltyDiscountForBooking({
+    barber: {
+      loyaltyDiscountSettings: {
+        enabled: true,
+        thresholdCompletedBookings: 5,
+        discountPercent: 25,
+        maxDiscountPercent: 30,
+      },
+    },
+    barberId,
+    clientId: clientAId,
+    serviceDiscountedPrice: 100,
+  });
+
+  assert.deepEqual(countQuery, {
+    barberId,
+    clientId: clientAId,
+    status: "completed",
+  });
+  assert.deepEqual(result, {
+    applied: true,
+    percent: 25,
+    amount: 25,
+    eligibleCompletedBookings: 5,
+    ruleSnapshot: {
+      thresholdCompletedBookings: 5,
+      discountPercent: 25,
+      maxDiscountPercent: 30,
+      scope: "barber",
+    },
+    finalPrice: 75,
+  });
+});
+
+test("calculateLoyaltyDiscountForBooking skips disabled, ineligible, and voucher bookings", async () => {
+  let countCalls = 0;
+  Booking.countDocuments = async () => {
+    countCalls += 1;
+    return 4;
+  };
+
+  const disabled = await calculateLoyaltyDiscountForBooking({
+    barber: { loyaltyDiscountSettings: { enabled: false } },
+    barberId,
+    clientId: clientAId,
+    serviceDiscountedPrice: 100,
+  });
+  assert.equal(disabled.applied, false);
+  assert.equal(countCalls, 0);
+
+  const voucher = await calculateLoyaltyDiscountForBooking({
+    barber: { loyaltyDiscountSettings: { enabled: true } },
+    barberId,
+    clientId: clientAId,
+    serviceDiscountedPrice: 100,
+    hasVoucher: true,
+  });
+  assert.equal(voucher.applied, false);
+  assert.equal(countCalls, 0);
+
+  const ineligible = await calculateLoyaltyDiscountForBooking({
+    barber: {
+      loyaltyDiscountSettings: {
+        enabled: true,
+        thresholdCompletedBookings: 5,
+        discountPercent: 10,
+        maxDiscountPercent: 30,
+      },
+    },
+    barberId,
+    clientId: clientAId,
+    serviceDiscountedPrice: 100,
+  });
+  assert.equal(ineligible.applied, false);
+  assert.equal(ineligible.eligibleCompletedBookings, 4);
 });

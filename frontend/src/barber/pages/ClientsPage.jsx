@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, SlidersHorizontal, Star } from "lucide-react";
+import { MessageCircle, Percent, SlidersHorizontal, Star } from "lucide-react";
 
 import ClientsFiltersPanel from "@/barber/components/clients/ClientsFiltersPanel";
 import api from "@/shared/api/axios";
@@ -34,6 +34,13 @@ const DEFAULT_CLIENT_FILTERS = Object.freeze({
     min: "",
     max: "",
   }),
+});
+
+const DEFAULT_LOYALTY_DISCOUNT_SETTINGS = Object.freeze({
+  enabled: false,
+  thresholdCompletedBookings: 5,
+  discountPercent: 10,
+  maxDiscountPercent: 30,
 });
 
 const getFiniteNumber = (value) => {
@@ -84,6 +91,15 @@ export default function ClientsPage() {
     ...DEFAULT_CLIENT_FILTERS.totalSpentRange,
   });
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [isLoyaltySettingsOpen, setIsLoyaltySettingsOpen] = useState(false);
+  const [loyaltySettings, setLoyaltySettings] = useState({
+    ...DEFAULT_LOYALTY_DISCOUNT_SETTINGS,
+  });
+  const [loyaltySettingsDraft, setLoyaltySettingsDraft] = useState({
+    ...DEFAULT_LOYALTY_DISCOUNT_SETTINGS,
+  });
+  const [isSavingLoyaltySettings, setIsSavingLoyaltySettings] = useState(false);
+  const [loyaltySettingsError, setLoyaltySettingsError] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
   const [loyaltyDraft, setLoyaltyDraft] = useState({
     isVip: false,
@@ -123,6 +139,35 @@ export default function ClientsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchLoyaltySettings() {
+      try {
+        const { data } = await api.get("/barbers/me/loyalty-discount-settings");
+        const nextSettings = {
+          ...DEFAULT_LOYALTY_DISCOUNT_SETTINGS,
+          ...(data || {}),
+        };
+
+        if (isMounted) {
+          setLoyaltySettings(nextSettings);
+          setLoyaltySettingsDraft(nextSettings);
+        }
+      } catch {
+        if (isMounted) {
+          setLoyaltySettingsError("Could not load loyalty discount settings.");
+        }
+      }
+    }
+
+    fetchLoyaltySettings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const handleTotalSpentRangeChange = (field, value) => {
     setTotalSpentRange((current) => ({
       ...current,
@@ -136,6 +181,54 @@ export default function ClientsPage() {
     setUpcomingFilter(DEFAULT_CLIENT_FILTERS.upcomingFilter);
     setLastVisitFilter(DEFAULT_CLIENT_FILTERS.lastVisitFilter);
     setTotalSpentRange({ ...DEFAULT_CLIENT_FILTERS.totalSpentRange });
+  };
+
+  const openLoyaltySettings = () => {
+    setLoyaltySettingsDraft({ ...loyaltySettings });
+    setLoyaltySettingsError("");
+    setIsLoyaltySettingsOpen(true);
+  };
+
+  const updateLoyaltySettingsDraft = (field, value) => {
+    setLoyaltySettingsDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const saveLoyaltySettings = async () => {
+    setIsSavingLoyaltySettings(true);
+    setLoyaltySettingsError("");
+
+    try {
+      const payload = {
+        enabled: Boolean(loyaltySettingsDraft.enabled),
+        thresholdCompletedBookings: Number(
+          loyaltySettingsDraft.thresholdCompletedBookings
+        ),
+        discountPercent: Number(loyaltySettingsDraft.discountPercent),
+        maxDiscountPercent: Number(loyaltySettingsDraft.maxDiscountPercent),
+      };
+      const { data } = await api.patch(
+        "/barbers/me/loyalty-discount-settings",
+        payload
+      );
+      const nextSettings = {
+        ...DEFAULT_LOYALTY_DISCOUNT_SETTINGS,
+        ...(data || payload),
+      };
+
+      setLoyaltySettings(nextSettings);
+      setLoyaltySettingsDraft(nextSettings);
+      setIsLoyaltySettingsOpen(false);
+    } catch (requestError) {
+      setLoyaltySettingsError(
+        requestError.response?.data?.message ||
+          "Could not save loyalty discount settings."
+      );
+    } finally {
+      setIsSavingLoyaltySettings(false);
+    }
   };
 
   const filterChips = useMemo(() => {
@@ -355,6 +448,14 @@ export default function ClientsPage() {
               </span>
             )}
           </Button>
+          <Button
+            className="w-full gap-2 sm:w-auto"
+            onClick={openLoyaltySettings}
+            variant="outline"
+          >
+            <Percent className="h-4 w-4" />
+            Loyalty discount
+          </Button>
           {hasActiveFilters && (
             <Button
               className="w-full sm:w-auto"
@@ -401,6 +502,105 @@ export default function ClientsPage() {
           upcomingFilter={upcomingFilter}
           visitType={visitType}
         />
+      </Drawer>
+
+      <Drawer
+        closeLabel="Close loyalty discount settings"
+        description="Applies automatically after completed bookings. Does not combine with vouchers."
+        footer={
+          <>
+            <Button
+              onClick={saveLoyaltySettings}
+              disabled={isSavingLoyaltySettings}
+            >
+              {isSavingLoyaltySettings ? "Saving..." : "Save settings"}
+            </Button>
+            <Button
+              onClick={() => setIsLoyaltySettingsOpen(false)}
+              variant="outline"
+            >
+              Cancel
+            </Button>
+          </>
+        }
+        isOpen={isLoyaltySettingsOpen}
+        onClose={() => setIsLoyaltySettingsOpen(false)}
+        title="Loyalty discount"
+      >
+        <div className="space-y-5">
+          <label className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 p-4 text-sm font-semibold">
+            <span>Enable loyalty discount</span>
+            <input
+              checked={Boolean(loyaltySettingsDraft.enabled)}
+              className="h-5 w-5 accent-neutral-950"
+              onChange={(event) =>
+                updateLoyaltySettingsDraft("enabled", event.target.checked)
+              }
+              type="checkbox"
+            />
+          </label>
+
+          <label className="grid gap-2 text-sm font-semibold">
+            Completed bookings required
+            <input
+              className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+              min="1"
+              onChange={(event) =>
+                updateLoyaltySettingsDraft(
+                  "thresholdCompletedBookings",
+                  event.target.value
+                )
+              }
+              type="number"
+              value={loyaltySettingsDraft.thresholdCompletedBookings}
+            />
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-2 text-sm font-semibold">
+              Discount percent
+              <input
+                className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+                min="0"
+                max="100"
+                onChange={(event) =>
+                  updateLoyaltySettingsDraft(
+                    "discountPercent",
+                    event.target.value
+                  )
+                }
+                type="number"
+                value={loyaltySettingsDraft.discountPercent}
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold">
+              Max discount percent
+              <input
+                className="h-11 w-full rounded-full border border-neutral-200 bg-white px-4 py-2 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+                min="0"
+                max="100"
+                onChange={(event) =>
+                  updateLoyaltySettingsDraft(
+                    "maxDiscountPercent",
+                    event.target.value
+                  )
+                }
+                type="number"
+                value={loyaltySettingsDraft.maxDiscountPercent}
+              />
+            </label>
+          </div>
+
+          {loyaltySettingsError && (
+            <p
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              role="alert"
+            >
+              {loyaltySettingsError}
+            </p>
+          )}
+        </div>
       </Drawer>
 
       <Drawer

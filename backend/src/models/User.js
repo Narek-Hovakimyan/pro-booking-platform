@@ -120,6 +120,33 @@ const salonEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const loyaltyDiscountSettingsSchema = new mongoose.Schema(
+  {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    thresholdCompletedBookings: {
+      type: Number,
+      default: 5,
+      min: 1,
+    },
+    discountPercent: {
+      type: Number,
+      default: 10,
+      min: 0,
+      max: 100,
+    },
+    maxDiscountPercent: {
+      type: Number,
+      default: 30,
+      min: 0,
+      max: 100,
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -217,6 +244,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ["men", "women", "unisex"],
     default: "unisex",
+  },
+  loyaltyDiscountSettings: {
+    type: loyaltyDiscountSettingsSchema,
+    default: () => ({}),
   },
   workHistory: [
     {

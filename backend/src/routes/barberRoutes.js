@@ -6,7 +6,9 @@ import {
   upsertProfileByBarberId,
 } from "../controllers/barberProfileController.js";
 import {
+  getMyLoyaltyDiscountSettings,
   getMyBarberClients,
+  updateMyLoyaltyDiscountSettings,
   updateMyBarberClientLoyalty,
 } from "../controllers/barberClientController.js";
 import {
@@ -41,6 +43,18 @@ const requireBarberRole = (req, res, next) => {
 router.get("/", barberProfileController.getAll);
 router.get("/card-summary", getBarberCardSummary);
 router.get("/me/clients", protect, requireBarberSubscription, getMyBarberClients);
+router.get(
+  "/me/loyalty-discount-settings",
+  protect,
+  requireBarberSubscription,
+  getMyLoyaltyDiscountSettings
+);
+router.patch(
+  "/me/loyalty-discount-settings",
+  protect,
+  requireBarberSubscription,
+  updateMyLoyaltyDiscountSettings
+);
 router.patch(
   "/me/clients/:clientId/loyalty",
   protect,

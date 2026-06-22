@@ -170,6 +170,61 @@ const serializeLoyalty = (relationship) => ({
   updatedAt: relationship?.updatedAt || null,
 });
 
+const defaultLoyaltyDiscountSettings = {
+  enabled: false,
+  thresholdCompletedBookings: 5,
+  discountPercent: 10,
+  maxDiscountPercent: 30,
+};
+
+export const normalizeLoyaltyDiscountSettings = (settings = {}) => {
+  const enabled = Boolean(settings.enabled);
+  const thresholdCompletedBookings = Number(
+    settings.thresholdCompletedBookings ??
+      defaultLoyaltyDiscountSettings.thresholdCompletedBookings
+  );
+  const discountPercent = Number(
+    settings.discountPercent ?? defaultLoyaltyDiscountSettings.discountPercent
+  );
+  const maxDiscountPercent = Number(
+    settings.maxDiscountPercent ??
+      defaultLoyaltyDiscountSettings.maxDiscountPercent
+  );
+
+  if (
+    !Number.isInteger(thresholdCompletedBookings) ||
+    thresholdCompletedBookings < 1
+  ) {
+    throw new BarberClientError(400, "thresholdCompletedBookings must be at least 1");
+  }
+
+  if (!Number.isFinite(discountPercent) || discountPercent < 0) {
+    throw new BarberClientError(400, "discountPercent must be at least 0");
+  }
+
+  if (!Number.isFinite(maxDiscountPercent) || maxDiscountPercent < 0) {
+    throw new BarberClientError(400, "maxDiscountPercent must be at least 0");
+  }
+
+  if (maxDiscountPercent > 100) {
+    throw new BarberClientError(400, "maxDiscountPercent must be 100 or less");
+  }
+
+  if (discountPercent > maxDiscountPercent) {
+    throw new BarberClientError(400, "discountPercent cannot exceed maxDiscountPercent");
+  }
+
+  return {
+    enabled,
+    thresholdCompletedBookings,
+    discountPercent,
+    maxDiscountPercent,
+  };
+};
+
+export const serializeLoyaltyDiscountSettings = (settings) =>
+  normalizeLoyaltyDiscountSettings(settings || defaultLoyaltyDiscountSettings);
+
 export const getBarberClients = async ({
   requester,
   now = new Date(),
@@ -335,4 +390,124 @@ export const updateBarberClientLoyalty = async ({
   ).select("isVip internalNote updatedAt");
 
   return serializeLoyalty(relationship);
+};
+
+export const getBarberLoyaltyDiscountSettings = async ({ requester } = {}) => {
+  if (!requester) {
+    throw new BarberClientError(401, "Not authenticated");
+  }
+
+  if (requester.role !== "barber") {
+    throw new BarberClientError(403, "Only barbers can manage loyalty discounts");
+  }
+
+  const barber = await User.findById(requester._id || requester.id).select(
+    "role loyaltyDiscountSettings"
+  );
+
+  if (!barber || barber.role !== "barber") {
+    throw new BarberClientError(404, "Barber not found");
+  }
+
+  return serializeLoyaltyDiscountSettings(barber.loyaltyDiscountSettings);
+};
+
+export const updateBarberLoyaltyDiscountSettings = async ({
+  requester,
+  updates = {},
+} = {}) => {
+  if (!requester) {
+    throw new BarberClientError(401, "Not authenticated");
+  }
+
+  if (requester.role !== "barber") {
+    throw new BarberClientError(403, "Only barbers can manage loyalty discounts");
+  }
+
+  const current = await User.findById(requester._id || requester.id).select(
+    "role loyaltyDiscountSettings"
+  );
+
+  if (!current || current.role !== "barber") {
+    throw new BarberClientError(404, "Barber not found");
+  }
+
+  const normalized = normalizeLoyaltyDiscountSettings({
+    ...serializeLoyaltyDiscountSettings(current.loyaltyDiscountSettings),
+    ...updates,
+  });
+
+  const updated = await User.findByIdAndUpdate(
+    requester._id || requester.id,
+    { $set: { loyaltyDiscountSettings: normalized } },
+    { new: true, runValidators: true }
+  ).select("loyaltyDiscountSettings");
+
+  return serializeLoyaltyDiscountSettings(updated?.loyaltyDiscountSettings || normalized);
+};
+
+export const calculateLoyaltyDiscountForBooking = async ({
+  barber,
+  barberId,
+  clientId,
+  serviceDiscountedPrice,
+  hasVoucher = false,
+} = {}) => {
+  const settings = serializeLoyaltyDiscountSettings(
+    barber?.loyaltyDiscountSettings
+  );
+  const basePrice = Number(serviceDiscountedPrice || 0);
+
+  const emptyDiscount = {
+    applied: false,
+    percent: 0,
+    amount: 0,
+    eligibleCompletedBookings: 0,
+    ruleSnapshot: null,
+    finalPrice: Math.max(0, Number.isFinite(basePrice) ? basePrice : 0),
+  };
+
+  if (
+    !settings.enabled ||
+    hasVoucher ||
+    !clientId ||
+    !barberId ||
+    !Number.isFinite(basePrice) ||
+    basePrice <= 0
+  ) {
+    return emptyDiscount;
+  }
+
+  const completedBookings = await Booking.countDocuments({
+    barberId,
+    clientId,
+    status: "completed",
+  });
+
+  if (completedBookings < settings.thresholdCompletedBookings) {
+    return {
+      ...emptyDiscount,
+      eligibleCompletedBookings: completedBookings,
+    };
+  }
+
+  const percent = Math.min(
+    settings.discountPercent,
+    settings.maxDiscountPercent
+  );
+  const amount = Math.min(basePrice, Math.round((basePrice * percent) / 100));
+
+  return {
+    applied: amount > 0,
+    percent,
+    amount,
+    eligibleCompletedBookings: completedBookings,
+    ruleSnapshot: {
+      thresholdCompletedBookings: settings.thresholdCompletedBookings,
+      discountPercent: settings.discountPercent,
+      maxDiscountPercent: settings.maxDiscountPercent,
+      scope: "barber",
+    },
+    finalPrice: Math.max(0, basePrice - amount),
+  };
 };

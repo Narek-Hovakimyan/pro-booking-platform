@@ -317,6 +317,32 @@ const bookingSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    loyaltyDiscountApplied: {
+      type: Boolean,
+      default: false,
+    },
+    loyaltyDiscountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    loyaltyDiscountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    loyaltyEligibleCompletedBookings: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    loyaltyRuleSnapshot: {
+      thresholdCompletedBookings: { type: Number, default: undefined },
+      discountPercent: { type: Number, default: undefined },
+      maxDiscountPercent: { type: Number, default: undefined },
+      scope: { type: String, default: "" },
+    },
     // ── Deposit fields ──
     depositRequired: {
       type: Boolean,
