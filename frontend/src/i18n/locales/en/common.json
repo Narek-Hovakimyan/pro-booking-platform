@@ -1,0 +1,91 @@
+{
+  "app": {
+    "brand": "HairBook"
+  },
+  "common": {
+    "armenian": "Armenian",
+    "english": "English",
+    "language": "Language",
+    "user": "User"
+  },
+  "nav": {
+    "account": "Account",
+    "billing": "Billing",
+    "bookings": "Bookings",
+    "calendar": "Calendar",
+    "certifications": "Certifications",
+    "clients": "Clients",
+    "dashboard": "Dashboard",
+    "defaultSchedule": "Default Schedule",
+    "deposit": "Deposit",
+    "events": "Events",
+    "favorites": "Favorites",
+    "findJobs": "Find Jobs",
+    "hiring": "Hiring / Jobs",
+    "home": "Home",
+    "jobs": "Jobs",
+    "join": "Join",
+    "logout": "Logout",
+    "manageHiring": "Manage Hiring",
+    "marketing": "Marketing",
+    "messages": "Messages",
+    "more": "More",
+    "myApplications": "My Applications",
+    "myBookings": "My bookings",
+    "notifications": "Notifications",
+    "platform": "Platform",
+    "platformBilling": "Platform Billing",
+    "portfolio": "Portfolio",
+    "profile": "Profile",
+    "promoCodes": "Promo Codes",
+    "revenue": "Revenue",
+    "salon": "Salon",
+    "salonBilling": "Salon Billing",
+    "salonCalendar": "Salon Calendar",
+    "salonDashboard": "Salon Dashboard",
+    "salonPromotions": "Salon Promotions",
+    "salonReports": "Salon Reports",
+    "salonSettings": "Salon Settings",
+    "salons": "Salons",
+    "schedule": "Schedule",
+    "services": "Services",
+    "settingsHub": "Settings Hub",
+    "signIn": "Sign in",
+    "specialists": "Specialists",
+    "toggleMenu": "Toggle menu",
+    "waitlist": "Waitlist",
+    "work": "Work"
+  },
+  "auth": {
+    "fields": {
+      "accountType": "Account type",
+      "name": "Name",
+      "password": "Password",
+      "phone": "Phone"
+    },
+    "login": {
+      "description": "Sign in with your phone number and password.",
+      "failed": "Login failed. Please try again.",
+      "missingFields": "Enter your phone number and password.",
+      "noAccount": "Don't have an account?",
+      "registerLink": "Register",
+      "submit": "Sign in",
+      "submitting": "Signing in...",
+      "title": "Sign in"
+    },
+    "register": {
+      "description": "Create an account as a client or specialist.",
+      "failed": "Registration failed. Please try again.",
+      "hasAccount": "Already have an account?",
+      "loginLink": "Sign in",
+      "missingFields": "Fill in all fields.",
+      "submit": "Register",
+      "submitting": "Registering...",
+      "title": "Register"
+    },
+    "roles": {
+      "barber": "Specialist",
+      "client": "Client"
+    }
+  }
+}

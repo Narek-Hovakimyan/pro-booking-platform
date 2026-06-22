@@ -1,5 +1,6 @@
 import { Bell, ChevronDown, Menu, Scissors, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -52,6 +53,7 @@ export default function Header() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { i18n, t } = useTranslation();
   const { currentUser, isAuthenticated, token } = useSelector((state) => state.auth);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -102,11 +104,11 @@ export default function Header() {
 
   // Primary barber nav items (visible in top bar)
   const barberNavItems = [
-    { label: "Services", to: "/admin/services" },
-    { label: "Schedule", to: "/admin/schedule" },
-    { label: "Bookings", to: "/admin/bookings" },
-    { label: "Clients", to: "/admin/clients" },
-    { label: "Calendar", to: "/admin/calendar" },
+    { label: t("nav.services"), to: "/admin/services" },
+    { label: t("nav.schedule"), to: "/admin/schedule" },
+    { label: t("nav.bookings"), to: "/admin/bookings" },
+    { label: t("nav.clients"), to: "/admin/clients" },
+    { label: t("nav.calendar"), to: "/admin/calendar" },
   ];
 
   useEffect(() => {
@@ -235,11 +237,39 @@ export default function Header() {
     setIsMobileMenuOpen(false);
   };
 
+  const currentLanguage = (i18n.resolvedLanguage || i18n.language || "hy").split("-")[0];
+
+  const handleLanguageChange = (event) => {
+    i18n.changeLanguage(event.target.value);
+  };
+
+  const renderLanguageSwitcher = () => (
+    <label className="sr-only" htmlFor="app-language-switcher">
+      {t("common.language")}
+    </label>
+  );
+
+  const languageSwitcher = (
+    <div className="relative shrink-0">
+      {renderLanguageSwitcher()}
+      <select
+        id="app-language-switcher"
+        className="h-8 max-w-[7rem] rounded-lg border border-white/10 bg-neutral-900 px-2 text-xs font-semibold text-white outline-none transition hover:bg-white/10 focus:border-white/40"
+        aria-label={t("common.language")}
+        value={currentLanguage}
+        onChange={handleLanguageChange}
+      >
+        <option value="hy">{t("common.armenian")}</option>
+        <option value="en">{t("common.english")}</option>
+      </select>
+    </div>
+  );
+
   const renderAlertIcon = () => (
     <Link
       to="/notifications"
       className="relative flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-white/10 hover:text-white"
-      aria-label="Notifications"
+      aria-label={t("nav.notifications")}
     >
       <Bell className="h-4 w-4" />
       {notificationCount > 0 && (
@@ -254,7 +284,7 @@ export default function Header() {
     <Link
       to="/messages"
       className="relative flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-white/10 hover:text-white"
-      aria-label="Messages"
+      aria-label={t("nav.messages")}
     >
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -277,7 +307,7 @@ export default function Header() {
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-neutral-950 sm:h-8 sm:w-8">
             <Scissors className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           </span>
-          <span className="text-sm sm:text-base">HairBook</span>
+          <span className="text-sm sm:text-base">{t("app.brand")}</span>
         </Link>
 
         {/* ─── Center: Nav (Desktop) ─── */}
@@ -301,37 +331,37 @@ export default function Header() {
               to="/specialists"
               className={linkClass(pathname === "/specialists" || pathname === "/barbers")}
             >
-              Specialists
+              {t("nav.specialists")}
             </Link>
             <Link
               to="/salons"
               className={linkClass(pathname === "/salons")}
             >
-              Salons
+              {t("nav.salons")}
             </Link>
             <Link
               to="/favorites"
               className={linkClass(pathname === "/favorites")}
             >
-              Favorites
+              {t("nav.favorites")}
             </Link>
             <Link
               to="/my-bookings"
               className={linkClass(pathname === "/my-bookings")}
             >
-              Bookings
+              {t("nav.bookings")}
             </Link>
             <Link
               to="/my-waitlist"
               className={linkClass(pathname === "/my-waitlist")}
             >
-              Waitlist
+              {t("nav.waitlist")}
             </Link>
             <Link
               to="/profile"
               className={linkClass(pathname === "/profile")}
             >
-              Profile
+              {t("nav.profile")}
             </Link>
           </nav>
         )}
@@ -341,6 +371,8 @@ export default function Header() {
 
         {/* ─── Right: Actions ─── */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {languageSwitcher}
+
           {isAuthenticated && (
             <>
               {renderAlertIcon()}
@@ -361,7 +393,7 @@ export default function Header() {
                     aria-haspopup="menu"
                     type="button"
                   >
-                    More
+                    {t("nav.more")}
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
 
@@ -396,14 +428,14 @@ export default function Header() {
                       ref={moreMenuRef}
                     >
                       <div className="px-3 py-1.5 text-xs font-medium text-neutral-500">
-                        {currentUser?.name || "User"}
+                        {currentUser?.name || t("common.user")}
                       </div>
                       <button
                         className="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
                         onClick={logout}
                         type="button"
                       >
-                        Logout
+                        {t("nav.logout")}
                       </button>
                     </div>
                   )}
@@ -418,13 +450,13 @@ export default function Header() {
                 to="/login"
                 className="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-300 transition hover:bg-white/10 hover:text-white"
               >
-                Մուտք
+                {t("nav.signIn")}
               </Link>
               <Link
                 to="/register"
                 className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-neutral-200"
               >
-                Գրանցում
+                {t("nav.join")}
               </Link>
             </>
           )}
@@ -435,7 +467,7 @@ export default function Header() {
               className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-white/10 hover:text-white lg:hidden"
               onClick={() => setIsMobileMenuOpen((v) => !v)}
               type="button"
-              aria-label="Toggle menu"
+              aria-label={t("nav.toggleMenu")}
             >
               {isMobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
@@ -483,14 +515,14 @@ export default function Header() {
             {/* Client mobile nav */}
             {isClient &&
               [
-                { label: "Specialists", to: "/specialists" },
-                { label: "Salons", to: "/salons" },
-                { label: "Favorites", to: "/favorites" },
-                { label: "Bookings", to: "/my-bookings" },
-                { label: "Waitlist", to: "/my-waitlist" },
-                { label: "Notifications", to: "/notifications" },
-                { label: "Messages", to: "/messages" },
-                { label: "Profile", to: "/profile" },
+                { label: t("nav.specialists"), to: "/specialists" },
+                { label: t("nav.salons"), to: "/salons" },
+                { label: t("nav.favorites"), to: "/favorites" },
+                { label: t("nav.bookings"), to: "/my-bookings" },
+                { label: t("nav.waitlist"), to: "/my-waitlist" },
+                { label: t("nav.notifications"), to: "/notifications" },
+                { label: t("nav.messages"), to: "/messages" },
+                { label: t("nav.profile"), to: "/profile" },
               ].map((item) => (
                 <Link
                   key={item.to}
@@ -509,7 +541,7 @@ export default function Header() {
               <>
                 <div className="my-1.5 border-t border-neutral-800" />
                 <div className="px-3 py-1.5 text-xs font-medium text-neutral-500">
-                  {currentUser?.name || currentUser?.email || "User"}
+                  {currentUser?.name || currentUser?.email || t("common.user")}
                 </div>
                 <button
                   className="flex items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
@@ -519,7 +551,7 @@ export default function Header() {
                   }}
                   type="button"
                 >
-                  Logout
+                  {t("nav.logout")}
                 </button>
               </>
             )}

@@ -1,0 +1,91 @@
+{
+  "app": {
+    "brand": "HairBook"
+  },
+  "common": {
+    "armenian": "Հայերեն",
+    "english": "English",
+    "language": "Լեզու",
+    "user": "Օգտատեր"
+  },
+  "nav": {
+    "account": "Հաշիվ",
+    "billing": "Վճարումներ",
+    "bookings": "Ամրագրումներ",
+    "calendar": "Օրացույց",
+    "certifications": "Վկայականներ",
+    "clients": "Հաճախորդներ",
+    "dashboard": "Վահանակ",
+    "defaultSchedule": "Հիմնական գրաֆիկ",
+    "deposit": "Կանխավճար",
+    "events": "Միջոցառումներ",
+    "favorites": "Ընտրանի",
+    "findJobs": "Գտնել աշխատանք",
+    "hiring": "Աշխատանք",
+    "home": "Գլխավոր",
+    "jobs": "Աշխատանք",
+    "join": "Գրանցվել",
+    "logout": "Դուրս գալ",
+    "manageHiring": "Կառավարել աշխատանքները",
+    "marketing": "Մարքեթինգ",
+    "messages": "Հաղորդագրություններ",
+    "more": "Ավելին",
+    "myApplications": "Իմ հայտերը",
+    "myBookings": "Իմ ամրագրումները",
+    "notifications": "Ծանուցումներ",
+    "platform": "Պլատֆորմ",
+    "platformBilling": "Պլատֆորմի վճարումներ",
+    "portfolio": "Պորտֆոլիո",
+    "profile": "Պրոֆիլ",
+    "promoCodes": "Պրոմո կոդեր",
+    "revenue": "Եկամուտ",
+    "salon": "Սրահ",
+    "salonBilling": "Սրահի վճարումներ",
+    "salonCalendar": "Սրահի օրացույց",
+    "salonDashboard": "Սրահի վահանակ",
+    "salonPromotions": "Սրահի ակցիաներ",
+    "salonReports": "Սրահի հաշվետվություններ",
+    "salonSettings": "Սրահի կարգավորումներ",
+    "salons": "Սրահներ",
+    "schedule": "Գրաֆիկ",
+    "services": "Ծառայություններ",
+    "settingsHub": "Կարգավորումներ",
+    "signIn": "Մուտք",
+    "specialists": "Մասնագետներ",
+    "toggleMenu": "Բացել կամ փակել մենյուն",
+    "waitlist": "Սպասացանկ",
+    "work": "Աշխատանք"
+  },
+  "auth": {
+    "fields": {
+      "accountType": "Հաշվի տեսակ",
+      "name": "Անուն",
+      "password": "Գաղտնաբառ",
+      "phone": "Հեռախոսահամար"
+    },
+    "login": {
+      "description": "Մուտք գործիր հեռախոսահամարով և գաղտնաբառով։",
+      "failed": "Մուտքը չհաջողվեց։ Փորձիր կրկին։",
+      "missingFields": "Լրացրու հեռախոսահամարը և գաղտնաբառը։",
+      "noAccount": "Չունե՞ս հաշիվ։",
+      "registerLink": "Գրանցվիր",
+      "submit": "Մուտք գործել",
+      "submitting": "Մուտք է կատարվում...",
+      "title": "Մուտք"
+    },
+    "register": {
+      "description": "Ստեղծիր հաշիվ՝ որպես հաճախորդ կամ մասնագետ։",
+      "failed": "Գրանցումը չհաջողվեց։ Փորձիր կրկին։",
+      "hasAccount": "Արդեն ունե՞ս հաշիվ։",
+      "loginLink": "Մուտք գործիր",
+      "missingFields": "Լրացրու բոլոր դաշտերը։",
+      "submit": "Գրանցվել",
+      "submitting": "Գրանցվում է...",
+      "title": "Գրանցում"
+    },
+    "roles": {
+      "barber": "Մասնագետ",
+      "client": "Հաճախորդ"
+    }
+  }
+}
