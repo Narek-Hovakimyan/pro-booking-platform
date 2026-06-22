@@ -11,6 +11,116 @@ import {
   serializeRelationshipFields,
 } from "./salonRelationshipService.js";
 
+const paymentTypes = new Set(["none", "commission", "fixed"]);
+const fixedPeriods = new Set(["daily", "weekly", "monthly"]);
+
+const emptyStaffPayment = () => ({
+  type: "none",
+  commissionStaffPercent: undefined,
+  commissionSalonPercent: undefined,
+  fixedAmount: undefined,
+  fixedPeriod: undefined,
+  notes: "",
+});
+
+const finiteNumber = (value) => {
+  if (value === "" || value === null || value === undefined) return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+};
+
+const serializeStaffPayment = (staffPayment) => {
+  const payment = staffPayment?.toObject?.() || staffPayment || {};
+  return {
+    type: payment.type || "none",
+    commissionStaffPercent: payment.commissionStaffPercent ?? null,
+    commissionSalonPercent: payment.commissionSalonPercent ?? null,
+    fixedAmount: payment.fixedAmount ?? null,
+    fixedPeriod: payment.fixedPeriod || "",
+    notes: payment.notes || "",
+    updatedAt: payment.updatedAt || null,
+    updatedBy: payment.updatedBy || null,
+  };
+};
+
+const normalizeStaffPayment = (staffPayment, updatedBy) => {
+  const incoming = staffPayment || {};
+  const type = incoming.type || "none";
+  const notes = String(incoming.notes || "").trim();
+
+  if (!paymentTypes.has(type)) {
+    throw new SalonStaffError(400, "staffPayment.type is invalid");
+  }
+
+  if (notes.length > 500) {
+    throw new SalonStaffError(400, "staffPayment.notes must be 500 characters or fewer");
+  }
+
+  if (type === "none") {
+    return {
+      ...emptyStaffPayment(),
+      notes,
+      updatedAt: new Date(),
+      updatedBy,
+    };
+  }
+
+  if (type === "commission") {
+    const commissionStaffPercent = finiteNumber(incoming.commissionStaffPercent);
+    const commissionSalonPercent = finiteNumber(incoming.commissionSalonPercent);
+
+    if (commissionStaffPercent === null || commissionSalonPercent === null) {
+      throw new SalonStaffError(400, "Commission split requires staff and salon percentages");
+    }
+
+    if (
+      commissionStaffPercent < 0 ||
+      commissionStaffPercent > 100 ||
+      commissionSalonPercent < 0 ||
+      commissionSalonPercent > 100
+    ) {
+      throw new SalonStaffError(400, "Commission percentages must be between 0 and 100");
+    }
+
+    if (commissionStaffPercent + commissionSalonPercent !== 100) {
+      throw new SalonStaffError(400, "Commission percentages must add up to 100");
+    }
+
+    return {
+      type,
+      commissionStaffPercent,
+      commissionSalonPercent,
+      fixedAmount: undefined,
+      fixedPeriod: undefined,
+      notes,
+      updatedAt: new Date(),
+      updatedBy,
+    };
+  }
+
+  const fixedAmount = finiteNumber(incoming.fixedAmount);
+  const fixedPeriod = incoming.fixedPeriod || "";
+
+  if (fixedAmount === null || fixedAmount <= 0) {
+    throw new SalonStaffError(400, "Fixed pay requires an amount greater than 0");
+  }
+
+  if (!fixedPeriods.has(fixedPeriod)) {
+    throw new SalonStaffError(400, "Fixed pay requires a valid period");
+  }
+
+  return {
+    type,
+    commissionStaffPercent: undefined,
+    commissionSalonPercent: undefined,
+    fixedAmount,
+    fixedPeriod,
+    notes,
+    updatedAt: new Date(),
+    updatedBy,
+  };
+};
+
 const getApprovedSalonEntry = (user, salonId) => {
   const approvedEntry = (user?.salons || []).find(
     (entry) => sameId(entry?.salon, salonId) && entry?.status === "approved"
@@ -95,6 +205,10 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
     const profile = profilesByBarberId.get(String(user._id));
     const approvedSalonEntry = getApprovedSalonEntry(user, salonId);
 
+    if (approvedSalonEntry?.worksAsSpecialist === false) {
+      return null;
+    }
+
     // Determine role in salon
     let roleInSalon = "staff";
     if (sameId(salon.ownerId, user._id)) {
@@ -118,10 +232,77 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
       bio: profile?.bio || "",
       roleInSalon,
       ...serializeRelationshipFields(approvedSalonEntry),
+      ...(isOwner || isAdmin
+        ? { staffPayment: serializeStaffPayment(approvedSalonEntry?.staffPayment) }
+        : {}),
     };
-  });
+  }).filter(Boolean);
 
   return staff;
+};
+
+export const updateSalonStaffPaymentSettings = async (
+  salonId,
+  barberId,
+  requestingUserId,
+  staffPayment
+) => {
+  const salon = await Salon.findById(salonId);
+
+  if (!salon) {
+    throw new SalonStaffError(404, "Salon not found");
+  }
+
+  const requester = await User.findById(requestingUserId).select("_id role");
+
+  if (!requester || requester.role !== "barber") {
+    throw new SalonStaffError(403, "Only barbers can manage salon staff payment settings");
+  }
+
+  const isOwner = sameId(salon.ownerId, requestingUserId);
+  const isAdmin =
+    Array.isArray(salon.admins) &&
+    salon.admins.some((adminId) => sameId(adminId, requestingUserId));
+
+  if (!isOwner && !isAdmin) {
+    throw new SalonStaffError(
+      403,
+      "Only salon owner or admin can update staff payment settings"
+    );
+  }
+
+  const barber = await User.findById(barberId);
+
+  if (!barber || barber.role !== "barber") {
+    throw new SalonStaffError(404, "Barber not found");
+  }
+
+  const salonEntry = (barber.salons || []).find((entry) =>
+    sameId(entry?.salon, salon._id)
+  );
+
+  if (!salonEntry || salonEntry.status !== "approved") {
+    throw new SalonStaffError(
+      400,
+      "Barber must be an approved member of this salon"
+    );
+  }
+
+  if (getRelationshipType(salonEntry) !== "staff") {
+    throw new SalonStaffError(
+      400,
+      "Staff payment settings apply only to staff members"
+    );
+  }
+
+  salonEntry.staffPayment = normalizeStaffPayment(staffPayment, requestingUserId);
+  await barber.save();
+
+  return {
+    id: barber._id,
+    name: barber.name,
+    staffPayment: serializeStaffPayment(salonEntry.staffPayment),
+  };
 };
 
 export const updateSalonMemberRelationshipType = async (

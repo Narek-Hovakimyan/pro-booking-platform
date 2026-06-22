@@ -9,7 +9,7 @@ import {
 import { isSalonAdmin, isSalonOwner } from "../../utils/salonPermissions.js";
 import {
   getRelationshipType,
-  isAcceptedStaffMember,
+  isWorkingSpecialist,
 } from "./salonRelationshipService.js";
 import { getPaidAccessByBarberIdsForSalon } from "../subscriptionService.js";
 
@@ -110,7 +110,7 @@ const getStaffMembers = async (salonId) => {
       if (!approvedSalonEntry) return null;
 
       const relationshipType = getRelationshipType(approvedSalonEntry);
-      if (relationshipType !== "staff" || !isAcceptedStaffMember(approvedSalonEntry)) {
+      if (relationshipType !== "staff" || !isWorkingSpecialist(approvedSalonEntry)) {
         return null;
       }
 

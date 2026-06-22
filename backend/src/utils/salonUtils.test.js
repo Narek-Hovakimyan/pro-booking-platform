@@ -118,3 +118,30 @@ test("includes public barber formatting in public salon response", () => {
   });
   assert.equal(Object.hasOwn(response.barbers[0], "workHistory"), false);
 });
+
+test("strips staff payment from public barber membership data", () => {
+  const salon = createSalon();
+  const barber = createBarber({
+    salons: [
+      {
+        salon: "salon-1",
+        status: "approved",
+        isPrimary: true,
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 70,
+          commissionSalonPercent: 30,
+        },
+      },
+    ],
+  });
+  const response = buildPublicSalonResponse({
+    salon,
+    reviewStats: null,
+    barbers: [barber],
+    profiles: [],
+  });
+
+  assert.equal(response.barbers[0].salons[0].staffPayment, undefined);
+  assert.equal(response.barbers[0].approvedSalons[0].staffPayment, undefined);
+});

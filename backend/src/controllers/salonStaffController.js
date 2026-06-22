@@ -21,6 +21,7 @@ import {
   respondToSalonMemberRelationshipType,
   SalonStaffError,
   updateSalonMemberRelationshipType,
+  updateSalonStaffPaymentSettings,
 } from "../services/salon/salonStaffService.js";
 import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
 import { createNotification } from "./notificationController.js";
@@ -267,6 +268,34 @@ export const updateMemberRelationshipType = async (req, res) => {
       res,
       error,
       "Could not request salon member relationship type"
+    );
+  }
+};
+
+export const updateStaffPaymentSettings = async (req, res) => {
+  try {
+    if (!requireBarber(req, res)) return undefined;
+
+    const barber = await updateSalonStaffPaymentSettings(
+      req.params.salonId,
+      req.params.barberId,
+      req.user._id,
+      req.body?.staffPayment
+    );
+
+    return res.json({
+      message: "Staff payment settings updated",
+      barber,
+    });
+  } catch (error) {
+    if (error instanceof SalonStaffError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    return sendControllerError(
+      res,
+      error,
+      "Could not update staff payment settings"
     );
   }
 };

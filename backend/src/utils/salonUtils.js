@@ -15,6 +15,14 @@ export const timeToMinutes = (time) => {
   return hours * 60 + minutes;
 };
 
+const stripStaffPaymentFromSalons = (salons = []) =>
+  (Array.isArray(salons) ? salons : []).map((entry) => {
+    const rawEntry = entry?.toObject ? entry.toObject() : entry;
+    if (!rawEntry) return rawEntry;
+    const { staffPayment, ...safeEntry } = rawEntry;
+    return safeEntry;
+  });
+
 // ─── Serializers ───
 export const serializeSalon = (salon) => {
   if (!salon) return null;
@@ -46,6 +54,7 @@ export const serializeUser = (user) => {
 
   delete rawUser.password;
   delete rawUser.platformRole;
+  rawUser.salons = stripStaffPaymentFromSalons(rawUser.salons);
 
   return {
     ...rawUser,
@@ -65,6 +74,7 @@ export const buildPublicBarbers = (barbers, profiles, salon) => {
 
     delete publicBarber.workHistory;
     delete publicBarber.platformRole;
+    publicBarber.salons = stripStaffPaymentFromSalons(publicBarber.salons);
 
     // Include approved salons info
     const approvedSalons = (barber.salons || [])

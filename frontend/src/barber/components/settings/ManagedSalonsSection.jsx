@@ -32,6 +32,221 @@ const relationshipHelperText = {
     "Staff members are included in salon dashboard, calendar, and revenue reports.",
 };
 
+const paymentTypeOptions = [
+  { value: "none", label: "Not configured" },
+  { value: "commission", label: "Commission split" },
+  { value: "fixed", label: "Fixed pay" },
+];
+
+const fixedPeriodOptions = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+];
+
+const commissionPresets = [
+  { label: "50/50", staff: 50, salon: 50 },
+  { label: "60/40", staff: 60, salon: 40 },
+  { label: "70/30", staff: 70, salon: 30 },
+];
+
+const getPaymentDraft = (staffPayment = {}) => ({
+  type: staffPayment.type || "none",
+  commissionStaffPercent: staffPayment.commissionStaffPercent ?? "",
+  commissionSalonPercent: staffPayment.commissionSalonPercent ?? "",
+  fixedAmount: staffPayment.fixedAmount ?? "",
+  fixedPeriod: staffPayment.fixedPeriod || "monthly",
+  notes: staffPayment.notes || "",
+});
+
+const getPaymentLabel = (staffPayment = {}) => {
+  if (staffPayment.type === "commission") {
+    const staff = staffPayment.commissionStaffPercent;
+    const salon = staffPayment.commissionSalonPercent;
+    return staff != null && salon != null ? `${staff}/${salon} split` : "Commission split";
+  }
+
+  if (staffPayment.type === "fixed") {
+    return `Fixed ${staffPayment.fixedPeriod || "pay"}`;
+  }
+
+  return "Not configured";
+};
+
+function PaymentSettingsModal({
+  draft,
+  error,
+  isSaving,
+  staffName,
+  onChange,
+  onClose,
+  onSave,
+}) {
+  const commissionTotal =
+    Number(draft.commissionStaffPercent || 0) +
+    Number(draft.commissionSalonPercent || 0);
+  const hasCommissionError =
+    draft.type === "commission" && commissionTotal !== 100;
+  const hasFixedError =
+    draft.type === "fixed" &&
+    (!Number(draft.fixedAmount) || Number(draft.fixedAmount) <= 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/40 p-4 sm:items-center sm:justify-center">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-neutral-950">
+              Pay terms
+            </h3>
+            <p className="mt-0.5 text-sm text-neutral-500">{staffName}</p>
+          </div>
+          <Button disabled={isSaving} onClick={onClose} size="sm" variant="outline">
+            Close
+          </Button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <label className="grid gap-1 text-sm font-semibold text-neutral-800">
+            Payment type
+            <select
+              className="rounded-xl border border-neutral-200 bg-white px-3 py-2 font-normal"
+              disabled={isSaving}
+              value={draft.type}
+              onChange={(event) => onChange("type", event.target.value)}
+            >
+              {paymentTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {draft.type === "commission" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {commissionPresets.map((preset) => (
+                  <Button
+                    disabled={isSaving}
+                    key={preset.label}
+                    onClick={() => {
+                      onChange("commissionStaffPercent", preset.staff);
+                      onChange("commissionSalonPercent", preset.salon);
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm font-semibold text-neutral-800">
+                  Staff %
+                  <input
+                    className="rounded-xl border border-neutral-200 px-3 py-2 font-normal"
+                    disabled={isSaving}
+                    min="0"
+                    max="100"
+                    type="number"
+                    value={draft.commissionStaffPercent}
+                    onChange={(event) =>
+                      onChange("commissionStaffPercent", event.target.value)
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-neutral-800">
+                  Salon %
+                  <input
+                    className="rounded-xl border border-neutral-200 px-3 py-2 font-normal"
+                    disabled={isSaving}
+                    min="0"
+                    max="100"
+                    type="number"
+                    value={draft.commissionSalonPercent}
+                    onChange={(event) =>
+                      onChange("commissionSalonPercent", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              {hasCommissionError && (
+                <p className="text-xs font-medium text-red-600">
+                  Commission split must add up to 100.
+                </p>
+              )}
+            </div>
+          )}
+
+          {draft.type === "fixed" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm font-semibold text-neutral-800">
+                Amount
+                <input
+                  className="rounded-xl border border-neutral-200 px-3 py-2 font-normal"
+                  disabled={isSaving}
+                  min="0"
+                  type="number"
+                  value={draft.fixedAmount}
+                  onChange={(event) => onChange("fixedAmount", event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-semibold text-neutral-800">
+                Period
+                <select
+                  className="rounded-xl border border-neutral-200 bg-white px-3 py-2 font-normal"
+                  disabled={isSaving}
+                  value={draft.fixedPeriod}
+                  onChange={(event) => onChange("fixedPeriod", event.target.value)}
+                >
+                  {fixedPeriodOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {hasFixedError && (
+                <p className="text-xs font-medium text-red-600 sm:col-span-2">
+                  Fixed pay requires an amount greater than 0.
+                </p>
+              )}
+            </div>
+          )}
+
+          <label className="grid gap-1 text-sm font-semibold text-neutral-800">
+            Notes
+            <textarea
+              className="min-h-20 rounded-xl border border-neutral-200 px-3 py-2 font-normal"
+              disabled={isSaving}
+              maxLength={500}
+              value={draft.notes}
+              onChange={(event) => onChange("notes", event.target.value)}
+            />
+          </label>
+
+          {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+
+          <div className="flex justify-end gap-2">
+            <Button disabled={isSaving} onClick={onClose} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={isSaving || hasCommissionError || hasFixedError}
+              onClick={onSave}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ManagedSalonsSection({
   managedSalonStaff,
   salonAdmins,
@@ -43,9 +258,14 @@ export default function ManagedSalonsSection({
   onOpenPromoteConfirmation,
   onOpenRemoveBarberConfirmation,
   onSaveRelationshipType,
+  onSaveStaffPayment,
   savingRelationshipKey,
+  savingPaymentKey,
 }) {
   const [relationshipDrafts, setRelationshipDrafts] = useState({});
+  const [paymentEditor, setPaymentEditor] = useState(null);
+  const [paymentDraft, setPaymentDraft] = useState(getPaymentDraft());
+  const [paymentError, setPaymentError] = useState("");
 
   if (managedSalonStaff.length === 0) return null;
 
@@ -193,6 +413,11 @@ export default function ManagedSalonsSection({
                       relationshipStatus === "rejected";
                     const isSavingRelationship =
                       savingRelationshipKey === relationshipKey;
+                    const canEditPayment =
+                      (isOwner || isAdmin) &&
+                      currentRelationshipType === "staff" &&
+                      relationshipStatus === "accepted";
+                    const isSavingPayment = savingPaymentKey === relationshipKey;
 
                     return (
                       <div
@@ -240,6 +465,11 @@ export default function ManagedSalonsSection({
                                     relationshipStatus
                                   ] || relationshipStatusLabels.accepted}
                                 </span>
+                                {canEditPayment && (
+                                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                    {getPaymentLabel(barber.staffPayment)}
+                                  </span>
+                                )}
                               </div>
                               <p className="mt-1 text-xs text-neutral-500">
                                 {relationshipStatus === "pending"
@@ -331,6 +561,25 @@ export default function ManagedSalonsSection({
                                   Remove
                                 </Button>
                               )}
+                              {canEditPayment && (
+                                <Button
+                                  disabled={isSalonSaving || isSavingPayment}
+                                  onClick={() => {
+                                    setPaymentEditor({
+                                      salonId: managedSalonId,
+                                      barber,
+                                    });
+                                    setPaymentDraft(
+                                      getPaymentDraft(barber.staffPayment)
+                                    );
+                                    setPaymentError("");
+                                  }}
+                                  size="sm"
+                                  variant="outline"
+                                >
+                                  Pay terms
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -409,6 +658,39 @@ export default function ManagedSalonsSection({
           </div>
         );
       })}
+      {paymentEditor && (
+        <PaymentSettingsModal
+          draft={paymentDraft}
+          error={paymentError}
+          isSaving={
+            savingPaymentKey ===
+            `${paymentEditor.salonId}:${paymentEditor.barber.id || paymentEditor.barber._id}`
+          }
+          staffName={paymentEditor.barber.name || "Specialist"}
+          onChange={(field, value) =>
+            setPaymentDraft((currentDraft) => ({
+              ...currentDraft,
+              [field]: value,
+            }))
+          }
+          onClose={() => {
+            if (!savingPaymentKey) setPaymentEditor(null);
+          }}
+          onSave={async () => {
+            setPaymentError("");
+            const success = await onSaveStaffPayment(
+              paymentEditor.salonId,
+              paymentEditor.barber.id || paymentEditor.barber._id,
+              paymentDraft
+            );
+            if (success) {
+              setPaymentEditor(null);
+            } else {
+              setPaymentError("Could not save pay terms.");
+            }
+          }}
+        />
+      )}
     </SettingsCard>
   );
 }

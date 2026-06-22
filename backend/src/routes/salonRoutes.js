@@ -21,6 +21,7 @@ import {
   removeBarberFromSalon,
   respondToRelationshipType,
   updateMemberRelationshipType,
+  updateStaffPaymentSettings,
 } from "../controllers/salonStaffController.js";
 import { getDashboard } from "../controllers/salonDashboardController.js";
 import { getReports } from "../controllers/salonReportController.js";
@@ -79,6 +80,11 @@ router.patch(
   "/:salonId/staff/:barberId/deposit-settings",
   protect,
   updateStaffDepositSettingsBySalonOwner
+);
+router.patch(
+  "/:salonId/staff/:barberId/payment-settings",
+  protect,
+  updateStaffPaymentSettings
 );
 
 export default router;

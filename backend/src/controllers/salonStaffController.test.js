@@ -7,6 +7,7 @@ import {
   removeBarberFromSalon,
   respondToRelationshipType,
   updateMemberRelationshipType,
+  updateStaffPaymentSettings,
 } from "./salonStaffController.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
@@ -406,6 +407,315 @@ test("cannot update non-approved member", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /approved member/);
+});
+
+test("owner can update staff payment settings", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Staff",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return { select: async () => ({ _id: ownerId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) return barber;
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 70,
+          commissionSalonPercent: 30,
+          notes: "Internal",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(barber.salons[0].staffPayment.type, "commission");
+  assert.equal(barber.salons[0].staffPayment.commissionStaffPercent, 70);
+  assert.equal(barber.salons[0].staffPayment.commissionSalonPercent, 30);
+  assert.ok(barber.salons[0].staffPayment.updatedAt instanceof Date);
+  assert.equal(String(barber.salons[0].staffPayment.updatedBy), String(ownerId));
+});
+
+test("admin can update staff payment settings", async () => {
+  const adminId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Salon Staff",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId: new mongoose.Types.ObjectId(),
+    admins: [adminId],
+  });
+  User.findById = (id) => {
+    if (String(id) === String(adminId)) {
+      return { select: async () => ({ _id: adminId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) return barber;
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: adminId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 100000,
+          fixedPeriod: "monthly",
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(barber.salons[0].staffPayment.type, "fixed");
+  assert.equal(barber.salons[0].staffPayment.fixedAmount, 100000);
+  assert.equal(barber.salons[0].staffPayment.fixedPeriod, "monthly");
+});
+
+test("non-owner/admin cannot update staff payment settings", async () => {
+  const memberId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId: new mongoose.Types.ObjectId(),
+    admins: [],
+  });
+  User.findById = (id) => {
+    if (String(id) === String(memberId)) {
+      return { select: async () => ({ _id: memberId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) {
+      return {
+        _id: barberId,
+        role: "barber",
+        salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+        async save() {
+          return this;
+        },
+      };
+    }
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: memberId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { staffPayment: { type: "none" } },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /Only salon owner or admin/);
+});
+
+test("chair renter cannot receive staff payment settings", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return { select: async () => ({ _id: ownerId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) {
+      return {
+        _id: barberId,
+        role: "barber",
+        salons: [{ salon: salonId, status: "approved", relationshipType: "chair_renter" }],
+        async save() {
+          return this;
+        },
+      };
+    }
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { staffPayment: { type: "fixed", fixedAmount: 100, fixedPeriod: "daily" } },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /only to staff/);
+});
+
+test("pending member cannot receive staff payment settings", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return { select: async () => ({ _id: ownerId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) {
+      return {
+        _id: barberId,
+        role: "barber",
+        salons: [{ salon: salonId, status: "pending", relationshipType: "staff" }],
+        async save() {
+          return this;
+        },
+      };
+    }
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { staffPayment: { type: "none" } },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /approved member/);
+});
+
+test("staff payment validation rejects bad commission and fixed payloads", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return { select: async () => ({ _id: ownerId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) return barber;
+    return null;
+  };
+
+  const commissionRes = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 60,
+          commissionSalonPercent: 30,
+        },
+      },
+    },
+    commissionRes
+  );
+
+  assert.equal(commissionRes.statusCode, 400);
+  assert.match(commissionRes.body.message, /add up to 100/);
+
+  const fixedRes = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { staffPayment: { type: "fixed", fixedAmount: 0 } },
+    },
+    fixedRes
+  );
+
+  assert.equal(fixedRes.statusCode, 400);
+  assert.match(fixedRes.body.message, /amount greater than 0/);
+});
+
+test("staff payment update is isolated to matching salon entry", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const otherSalonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    name: "Multi Salon Staff",
+    role: "barber",
+    salons: [
+      { salon: otherSalonId, status: "approved", relationshipType: "staff" },
+      { salon: salonId, status: "approved", relationshipType: "staff" },
+    ],
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return { select: async () => ({ _id: ownerId, role: "barber" }) };
+    }
+    if (String(id) === String(barberId)) return barber;
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { staffPayment: { type: "none" } },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(barber.salons[0].staffPayment, undefined);
+  assert.equal(barber.salons[1].staffPayment.type, "none");
 });
 
 test("barber can accept pending relationship", async () => {

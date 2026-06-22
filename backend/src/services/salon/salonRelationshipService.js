@@ -15,9 +15,18 @@ export const isAcceptedStaffMember = (membership) =>
   getRelationshipType(membership) === "staff" &&
   getRelationshipStatus(membership) === "accepted";
 
+export const isWorkingSpecialist = (membership) =>
+  isAcceptedStaffMember(membership) && membership?.worksAsSpecialist !== false;
+
+export const isBookableSalonSpecialist = (membership) =>
+  membership?.status === "approved" &&
+  getRelationshipStatus(membership) === "accepted" &&
+  membership?.worksAsSpecialist !== false;
+
 export const serializeRelationshipFields = (membership = {}) => ({
   relationshipType: getRelationshipType(membership),
   relationshipStatus: getRelationshipStatus(membership),
+  worksAsSpecialist: membership.worksAsSpecialist !== false,
   relationshipRequestedBy: membership.relationshipRequestedBy || null,
   relationshipRequestedAt: membership.relationshipRequestedAt || null,
   relationshipRespondedAt: membership.relationshipRespondedAt || null,

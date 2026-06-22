@@ -9,7 +9,7 @@ import { isSalonOwner, isSalonAdmin } from "../../utils/salonPermissions.js";
 import { getOrCreateDefaultSubscriptionPlan, getDaysRemaining } from "../subscriptionService.js";
 import {
   getRelationshipType,
-  isAcceptedStaffMember,
+  isWorkingSpecialist,
 } from "./salonRelationshipService.js";
 
 export class DashboardError extends Error {
@@ -77,7 +77,7 @@ const getSalonMembers = async (salonId) => {
 
     if (relationshipType === "chair_renter") {
       chairRenterIds.push(user._id);
-    } else if (isAcceptedStaffMember(salonEntry)) {
+    } else if (isWorkingSpecialist(salonEntry)) {
       staffIds.push(user._id);
     }
   }

@@ -15,7 +15,9 @@ export default function TeamSettingsSection({
   onOpenPromoteConfirmation,
   onOpenRemoveBarberConfirmation,
   onSaveRelationshipType,
+  onSaveStaffPayment,
   savingRelationshipKey,
+  savingPaymentKey,
 }) {
   const managedSalonStaff = managedSalons.map((managedSalon) => {
     const managedSalonId = managedSalon.id || managedSalon._id;
@@ -51,7 +53,9 @@ export default function TeamSettingsSection({
         onOpenPromoteConfirmation={onOpenPromoteConfirmation}
         onOpenRemoveBarberConfirmation={onOpenRemoveBarberConfirmation}
         onSaveRelationshipType={onSaveRelationshipType}
+        onSaveStaffPayment={onSaveStaffPayment}
         savingRelationshipKey={savingRelationshipKey}
+        savingPaymentKey={savingPaymentKey}
       />
       <SalonStaffSection
         approvedSalonEntries={approvedSalonEntries}

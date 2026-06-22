@@ -15,7 +15,7 @@ import {
   getConfiguredPaymentProviderName,
   getPaymentProvider,
 } from "./payment/paymentProviderFactory.js";
-import { isAcceptedStaffMember } from "./salon/salonRelationshipService.js";
+import { isWorkingSpecialist } from "./salon/salonRelationshipService.js";
 
 const DEFAULT_PLAN_CODE = "barber_monthly";
 const TRIAL_DAYS = 14;
@@ -25,7 +25,7 @@ const RECOVERABLE_PAYMENT_ATTEMPT_STATUSES = ["pending", "requires_action"];
 const MANUAL_PROVIDER = "manual";
 const PAYMENT_ATTEMPT_EXPIRY_HOURS = 24;
 const SUBSCRIPTION_SEAT_BARBER_FIELDS =
-  "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus";
+  "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -80,7 +80,7 @@ const isAcceptedSalonStaffMember = (barber, salonId) => {
   );
 
   if (salonEntry) {
-    return isAcceptedStaffMember(salonEntry);
+    return isWorkingSpecialist(salonEntry);
   }
 
   return (
@@ -1448,7 +1448,7 @@ export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
         { salon: salon._id, salonStatus: "approved" },
       ],
     },
-    "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus"
+    "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist"
   ).lean();
   const approvedMembers = approvedMemberDocs
     .filter((member) => isAcceptedSalonStaffMember(member, salon._id))

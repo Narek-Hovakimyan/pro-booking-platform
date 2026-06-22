@@ -178,6 +178,10 @@ test("createSalon lets an owner create a second salon without changing primary l
   );
   assert.equal(user.salons[0].isPrimary, true);
   assert.equal(user.salons[1].isPrimary, false);
+  assert.equal(user.salons[0].worksAsSpecialist, true);
+  assert.equal(user.salons[1].worksAsSpecialist, true);
+  assert.equal(user.salons[0].relationshipType, "staff");
+  assert.equal(user.salons[0].relationshipStatus, "accepted");
   assert.equal(String(user.salon), salonAId);
   assert.equal(user.salonStatus, "approved");
   assert.equal(new Set(user.salons.map((entry) => String(entry.salon))).size, 2);
@@ -203,6 +207,57 @@ test("createSalon lets an owner create a second salon without changing primary l
     manageableRes.body.map((salon) => String(salon.id || salon._id)),
     [salonAId, salonBId]
   );
+});
+
+test("createSalon can keep owner out of working specialist membership", async () => {
+  const user = {
+    _id: ownerId,
+    role: "barber",
+    salon: null,
+    salonStatus: "none",
+    salons: [],
+    workHistory: [],
+    save: async () => user,
+  };
+
+  Salon.create = async (payload) => ({ _id: salonAId, ...payload });
+  User.findById = async () => user;
+
+  const res = createResponse();
+  await createSalon(
+    {
+      user: { _id: ownerId, role: "barber" },
+      body: {
+        name: "Owner Only Salon",
+        ownerWorksAsSpecialist: false,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(String(res.body.salon.ownerId), ownerId);
+  assert.equal(user.salons.length, 1);
+  assert.equal(user.salons[0].relationshipType, "staff");
+  assert.equal(user.salons[0].relationshipStatus, "accepted");
+  assert.equal(user.salons[0].worksAsSpecialist, false);
+  assert.equal(user.workHistory.length, 0);
+
+  const manageableRes = createResponse();
+  Salon.find = (query) => {
+    assert.deepEqual(query, {
+      $or: [{ ownerId }, { admins: ownerId }],
+    });
+    return { sort: async () => [{ _id: salonAId, ownerId, admins: [] }] };
+  };
+
+  await listManageableSalons(
+    { user: { _id: ownerId, role: "barber" } },
+    manageableRes
+  );
+
+  assert.equal(manageableRes.statusCode, 200);
+  assert.equal(manageableRes.body.length, 1);
 });
 
 test("updateSalonDefaultSchedule creates salon-specific schedule document", async () => {
@@ -475,6 +530,34 @@ test("getSalonStaff — owner can view staff", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1);
+});
+
+test("getSalonStaff — excludes owner membership with worksAsSpecialist false", async () => {
+  const res = createResponse();
+
+  setupStaffMocks({
+    requesterOverrides: { _id: ownerId },
+    staffUserOverrides: {
+      _id: ownerId,
+      salons: [
+        {
+          salon: salonAId,
+          status: "approved",
+          relationshipType: "staff",
+          relationshipStatus: "accepted",
+          worksAsSpecialist: false,
+        },
+      ],
+    },
+  });
+
+  await getSalonStaff(
+    { user: { _id: ownerId, role: "barber" }, params: { salonId: salonAId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
 });
 
 test("getSalonStaff — admin can view staff", async () => {
@@ -801,6 +884,52 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
   assert.equal(salonResult.barbers.length, 1, "only paid barber included");
   assert.equal(salonResult.barbers[0].id || salonResult.barbers[0]._id, paidBarberId);
   assert.equal(salonResult.barbers[0].platformRole, undefined);
+
+  __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
+  __salonControllerTestHooks.resetGetSalonReviewStats();
+});
+
+test("listSalons excludes explicit non-working owner from salon barbers list", async () => {
+  const res = createResponse();
+  const salonId = "64b000000000000000001200";
+
+  __salonControllerTestHooks.setGetPaidAccessByBarberIds(async (ids) => {
+    return new Map(ids.map((id) => [String(id), true]));
+  });
+  __salonControllerTestHooks.setGetSalonReviewStats(async () => new Map());
+
+  Salon.find = () => ({
+    sort: async () => [{ _id: salonId, name: "Owner Salon", city: "Yerevan" }],
+  });
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  User.find = () => ({
+    select: async () => [
+      {
+        _id: ownerId,
+        name: "Owner Only",
+        role: "barber",
+        salons: [
+          {
+            salon: salonId,
+            status: "approved",
+            relationshipType: "staff",
+            relationshipStatus: "accepted",
+            worksAsSpecialist: false,
+          },
+        ],
+        toObject() {
+          const { toObject, ...rest } = this;
+          return { ...rest };
+        },
+      },
+    ],
+  });
+  BarberProfile.find = async () => [];
+
+  await listSalons({ query: {} }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body[0].barbers.length, 0);
 
   __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
   __salonControllerTestHooks.resetGetSalonReviewStats();

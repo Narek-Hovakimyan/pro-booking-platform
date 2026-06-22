@@ -4,7 +4,7 @@ import User from "../../models/User.js";
 import { isSalonAdmin, isSalonOwner } from "../../utils/salonPermissions.js";
 import {
   getRelationshipType,
-  isAcceptedStaffMember,
+  isWorkingSpecialist,
 } from "./salonRelationshipService.js";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -135,7 +135,7 @@ const getSalonMembers = async (salonId) => {
         avatarUrl: user.avatarUrl || "",
         relationshipType: "chair_renter",
       };
-    } else if (isAcceptedStaffMember(salonEntry)) {
+    } else if (isWorkingSpecialist(salonEntry)) {
       staffIds.push(user._id);
       membersById[String(user._id)] = {
         _id: user._id,

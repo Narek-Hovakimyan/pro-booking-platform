@@ -262,6 +262,50 @@ test("hides expired barber from public booking data", async () => {
   assert.equal(res.body.barbers.length, 0);
 });
 
+test("hides approved owner who does not work as specialist from public booking data", async () => {
+  const res = createResponse();
+
+  __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
+    async () => paidAccessMap
+  );
+  __publicSalonBookingTestHooks.setGetSalonReviewStats(
+    async () => reviewStatsMap
+  );
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    name: "Test Salon",
+    city: "Yerevan",
+    address: "",
+    phone: "",
+    imageUrl: "",
+  });
+  User.find = () =>
+    makeFindChain([
+      makeBarber(paidStaffBarberId, {
+        salons: [
+          {
+            salon: salonId,
+            status: "approved",
+            relationshipType: "staff",
+            relationshipStatus: "accepted",
+            worksAsSpecialist: false,
+          },
+        ],
+      }),
+    ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Booking.find = async () => [];
+  Service.find = () => makeLeanQuery([]);
+  paidAccessMap = new Map([[String(paidStaffBarberId), true]]);
+
+  await getPublicSalonBooking({ params: { salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barbers.length, 0);
+});
+
 test("hides stale-seat barber from public booking data", async () => {
   const res = createResponse();
 

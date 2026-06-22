@@ -8,6 +8,7 @@ import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
 import {
   findManageableSalonsForUser,
 } from "../services/salon/salonMembershipService.js";
+import { isBookableSalonSpecialist } from "../services/salon/salonRelationshipService.js";
 import { getSalonStatusForBarber } from "../services/salon/salonStatusService.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 import {
@@ -43,6 +44,30 @@ export const __salonControllerTestHooks = {
   setGetSalonReviewStats(fn) {
     getSalonReviewStatsForSalons = fn;
   },
+};
+
+const getApprovedSalonEntry = (barber, salonId) => {
+  const approvedEntry = (barber?.salons || []).find(
+    (entry) =>
+      String(entry?.salon?._id || entry?.salon) === String(salonId) &&
+      entry?.status === "approved"
+  );
+
+  if (approvedEntry) return approvedEntry;
+
+  if (
+    String(barber?.salon?._id || barber?.salon) === String(salonId) &&
+    barber?.salonStatus === "approved"
+  ) {
+    return {
+      salon: salonId,
+      status: "approved",
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+    };
+  }
+
+  return null;
 };
 
 /**
@@ -186,7 +211,7 @@ export const listSalons = async (req, res) => {
     barbers.forEach((barber) => {
       // Check new salons array first
       if (Array.isArray(barber.salons) && barber.salons.length > 0) {
-        const approvedEntries = barber.salons.filter((s) => s.status === "approved");
+        const approvedEntries = barber.salons.filter(isBookableSalonSpecialist);
         approvedEntries.forEach((entry) => {
           const salonId = String(entry.salon);
           if (
@@ -262,7 +287,11 @@ export const getSalonProfile = async (req, res) => {
       barberIds,
       salon._id
     );
-    const paidBarbers = barbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
+    const paidBarbers = barbers.filter(
+      (barber) =>
+        paidAccessMap.get(String(barber._id)) === true &&
+        isBookableSalonSpecialist(getApprovedSalonEntry(barber, salon._id))
+    );
 
     const profiles = await BarberProfile.find({
       barberId: { $in: paidBarbers.map((barber) => barber._id) },
@@ -301,7 +330,14 @@ export const createSalon = async (req, res) => {
   try {
     if (!requireBarber(req, res)) return undefined;
 
-    const { name, city = "", address = "", phone = "", imageUrl = "" } = req.body;
+    const {
+      name,
+      city = "",
+      address = "",
+      phone = "",
+      imageUrl = "",
+      ownerWorksAsSpecialist = true,
+    } = req.body;
     const safeImageUrl = sanitizeMediaUrl(imageUrl);
 
 
@@ -330,6 +366,9 @@ export const createSalon = async (req, res) => {
       status: "approved",
       joinedAt: new Date(),
       isPrimary: !hasPrimary,
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: ownerWorksAsSpecialist !== false,
     });
 
     // Update legacy fields only if no primary exists yet
@@ -337,7 +376,9 @@ export const createSalon = async (req, res) => {
       user.salon = salon._id;
       user.salonStatus = "approved";
     }
-    openCurrentWorkHistory(user, salon);
+    if (ownerWorksAsSpecialist !== false) {
+      openCurrentWorkHistory(user, salon);
+    }
     await user.save();
 
     return res.status(201).json({

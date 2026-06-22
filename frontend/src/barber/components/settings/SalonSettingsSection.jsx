@@ -402,6 +402,28 @@ export default function SalonSettingsSection({
             />
           </label>
 
+          <label className="flex items-start gap-3 rounded-2xl border border-neutral-200 bg-white p-3 text-sm font-semibold sm:col-span-2">
+            <input
+              checked={safeSalonDraft.ownerWorksAsSpecialist !== false}
+              className="mt-1 h-4 w-4"
+              disabled={isSalonSaving}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateSalonDraft(
+                  "ownerWorksAsSpecialist",
+                  event.target.checked
+                )
+              }
+            />
+            <span>
+              I also work as a specialist in this salon
+              <span className="mt-1 block text-xs font-normal text-neutral-500">
+                Turn this off if you only manage the salon and do not take
+                client bookings.
+              </span>
+            </span>
+          </label>
+
           <Button
             className="sm:col-span-2"
             disabled={!safeSalonDraft.name?.trim() || isSalonSaving}

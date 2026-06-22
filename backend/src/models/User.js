@@ -13,6 +13,54 @@ const defaultScheduleSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const staffPaymentSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ["none", "commission", "fixed"],
+      default: "none",
+    },
+    commissionStaffPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: undefined,
+    },
+    commissionSalonPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: undefined,
+    },
+    fixedAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+    fixedPeriod: {
+      type: String,
+      enum: ["daily", "weekly", "monthly"],
+      default: undefined,
+    },
+    notes: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
+    updatedAt: {
+      type: Date,
+      default: null,
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const salonEntrySchema = new mongoose.Schema(
   {
     salon: {
@@ -47,6 +95,10 @@ const salonEntrySchema = new mongoose.Schema(
       enum: ["pending", "accepted", "rejected"],
       default: "accepted",
     },
+    worksAsSpecialist: {
+      type: Boolean,
+      default: true,
+    },
     relationshipRequestedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -59,6 +111,10 @@ const salonEntrySchema = new mongoose.Schema(
     relationshipRespondedAt: {
       type: Date,
       default: null,
+    },
+    staffPayment: {
+      type: staffPaymentSchema,
+      default: () => ({ type: "none" }),
     },
   },
   { _id: false }

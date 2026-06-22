@@ -91,6 +91,7 @@ export default function BarberSettings({
     address: "",
     phone: "",
     imageUrl: "",
+    ownerWorksAsSpecialist: true,
   });
   const [selectedSalonId, setSelectedSalonId] = useState("");
   const [selectedPromotionSalonId, setSelectedPromotionSalonId] = useState("");
@@ -100,6 +101,7 @@ export default function BarberSettings({
   const [confirmation, setConfirmation] = useState(null);
   const [salonStaffById, setSalonStaffById] = useState({});
   const [savingRelationshipKey, setSavingRelationshipKey] = useState("");
+  const [savingPaymentKey, setSavingPaymentKey] = useState("");
   const [respondingRelationshipSalonId, setRespondingRelationshipSalonId] =
     useState("");
 
@@ -418,7 +420,14 @@ export default function BarberSettings({
 
     try {
       await api.post("/salons", salonDraft);
-      setSalonDraft({ name: "", city: "", address: "", phone: "", imageUrl: "" });
+      setSalonDraft({
+        name: "",
+        city: "",
+        address: "",
+        phone: "",
+        imageUrl: "",
+        ownerWorksAsSpecialist: true,
+      });
       await refreshSalonData();
       setSalonSaved("Salon created.");
     } catch (requestError) {
@@ -762,6 +771,34 @@ export default function BarberSettings({
     }
   };
 
+  const saveStaffPayment = async (salonId, barberId, staffPayment) => {
+    if (isSalonSaving) return false;
+
+    const nextSavingKey = `${salonId}:${barberId}`;
+    setIsSalonSaving(true);
+    setSavingPaymentKey(nextSavingKey);
+    setSalonError("");
+    setSalonSaved("");
+
+    try {
+      await api.patch(`/salons/${salonId}/staff/${barberId}/payment-settings`, {
+        staffPayment,
+      });
+      await refreshSalonData();
+      setSalonSaved("Staff payment settings updated.");
+      return true;
+    } catch (requestError) {
+      setSalonError(
+        requestError.response?.data?.message ||
+          "Could not update staff payment settings. Please try again."
+      );
+      return false;
+    } finally {
+      setSavingPaymentKey("");
+      setIsSalonSaving(false);
+    }
+  };
+
   const respondToRelationshipRequest = async (salonId, response) => {
     if (!salonId || isSalonSaving) return;
 
@@ -902,7 +939,9 @@ export default function BarberSettings({
                   onOpenPromoteConfirmation={openPromoteAdminConfirmation}
                   onOpenRemoveBarberConfirmation={openRemoveBarberConfirmation}
                   onSaveRelationshipType={saveRelationshipType}
+                  onSaveStaffPayment={saveStaffPayment}
                   savingRelationshipKey={savingRelationshipKey}
+                  savingPaymentKey={savingPaymentKey}
                 />
 
                 {/* Salon Promotions — one manager per managed salon */}

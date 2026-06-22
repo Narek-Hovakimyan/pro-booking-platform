@@ -6,12 +6,12 @@ import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
 import PaymentRecord from "../models/PaymentRecord.js";
 import PlatformAuditLog from "../models/PlatformAuditLog.js";
-import { isAcceptedStaffMember } from "./salon/salonRelationshipService.js";
+import { isWorkingSpecialist } from "./salon/salonRelationshipService.js";
 import { getDaysRemaining, getOrCreateDefaultSubscriptionPlan } from "./subscriptionService.js";
 
 const SAFE_OWNER_FIELDS = "name email avatarUrl city emailVerified profession barberType";
 const SAFE_BARBER_SEAT_FIELDS =
-  "name avatarUrl profession barberType email salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus";
+  "name avatarUrl profession barberType email salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -80,7 +80,7 @@ const getAcceptedStaffBarbersForSalon = async (salonId) => {
     const salonEntry = (barber.salons || []).find(
       (s) => getIdString(s.salon) === stringId && s.status === "approved"
     );
-    if (salonEntry && isAcceptedStaffMember(salonEntry)) return true;
+    if (salonEntry && isWorkingSpecialist(salonEntry)) return true;
 
     // Check legacy barber field
     if (getIdString(barber.salon) === stringId && barber.salonStatus === "approved") return true;
@@ -104,7 +104,7 @@ const isBarberAcceptedStaffForSalon = async (barberId, salonId) => {
   const salonEntry = (barber.salons || []).find(
     (s) => getIdString(s.salon) === stringId && s.status === "approved"
   );
-  if (salonEntry && isAcceptedStaffMember(salonEntry)) return true;
+  if (salonEntry && isWorkingSpecialist(salonEntry)) return true;
 
   // Check legacy fields
   if (getIdString(barber.salon) === stringId && barber.salonStatus === "approved") return true;

@@ -5,6 +5,7 @@ import Booking from "../models/Booking.js";
 import Schedule from "../models/Schedule.js";
 import User from "../models/User.js";
 import { getPaidAccessByBarberIdsForSalon } from "../services/subscriptionService.js";
+import { isBookableSalonSpecialist } from "../services/salon/salonRelationshipService.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
@@ -114,7 +115,9 @@ export const getPublicSalonBooking = async (req, res) => {
       salon._id
     );
     const paidBarbers = barbers.filter(
-      (b) => paidAccessMap.get(String(b._id)) === true
+      (barber) =>
+        paidAccessMap.get(String(barber._id)) === true &&
+        isBookableSalonSpecialist(getApprovedSalonEntry(barber, salon._id, salon))
     );
 
     const paidBarberIds = paidBarbers.map((barber) => barber._id).filter(Boolean);
