@@ -1,20 +1,32 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link } from "react-router-dom";
+import {
+  BriefcaseBusiness,
+  Camera,
+  Image,
+  AtSign,
+  MapPin,
+  Pencil,
+  Scissors,
+  Star,
+} from "lucide-react";
 
 import api from "@/shared/api/axios";
+import { getMyPortfolio } from "@/shared/api/portfolio";
 import AccountEmailSection from "@/shared/components/AccountEmailSection";
+import Drawer from "@/shared/components/common/Drawer";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { setReviews } from "@/store/slices/reviewsSlice";
 import { updateBarberProfile } from "@/store/slices/usersSlice";
 import { defaultPersonalSchedule } from "@/shared/data/schedule";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
-import ProfileSidebarCard from "@/barber/components/profile/ProfileSidebarCard";
 import ProfileFormCard from "@/barber/components/profile/ProfileFormCard";
 import CertificationsSection from "@/barber/components/profile/CertificationsSection";
 import ReviewsSection from "@/barber/components/profile/ReviewsSection";
 import ProfileWorkHistorySection from "@/barber/components/profile/ProfileWorkHistorySection";
+import { getMediaUrl } from "@/shared/utils/media";
 
 function getPrimarySalonId(user) {
   const approvedSalons = (user?.approvedSalons || user?.salons || []).filter(
@@ -33,6 +45,54 @@ function getPrimarySalonId(user) {
     legacySalon?._id ||
     null
   );
+}
+
+const professionLabels = {
+  barber: "Barber",
+  hair_stylist: "Hair stylist",
+  nail_master: "Nail master",
+  makeup_artist: "Makeup artist",
+  cosmetologist: "Cosmetologist",
+  lash_brow: "Lash & Brow",
+  massage: "Massage therapist",
+  other: "Specialist",
+};
+
+const barberTypeLabels = {
+  men: "Men's barber",
+  women: "Women's hairdresser",
+  unisex: "Unisex",
+};
+
+const getProfileHeadline = (profile) => {
+  const profession = professionLabels[profile?.profession] || "Specialist";
+  const barberType =
+    profile?.profession === "barber"
+      ? barberTypeLabels[profile?.barberType]
+      : "";
+
+  return [profession, barberType].filter(Boolean).join(" · ");
+};
+
+function StatCard({ icon: Icon, label, value, helper }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-700">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div>
+          <p className="text-lg font-bold text-neutral-950">{value}</p>
+          <p className="text-xs font-medium text-neutral-500">{label}</p>
+        </div>
+      </div>
+      {helper && <p className="mt-2 text-xs text-neutral-400">{helper}</p>}
+    </div>
+  );
+}
+
+function EmptyText({ children }) {
+  return <p className="text-sm text-neutral-500">{children}</p>;
 }
 
 export default function BarberProfilePage() {
@@ -65,6 +125,9 @@ export default function BarberProfilePage() {
   const [eventCertifications, setEventCertifications] = useState([]);
   const [salonRating, setSalonRating] = useState(null);
   const [salonReviewsCount, setSalonReviewsCount] = useState(0);
+  const [servicesCount, setServicesCount] = useState(null);
+  const [portfolioCount, setPortfolioCount] = useState(null);
+  const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
 
   // Email state (separate from public profile state)
   const [email, setEmail] = useState(
@@ -101,6 +164,9 @@ export default function BarberProfilePage() {
     salon: savedProfile?.salon || null,
     salonStatus: savedProfile?.salonStatus || currentUser?.salonStatus || "none",
     workHistory: savedProfile?.workHistory || currentUser?.workHistory || [],
+    approvedSalons: savedProfile?.approvedSalons || savedProfile?.salons || [],
+    primarySalon: savedProfile?.primarySalon || null,
+    salons: savedProfile?.salons || [],
   });
   const hasCertifications =
     certifications.length > 0 || eventCertifications.length > 0;
@@ -161,6 +227,9 @@ export default function BarberProfilePage() {
             salon: data.salon || null,
             salonStatus: data.salonStatus || "none",
             workHistory: data.workHistory || [],
+            approvedSalons: data.approvedSalons || data.salons || [],
+            primarySalon: data.primarySalon || null,
+            salons: data.salons || [],
           });
         }
       } catch (requestError) {
@@ -220,6 +289,29 @@ export default function BarberProfilePage() {
     fetchProfile();
     fetchReviews();
     fetchCertifications();
+
+    api.get(`/services/${currentUserId}`)
+      .then(({ data }) => {
+        if (isMounted) {
+          const activeServices = (data || []).filter(
+            (service) => service?.active !== false
+          );
+          setServicesCount(activeServices.length);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setServicesCount(null);
+      });
+
+    getMyPortfolio()
+      .then((items) => {
+        if (isMounted) {
+          setPortfolioCount(Array.isArray(items) ? items.length : null);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setPortfolioCount(null);
+      });
 
     // Fetch salon review stats if barber belongs to approved salons
     if (currentUserSalonId) {
@@ -290,6 +382,10 @@ export default function BarberProfilePage() {
         defaultSchedule: data.defaultSchedule || profile.defaultSchedule,
         salon: data.salon || profile.salon || null,
         salonStatus: data.salonStatus || profile.salonStatus || "none",
+        workHistory: data.workHistory || profile.workHistory || [],
+        approvedSalons: data.approvedSalons || data.salons || profile.approvedSalons || [],
+        primarySalon: data.primarySalon || profile.primarySalon || null,
+        salons: data.salons || profile.salons || [],
       };
 
       dispatch(updateBarberProfile({ barberId: currentUser.id, profile: nextProfile }));
@@ -333,6 +429,10 @@ export default function BarberProfilePage() {
       defaultSchedule: data.defaultSchedule || profile.defaultSchedule,
       salon: data.salon || profile.salon || null,
       salonStatus: data.salonStatus || profile.salonStatus || "none",
+      workHistory: data.workHistory || profile.workHistory || [],
+      approvedSalons: data.approvedSalons || data.salons || profile.approvedSalons || [],
+      primarySalon: data.primarySalon || profile.primarySalon || null,
+      salons: data.salons || profile.salons || [],
     };
 
     dispatch(updateBarberProfile({ barberId: currentUser.id, profile: nextProfile }));
@@ -412,6 +512,25 @@ export default function BarberProfilePage() {
   const normalizedInputEmail = (email ?? "").trim().toLowerCase();
   const normalizedSavedEmail = (savedEmail ?? "").trim().toLowerCase();
   const hasEmailChanges = normalizedInputEmail !== normalizedSavedEmail;
+  const displayName = profile.name || currentUser.name || "Your profile";
+  const headline = getProfileHeadline(profile);
+  const avatarSrc = profile.imageUrl ? getMediaUrl(profile.imageUrl) : "";
+  const instagramHandle = profile.instagram?.trim() || "";
+  const instagramHref = instagramHandle
+    ? instagramHandle.startsWith("http")
+      ? instagramHandle
+      : `https://instagram.com/${instagramHandle.replace(/^@/, "")}`
+    : "";
+  const statRating =
+    barberReviews.length > 0 && averageRating > 0
+      ? averageRating.toFixed(1)
+      : "No rating";
+  const statReviews =
+    barberReviews.length > 0 ? String(barberReviews.length) : "No reviews";
+  const statServices =
+    servicesCount === null ? "Add services" : String(servicesCount);
+  const statPortfolio =
+    portfolioCount === null ? "Portfolio" : String(portfolioCount);
 
   if (!currentUser?.id) {
 
@@ -420,57 +539,196 @@ export default function BarberProfilePage() {
 
   return (
     <div className="flex flex-col gap-5 lg:gap-6">
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
-        <ProfileFormCard
-          profile={profile}
-          isProfileSaving={isProfileSaving}
-          saved={saved}
-          profileError={profileError}
-          currentUser={currentUser}
-          onUpdateField={updateField}
-          onSaveProfile={saveProfile}
-          onAvatarUploaded={handleAvatarUploaded}
-        />
+      <Card className="overflow-hidden rounded-2xl sm:rounded-3xl">
+        <div className="h-36 bg-[linear-gradient(135deg,#111827_0%,#334155_48%,#0f766e_100%)] sm:h-48" />
+        <CardContent className="p-4 sm:p-6">
+          <div className="-mt-16 flex flex-col gap-4 sm:-mt-20 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              {avatarSrc ? (
+                <img
+                  alt={displayName}
+                  className="h-28 w-28 rounded-3xl border-4 border-white object-cover shadow-sm sm:h-36 sm:w-36"
+                  src={avatarSrc}
+                />
+              ) : (
+                <div className="flex h-28 w-28 items-center justify-center rounded-3xl border-4 border-white bg-neutral-100 text-3xl font-bold text-neutral-500 shadow-sm sm:h-36 sm:w-36">
+                  {displayName.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="space-y-2 pb-1">
+                <div>
+                  <h1 className="text-3xl font-bold tracking-tight text-neutral-950 sm:text-4xl">
+                    {displayName}
+                  </h1>
+                  <p className="mt-1 text-sm font-medium text-neutral-600">
+                    {headline}
+                  </p>
+                </div>
+                {profile.city && (
+                  <p className="flex items-center gap-1.5 text-sm text-neutral-500">
+                    <MapPin className="h-4 w-4" />
+                    {profile.city}
+                  </p>
+                )}
+              </div>
+            </div>
 
-        <ProfileSidebarCard
-          profile={profile}
-          currentUser={currentUser}
-          showSalonLink={showSalonLink}
-          salonName={salonName}
-          salonId={salonId}
-          reviewsAverage={averageRating}
-          reviewsCount={barberReviews.length}
-          salonRating={salonRating}
-          salonReviewsCount={salonReviewsCount}
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setIsEditDrawerOpen(true)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit profile
+              </Button>
+              <Button as={Link} to="/admin/portfolio" variant="outline">
+                <Camera className="mr-2 h-4 w-4" />
+                Portfolio
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          icon={Star}
+          label="Rating"
+          value={statRating}
+          helper={barberReviews.length > 0 ? "Client average" : "Waiting for first review"}
+        />
+        <StatCard
+          icon={BriefcaseBusiness}
+          label="Reviews"
+          value={statReviews}
+        />
+        <StatCard
+          icon={Scissors}
+          label="Services"
+          value={statServices}
+        />
+        <StatCard
+          icon={Image}
+          label="Portfolio"
+          value={statPortfolio}
         />
       </div>
 
-      <section className="w-full">
-        <Card className="rounded-2xl sm:rounded-3xl">
-          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-            <div>
-              <h2 className="text-xl font-bold text-neutral-950">
-                Portfolio
-              </h2>
-              <p className="mt-1 text-sm text-neutral-500">
-                Manage your portfolio and before/after photos.
-              </p>
-            </div>
-            <Button as={Link} to="/admin/portfolio" variant="outline">
-              Manage portfolio
-            </Button>
-          </CardContent>
-        </Card>
-      </section>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
+        <div className="space-y-5">
+          <Card className="rounded-2xl sm:rounded-3xl">
+            <CardContent className="space-y-4 p-4 sm:p-6">
+              <h2 className="text-xl font-bold text-neutral-950">About</h2>
+              {profile.bio ? (
+                <p className="text-sm leading-6 text-neutral-600">{profile.bio}</p>
+              ) : (
+                <EmptyText>No bio added yet.</EmptyText>
+              )}
+              <div className="grid gap-3 border-t border-neutral-100 pt-4 text-sm text-neutral-600 sm:grid-cols-2">
+                {profile.city && (
+                  <p className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-neutral-400" />
+                    {profile.city}
+                  </p>
+                )}
+                {profile.address && (
+                  <p className="flex items-center gap-2">
+                    <BriefcaseBusiness className="h-4 w-4 text-neutral-400" />
+                    {profile.address}
+                  </p>
+                )}
+                {instagramHref && (
+                  <a
+                    className="flex items-center gap-2 font-medium text-neutral-800 hover:text-neutral-950"
+                    href={instagramHref}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <AtSign className="h-4 w-4 text-neutral-400" />
+                    {instagramHandle}
+                  </a>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
-      {hasCertifications && (
-        <section className="w-full">
+          <Card className="rounded-2xl sm:rounded-3xl">
+            <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div>
+                <h2 className="text-xl font-bold text-neutral-950">
+                  Portfolio
+                </h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  {portfolioCount && portfolioCount > 0
+                    ? `${portfolioCount} portfolio item${portfolioCount === 1 ? "" : "s"} ready for clients.`
+                    : "No portfolio items yet."}
+                </p>
+              </div>
+              <Button as={Link} to="/admin/portfolio" variant="outline">
+                Manage portfolio
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-5">
+          <Card className="rounded-2xl sm:rounded-3xl">
+            <CardContent className="space-y-4 p-4 sm:p-6">
+              <h2 className="text-xl font-bold text-neutral-950">Salon & work</h2>
+              {showSalonLink ? (
+                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                  <Link
+                    className="font-semibold text-neutral-900 hover:text-neutral-950"
+                    to={`/salons/${salonId}`}
+                  >
+                    {salonName}
+                  </Link>
+                  {salonRating !== null && (
+                    <p className="mt-1 text-sm text-neutral-500">
+                      <Star className="mr-1 inline-block h-4 w-4 fill-amber-400 text-amber-500" />
+                      {salonRating ? salonRating.toFixed(1) : "0.0"} ·{" "}
+                      {salonReviewsCount} reviews
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <EmptyText>No salon connected yet.</EmptyText>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl sm:rounded-3xl">
+            <CardContent className="space-y-3 p-4 sm:p-6">
+              <h2 className="text-xl font-bold text-neutral-950">Client view</h2>
+              <p className="text-sm leading-6 text-neutral-500">
+                This page now mirrors the information clients use to decide
+                whether to book, while private contact and account settings stay
+                behind edit controls.
+              </p>
+              <Button onClick={() => setIsEditDrawerOpen(true)} variant="outline">
+                Edit public details
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <section className="w-full">
+        {hasCertifications ? (
           <CertificationsSection
             certifications={certifications}
             eventCertifications={eventCertifications}
           />
-        </section>
-      )}
+        ) : (
+          <Card className="rounded-2xl sm:rounded-3xl">
+            <CardContent className="p-4 sm:p-6">
+              <h2 className="text-xl font-bold text-neutral-950">
+                Certifications
+              </h2>
+              <p className="mt-2 text-sm text-neutral-500">
+                No certifications added yet.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </section>
 
       <section className="w-full">
         <ProfileWorkHistorySection
@@ -489,9 +747,25 @@ export default function BarberProfilePage() {
         />
       </section>
 
-      <section className="w-full">
-        <Card className="rounded-2xl sm:rounded-3xl">
-          <CardContent className="space-y-5 p-4 sm:p-6">
+      <Drawer
+        description="Update the details clients see before booking."
+        isOpen={isEditDrawerOpen}
+        onClose={() => setIsEditDrawerOpen(false)}
+        title="Edit profile"
+      >
+        <ProfileFormCard
+          profile={profile}
+          isProfileSaving={isProfileSaving}
+          saved={saved}
+          profileError={profileError}
+          currentUser={currentUser}
+          onUpdateField={updateField}
+          onSaveProfile={saveProfile}
+          onAvatarUploaded={handleAvatarUploaded}
+        />
+
+        <Card className="rounded-2xl">
+          <CardContent className="space-y-5 p-4">
             <AccountEmailSection
               email={email}
               emailVerified={emailVerified}
@@ -505,16 +779,16 @@ export default function BarberProfilePage() {
             />
 
             <Button
+              className="w-full"
               disabled={!hasEmailChanges || isEmailSaving}
               variant="outline"
               onClick={saveEmail}
             >
               {isEmailSaving ? "Saving..." : "Save email"}
             </Button>
-
           </CardContent>
         </Card>
-      </section>
+      </Drawer>
     </div>
   );
 }
