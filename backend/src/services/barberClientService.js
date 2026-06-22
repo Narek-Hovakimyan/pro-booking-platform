@@ -1,4 +1,5 @@
 import Booking from "../models/Booking.js";
+import ClientRelationship from "../models/ClientRelationship.js";
 import User from "../models/User.js";
 import {
   getArmeniaDateKey,
@@ -163,6 +164,12 @@ const sortClientSummaries = (left, right) => {
   return left.clientName.localeCompare(right.clientName);
 };
 
+const serializeLoyalty = (relationship) => ({
+  isVip: Boolean(relationship?.isVip),
+  internalNote: String(relationship?.internalNote || ""),
+  updatedAt: relationship?.updatedAt || null,
+});
+
 export const getBarberClients = async ({
   requester,
   now = new Date(),
@@ -204,6 +211,18 @@ export const getBarberClients = async ({
   const usersById = new Map(
     (users || []).map((user) => [getIdString(user?._id || user?.id), user])
   );
+  const relationships = clientIds.length > 0
+    ? await runLeanQuery(
+        ClientRelationship.find({ barberId, clientId: { $in: clientIds } }),
+        "clientId isVip internalNote updatedAt"
+      )
+    : [];
+  const relationshipsByClientId = new Map(
+    (relationships || []).map((relationship) => [
+      getIdString(relationship?.clientId),
+      relationship,
+    ])
+  );
   const todayKey = getArmeniaDateKey(now);
   const nowMinutes = getArmeniaMinutesOfDay(now);
 
@@ -235,8 +254,85 @@ export const getBarberClients = async ({
         totalSpent,
         mostBookedService: getMostBookedService(clientBookings),
         bookingCount: clientBookings.length,
+        loyalty: serializeLoyalty(relationshipsByClientId.get(clientId)),
         messagePath: `/messages/${clientId}`,
       };
     })
     .sort(sortClientSummaries);
+};
+
+export const updateBarberClientLoyalty = async ({
+  requester,
+  clientId,
+  updates = {},
+} = {}) => {
+  if (!requester) {
+    throw new BarberClientError(401, "Not authenticated");
+  }
+
+  if (requester.role !== "barber") {
+    throw new BarberClientError(403, "Only barbers can update clients");
+  }
+
+  const barberId = getIdString(requester._id || requester.id);
+  const targetClientId = getIdString(clientId);
+
+  if (!targetClientId) {
+    throw new BarberClientError(400, "clientId is required");
+  }
+
+  const payload = {};
+
+  if (updates.isVip !== undefined) {
+    if (typeof updates.isVip !== "boolean") {
+      throw new BarberClientError(400, "isVip must be a boolean");
+    }
+    payload.isVip = updates.isVip;
+  }
+
+  if (updates.internalNote !== undefined) {
+    if (typeof updates.internalNote !== "string") {
+      throw new BarberClientError(400, "internalNote must be a string");
+    }
+
+    const internalNote = updates.internalNote.trim();
+    if (internalNote.length > 1000) {
+      throw new BarberClientError(400, "internalNote must be 1000 characters or fewer");
+    }
+    payload.internalNote = internalNote;
+  }
+
+  if (Object.keys(payload).length === 0) {
+    throw new BarberClientError(400, "No loyalty updates provided");
+  }
+
+  const existingBooking = await Booking.findOne({
+    barberId,
+    clientId: targetClientId,
+  }).select("_id");
+
+  if (!existingBooking) {
+    throw new BarberClientError(404, "Client not found for this barber");
+  }
+
+  const relationship = await ClientRelationship.findOneAndUpdate(
+    { barberId, clientId: targetClientId },
+    {
+      $set: {
+        ...payload,
+        updatedBy: barberId,
+      },
+      $setOnInsert: {
+        barberId,
+        clientId: targetClientId,
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+      upsert: true,
+    }
+  ).select("isVip internalNote updatedAt");
+
+  return serializeLoyalty(relationship);
 };

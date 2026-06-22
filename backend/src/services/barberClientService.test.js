@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import Booking from "../models/Booking.js";
+import ClientRelationship from "../models/ClientRelationship.js";
 import User from "../models/User.js";
-import { getBarberClients } from "./barberClientService.js";
+import {
+  getBarberClients,
+  updateBarberClientLoyalty,
+} from "./barberClientService.js";
 
 const originalMethods = {
   bookingFind: Booking.find,
+  bookingFindOne: Booking.findOne,
+  clientRelationshipFind: ClientRelationship.find,
+  clientRelationshipFindOneAndUpdate: ClientRelationship.findOneAndUpdate,
   userFind: User.find,
 };
 
@@ -16,11 +23,6 @@ const clientAId = "64b000000000000000000003";
 const clientBId = "64b000000000000000000004";
 const manualClientId = null;
 
-afterEach(() => {
-  Booking.find = originalMethods.bookingFind;
-  User.find = originalMethods.userFind;
-});
-
 const createLeanQuery = (items, onSelect = () => {}) => ({
   select(fields) {
     onSelect(fields);
@@ -29,6 +31,26 @@ const createLeanQuery = (items, onSelect = () => {}) => ({
   async lean() {
     return items;
   },
+});
+
+const createSelectQuery = (item, onSelect = () => {}) => ({
+  select(fields) {
+    onSelect(fields);
+    return item;
+  },
+});
+
+beforeEach(() => {
+  ClientRelationship.find = () => createLeanQuery([]);
+});
+
+afterEach(() => {
+  Booking.find = originalMethods.bookingFind;
+  Booking.findOne = originalMethods.bookingFindOne;
+  ClientRelationship.find = originalMethods.clientRelationshipFind;
+  ClientRelationship.findOneAndUpdate =
+    originalMethods.clientRelationshipFindOneAndUpdate;
+  User.find = originalMethods.userFind;
 });
 
 const makeBooking = (overrides = {}) => ({
@@ -208,6 +230,11 @@ test("getBarberClients returns only current barber client summaries", async () =
       count: 1,
     },
     bookingCount: 3,
+    loyalty: {
+      isVip: false,
+      internalNote: "",
+      updatedAt: null,
+    },
     messagePath: `/messages/${clientAId}`,
   });
 
@@ -230,6 +257,11 @@ test("getBarberClients returns only current barber client summaries", async () =
       count: 1,
     },
     bookingCount: 1,
+    loyalty: {
+      isVip: false,
+      internalNote: "",
+      updatedAt: null,
+    },
     messagePath: `/messages/${clientBId}`,
   });
 
@@ -286,4 +318,141 @@ test("getBarberClients uses non-rejected service fallback when client has no com
     serviceName: "Trim",
     count: 2,
   });
+});
+
+test("getBarberClients includes barber-only loyalty metadata", async () => {
+  const updatedAt = new Date("2026-06-05T10:00:00.000Z");
+  let relationshipQuery = null;
+
+  Booking.find = () =>
+    createLeanQuery([
+      makeBooking({
+        _id: "booking-one",
+        clientId: clientAId,
+      }),
+    ]);
+  User.find = () => createLeanQuery([{ _id: clientAId, name: "Client A" }]);
+  ClientRelationship.find = (query) => {
+    relationshipQuery = query;
+    return createLeanQuery([
+      {
+        clientId: clientAId,
+        isVip: true,
+        internalNote: "Prefers quiet appointments",
+        updatedAt,
+      },
+    ]);
+  };
+
+  const result = await getBarberClients({
+    requester: { _id: barberId, role: "barber" },
+    now: new Date("2026-06-04T08:00:00.000Z"),
+  });
+
+  assert.deepEqual(relationshipQuery, {
+    barberId,
+    clientId: { $in: [clientAId] },
+  });
+  assert.deepEqual(result[0].loyalty, {
+    isVip: true,
+    internalNote: "Prefers quiet appointments",
+    updatedAt,
+  });
+});
+
+test("updateBarberClientLoyalty updates own visible client", async () => {
+  const updatedAt = new Date("2026-06-06T12:00:00.000Z");
+  const bookingQueries = [];
+  let updateQuery = null;
+  let updatePayload = null;
+
+  Booking.findOne = (query) => {
+    bookingQueries.push(query);
+    return createSelectQuery({ _id: "booking-one" });
+  };
+  ClientRelationship.findOneAndUpdate = (query, payload) => {
+    updateQuery = query;
+    updatePayload = payload;
+    return createSelectQuery({
+      isVip: true,
+      internalNote: "Prefers quiet appointments",
+      updatedAt,
+    });
+  };
+
+  const result = await updateBarberClientLoyalty({
+    requester: { _id: barberId, role: "barber" },
+    clientId: clientAId,
+    updates: {
+      isVip: true,
+      internalNote: "  Prefers quiet appointments  ",
+    },
+  });
+
+  assert.deepEqual(bookingQueries, [{ barberId, clientId: clientAId }]);
+  assert.deepEqual(updateQuery, { barberId, clientId: clientAId });
+  assert.deepEqual(updatePayload, {
+    $set: {
+      isVip: true,
+      internalNote: "Prefers quiet appointments",
+      updatedBy: barberId,
+    },
+    $setOnInsert: {
+      barberId,
+      clientId: clientAId,
+    },
+  });
+  assert.deepEqual(result, {
+    isVip: true,
+    internalNote: "Prefers quiet appointments",
+    updatedAt,
+  });
+});
+
+test("updateBarberClientLoyalty rejects unrelated clients", async () => {
+  Booking.findOne = () => createSelectQuery(null);
+
+  await assert.rejects(
+    () =>
+      updateBarberClientLoyalty({
+        requester: { _id: barberId, role: "barber" },
+        clientId: clientBId,
+        updates: { isVip: true },
+      }),
+    (error) => {
+      assert.equal(error.statusCode, 404);
+      assert.equal(error.message, "Client not found for this barber");
+      return true;
+    }
+  );
+});
+
+test("updateBarberClientLoyalty validates payload", async () => {
+  await assert.rejects(
+    () =>
+      updateBarberClientLoyalty({
+        requester: { _id: barberId, role: "barber" },
+        clientId: clientAId,
+        updates: { internalNote: "x".repeat(1001) },
+      }),
+    (error) => {
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.message, "internalNote must be 1000 characters or fewer");
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    () =>
+      updateBarberClientLoyalty({
+        requester: { _id: barberId, role: "barber" },
+        clientId: clientAId,
+        updates: { isVip: "yes" },
+      }),
+    (error) => {
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.message, "isVip must be a boolean");
+      return true;
+    }
+  );
 });

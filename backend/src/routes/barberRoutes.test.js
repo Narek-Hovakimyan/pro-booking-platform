@@ -15,6 +15,31 @@ test("barber client CRM route requires auth before controller", () => {
   );
 });
 
+test("barber client loyalty route requires auth before controller", () => {
+  const route = barberRoutes.stack.find(
+    (layer) =>
+      layer.route?.path === "/me/clients/:clientId/loyalty" &&
+      layer.route?.methods?.patch
+  );
+
+  assert.ok(route, "expected PATCH /me/clients/:clientId/loyalty route");
+  assert.deepEqual(
+    route.route.stack.map((stackLayer) => stackLayer.name),
+    ["protect", "requireBarberSubscription", "updateMyBarberClientLoyalty"]
+  );
+});
+
+test("barber client loyalty route is registered before generic barber id route", () => {
+  const paths = barberRoutes.stack
+    .map((layer) => layer.route?.path)
+    .filter(Boolean);
+
+  assert.ok(
+    paths.indexOf("/me/clients/:clientId/loyalty") < paths.indexOf("/:id"),
+    "/me/clients/:clientId/loyalty must be registered before /:id"
+  );
+});
+
 test("barber client CRM route is registered before generic barber id route", () => {
   const paths = barberRoutes.stack
     .map((layer) => layer.route?.path)

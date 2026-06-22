@@ -5,7 +5,10 @@ import {
   getProfileByBarberId,
   upsertProfileByBarberId,
 } from "../controllers/barberProfileController.js";
-import { getMyBarberClients } from "../controllers/barberClientController.js";
+import {
+  getMyBarberClients,
+  updateMyBarberClientLoyalty,
+} from "../controllers/barberClientController.js";
 import {
   getCertifications,
   getEventCertificates,
@@ -38,6 +41,12 @@ const requireBarberRole = (req, res, next) => {
 router.get("/", barberProfileController.getAll);
 router.get("/card-summary", getBarberCardSummary);
 router.get("/me/clients", protect, requireBarberSubscription, getMyBarberClients);
+router.patch(
+  "/me/clients/:clientId/loyalty",
+  protect,
+  requireBarberSubscription,
+  updateMyBarberClientLoyalty
+);
 router.get("/profile/:barberId", getProfileByBarberId);
 router.put(
   "/profile/:barberId",

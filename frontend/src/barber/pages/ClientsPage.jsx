@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, SlidersHorizontal } from "lucide-react";
+import { MessageCircle, SlidersHorizontal, Star } from "lucide-react";
 
 import ClientsFiltersPanel from "@/barber/components/clients/ClientsFiltersPanel";
 import api from "@/shared/api/axios";
@@ -84,6 +84,13 @@ export default function ClientsPage() {
     ...DEFAULT_CLIENT_FILTERS.totalSpentRange,
   });
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [loyaltyDraft, setLoyaltyDraft] = useState({
+    isVip: false,
+    internalNote: "",
+  });
+  const [isSavingLoyalty, setIsSavingLoyalty] = useState(false);
+  const [loyaltyError, setLoyaltyError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -265,6 +272,63 @@ export default function ClientsPage() {
     });
   };
 
+  const openClientDetails = (client) => {
+    setSelectedClient(client);
+    setLoyaltyDraft({
+      isVip: Boolean(client?.loyalty?.isVip),
+      internalNote: client?.loyalty?.internalNote || "",
+    });
+    setLoyaltyError("");
+  };
+
+  const closeClientDetails = () => {
+    setSelectedClient(null);
+    setLoyaltyError("");
+  };
+
+  const saveClientLoyalty = async () => {
+    if (!selectedClient?.clientId) return;
+
+    setIsSavingLoyalty(true);
+    setLoyaltyError("");
+
+    try {
+      const { data } = await api.patch(
+        `/barbers/me/clients/${selectedClient.clientId}/loyalty`,
+        loyaltyDraft
+      );
+      const nextLoyalty = data?.loyalty || {
+        isVip: Boolean(loyaltyDraft.isVip),
+        internalNote: loyaltyDraft.internalNote.trim(),
+        updatedAt: null,
+      };
+
+      setClients((currentClients) =>
+        currentClients.map((client) =>
+          client.clientId === selectedClient.clientId
+            ? { ...client, loyalty: nextLoyalty }
+            : client
+        )
+      );
+      setSelectedClient((currentClient) =>
+        currentClient
+          ? { ...currentClient, loyalty: nextLoyalty }
+          : currentClient
+      );
+      setLoyaltyDraft({
+        isVip: Boolean(nextLoyalty.isVip),
+        internalNote: nextLoyalty.internalNote || "",
+      });
+    } catch (requestError) {
+      setLoyaltyError(
+        requestError.response?.data?.message ||
+          "Could not save client loyalty settings."
+      );
+    } finally {
+      setIsSavingLoyalty(false);
+    }
+  };
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -339,6 +403,97 @@ export default function ClientsPage() {
         />
       </Drawer>
 
+      <Drawer
+        closeLabel="Close client details"
+        description={
+          selectedClient
+            ? "Private loyalty details for your admin view only."
+            : ""
+        }
+        footer={
+          <>
+            <Button onClick={saveClientLoyalty} disabled={isSavingLoyalty}>
+              {isSavingLoyalty ? "Saving..." : "Save loyalty"}
+            </Button>
+            <Button onClick={closeClientDetails} variant="outline">
+              Close
+            </Button>
+          </>
+        }
+        isOpen={Boolean(selectedClient)}
+        onClose={closeClientDetails}
+        title={selectedClient?.clientName || "Client details"}
+      >
+        {selectedClient && (
+          <div className="space-y-5">
+            <div className="rounded-2xl bg-neutral-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-950">
+                    {selectedClient.clientName || "Client"}
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    {selectedClient.phone || "No phone on booking"}
+                  </p>
+                </div>
+                {selectedClient.loyalty?.isVip && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                    <Star className="h-3.5 w-3.5 fill-current" />
+                    VIP
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 p-4 text-sm font-semibold">
+              <span>VIP client</span>
+              <input
+                checked={loyaltyDraft.isVip}
+                className="h-5 w-5 accent-neutral-950"
+                onChange={(event) =>
+                  setLoyaltyDraft((current) => ({
+                    ...current,
+                    isVip: event.target.checked,
+                  }))
+                }
+                type="checkbox"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold">
+              Internal note
+              <textarea
+                className="min-h-32 w-full rounded-2xl border border-neutral-200 p-3 font-normal outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10"
+                maxLength={1000}
+                onChange={(event) =>
+                  setLoyaltyDraft((current) => ({
+                    ...current,
+                    internalNote: event.target.value,
+                  }))
+                }
+                placeholder="No internal note yet"
+                value={loyaltyDraft.internalNote}
+              />
+            </label>
+
+            {!loyaltyDraft.internalNote.trim() && (
+              <p className="rounded-2xl bg-neutral-50 p-3 text-sm text-neutral-500">
+                No internal note yet.
+              </p>
+            )}
+
+            {loyaltyError && (
+              <p
+                className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                role="alert"
+              >
+                {loyaltyError}
+              </p>
+            )}
+          </div>
+        )}
+      </Drawer>
+
       {error && (
         <div
           className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
@@ -384,9 +539,17 @@ export default function ClientsPage() {
               <CardContent className="space-y-4 p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate text-lg font-semibold text-neutral-950">
-                      {client.clientName || "Client"}
-                    </h2>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h2 className="truncate text-lg font-semibold text-neutral-950">
+                        {client.clientName || "Client"}
+                      </h2>
+                      {client.loyalty?.isVip && (
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                          <Star className="h-3 w-3 fill-current" />
+                          VIP
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-0.5 truncate text-sm text-neutral-500">
                       {client.phone || "No phone on booking"}
                     </p>
@@ -444,13 +607,22 @@ export default function ClientsPage() {
                   </div>
                 </div>
 
-                <Button
-                  className="w-full gap-2"
-                  onClick={() => openMessage(client)}
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  Message
-                </Button>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    className="w-full"
+                    onClick={() => openClientDetails(client)}
+                    variant="outline"
+                  >
+                    Client details
+                  </Button>
+                  <Button
+                    className="w-full gap-2"
+                    onClick={() => openMessage(client)}
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Message
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
