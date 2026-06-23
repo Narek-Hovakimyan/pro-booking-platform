@@ -56,6 +56,14 @@
     "waitlist": "Waitlist",
     "work": "Work"
   },
+  "dashboard": {
+    "personal": {
+      "title": "Personal dashboard",
+      "description": "This page shows your personal barber bookings, income, and reviews. For salon-specific analytics, open Salon Dashboard.",
+      "multipleSalons": "You manage multiple salons. Use Salon Dashboard to switch between salons.",
+      "openSalonDashboard": "Open Salon Dashboard"
+    }
+  },
   "auth": {
     "fields": {
       "accountType": "Account type",

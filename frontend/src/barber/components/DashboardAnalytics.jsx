@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
+  ArrowRight,
   Bell,
   CalendarCheck,
   CalendarDays,
   Clock3,
+  Info,
   Scissors,
   UserCircle,
 } from "lucide-react";
 import { useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
+import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { formatDateKey } from "@/shared/utils/dates";
 import AnalyticsActivityLists from "@/barber/components/analytics/AnalyticsActivityLists";
@@ -28,6 +32,12 @@ import { StatCardSkeleton } from "@/barber/components/analytics/AnalyticsStatCar
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
 
 const formatCurrency = (amount) => `${Number(amount || 0).toLocaleString()} AMD`;
+
+const getSalonList = (data) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.salons)) return data.salons;
+  return [];
+};
 
 const getWeekBounds = () => {
   const now = new Date();
@@ -87,6 +97,7 @@ function formatTimeAgo(dateValue) {
 
 export default function DashboardAnalytics({ bookings = [] }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { currentUser } = useSelector((state) => state.auth);
   const currentUserId = currentUser?._id || currentUser?.id;
   const currentMonth = getCurrentMonth();
@@ -106,6 +117,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
   const [ratingCount, setRatingCount] = useState(0);
   const [incomeLoading, setIncomeLoading] = useState(true);
   const [ratingLoading, setRatingLoading] = useState(true);
+  const [manageableSalonCount, setManageableSalonCount] = useState(0);
 
   const todayKey = formatDateKey(new Date());
   const { monday, sunday } = getWeekBounds();
@@ -306,6 +318,29 @@ export default function DashboardAnalytics({ bookings = [] }) {
     };
   }, [currentUserId, currentMonth, bookingSignature]);
 
+  useEffect(() => {
+    if (currentUser?.role !== "barber" || !currentUserId) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    api
+      .get("/salons/mine/manageable")
+      .then(({ data }) => {
+        if (isMounted) {
+          setManageableSalonCount(getSalonList(data).length);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setManageableSalonCount(0);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.role, currentUserId]);
+
   // ---- Today's date display ----
 
   const todayDate = new Date();
@@ -361,6 +396,37 @@ export default function DashboardAnalytics({ bookings = [] }) {
           todayDateLabel={todayDateLabel}
           unreadNotifications={unreadNotifications}
         />
+
+        {currentUser?.role === "barber" && manageableSalonCount > 0 && (
+          <div className="flex flex-col gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <span className="mt-0.5 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm">
+                <Info className="h-4 w-4" />
+              </span>
+              <div>
+                <h2 className="text-sm font-semibold">
+                  {t("dashboard.personal.title")}
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-sky-800">
+                  {t("dashboard.personal.description")}
+                </p>
+                {manageableSalonCount > 1 && (
+                  <p className="mt-1 text-sm font-medium leading-6 text-sky-900">
+                    {t("dashboard.personal.multipleSalons")}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button
+              as={Link}
+              className="w-full gap-2 bg-sky-950 hover:bg-sky-900 sm:w-auto"
+              to="/admin/salon/dashboard"
+            >
+              {t("dashboard.personal.openSalonDashboard")}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
 
         <AnalyticsSummaryCards
           averageRating={averageRating}
