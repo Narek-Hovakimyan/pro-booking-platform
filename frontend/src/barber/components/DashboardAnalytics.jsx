@@ -247,6 +247,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
 
   // Data loading indicator
   const isDataLoading = bookings.length === 0 && incomeLoading && ratingLoading;
+  const hasMultipleManageableSalons = currentUser?.role === "barber" && manageableSalonCount > 1;
 
   // ---- Existing effects (unchanged) ----
 
@@ -397,7 +398,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
           unreadNotifications={unreadNotifications}
         />
 
-        {currentUser?.role === "barber" && manageableSalonCount > 0 && (
+        {hasMultipleManageableSalons && (
           <div className="flex flex-col gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex gap-3">
               <span className="mt-0.5 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm">
@@ -410,11 +411,9 @@ export default function DashboardAnalytics({ bookings = [] }) {
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-sky-800">
                   {t("dashboard.personal.description")}
                 </p>
-                {manageableSalonCount > 1 && (
-                  <p className="mt-1 text-sm font-medium leading-6 text-sky-900">
-                    {t("dashboard.personal.multipleSalons")}
-                  </p>
-                )}
+                <p className="mt-1 text-sm font-medium leading-6 text-sky-900">
+                  {t("dashboard.personal.multipleSalons")}
+                </p>
               </div>
             </div>
             <Button
