@@ -118,6 +118,17 @@ export default function DashboardAnalytics({ bookings = [] }) {
   const [incomeLoading, setIncomeLoading] = useState(true);
   const [ratingLoading, setRatingLoading] = useState(true);
   const [manageableSalonCount, setManageableSalonCount] = useState(0);
+  const [manageableSalonLoading, setManageableSalonLoading] = useState(true);
+  const [manageableSalonUserId, setManageableSalonUserId] = useState(null);
+
+  const shouldCheckManageableSalons = currentUser?.role === "barber" && Boolean(currentUserId);
+  const hasLoadedManageableSalonCount = !shouldCheckManageableSalons || manageableSalonUserId === currentUserId;
+  const hasMultipleManageableSalons =
+    shouldCheckManageableSalons && hasLoadedManageableSalonCount && manageableSalonCount > 1;
+  const shouldLoadPersonalDashboard =
+    Boolean(currentUserId) &&
+    (!shouldCheckManageableSalons ||
+      (hasLoadedManageableSalonCount && !manageableSalonLoading && !hasMultipleManageableSalons));
 
   const todayKey = formatDateKey(new Date());
   const { monday, sunday } = getWeekBounds();
@@ -125,41 +136,58 @@ export default function DashboardAnalytics({ bookings = [] }) {
   // ---- Derived (unchanged) ----
 
   const todayBookings = useMemo(
-    () => bookings.filter((b) => b.bookingDate === todayKey),
-    [bookings, todayKey],
+    () => {
+      if (hasMultipleManageableSalons) return [];
+      return bookings.filter((b) => b.bookingDate === todayKey);
+    },
+    [bookings, hasMultipleManageableSalons, todayKey],
   );
   const thisWeekBookings = useMemo(
-    () =>
-      bookings.filter((b) => {
+    () => {
+      if (hasMultipleManageableSalons) return [];
+      return bookings.filter((b) => {
         if (!b.bookingDate) return false;
         const d = new Date(b.bookingDate + "T00:00:00");
         return d >= monday && d <= sunday;
-      }),
-    [bookings, monday, sunday],
+      });
+    },
+    [bookings, hasMultipleManageableSalons, monday, sunday],
   );
   const thisMonthCompleted = useMemo(
-    () =>
-      bookings.filter(
+    () => {
+      if (hasMultipleManageableSalons) return [];
+      return bookings.filter(
         (b) =>
           b.status === "completed" &&
           b.bookingDate &&
           b.bookingDate.startsWith(currentMonth + "-"),
-      ),
-    [bookings, currentMonth],
+      );
+    },
+    [bookings, currentMonth, hasMultipleManageableSalons],
   );
   const pendingCount = useMemo(
-    () => bookings.filter((b) => b.status === "pending").length,
-    [bookings],
+    () => {
+      if (hasMultipleManageableSalons) return 0;
+      return bookings.filter((b) => b.status === "pending").length;
+    },
+    [bookings, hasMultipleManageableSalons],
   );
   const cancelledCount = useMemo(
-    () => bookings.filter((b) => b.status === "cancelled").length,
-    [bookings],
+    () => {
+      if (hasMultipleManageableSalons) return 0;
+      return bookings.filter((b) => b.status === "cancelled").length;
+    },
+    [bookings, hasMultipleManageableSalons],
   );
   const rejectedCount = useMemo(
-    () => bookings.filter((b) => b.status === "rejected").length,
-    [bookings],
+    () => {
+      if (hasMultipleManageableSalons) return 0;
+      return bookings.filter((b) => b.status === "rejected").length;
+    },
+    [bookings, hasMultipleManageableSalons],
   );
   const mostBookedService = useMemo(() => {
+    if (hasMultipleManageableSalons) return null;
     const counts = {};
     for (const b of bookings) {
       const name = b.serviceName || b.serviceId?.name;
@@ -176,16 +204,18 @@ export default function DashboardAnalytics({ bookings = [] }) {
       }
     }
     return maxName ? { name: maxName, count: maxCount } : null;
-  }, [bookings]);
+  }, [bookings, hasMultipleManageableSalons]);
 
   const bookingSignature = useMemo(
-    () =>
-      bookings
+    () => {
+      if (hasMultipleManageableSalons) return "";
+      return bookings
         .map((b) =>
           [getBookingId(b), b?.status, b?.bookingDate || b?.dayKey, b?.price, b?.updatedAt || b?.completedAt || ""].join(":"),
         )
-        .join("|"),
-    [bookings],
+        .join("|");
+    },
+    [bookings, hasMultipleManageableSalons],
   );
 
   // ---- NEW: derived for dashboard sections ----
@@ -208,17 +238,22 @@ export default function DashboardAnalytics({ bookings = [] }) {
   }, [todayBookings]);
 
   const pendingBookings = useMemo(
-    () => bookings.filter((b) => b.status === "pending").slice(0, 5),
-    [bookings],
+    () => {
+      if (hasMultipleManageableSalons) return [];
+      return bookings.filter((b) => b.status === "pending").slice(0, 5);
+    },
+    [bookings, hasMultipleManageableSalons],
   );
 
   const upcomingBookings = useMemo(
-    () =>
-      bookings
+    () => {
+      if (hasMultipleManageableSalons) return [];
+      return bookings
         .filter((b) => b.status === "accepted" && b.bookingDate >= todayKey)
         .sort((a, b) => a.bookingDate.localeCompare(b.bookingDate) || getBookingTime(a).localeCompare(getBookingTime(b)))
-        .slice(0, 5),
-    [bookings, todayKey],
+        .slice(0, 5);
+    },
+    [bookings, hasMultipleManageableSalons, todayKey],
   );
 
   const recentCompleted = useMemo(
@@ -246,13 +281,16 @@ export default function DashboardAnalytics({ bookings = [] }) {
   );
 
   // Data loading indicator
-  const isDataLoading = bookings.length === 0 && incomeLoading && ratingLoading;
-  const hasMultipleManageableSalons = currentUser?.role === "barber" && manageableSalonCount > 1;
+  const isDataLoading =
+    (shouldCheckManageableSalons && (!hasLoadedManageableSalonCount || manageableSalonLoading)) ||
+    (shouldLoadPersonalDashboard && bookings.length === 0 && incomeLoading && ratingLoading);
 
-  // ---- Existing effects (unchanged) ----
+  // ---- Effects ----
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!shouldLoadPersonalDashboard) {
+      return undefined;
+    }
 
     let isMounted = true;
 
@@ -317,10 +355,10 @@ export default function DashboardAnalytics({ bookings = [] }) {
     return () => {
       isMounted = false;
     };
-  }, [currentUserId, currentMonth, bookingSignature]);
+  }, [bookingSignature, currentMonth, currentUserId, hasMultipleManageableSalons, shouldLoadPersonalDashboard]);
 
   useEffect(() => {
-    if (currentUser?.role !== "barber" || !currentUserId) {
+    if (!shouldCheckManageableSalons) {
       return undefined;
     }
 
@@ -331,16 +369,23 @@ export default function DashboardAnalytics({ bookings = [] }) {
       .then(({ data }) => {
         if (isMounted) {
           setManageableSalonCount(getSalonList(data).length);
+          setManageableSalonUserId(currentUserId);
         }
       })
       .catch(() => {
-        if (isMounted) setManageableSalonCount(0);
+        if (isMounted) {
+          setManageableSalonCount(0);
+          setManageableSalonUserId(currentUserId);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setManageableSalonLoading(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.role, currentUserId]);
+  }, [currentUser?.role, currentUserId, shouldCheckManageableSalons]);
 
   // ---- Today's date display ----
 
@@ -381,6 +426,41 @@ export default function DashboardAnalytics({ bookings = [] }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <StatCardSkeleton />
             <StatCardSkeleton />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (hasMultipleManageableSalons) {
+    return (
+      <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <span className="mt-0.5 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm">
+                <Info className="h-4 w-4" />
+              </span>
+              <div>
+                <h2 className="text-sm font-semibold">
+                  {t("dashboard.personal.title")}
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-sky-800">
+                  {t("dashboard.personal.description")}
+                </p>
+                <p className="mt-1 text-sm font-medium leading-6 text-sky-900">
+                  {t("dashboard.personal.multipleSalons")}
+                </p>
+              </div>
+            </div>
+            <Button
+              as={Link}
+              className="w-full gap-2 bg-sky-950 hover:bg-sky-900 sm:w-auto"
+              to="/admin/salon/dashboard"
+            >
+              {t("dashboard.personal.openSalonDashboard")}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
           </div>
         </CardContent>
       </Card>
