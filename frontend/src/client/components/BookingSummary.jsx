@@ -12,12 +12,29 @@ export default function BookingSummary({
   client,
   depositSettings = null,
   discountPreview = 0,
+  pricingQuote = null,
   isServiceLoading = false,
 }) {
   const priceInfo = getServicePriceInfo(selectedService);
-  const promoDiscount = Math.max(0, Number(discountPreview || 0));
-  const finalTotal = Math.max(0, priceInfo.discountedPrice - promoDiscount);
-  const totalDiscount = Math.max(0, priceInfo.originalPrice - finalTotal);
+  const servicePrice = Number(pricingQuote?.originalPrice ?? priceInfo.originalPrice);
+  const serviceDiscountAmount = Number(
+    pricingQuote?.serviceDiscountAmount ?? priceInfo.serviceDiscountAmount
+  );
+  const serviceDiscountedPrice = Number(
+    pricingQuote?.serviceDiscountedPrice ?? priceInfo.discountedPrice
+  );
+  const promoDiscount = Math.max(
+    0,
+    Number(pricingQuote?.voucherDiscountAmount ?? discountPreview ?? 0)
+  );
+  const loyaltyDiscount = Math.max(0, Number(pricingQuote?.loyaltyDiscountAmount || 0));
+  const hasLoyaltyDiscount =
+    Boolean(pricingQuote?.loyaltyDiscountApplied) && loyaltyDiscount > 0 && !promoDiscount;
+  const finalTotal = Math.max(
+    0,
+    Number(pricingQuote?.finalPrice ?? serviceDiscountedPrice - promoDiscount)
+  );
+  const totalDiscount = Math.max(0, servicePrice - finalTotal);
   const depositEstimate = calculateDepositEstimate(
     depositSettings,
     finalTotal
@@ -58,10 +75,51 @@ export default function BookingSummary({
             {client.name || "Հաճախորդ"}
           </p>
 
+          {selectedService && pricingQuote && (
+            <div className="space-y-2 rounded-xl bg-neutral-50 p-3">
+              <div className="flex justify-between gap-3">
+                <span>Service price</span>
+                <span className="font-semibold text-neutral-900">
+                  {servicePrice.toLocaleString()} դր
+                </span>
+              </div>
+              {serviceDiscountAmount > 0 && (
+                <div className="flex justify-between gap-3 text-rose-700">
+                  <span>Service discount</span>
+                  <span className="font-semibold">
+                    -{serviceDiscountAmount.toLocaleString()} դր
+                  </span>
+                </div>
+              )}
+              {promoDiscount > 0 && (
+                <div className="flex justify-between gap-3 text-amber-700">
+                  <span>Promo discount</span>
+                  <span className="font-semibold">
+                    -{promoDiscount.toLocaleString()} դր
+                  </span>
+                </div>
+              )}
+              {hasLoyaltyDiscount && (
+                <div className="flex justify-between gap-3 text-emerald-700">
+                  <span>Loyalty discount</span>
+                  <span className="font-semibold">
+                    -{loyaltyDiscount.toLocaleString()} դր
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between gap-3 border-t border-neutral-200 pt-2 text-neutral-950">
+                <span className="font-semibold">Final price</span>
+                <span className="font-bold">
+                  {finalTotal.toLocaleString()} դր
+                </span>
+              </div>
+            </div>
+          )}
+
           {selectedService && depositEstimate.depositRequired && (
             <DepositNotice
               className="rounded-xl p-3"
-              originalPrice={priceInfo.originalPrice}
+              originalPrice={servicePrice}
               discountAmount={totalDiscount}
               finalPrice={finalTotal}
               depositAmount={depositEstimate.depositAmount}

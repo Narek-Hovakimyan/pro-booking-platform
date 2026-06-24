@@ -31,6 +31,9 @@ const formatCreatedDate = (dateValue) => {
   });
 };
 
+const formatMoney = (value) =>
+  `${Number(value || 0).toLocaleString()} \u0564\u0580\u0561\u0574`;
+
 function DetailRow({ label, value }) {
   return (
     <div className="flex justify-between gap-4 rounded-xl bg-neutral-50 p-3 text-sm">
@@ -67,7 +70,18 @@ export default function BookingDetailsModal({
       : null;
   const salonName = salon?.name || bookingBarber?.salonName || "";
   const serviceName = service?.name || booking?.serviceName || "Service";
-  const servicePrice = service?.price ?? booking?.price;
+  const servicePrice = booking?.serviceOriginalPrice ?? booking?.originalPrice ?? booking?.price;
+  const serviceDiscountAmount = Number(booking?.serviceDiscountAmount || 0);
+  const voucherDiscount = Number(booking?.voucherDiscount || 0);
+  const loyaltyDiscount = Number(booking?.loyaltyDiscountAmount || 0);
+  const finalPrice = booking?.finalPrice ?? booking?.price;
+  const hasLoyaltyDiscount =
+    Boolean(booking?.loyaltyDiscountApplied) && loyaltyDiscount > 0 && !voucherDiscount;
+  const hasPriceBreakdown =
+    serviceDiscountAmount > 0 ||
+    voucherDiscount > 0 ||
+    hasLoyaltyDiscount ||
+    (booking?.finalPrice !== undefined && booking?.finalPrice !== booking?.price);
   const serviceDuration = service?.duration ?? booking?.duration;
   const createdDate = formatCreatedDate(booking?.createdAt);
   const canCancel =
@@ -108,13 +122,41 @@ export default function BookingDetailsModal({
               {salonName && <DetailRow label="Salon" value={salonName} />}
               <DetailRow label="Service" value={serviceName} />
               <DetailRow
-                label="Price"
+                label={hasPriceBreakdown ? "Service price" : "Price"}
                 value={
                   servicePrice !== undefined && servicePrice !== null
-                    ? `${Number(servicePrice || 0).toLocaleString()} \u0564\u0580\u0561\u0574`
+                    ? formatMoney(servicePrice)
                     : ""
                 }
               />
+              {serviceDiscountAmount > 0 && (
+                <DetailRow
+                  label="Service discount"
+                  value={`-${formatMoney(serviceDiscountAmount)}`}
+                />
+              )}
+              {voucherDiscount > 0 && (
+                <DetailRow
+                  label="Promo code discount"
+                  value={`-${formatMoney(voucherDiscount)}`}
+                />
+              )}
+              {hasLoyaltyDiscount && (
+                <DetailRow
+                  label={`Loyalty discount (${Number(booking.loyaltyDiscountPercent || 0)}%)`}
+                  value={`-${formatMoney(loyaltyDiscount)}`}
+                />
+              )}
+              {hasPriceBreakdown && (
+                <DetailRow
+                  label="Final price"
+                  value={
+                    finalPrice !== undefined && finalPrice !== null
+                      ? formatMoney(finalPrice)
+                      : ""
+                  }
+                />
+              )}
               <DetailRow
                 label="Duration"
                 value={serviceDuration ? `${serviceDuration} min` : ""}

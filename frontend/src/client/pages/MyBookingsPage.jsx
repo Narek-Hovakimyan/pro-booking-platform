@@ -272,11 +272,7 @@ export default function MyBookingsPage() {
   };
 
   const getServicePrice = (booking) => {
-    const service = booking?.service;
-
-    return service && typeof service === "object" && service.price !== undefined
-      ? service.price
-      : booking?.price;
+    return booking?.finalPrice ?? booking?.price;
   };
 
   const getServiceDuration = (booking) => {

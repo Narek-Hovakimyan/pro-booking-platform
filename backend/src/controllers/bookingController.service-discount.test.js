@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { createBooking } from "./bookingController.js";
+import { createBooking, quoteBookingPrice } from "./bookingController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
@@ -336,6 +336,8 @@ test("createBooking applies loyalty discount after service discount", async () =
     status: "completed",
   });
   assert.equal(createdBookings[0].price, 72);
+  assert.equal(createdBookings[0].serviceOriginalPrice, 100);
+  assert.equal(createdBookings[0].serviceDiscountAmount, 20);
   assert.equal(createdBookings[0].originalPrice, 80);
   assert.equal(createdBookings[0].finalPrice, 72);
   assert.equal(createdBookings[0].discountAmount, 8);
@@ -343,10 +345,12 @@ test("createBooking applies loyalty discount after service discount", async () =
   assert.equal(createdBookings[0].loyaltyDiscountPercent, 10);
   assert.equal(createdBookings[0].loyaltyDiscountAmount, 8);
   assert.equal(createdBookings[0].loyaltyEligibleCompletedBookings, 5);
+  assert.equal(createdBookings[0].loyaltyTierIndex, 0);
   assert.deepEqual(createdBookings[0].loyaltyRuleSnapshot, {
     thresholdCompletedBookings: 5,
     discountPercent: 10,
     maxDiscountPercent: 30,
+    growthSteps: 4,
     scope: "barber",
   });
 });
@@ -383,7 +387,9 @@ test("createBooking skips loyalty discount when client is below threshold", asyn
 
   assert.equal(res.statusCode, 201);
   assert.equal(createdBookings[0].price, 100);
-  assert.equal(createdBookings[0].loyaltyDiscountApplied, undefined);
+  assert.equal(createdBookings[0].loyaltyDiscountApplied, false);
+  assert.equal(createdBookings[0].loyaltyDiscountPercent, 0);
+  assert.equal(createdBookings[0].loyaltyDiscountAmount, 0);
   assert.equal(createdBookings[0].loyaltyEligibleCompletedBookings, 4);
 });
 
@@ -444,7 +450,9 @@ test("createBooking does not stack loyalty discount with voucher", async () => {
   assert.equal(countDocumentsCalled, false);
   assert.equal(createdBookings[0].price, 90);
   assert.equal(createdBookings[0].voucherDiscount, 10);
-  assert.equal(createdBookings[0].loyaltyDiscountApplied, undefined);
+  assert.equal(createdBookings[0].loyaltyDiscountApplied, false);
+  assert.equal(createdBookings[0].loyaltyDiscountPercent, 0);
+  assert.equal(createdBookings[0].loyaltyDiscountAmount, 0);
 });
 
 test("createBooking calculates deposit from loyalty-discounted final price", async () => {
@@ -493,4 +501,253 @@ test("createBooking calculates deposit from loyalty-discounted final price", asy
   assert.equal(createdBookings[0].finalPrice, 90);
   assert.equal(createdBookings[0].depositRequired, true);
   assert.equal(createdBookings[0].depositAmount, 45);
+});
+
+const createLoyaltyTierBooking = async ({ completedBookings, service = {} }) => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 50,
+      maxDiscountPercent: 80,
+    },
+  });
+  Booking.countDocuments = async (query) => {
+    assert.deepEqual(query, {
+      barberId,
+      clientId,
+      status: "completed",
+    });
+    return completedBookings;
+  };
+  const serviceDoc = {
+    _id: serviceId,
+    barberId,
+    name: "Loyalty Cut",
+    duration: 30,
+    price: 100,
+    discountType: "none",
+    discountValue: 0,
+    ...service,
+  };
+  Service.findOne = async () => serviceDoc;
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  return { booking: createdBookings[0], serviceDoc };
+};
+
+test("createBooking does not mutate service price or discount fields for loyalty", async () => {
+  const { booking, serviceDoc } = await createLoyaltyTierBooking({
+    completedBookings: 5,
+    service: {
+      price: 100,
+      discountType: "percent",
+      discountValue: 20,
+    },
+  });
+
+  assert.equal(booking.price, 40);
+  assert.equal(serviceDoc.price, 100);
+  assert.equal(serviceDoc.discountType, "percent");
+  assert.equal(serviceDoc.discountValue, 20);
+});
+
+test("createBooking applies progressive loyalty tiers", async () => {
+  const cases = [
+    { completedBookings: 4, percent: 0, amount: 0, finalPrice: 100, tierIndex: undefined },
+    { completedBookings: 5, percent: 50, amount: 50, finalPrice: 50, tierIndex: 0 },
+    { completedBookings: 6, percent: 0, amount: 0, finalPrice: 100, tierIndex: undefined },
+    { completedBookings: 9, percent: 0, amount: 0, finalPrice: 100, tierIndex: undefined },
+    { completedBookings: 10, percent: 57.5, amount: 58, finalPrice: 42, tierIndex: 1 },
+    { completedBookings: 11, percent: 0, amount: 0, finalPrice: 100, tierIndex: undefined },
+    { completedBookings: 15, percent: 65, amount: 65, finalPrice: 35, tierIndex: 2 },
+    { completedBookings: 20, percent: 72.5, amount: 73, finalPrice: 27, tierIndex: 3 },
+    { completedBookings: 25, percent: 80, amount: 80, finalPrice: 20, tierIndex: 4 },
+    { completedBookings: 30, percent: 80, amount: 80, finalPrice: 20, tierIndex: 5 },
+  ];
+
+  for (const expected of cases) {
+    const { booking } = await createLoyaltyTierBooking({
+      completedBookings: expected.completedBookings,
+    });
+
+    assert.equal(booking.price, expected.finalPrice);
+    assert.equal(booking.finalPrice, expected.percent > 0 ? expected.finalPrice : undefined);
+    assert.equal(booking.loyaltyDiscountApplied, expected.percent > 0);
+    assert.equal(booking.loyaltyDiscountPercent, expected.percent);
+    assert.equal(booking.loyaltyDiscountAmount, expected.amount);
+    assert.equal(booking.loyaltyEligibleCompletedBookings, expected.completedBookings);
+    assert.equal(booking.loyaltyTierIndex, expected.tierIndex);
+  }
+});
+
+test("createBooking stores immutable loyalty rule snapshot", async () => {
+  const createdBookings = [];
+  const barberDoc = {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 50,
+      maxDiscountPercent: 80,
+    },
+  };
+  mockSuccessfulCreateDependencies(createdBookings, barberDoc);
+  Booking.countDocuments = async () => 10;
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  barberDoc.loyaltyDiscountSettings.discountPercent = 5;
+  barberDoc.loyaltyDiscountSettings.maxDiscountPercent = 10;
+
+  assert.deepEqual(createdBookings[0].loyaltyRuleSnapshot, {
+    thresholdCompletedBookings: 5,
+    discountPercent: 50,
+    maxDiscountPercent: 80,
+    growthSteps: 4,
+    scope: "barber",
+  });
+});
+
+test("createBooking uses threshold setting as loyalty interval", async () => {
+  const cases = [
+    { completedBookings: 3, percent: 50, finalPrice: 50, tierIndex: 0 },
+    { completedBookings: 4, percent: 0, finalPrice: 100, tierIndex: undefined },
+    { completedBookings: 6, percent: 57.5, finalPrice: 42, tierIndex: 1 },
+  ];
+
+  for (const expected of cases) {
+    const createdBookings = [];
+    mockSuccessfulCreateDependencies(createdBookings, {
+      ...barberWithSalon,
+      loyaltyDiscountSettings: {
+        enabled: true,
+        thresholdCompletedBookings: 3,
+        discountPercent: 50,
+        maxDiscountPercent: 80,
+      },
+    });
+    Booking.countDocuments = async () => expected.completedBookings;
+
+    const res = createResponse();
+    await createBooking(
+      {
+        user: client,
+        body: {
+          barberId,
+          clientId,
+          serviceId,
+          bookingDate,
+          time: "10:00",
+          salonId,
+          clientName: "Client",
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(createdBookings[0].price, expected.finalPrice);
+    assert.equal(createdBookings[0].loyaltyDiscountPercent, expected.percent);
+    assert.equal(createdBookings[0].loyaltyTierIndex, expected.tierIndex);
+  }
+});
+
+test("quoteBookingPrice and createBooking use the same final price", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barberWithSalon,
+    loyaltyDiscountSettings: {
+      enabled: true,
+      thresholdCompletedBookings: 5,
+      discountPercent: 50,
+      maxDiscountPercent: 80,
+    },
+  });
+  Booking.countDocuments = async () => 10;
+  Service.findOne = async () => ({
+    _id: serviceId,
+    barberId,
+    name: "Discounted Cut",
+    duration: 30,
+    price: 100,
+    discountType: "percent",
+    discountValue: 20,
+  });
+
+  const quoteRes = createResponse();
+  await quoteBookingPrice(
+    {
+      user: client,
+      body: {
+        barberId,
+        serviceId,
+        salonId,
+      },
+    },
+    quoteRes
+  );
+
+  const createRes = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    createRes
+  );
+
+  assert.equal(quoteRes.statusCode, 200);
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(quoteRes.body.originalPrice, 100);
+  assert.equal(quoteRes.body.serviceDiscountAmount, 20);
+  assert.equal(quoteRes.body.serviceDiscountedPrice, 80);
+  assert.equal(quoteRes.body.loyaltyDiscountApplied, true);
+  assert.equal(quoteRes.body.loyaltyDiscountPercent, 57.5);
+  assert.equal(quoteRes.body.loyaltyDiscountAmount, 46);
+  assert.equal(quoteRes.body.finalPrice, 34);
+  assert.equal(createdBookings[0].price, quoteRes.body.finalPrice);
+  assert.equal(createdBookings[0].depositAmount, 0);
 });

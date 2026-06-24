@@ -20,15 +20,37 @@ export default function BookingConfirmationModal({
   consent = null,
   voucherCode = "",
   discountPreview = 0,
+  pricingQuote = null,
+  isQuoteLoading = false,
+  quoteError = "",
   depositSettings = null,
   disabledReason = "",
 }) {
   if (!isOpen) return null;
 
   const priceInfo = getServicePriceInfo(selectedService);
-  const promoDiscount = Math.max(0, Number(discountPreview || 0));
-  const finalTotal = Math.max(0, priceInfo.discountedPrice - promoDiscount);
-  const totalDiscount = Math.max(0, priceInfo.originalPrice - finalTotal);
+  const servicePrice = Number(pricingQuote?.originalPrice ?? priceInfo.originalPrice);
+  const serviceDiscountAmount = Number(
+    pricingQuote?.serviceDiscountAmount ?? priceInfo.serviceDiscountAmount
+  );
+  const serviceDiscountedPrice = Number(
+    pricingQuote?.serviceDiscountedPrice ?? priceInfo.discountedPrice
+  );
+  const promoDiscount = Math.max(
+    0,
+    Number(pricingQuote?.voucherDiscountAmount ?? discountPreview ?? 0)
+  );
+  const loyaltyDiscount = Math.max(0, Number(pricingQuote?.loyaltyDiscountAmount || 0));
+  const hasLoyaltyDiscount =
+    Boolean(pricingQuote?.loyaltyDiscountApplied) && loyaltyDiscount > 0 && !promoDiscount;
+  const finalTotal = Math.max(
+    0,
+    Number(
+      pricingQuote?.finalPrice ??
+        serviceDiscountedPrice - promoDiscount
+    )
+  );
+  const totalDiscount = Math.max(0, servicePrice - finalTotal);
   const depositEstimate = calculateDepositEstimate(depositSettings, finalTotal);
 
   return (
@@ -94,31 +116,35 @@ export default function BookingConfirmationModal({
               {selectedTime}
             </span>
           </div>
-          {selectedService && priceInfo.hasDiscount ? (
+          {selectedService && (
             <>
               <div className="flex items-center justify-between gap-4 px-4 py-3">
-                <span className="text-neutral-500">Original price</span>
+                <span className="text-neutral-500">Service price</span>
                 <span className="font-semibold text-neutral-950">
-                  {priceInfo.originalPrice.toLocaleString()} դրամ
+                  {servicePrice.toLocaleString()} դրամ
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-4 bg-rose-50 px-4 py-2 text-rose-800">
-                <span className="font-medium">Service discount</span>
-                <span className="font-semibold">
-                  -{priceInfo.serviceDiscountAmount.toLocaleString()} դր
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4 px-4 py-3">
-                <span className="text-neutral-500">
-                  Subtotal after service discount
-                </span>
-                <span className="font-semibold text-neutral-950">
-                  {priceInfo.discountedPrice.toLocaleString()} դրամ
-                </span>
-              </div>
+              {serviceDiscountAmount > 0 && (
+                <>
+                  <div className="flex items-center justify-between gap-4 bg-rose-50 px-4 py-2 text-rose-800">
+                    <span className="font-medium">Service discount</span>
+                    <span className="font-semibold">
+                      -{serviceDiscountAmount.toLocaleString()} դր
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 px-4 py-3">
+                    <span className="text-neutral-500">
+                      Subtotal after service discount
+                    </span>
+                    <span className="font-semibold text-neutral-950">
+                      {serviceDiscountedPrice.toLocaleString()} դրամ
+                    </span>
+                  </div>
+                </>
+              )}
             </>
-          ) : null}
-          {selectedService && promoDiscount > 0 && voucherCode && (
+          )}
+          {selectedService && promoDiscount > 0 && (
             <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-sm text-amber-800">
               <span className="font-medium">Promo code discount ({voucherCode})</span>
               <span className="font-semibold">
@@ -126,9 +152,29 @@ export default function BookingConfirmationModal({
               </span>
             </div>
           )}
+          {selectedService && hasLoyaltyDiscount && (
+            <div className="flex items-center justify-between gap-4 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+              <span className="font-medium">
+                Loyalty discount ({Number(pricingQuote.loyaltyDiscountPercent || 0)}%)
+              </span>
+              <span className="font-semibold">
+                -{loyaltyDiscount.toLocaleString()} դր
+              </span>
+            </div>
+          )}
+          {selectedService && isQuoteLoading && (
+            <div className="px-4 py-3 text-sm text-neutral-500">
+              Calculating final price...
+            </div>
+          )}
+          {selectedService && quoteError && (
+            <div className="px-4 py-3 text-sm text-red-600">
+              {quoteError}
+            </div>
+          )}
           {selectedService && (
             <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
-              <span className="font-medium">Total</span>
+              <span className="font-medium">Final price</span>
               <span className="text-lg font-bold">
                 {finalTotal.toLocaleString()}{" "}
                 դրամ
@@ -225,7 +271,7 @@ export default function BookingConfirmationModal({
         <div className="mt-5 grid gap-2 sm:flex sm:flex-row-reverse">
           <Button
             className="w-full sm:w-auto sm:min-w-[160px]"
-            disabled={!canConfirm || isSubmitting || isServiceLoading || !selectedService}
+            disabled={!canConfirm || isSubmitting || isServiceLoading || isQuoteLoading || !pricingQuote || !selectedService}
             onClick={onConfirm}
           >
             {isSubmitting ? "Booking..." : "Confirm booking"}

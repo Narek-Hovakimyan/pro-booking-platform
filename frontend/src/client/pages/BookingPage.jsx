@@ -101,6 +101,7 @@ export default function BookingPage({
   const activeSelectedSalonId = querySelectedSalonId || selectedSalonId;
   const [priceAdjustment, setPriceAdjustment] = useState({
     discountPreview: 0,
+    pricingQuote: null,
     voucherCode: "",
   });
   const users = useSelector((state) => state.users);
@@ -628,6 +629,7 @@ export default function BookingPage({
           client={client}
           depositSettings={barber?.depositSettings}
           discountPreview={priceAdjustment.discountPreview}
+          pricingQuote={priceAdjustment.pricingQuote}
           isServiceLoading={isServicesLoading}
         />
       </div>

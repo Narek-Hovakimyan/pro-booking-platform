@@ -51,6 +51,9 @@ export default function ClientBooking({
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationService, setConfirmationService] = useState(null);
   const [isPreparingConfirmation, setIsPreparingConfirmation] = useState(false);
+  const [bookingQuote, setBookingQuote] = useState(null);
+  const [isQuoteLoading, setIsQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState("");
   const [showWaitlistForm, setShowWaitlistForm] = useState(false);
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
   const [salonSelectorOpen, setSalonSelectorOpen] = useState(false);
@@ -118,6 +121,8 @@ export default function ClientBooking({
       isSelectedTimeValid &&
       currentUser &&
       (confirmationService || selectedService) &&
+      bookingQuote &&
+      !isQuoteLoading &&
       client.name?.trim() &&
       client.phone?.trim() &&
       !isSaving
@@ -135,6 +140,8 @@ export default function ClientBooking({
     isSaving && "Booking in progress…",
     isServiceDataLoading && "Service details are still loading.",
     isPreparingConfirmation && "Preparing booking details…",
+    isQuoteLoading && "Calculating final price…",
+    quoteError && "Final price could not be calculated.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -187,6 +194,9 @@ export default function ClientBooking({
 
     setShowConfirmation(false);
     setConfirmationService(null);
+    setBookingQuote(null);
+    setIsQuoteLoading(false);
+    setQuoteError("");
     setError("");
     setStep(2);
     setSelectedServiceId(null);
@@ -278,6 +288,8 @@ export default function ClientBooking({
         serviceId: selectedServiceEntityId,
       });
       if (data.valid) {
+        setBookingQuote(null);
+        setQuoteError("");
         setVoucherCode(code);
         setVoucherPreview(data.voucher);
         setDiscountPreview(data.discountPreview);
@@ -299,6 +311,8 @@ export default function ClientBooking({
     setVoucherCode("");
     setVoucherPreview(null);
     setDiscountPreview(0);
+    setBookingQuote(null);
+    setQuoteError("");
     setVoucherError("");
   };
 
@@ -307,19 +321,26 @@ export default function ClientBooking({
 
     onPriceAdjustmentChange({
       discountPreview,
+      pricingQuote: bookingQuote,
       voucherCode,
     });
-  }, [discountPreview, onPriceAdjustmentChange, voucherCode]);
+  }, [bookingQuote, discountPreview, onPriceAdjustmentChange, voucherCode]);
 
   /* ── Clear voucher when service changes ── */
   useEffect(() => {
-    if (
-      previousServiceIdRef.current &&
-      previousServiceIdRef.current !== selectedServiceEntityId
-    ) {
-      removeVoucher();
-    }
-    previousServiceIdRef.current = selectedServiceEntityId;
+    const resetId = window.setTimeout(() => {
+      if (
+        previousServiceIdRef.current &&
+        previousServiceIdRef.current !== selectedServiceEntityId
+      ) {
+        removeVoucher();
+      }
+      setBookingQuote(null);
+      setQuoteError("");
+      previousServiceIdRef.current = selectedServiceEntityId;
+    }, 0);
+
+    return () => window.clearTimeout(resetId);
   }, [selectedServiceEntityId]);
 
   const voucherCodeChange = () => {
@@ -368,10 +389,14 @@ export default function ClientBooking({
     setSelectedDate(dateKey);
     setSelectedDayKey(dayKey);
     setSelectedTime("");
+    setBookingQuote(null);
+    setQuoteError("");
   };
 
   const selectTime = (time) => {
     setSelectedTime(time);
+    setBookingQuote(null);
+    setQuoteError("");
     setError("");
   };
 
@@ -447,6 +472,7 @@ export default function ClientBooking({
       resetBookingFlow();
       navigate("/success", {
         state: {
+          booking: createdBooking,
           payment: createdBooking?.payment || createdBooking?.depositPayment || null,
         },
       });
@@ -506,14 +532,32 @@ export default function ClientBooking({
       }
 
       setConfirmationService(latestSelectedService);
+      setBookingQuote(null);
+      setQuoteError("");
       setShowConfirmation(true);
+      setIsQuoteLoading(true);
+
+      const salonId = externalSelectedSalonId || getSalonId(selectedSalon) || "";
+      const { data: quote } = await api.post("/bookings/quote", {
+        barberId: selectedBarberId,
+        serviceId: selectedServiceEntityId,
+        salonId,
+        bookingDate: selectedDate,
+        dayKey: selectedDateDayKey,
+        time: selectedTime,
+        voucherCode: voucherCode || undefined,
+      });
+      setBookingQuote(quote);
     } catch (requestError) {
-      setError(
+      const message =
+        requestError.response?.data?.message ||
         requestError.message ||
           "Could not refresh service price. Please try again."
-      );
+      setQuoteError(message);
+      setError(message);
     } finally {
       setIsPreparingConfirmation(false);
+      setIsQuoteLoading(false);
     }
   };
 
@@ -852,6 +896,9 @@ export default function ClientBooking({
           consent={consent}
           voucherCode={voucherCode}
           discountPreview={discountPreview}
+          pricingQuote={bookingQuote}
+          isQuoteLoading={isQuoteLoading}
+          quoteError={quoteError}
           depositSettings={barber?.depositSettings}
           disabledReason={confirmDisabledReason}
         />

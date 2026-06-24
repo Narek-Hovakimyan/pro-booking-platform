@@ -589,11 +589,13 @@ test("calculateLoyaltyDiscountForBooking counts completed bookings only", async 
     applied: true,
     percent: 25,
     amount: 25,
+    tierIndex: 0,
     eligibleCompletedBookings: 5,
     ruleSnapshot: {
       thresholdCompletedBookings: 5,
       discountPercent: 25,
       maxDiscountPercent: 30,
+      growthSteps: 4,
       scope: "barber",
     },
     finalPrice: 75,
@@ -641,4 +643,22 @@ test("calculateLoyaltyDiscountForBooking skips disabled, ineligible, and voucher
   });
   assert.equal(ineligible.applied, false);
   assert.equal(ineligible.eligibleCompletedBookings, 4);
+
+  Booking.countDocuments = async () => 6;
+  const betweenIntervals = await calculateLoyaltyDiscountForBooking({
+    barber: {
+      loyaltyDiscountSettings: {
+        enabled: true,
+        thresholdCompletedBookings: 5,
+        discountPercent: 10,
+        maxDiscountPercent: 30,
+      },
+    },
+    barberId,
+    clientId: clientAId,
+    serviceDiscountedPrice: 100,
+  });
+  assert.equal(betweenIntervals.applied, false);
+  assert.equal(betweenIntervals.eligibleCompletedBookings, 6);
+  assert.equal(betweenIntervals.finalPrice, 100);
 });

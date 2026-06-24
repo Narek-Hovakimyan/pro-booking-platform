@@ -3,6 +3,7 @@ import {
   createBooking,
   delayBooking,
   getReferenceImage,
+  quoteBookingPrice,
   updateBooking,
   updateTreatmentRecord,
 } from "../controllers/bookingController.js";
@@ -39,6 +40,7 @@ router.get("/client/:clientId/reliability", protect, getClientReliability);
 router.get("/barber/:barberId/income", protect, requireBarberSubscription, getBarberMonthlyIncome);
 router.get("/barber/:barberId", optionalAuth, getBarberBookings);
 router.post("/availability-debug", protect, debugBookingAvailability);
+router.post("/quote", protect, publicBookingLimiter, quoteBookingPrice);
 router.post("/", protect, publicBookingLimiter, uploadLimiter, handleReferenceImageUpload, createBooking);
 router.post("/:id/reschedule-request", protect, createRescheduleRequest);
 router.patch("/:id/reschedule-request/accept", protect, acceptRescheduleRequest);

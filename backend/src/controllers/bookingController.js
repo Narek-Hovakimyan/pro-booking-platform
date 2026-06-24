@@ -209,7 +209,19 @@ const sameId = (left, right) =>
  *
  * If atomic claim fails (concurrency/overuse), throws descriptive error.
  */
-const claimVoucherForBooking = async ({
+const calculateVoucherDiscount = ({ voucher, servicePrice }) => {
+  const voucherAmount = Number(voucher.amount);
+  const discountType = voucher.discountType || "fixed";
+
+  if (discountType === "percentage") {
+    const pct = Math.min(voucherAmount, 100);
+    return Math.round((servicePrice * pct) / 100);
+  }
+
+  return Math.min(voucherAmount, servicePrice);
+};
+
+const validateVoucherForBooking = async ({
   voucherCode: rawCode,
   barberId,
   salonId,
@@ -279,6 +291,28 @@ const claimVoucherForBooking = async ({
     }
   }
 
+  const voucherDiscount = calculateVoucherDiscount({ voucher, servicePrice });
+  const finalPrice = Math.max(0, servicePrice - voucherDiscount);
+
+  return { voucher, voucherDiscount, finalPrice };
+};
+
+const claimVoucherForBooking = async ({
+  voucherCode: rawCode,
+  barberId,
+  salonId,
+  serviceId,
+  servicePrice,
+}) => {
+  const preview = await validateVoucherForBooking({
+    voucherCode: rawCode,
+    barberId,
+    salonId,
+    serviceId,
+    servicePrice,
+  });
+  const voucher = preview.voucher;
+
   // 6. Atomically claim a use — guard: currentUses < maxUses AND still active
   const claimFilter = {
     _id: voucher._id,
@@ -299,22 +333,66 @@ const claimVoucherForBooking = async ({
     throw Object.assign(new Error("This promotion is no longer available"), { statusCode: 400 });
   }
 
-  // 7. Compute discount
-  const voucherAmount = Number(claimed.amount);
-  const discountType = claimed.discountType || "fixed";
-  let voucherDiscount;
-
-  if (discountType === "percentage") {
-    const pct = Math.min(voucherAmount, 100); // cap at 100%
-    voucherDiscount = Math.round((servicePrice * pct) / 100);
-  } else {
-    voucherDiscount = Math.min(voucherAmount, servicePrice);
-  }
-
+  const voucherDiscount = calculateVoucherDiscount({ voucher: claimed, servicePrice });
   const finalPrice = Math.max(0, servicePrice - voucherDiscount);
 
   return { voucher: claimed, voucherDiscount, finalPrice };
 
+};
+
+const buildBookingPricing = async ({
+  barber,
+  barberId,
+  clientId,
+  service,
+  serviceId,
+  salonId,
+  voucherCode,
+  claimVoucher = false,
+}) => {
+  const parsedServicePrice = Number(service.price || 0);
+  const originalPrice = Number.isFinite(parsedServicePrice)
+    ? Math.max(0, parsedServicePrice)
+    : 0;
+  const {
+    discountAmount: serviceDiscountAmount,
+    discountedPrice: serviceDiscountedPrice,
+  } = calculateServiceDiscountedPrice(service);
+
+  let voucherClaim = null;
+  if (voucherCode) {
+    const voucherPayload = {
+      voucherCode,
+      barberId,
+      salonId,
+      serviceId,
+      servicePrice: serviceDiscountedPrice,
+    };
+    voucherClaim = claimVoucher
+      ? await claimVoucherForBooking(voucherPayload)
+      : await validateVoucherForBooking(voucherPayload);
+  }
+
+  const loyaltyDiscount = await calculateLoyaltyDiscountForBooking({
+    barber,
+    barberId,
+    clientId,
+    serviceDiscountedPrice,
+    hasVoucher: Boolean(voucherClaim),
+  });
+  const finalPrice = voucherClaim
+    ? voucherClaim.finalPrice
+    : loyaltyDiscount.finalPrice;
+
+  return {
+    originalPrice,
+    serviceDiscountAmount,
+    serviceDiscountedPrice,
+    voucherClaim,
+    voucherDiscountAmount: voucherClaim?.voucherDiscount || 0,
+    loyaltyDiscount,
+    finalPrice,
+  };
 };
 
 /**
@@ -509,7 +587,6 @@ export const createBooking = async (req, res) => {
     }
 
     const bookingDuration = Number(service.duration);
-    const { discountedPrice: bookingPrice } = calculateServiceDiscountedPrice(service);
 
     const slotValidation = await validateBookingSlot({
       barberId,
@@ -545,33 +622,27 @@ export const createBooking = async (req, res) => {
       }
 
       // ── Voucher claim ──
-      let voucherClaim = null;
       const rawVoucherCode =
         req.body.promotionCode || req.body.voucherCode || req.body.voucher_code;
-      if (rawVoucherCode) {
-        try {
-          voucherClaim = await claimVoucherForBooking({
-            voucherCode: rawVoucherCode,
-            barberId,
-            salonId: salonResolution.salonId,
-            serviceId,
-            servicePrice: bookingPrice,
-          });
-        } catch (voucherError) {
-          return { message: voucherError.message, cleanup: true };
-        }
+      let pricing;
+      try {
+        pricing = await buildBookingPricing({
+          barber: salonResolution.barber,
+          barberId,
+          clientId: isManualBooking ? null : clientId,
+          service,
+          serviceId,
+          salonId: salonResolution.salonId,
+          voucherCode: rawVoucherCode,
+          claimVoucher: Boolean(rawVoucherCode),
+        });
+      } catch (pricingError) {
+        return { message: pricingError.message, cleanup: true };
       }
-
-      const loyaltyDiscount = await calculateLoyaltyDiscountForBooking({
-        barber: salonResolution.barber,
-        barberId,
-        clientId: isManualBooking ? null : clientId,
-        serviceDiscountedPrice: bookingPrice,
-        hasVoucher: Boolean(voucherClaim),
-      });
-      const effectivePrice = voucherClaim
-        ? voucherClaim.finalPrice
-        : loyaltyDiscount.finalPrice;
+      const voucherClaim = pricing.voucherClaim;
+      const loyaltyDiscount = pricing.loyaltyDiscount;
+      const bookingPrice = pricing.serviceDiscountedPrice;
+      const effectivePrice = pricing.finalPrice;
 
       // ── Deposit calculation ──
       // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
@@ -625,10 +696,14 @@ export const createBooking = async (req, res) => {
               loyaltyDiscountAmount: loyaltyDiscount.amount,
               loyaltyEligibleCompletedBookings:
                 loyaltyDiscount.eligibleCompletedBookings,
+              loyaltyTierIndex: loyaltyDiscount.tierIndex,
               loyaltyRuleSnapshot: loyaltyDiscount.ruleSnapshot,
             }
             : loyaltyDiscount.eligibleCompletedBookings > 0
               ? {
+                loyaltyDiscountApplied: false,
+                loyaltyDiscountPercent: 0,
+                loyaltyDiscountAmount: 0,
                 loyaltyEligibleCompletedBookings:
                   loyaltyDiscount.eligibleCompletedBookings,
               }
@@ -644,8 +719,13 @@ export const createBooking = async (req, res) => {
               discountAmount: voucherClaim.voucherDiscount,
               originalPrice: bookingPrice,
               finalPrice: voucherClaim.finalPrice,
+              loyaltyDiscountApplied: false,
+              loyaltyDiscountPercent: 0,
+              loyaltyDiscountAmount: 0,
             }
             : {}),
+          serviceOriginalPrice: pricing.originalPrice,
+          serviceDiscountAmount: pricing.serviceDiscountAmount,
         });
       } catch (createErr) {
         // If voucher was claimed but Booking.create failed, roll back the claim
@@ -713,6 +793,82 @@ export const createBooking = async (req, res) => {
     // DB or unexpected failure — cleanup uploaded files
     cleanup();
     return sendControllerError(res, error, "Could not create booking");
+  }
+};
+
+export const quoteBookingPrice = async (req, res) => {
+  try {
+    const { barberId, serviceId } = req.body || {};
+    const clientId = req.user?._id || req.user?.id;
+    const rawVoucherCode =
+      req.body?.promotionCode || req.body?.voucherCode || req.body?.voucher_code;
+
+    if (req.user?.role !== "client" || !clientId) {
+      return res.status(403).json({
+        message: "Only clients can request booking price quotes",
+      });
+    }
+
+    if (!barberId || !serviceId) {
+      return res.status(400).json({ message: "barberId and serviceId are required" });
+    }
+
+    const salonResolution = await resolveBookingSalon({
+      barberId,
+      salonId: req.body.salonId,
+    });
+
+    if (salonResolution.message) {
+      return res.status(400).json({ message: salonResolution.message });
+    }
+
+    const hasExplicitSalonContext = Boolean(req.body.salonId);
+    const barberPaidAccess = hasExplicitSalonContext
+      ? await barberHasPaidSeatAccessForSalon(barberId, salonResolution.salonId)
+      : await barberHasPaidAccessForSalon(barberId, salonResolution.salonId);
+    if (!barberPaidAccess) {
+      return res.status(403).json({
+        code: "BARBER_UNAVAILABLE",
+        message: "This specialist is not currently accepting bookings.",
+      });
+    }
+
+    const service = await Service.findOne({ _id: serviceId, barberId, active: true });
+
+    if (!service) {
+      return res.status(400).json({
+        message: "Service is not available for this barber",
+      });
+    }
+
+    const pricing = await buildBookingPricing({
+      barber: salonResolution.barber,
+      barberId,
+      clientId,
+      service,
+      serviceId,
+      salonId: salonResolution.salonId,
+      voucherCode: rawVoucherCode,
+      claimVoucher: false,
+    });
+    const loyaltyDiscount = pricing.loyaltyDiscount;
+
+    return res.json({
+      originalPrice: pricing.originalPrice,
+      serviceDiscountAmount: pricing.serviceDiscountAmount,
+      serviceDiscountedPrice: pricing.serviceDiscountedPrice,
+      voucherDiscountAmount: pricing.voucherDiscountAmount,
+      loyaltyDiscountApplied: loyaltyDiscount.applied,
+      loyaltyDiscountPercent: loyaltyDiscount.percent,
+      loyaltyDiscountAmount: loyaltyDiscount.amount,
+      loyaltyEligibleCompletedBookings:
+        loyaltyDiscount.eligibleCompletedBookings,
+      loyaltyTierIndex: loyaltyDiscount.tierIndex,
+      loyaltyRuleSnapshot: loyaltyDiscount.ruleSnapshot,
+      finalPrice: pricing.finalPrice,
+    });
+  } catch (error) {
+    return sendControllerError(res, error, "Could not quote booking price");
   }
 };
 

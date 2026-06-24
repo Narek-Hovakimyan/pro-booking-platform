@@ -176,6 +176,7 @@ const defaultLoyaltyDiscountSettings = {
   discountPercent: 10,
   maxDiscountPercent: 30,
 };
+const loyaltyDiscountGrowthSteps = 4;
 
 export const normalizeLoyaltyDiscountSettings = (settings = {}) => {
   const enabled = Boolean(settings.enabled);
@@ -491,9 +492,23 @@ export const calculateLoyaltyDiscountForBooking = async ({
     };
   }
 
+  if (completedBookings % settings.thresholdCompletedBookings !== 0) {
+    return {
+      ...emptyDiscount,
+      eligibleCompletedBookings: completedBookings,
+    };
+  }
+
+  const tierIndex = Math.max(
+    0,
+    Math.floor(completedBookings / settings.thresholdCompletedBookings) - 1
+  );
+  const stepSize =
+    (settings.maxDiscountPercent - settings.discountPercent) /
+    loyaltyDiscountGrowthSteps;
   const percent = Math.min(
-    settings.discountPercent,
-    settings.maxDiscountPercent
+    settings.maxDiscountPercent,
+    settings.discountPercent + tierIndex * stepSize
   );
   const amount = Math.min(basePrice, Math.round((basePrice * percent) / 100));
 
@@ -501,11 +516,13 @@ export const calculateLoyaltyDiscountForBooking = async ({
     applied: amount > 0,
     percent,
     amount,
+    tierIndex,
     eligibleCompletedBookings: completedBookings,
     ruleSnapshot: {
       thresholdCompletedBookings: settings.thresholdCompletedBookings,
       discountPercent: settings.discountPercent,
       maxDiscountPercent: settings.maxDiscountPercent,
+      growthSteps: loyaltyDiscountGrowthSteps,
       scope: "barber",
     },
     finalPrice: Math.max(0, basePrice - amount),
