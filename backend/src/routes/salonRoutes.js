@@ -24,7 +24,10 @@ import {
   updateStaffPaymentSettings,
 } from "../controllers/salonStaffController.js";
 import { getDashboard } from "../controllers/salonDashboardController.js";
-import { getReports } from "../controllers/salonReportController.js";
+import {
+  exportReports,
+  getReports,
+} from "../controllers/salonReportController.js";
 import { getCalendar } from "../controllers/salonCalendarController.js";
 import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
 import { updateStaffDepositSettingsBySalonOwner } from "../controllers/depositSettingsController.js";
@@ -50,6 +53,7 @@ router.get("/:salonId/admins", protect, getSalonAdmins);
 router.get("/:salonId/dashboard", protect, getDashboard);
 router.get("/:salonId/calendar", protect, getCalendar);
 router.get("/:salonId/public-booking", getPublicSalonBooking);
+router.get("/:salonId/reports/export", protect, exportReports);
 router.get("/:salonId/reports", protect, getReports);
 router.get("/:salonId/promotions", protect, getSalonPromotions);
 router.post("/:salonId/promotions", protect, createSalonPromotion);

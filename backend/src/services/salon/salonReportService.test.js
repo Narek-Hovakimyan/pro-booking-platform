@@ -7,6 +7,7 @@ import Subscription from "../../models/Subscription.js";
 import User from "../../models/User.js";
 import {
   ReportError,
+  getSalonReportCsvExport,
   getSalonReport,
 } from "./salonReportService.js";
 
@@ -349,6 +350,37 @@ const setupEarningsReport = async ({ members, bookings, from = "2026-06-15", to 
   return getSalonReport(salonId, ownerId, { from, to });
 };
 
+const setupCsvExport = ({
+  members = [makeStaffUser(staffOneId, "staff", "accepted")],
+  bookings = [],
+  salonName = "Test Salon",
+  requesterId = ownerId,
+  admins = [],
+  from = "2026-06-15",
+  to = "2026-06-15",
+  format = "csv",
+  barberId = "",
+} = {}) => {
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins,
+    name: salonName,
+  });
+  User.findById = () => makeLeanQuery([{ _id: requesterId }]);
+  User.find = () => ({ select: async () => members });
+  Booking.aggregate = async (pipeline) => aggregateReportBookings(bookings, pipeline);
+  Booking.find = (query) =>
+    makeLeanQuery(bookings.filter((booking) => bookingMatchesSalonReportQuery(booking, query)));
+
+  return getSalonReportCsvExport(salonId, requesterId, {
+    format,
+    from,
+    to,
+    barberId,
+  });
+};
+
 beforeEach(() => {
   setSubscriptionFindOneMock();
 });
@@ -524,6 +556,193 @@ test("personal barber subscription does not unlock salon reports", async () => {
       return true;
     }
   );
+});
+
+test("CSV export rejects unsupported or missing format", async () => {
+  await assert.rejects(
+    () => setupCsvExport({ format: "pdf" }),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "UNSUPPORTED_REPORT_EXPORT_FORMAT");
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    () =>
+      getSalonReportCsvExport(salonId, ownerId, {
+        from: fromDate,
+        to: toDate,
+      }),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "UNSUPPORTED_REPORT_EXPORT_FORMAT");
+      return true;
+    }
+  );
+});
+
+test("CSV export uses report owner/admin and salon subscription checks", async () => {
+  setSubscriptionFindOneMock([]);
+
+  await assert.rejects(
+    () => setupCsvExport(),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+      return true;
+    }
+  );
+
+  setSubscriptionFindOneMock([makeSubscription({ ownerId: salonBId })]);
+
+  await assert.rejects(
+    () => setupCsvExport(),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+      return true;
+    }
+  );
+
+  setSubscriptionFindOneMock([
+    makeSubscription({ ownerType: "barber", ownerId }),
+  ]);
+
+  await assert.rejects(
+    () => setupCsvExport(),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+      return true;
+    }
+  );
+
+  setSubscriptionFindOneMock();
+
+  await assert.rejects(
+    () => setupCsvExport({ requesterId: memberId }),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      return true;
+    }
+  );
+
+  const adminExport = await setupCsvExport({
+    requesterId: adminId,
+    admins: [adminId],
+  });
+
+  assert.equal(adminExport.contentType, "text/csv; charset=utf-8");
+  assert.match(adminExport.filename, /^salon-reports-test-salon-/);
+});
+
+test("CSV export reuses report filtering and safe earnings fields", async () => {
+  const exportData = await setupCsvExport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 50,
+          commissionSalonPercent: 50,
+          notes: "private note",
+          updatedBy: "admin-1",
+        },
+      }),
+      makeChairRenterUser(),
+      makeStaffUser(staffTwoId, "staff", "accepted", {
+        worksAsSpecialist: false,
+      }),
+    ],
+    bookings: [
+      {
+        _id: "included",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 100,
+        serviceName: "Haircut",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "other-salon",
+        salonId: salonBId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 900,
+        serviceName: "Color",
+        clientId: "client-2",
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "chair-renter",
+        salonId,
+        barberId: chairRenterId,
+        status: "completed",
+        price: 800,
+        serviceName: "Rental",
+        clientId: "client-3",
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "non-specialist",
+        salonId,
+        barberId: staffTwoId,
+        status: "completed",
+        price: 700,
+        serviceName: "Color",
+        clientId: "client-4",
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.match(exportData.content, /Gross revenue,100/);
+  assert.match(exportData.content, /Staff earnings total,50/);
+  assert.match(exportData.content, /Staff One,1,1,100,50,50,Commission 50\/50,50,50,,,calculated/);
+  assert.equal(exportData.content.includes("Chair Renter"), false);
+  assert.equal(exportData.content.includes("Staff Two"), false);
+  assert.equal(exportData.content.includes("900"), false);
+  assert.equal(exportData.content.includes("800"), false);
+  assert.equal(exportData.content.includes("700"), false);
+  assert.equal(exportData.content.includes("staffPayment"), false);
+  assert.equal(exportData.content.includes("private note"), false);
+  assert.equal(exportData.content.includes("admin-1"), false);
+  assert.equal(exportData.content.includes(clientIdClient), false);
+});
+
+test("CSV export escapes values and prevents spreadsheet injection", async () => {
+  const injectableStaff = {
+    ...makeStaffUser(staffOneId, "staff", "accepted"),
+    name: '=Staff, "One"\nNext',
+  };
+  const exportData = await setupCsvExport({
+    salonName: '+Salon, "Main"\nHQ',
+    members: [injectableStaff],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 100,
+        serviceName: "@Service",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.match(exportData.content, /"'\+Salon, ""Main""\r?\nHQ"/);
+  assert.match(exportData.content, /"'=Staff, ""One""\r?\nNext"/);
+  assert.match(exportData.content, /'@Service,1,100/);
 });
 
 test("normal member cannot fetch reports", async () => {

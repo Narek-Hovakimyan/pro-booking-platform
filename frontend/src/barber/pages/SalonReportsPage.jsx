@@ -1,6 +1,7 @@
 import {
   Building2,
   CalendarCheck,
+  Download,
   DollarSign,
   RefreshCw,
   Users,
@@ -9,7 +10,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import api from "@/shared/api/axios";
-import { getSalonReports } from "@/shared/api/salonReports";
+import {
+  exportSalonReportsCsv,
+  getSalonReports,
+} from "@/shared/api/salonReports";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 
@@ -119,8 +123,10 @@ export default function SalonReportsPage() {
   const [reports, setReports] = useState(null);
   const [loadingSalons, setLoadingSalons] = useState(true);
   const [loadingReports, setLoadingReports] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState("");
+  const [exportError, setExportError] = useState("");
   const initialLoadDone = useRef(false);
 
   // Date filter state
@@ -190,6 +196,7 @@ export default function SalonReportsPage() {
           setReports(data);
           setError("");
           setErrorCode("");
+          setExportError("");
 
           // Extract staff options from the byStaff response (only staff, no chair_renters)
           if (data.byStaff && data.byStaff.length > 0) {
@@ -225,6 +232,7 @@ export default function SalonReportsPage() {
     setReports(null);
     setStaffOptions([]);
     setErrorCode("");
+    setExportError("");
   };
 
   const handleRefresh = () => {
@@ -238,6 +246,7 @@ export default function SalonReportsPage() {
         setReports(data);
         setError("");
         setErrorCode("");
+        setExportError("");
         if (data.byStaff && data.byStaff.length > 0) {
           setStaffOptions(
             data.byStaff.map((s) => ({
@@ -257,6 +266,35 @@ export default function SalonReportsPage() {
       .finally(() => {
         setLoadingReports(false);
       });
+  };
+
+  const handleExportCsv = async () => {
+    if (!selectedSalonId || !fromDate || !toDate) return;
+
+    setExportingCsv(true);
+    setExportError("");
+
+    try {
+      const params = { from: fromDate, to: toDate };
+      if (selectedBarberId) params.barberId = selectedBarberId;
+
+      const { data, filename } = await exportSalonReportsCsv(
+        selectedSalonId,
+        params
+      );
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("Could not export salon reports.");
+    } finally {
+      setExportingCsv(false);
+    }
   };
 
   const summary = reports?.summary || null;
@@ -282,23 +320,47 @@ export default function SalonReportsPage() {
           </p>
         </div>
 
-        <Button
-          className="gap-2"
-          disabled={!selectedSalonId || loadingReports}
-          onClick={handleRefresh}
-          variant="outline"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${loadingReports ? "animate-spin" : ""}`}
-          />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            className="gap-2"
+            disabled={
+              !selectedSalonId ||
+              !fromDate ||
+              !toDate ||
+              loadingReports ||
+              exportingCsv
+            }
+            onClick={handleExportCsv}
+            variant="outline"
+          >
+            <Download
+              className={`h-4 w-4 ${exportingCsv ? "animate-pulse" : ""}`}
+            />
+            {exportingCsv ? "Exporting..." : "Export CSV"}
+          </Button>
+          <Button
+            className="gap-2"
+            disabled={!selectedSalonId || loadingReports}
+            onClick={handleRefresh}
+            variant="outline"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${loadingReports ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* ─── Error ─── */}
       {error && !isSubscriptionRequiredError && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error}
+        </div>
+      )}
+      {exportError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {exportError}
         </div>
       )}
 
