@@ -18,6 +18,7 @@ const originalMethods = {
 };
 
 const salonId = "salon-1";
+const salonBId = "salon-2";
 const ownerId = "owner-1";
 const adminId = "admin-1";
 const memberId = "member-1";
@@ -36,7 +37,12 @@ const makeLeanQuery = (results) => ({
   }),
 });
 
-const makeStaffUser = (userId, relationshipType, relationshipStatus) => ({
+const makeStaffUser = (
+  userId,
+  relationshipType,
+  relationshipStatus,
+  overrides = {}
+) => ({
   _id: userId,
   name: userId === staffOneId ? "Staff One" : "Staff Two",
   avatarUrl: "",
@@ -47,6 +53,7 @@ const makeStaffUser = (userId, relationshipType, relationshipStatus) => ({
       status: "approved",
       ...(relationshipType ? { relationshipType } : {}),
       ...(relationshipStatus ? { relationshipStatus } : {}),
+      ...overrides,
     },
   ],
   salon: salonId,
@@ -129,6 +136,29 @@ const setupOwnerReportAccess = (members = [makeStaffUser(staffOneId, "staff", "a
 
 const getAppointmentDate = (booking) => booking.bookingDate || booking.dayKey || "";
 
+const getTestBookingRevenue = (booking) => {
+  const finalPrice = Number(booking?.finalPrice);
+  const hasDiscountMarker = Boolean(
+    booking?.promotionId ||
+      booking?.voucherId ||
+      booking?.promotionCode ||
+      booking?.voucherCode ||
+      Number(booking?.discountAmount || booking?.voucherDiscount || 0) > 0
+  );
+
+  if (
+    hasDiscountMarker &&
+    booking?.finalPrice !== undefined &&
+    booking?.finalPrice !== null &&
+    Number.isFinite(finalPrice)
+  ) {
+    return finalPrice;
+  }
+
+  const price = Number(booking?.price || booking?.totalPrice || 0);
+  return Number.isFinite(price) ? price : 0;
+};
+
 const bookingMatchesReportQuery = (booking, query) => {
   const date = getAppointmentDate(booking);
   const bookingDateRange = query.$or?.[0]?.bookingDate || {};
@@ -141,6 +171,124 @@ const bookingMatchesReportQuery = (booking, query) => {
   return date >= dayKeyRange.$gte && date <= dayKeyRange.$lte;
 };
 
+const sameId = (left, right) => String(left || "") === String(right || "");
+
+const bookingMatchesSalonReportQuery = (booking, query) => {
+  const barberIds = query.barberId?.$in || [];
+  return (
+    sameId(booking.salonId, query.salonId) &&
+    barberIds.some((id) => sameId(id, booking.barberId)) &&
+    bookingMatchesReportQuery(booking, query)
+  );
+};
+
+const bookingMatchesAggregatePipeline = (booking, pipeline) => {
+  const match = pipeline[0]?.$match || {};
+  const barberIds = match.barberId?.$in || [];
+  const range = pipeline.find((stage) => stage.$match?.reportAppointmentDate)
+    ?.$match?.reportAppointmentDate;
+
+  if (!sameId(booking.salonId, match.salonId)) return false;
+  if (!barberIds.some((id) => sameId(id, booking.barberId))) return false;
+  if (match.serviceName && !booking.serviceName) return false;
+
+  const date = getAppointmentDate(booking);
+  return date >= range.$gte && date <= range.$lte;
+};
+
+const aggregateReportBookings = (bookings, pipeline) => {
+  const groupId = getAggregateGroupId(pipeline);
+  const matched = bookings.filter((booking) =>
+    bookingMatchesAggregatePipeline(booking, pipeline)
+  );
+
+  if (groupId === "$status") {
+    return Object.values(
+      matched.reduce((groups, booking) => {
+        groups[booking.status] ||= { _id: booking.status, count: 0 };
+        groups[booking.status].count++;
+        return groups;
+      }, {})
+    );
+  }
+
+  if (groupId === "$reportAppointmentDate") {
+    return Object.values(
+      matched.reduce((groups, booking) => {
+        const key = getAppointmentDate(booking);
+        groups[key] ||= {
+          _id: key,
+          total: 0,
+          completed: 0,
+          cancelled: 0,
+          noShow: 0,
+          pending: 0,
+          revenue: 0,
+        };
+        groups[key].total++;
+        if (booking.status === "completed") {
+          groups[key].completed++;
+          groups[key].revenue += getTestBookingRevenue(booking);
+        }
+        if (["cancelled", "late_cancelled"].includes(booking.status)) {
+          groups[key].cancelled++;
+        }
+        if (booking.status === "no_show") groups[key].noShow++;
+        if (booking.status === "pending") groups[key].pending++;
+        return groups;
+      }, {})
+    );
+  }
+
+  if (groupId === "$barberId") {
+    return Object.values(
+      matched.reduce((groups, booking) => {
+        groups[booking.barberId] ||= {
+          _id: booking.barberId,
+          totalBookings: 0,
+          completed: 0,
+          cancelled: 0,
+          noShow: 0,
+          revenue: 0,
+          uniqueClients: [],
+        };
+        groups[booking.barberId].totalBookings++;
+        if (booking.status === "completed") {
+          groups[booking.barberId].completed++;
+          groups[booking.barberId].revenue += getTestBookingRevenue(booking);
+        }
+        if (["cancelled", "late_cancelled"].includes(booking.status)) {
+          groups[booking.barberId].cancelled++;
+        }
+        if (booking.status === "no_show") groups[booking.barberId].noShow++;
+        if (!groups[booking.barberId].uniqueClients.includes(booking.clientId)) {
+          groups[booking.barberId].uniqueClients.push(booking.clientId);
+        }
+        return groups;
+      }, {})
+    );
+  }
+
+  if (groupId === "$serviceName") {
+    return Object.values(
+      matched.reduce((groups, booking) => {
+        groups[booking.serviceName] ||= {
+          _id: booking.serviceName,
+          count: 0,
+          revenue: 0,
+        };
+        groups[booking.serviceName].count++;
+        if (booking.status === "completed") {
+          groups[booking.serviceName].revenue += getTestBookingRevenue(booking);
+        }
+        return groups;
+      }, {})
+    );
+  }
+
+  return [];
+};
+
 const getAggregateGroupId = (pipeline) =>
   pipeline.find((stage) => stage.$group)?.$group?._id;
 
@@ -151,6 +299,15 @@ const assertPipelineUsesAppointmentRange = (pipeline, from, to) => {
       ?.reportAppointmentDate,
     { $gte: from, $lte: to }
   );
+};
+
+const setupEarningsReport = async ({ members, bookings, from = "2026-06-15", to = "2026-06-15" }) => {
+  setupOwnerReportAccess(members);
+  Booking.aggregate = async (pipeline) => aggregateReportBookings(bookings, pipeline);
+  Booking.find = (query) =>
+    makeLeanQuery(bookings.filter((booking) => bookingMatchesSalonReportQuery(booking, query)));
+
+  return getSalonReport(salonId, ownerId, { from, to });
 };
 
 afterEach(() => {
@@ -327,6 +484,309 @@ test("chair_renter excluded", async () => {
   assert.ok(bookingFindBarberIds.some((id) => String(id) === staffOneId));
   assert.ok(!bookingFindBarberIds.some((id) => String(id) === chairRenterId));
   assert.equal(result.summary.totalBookings, 0);
+});
+
+test("reports isolate bookings by requested salonId across summary and breakdowns", async () => {
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins: [adminId],
+    name: "Test Salon",
+  });
+  User.findById = () => makeLeanQuery([{ _id: ownerId }]);
+  User.find = () => ({
+    select: async () => [
+      makeStaffUser(staffOneId, "staff", "accepted"),
+      makeChairRenterUser(),
+      makeStaffUser(ownerId, "staff", "accepted", { worksAsSpecialist: false }),
+    ],
+  });
+
+  const bookings = [
+    {
+      _id: "salon-a-booking",
+      salonId,
+      barberId: staffOneId,
+      status: "completed",
+      price: 100,
+      serviceName: "Haircut",
+      clientId: clientIdClient,
+      bookingDate: "2026-06-15",
+    },
+    {
+      _id: "salon-b-booking",
+      salonId: salonBId,
+      barberId: staffOneId,
+      status: "completed",
+      price: 900,
+      serviceName: "Color",
+      clientId: "client-2",
+      bookingDate: "2026-06-15",
+    },
+    {
+      _id: "chair-renter-booking",
+      salonId,
+      barberId: chairRenterId,
+      status: "completed",
+      price: 500,
+      serviceName: "Rental Service",
+      clientId: "client-3",
+      bookingDate: "2026-06-15",
+    },
+    {
+      _id: "non-working-owner-booking",
+      salonId,
+      barberId: ownerId,
+      status: "completed",
+      price: 300,
+      serviceName: "Owner Service",
+      clientId: "client-4",
+      bookingDate: "2026-06-15",
+    },
+  ];
+
+  Booking.aggregate = async (pipeline) => aggregateReportBookings(bookings, pipeline);
+  Booking.find = (query) =>
+    makeLeanQuery(bookings.filter((booking) => bookingMatchesSalonReportQuery(booking, query)));
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: "2026-06-15",
+    to: "2026-06-15",
+  });
+
+  assert.equal(result.summary.totalBookings, 1);
+  assert.equal(result.summary.completedBookings, 1);
+  assert.equal(result.summary.totalRevenue, 100);
+  assert.deepEqual(result.byStatus, [{ status: "completed", count: 1 }]);
+  assert.equal(result.byDay.length, 1);
+  assert.equal(result.byDay[0].total, 1);
+  assert.equal(result.byDay[0].revenue, 100);
+  assert.equal(result.byStaff.length, 1);
+  assert.equal(result.byStaff[0].barberId, staffOneId);
+  assert.equal(result.byStaff[0].totalBookings, 1);
+  assert.equal(result.byStaff[0].grossRevenue, 100);
+  assert.equal(result.summary.grossRevenue, 100);
+  assert.equal(result.summary.staffEarningsTotal, 0);
+  assert.equal(result.summary.salonEarningsTotal, 100);
+  assert.deepEqual(result.topServices, [{ _id: "Haircut", count: 1, revenue: 100 }]);
+});
+
+test("earnings calculate a 50/50 commission split from completed revenue", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 50,
+          commissionSalonPercent: 50,
+          notes: "private note",
+          updatedBy: "admin-1",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 120,
+        serviceName: "Haircut",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].grossRevenue, 120);
+  assert.equal(result.byStaff[0].staffEarnings, 60);
+  assert.equal(result.byStaff[0].salonEarnings, 60);
+  assert.equal(result.byStaff[0].paymentType, "commission");
+  assert.equal(result.byStaff[0].commissionStaffPercent, 50);
+  assert.equal(result.byStaff[0].commissionSalonPercent, 50);
+  assert.equal(result.byStaff[0].fixedAmount, null);
+  assert.equal(result.byStaff[0].fixedPeriod, "");
+  assert.equal(result.byStaff[0].earningsCalculationStatus, "calculated");
+  assert.equal(result.byStaff[0].staffPayment, undefined);
+  assert.equal(result.byStaff[0].notes, undefined);
+  assert.equal(result.byStaff[0].updatedBy, undefined);
+  assert.equal(result.summary.grossRevenue, 120);
+  assert.equal(result.summary.staffEarningsTotal, 60);
+  assert.equal(result.summary.salonEarningsTotal, 60);
+  assert.equal(result.summary.fixedPayNotProratedCount, 0);
+});
+
+test("earnings calculate a 70/30 commission split from completed revenue", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 70,
+          commissionSalonPercent: 30,
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 200,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].staffEarnings, 140);
+  assert.equal(result.byStaff[0].salonEarnings, 60);
+  assert.equal(result.summary.staffEarningsTotal, 140);
+  assert.equal(result.summary.salonEarningsTotal, 60);
+});
+
+test("earnings for none payment type leave gross revenue with salon", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: { type: "none" },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 80,
+        serviceName: "Trim",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].grossRevenue, 80);
+  assert.equal(result.byStaff[0].staffEarnings, 0);
+  assert.equal(result.byStaff[0].salonEarnings, 80);
+  assert.equal(result.byStaff[0].paymentType, "none");
+  assert.equal(result.byStaff[0].earningsCalculationStatus, "not_configured");
+  assert.equal(result.summary.staffEarningsTotal, 0);
+  assert.equal(result.summary.salonEarningsTotal, 80);
+});
+
+test("fixed payment type is not prorated and is marked separately", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 500,
+          fixedPeriod: "weekly",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 300,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].grossRevenue, 300);
+  assert.equal(result.byStaff[0].staffEarnings, 0);
+  assert.equal(result.byStaff[0].salonEarnings, 300);
+  assert.equal(result.byStaff[0].paymentType, "fixed");
+  assert.equal(result.byStaff[0].fixedAmount, 500);
+  assert.equal(result.byStaff[0].fixedPeriod, "weekly");
+  assert.equal(result.byStaff[0].earningsCalculationStatus, "fixed_not_prorated");
+  assert.equal(result.summary.fixedPayNotProratedCount, 1);
+});
+
+test("earnings use only completed bookings for the requested salon and staff", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 50,
+          commissionSalonPercent: 50,
+        },
+      }),
+      makeChairRenterUser(),
+      makeStaffUser(staffTwoId, "staff", "accepted", { worksAsSpecialist: false }),
+    ],
+    bookings: [
+      {
+        _id: "completed",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 100,
+        serviceName: "Haircut",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "pending",
+        salonId,
+        barberId: staffOneId,
+        status: "pending",
+        price: 500,
+        serviceName: "Haircut",
+        clientId: "client-2",
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "other-salon",
+        salonId: salonBId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 900,
+        serviceName: "Color",
+        clientId: "client-3",
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "chair-renter",
+        salonId,
+        barberId: chairRenterId,
+        status: "completed",
+        price: 700,
+        serviceName: "Color",
+        clientId: "client-4",
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "non-specialist",
+        salonId,
+        barberId: staffTwoId,
+        status: "completed",
+        price: 600,
+        serviceName: "Color",
+        clientId: "client-5",
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff.length, 1);
+  assert.equal(result.byStaff[0].barberId, staffOneId);
+  assert.equal(result.byStaff[0].grossRevenue, 100);
+  assert.equal(result.byStaff[0].staffEarnings, 50);
+  assert.equal(result.byStaff[0].salonEarnings, 50);
+  assert.equal(result.summary.grossRevenue, 100);
+  assert.equal(result.summary.staffEarningsTotal, 50);
+  assert.equal(result.summary.salonEarningsTotal, 50);
 });
 
 test("pending staff excluded", async () => {

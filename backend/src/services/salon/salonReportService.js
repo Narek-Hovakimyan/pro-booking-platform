@@ -90,6 +90,72 @@ const appointmentDateAggregationStages = (from, to) => [
   },
 ];
 
+const paymentTypes = new Set(["none", "commission", "fixed"]);
+
+const toPlainObject = (value) => value?.toObject?.() || value || {};
+
+const numberOrNull = (value) => {
+  if (value === "" || value === null || value === undefined) return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+};
+
+const getSafeStaffPayment = (staffPayment) => {
+  const payment = toPlainObject(staffPayment);
+  const type = paymentTypes.has(payment.type) ? payment.type : "none";
+
+  return {
+    paymentType: type,
+    commissionStaffPercent: numberOrNull(payment.commissionStaffPercent),
+    commissionSalonPercent: numberOrNull(payment.commissionSalonPercent),
+    fixedAmount: numberOrNull(payment.fixedAmount),
+    fixedPeriod: payment.fixedPeriod || "",
+  };
+};
+
+const getStaffEarningsBreakdown = (grossRevenue, staffPayment) => {
+  const safePayment = getSafeStaffPayment(staffPayment);
+
+  if (safePayment.paymentType === "commission") {
+    const staffPercent = safePayment.commissionStaffPercent ?? 0;
+    const salonPercent = safePayment.commissionSalonPercent ?? 0;
+
+    return {
+      grossRevenue,
+      staffEarnings: (grossRevenue * staffPercent) / 100,
+      salonEarnings: (grossRevenue * salonPercent) / 100,
+      ...safePayment,
+      fixedAmount: null,
+      fixedPeriod: "",
+      earningsCalculationStatus: "calculated",
+    };
+  }
+
+  if (safePayment.paymentType === "fixed") {
+    return {
+      grossRevenue,
+      staffEarnings: 0,
+      salonEarnings: grossRevenue,
+      ...safePayment,
+      commissionStaffPercent: null,
+      commissionSalonPercent: null,
+      earningsCalculationStatus: "fixed_not_prorated",
+    };
+  }
+
+  return {
+    grossRevenue,
+    staffEarnings: 0,
+    salonEarnings: grossRevenue,
+    ...safePayment,
+    commissionStaffPercent: null,
+    commissionSalonPercent: null,
+    fixedAmount: null,
+    fixedPeriod: "",
+    earningsCalculationStatus: "not_configured",
+  };
+};
+
 /**
  * Get approved salon member IDs grouped by relationship type.
  * Reuses the same privacy model as salon dashboard.
@@ -143,6 +209,7 @@ const getSalonMembers = async (salonId) => {
         avatarUrl: user.avatarUrl || "",
         relationshipType: "staff",
         relationshipStatus: "accepted",
+        staffPayment: salonEntry.staffPayment || { type: "none" },
       };
     }
   }
@@ -153,12 +220,13 @@ const getSalonMembers = async (salonId) => {
 /**
  * Count bookings by status in a given date range for given barber IDs.
  */
-const getStatusBreakdown = async (barberIds, from, to) => {
+const getStatusBreakdown = async (salonId, barberIds, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
+        salonId,
         barberId: { $in: barberIds },
       },
     },
@@ -222,12 +290,13 @@ const getBookingRevenueAmount = (booking) => {
 /**
  * Get booking counts by day for given barber IDs in date range.
  */
-const getByDayBreakdown = async (barberIds, from, to) => {
+const getByDayBreakdown = async (salonId, barberIds, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
+        salonId,
         barberId: { $in: barberIds },
       },
     },
@@ -274,12 +343,13 @@ const getByDayBreakdown = async (barberIds, from, to) => {
 /**
  * Get per-staff breakdown for given barber IDs in date range.
  */
-const getByStaffBreakdown = async (barberIds, membersById, from, to) => {
+const getByStaffBreakdown = async (salonId, barberIds, membersById, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
+        salonId,
         barberId: { $in: barberIds },
       },
     },
@@ -322,6 +392,12 @@ const getByStaffBreakdown = async (barberIds, membersById, from, to) => {
 
   return results.map((r) => {
     const member = membersById[String(r._id)];
+    const grossRevenue = Number(r.revenue || 0);
+    const earningsBreakdown = getStaffEarningsBreakdown(
+      grossRevenue,
+      member?.staffPayment
+    );
+
     return {
       barberId: r._id,
       barberName: member?.name || "Unknown",
@@ -332,6 +408,7 @@ const getByStaffBreakdown = async (barberIds, membersById, from, to) => {
       noShow: r.noShow,
       revenue: r.revenue,
       uniqueClients: r.uniqueClients.length,
+      ...earningsBreakdown,
     };
   });
 };
@@ -339,12 +416,13 @@ const getByStaffBreakdown = async (barberIds, membersById, from, to) => {
 /**
  * Get top services for given barber IDs in date range.
  */
-const getTopServices = async (barberIds, from, to) => {
+const getTopServices = async (salonId, barberIds, from, to) => {
   if (barberIds.length === 0) return [];
 
   const pipeline = [
     {
       $match: {
+        salonId,
         barberId: { $in: barberIds },
         serviceName: { $exists: true, $ne: "" },
       },
@@ -423,12 +501,13 @@ export const getSalonReport = async (
     topServices,
     allBookings,
   ] = await Promise.all([
-    getStatusBreakdown(effectiveStaffIds, from, to),
-    getByDayBreakdown(effectiveStaffIds, from, to),
-    getByStaffBreakdown(effectiveStaffIds, membersById, from, to),
-    getTopServices(effectiveStaffIds, from, to),
+    getStatusBreakdown(salon._id, effectiveStaffIds, from, to),
+    getByDayBreakdown(salon._id, effectiveStaffIds, from, to),
+    getByStaffBreakdown(salon._id, effectiveStaffIds, membersById, from, to),
+    getTopServices(salon._id, effectiveStaffIds, from, to),
     // Fetch all bookings in range for summary
     Booking.find({
+      salonId: salon._id,
       barberId: { $in: effectiveStaffIds },
       ...appointmentDateQuery(from, to),
     })
@@ -485,6 +564,17 @@ export const getSalonReport = async (
   const totalBookings = allBookings.length;
   const averageBookingValue =
     completedBookings > 0 ? totalRevenue / completedBookings : 0;
+  const staffEarningsTotal = byStaff.reduce(
+    (sum, staff) => sum + Number(staff.staffEarnings || 0),
+    0
+  );
+  const salonEarningsTotal = byStaff.reduce(
+    (sum, staff) => sum + Number(staff.salonEarnings || 0),
+    0
+  );
+  const fixedPayNotProratedCount = byStaff.filter(
+    (staff) => staff.earningsCalculationStatus === "fixed_not_prorated"
+  ).length;
 
   return {
     salon: {
@@ -508,6 +598,10 @@ export const getSalonReport = async (
       noShowBookings,
       lateCancelledBookings,
       totalRevenue,
+      grossRevenue: totalRevenue,
+      staffEarningsTotal,
+      salonEarningsTotal,
+      fixedPayNotProratedCount,
       averageBookingValue,
       uniqueClients: uniqueClientSet.size,
     },

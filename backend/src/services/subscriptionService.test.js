@@ -559,7 +559,6 @@ test("dev grant salon activates subscription with correct totalPrice", async () 
 });
 
 test("3 seats × 1 month sets seatCount=3 and extends periodEnd by exactly 1 month", async () => {
-  const now = new Date();
   let createdSubscription = null;
   let createdPayment = null;
 
@@ -589,11 +588,11 @@ test("3 seats × 1 month sets seatCount=3 and extends periodEnd by exactly 1 mon
   assert.equal(result.seatCount, 3);
   assert.equal(result.totalPrice, 15000);
   // currentPeriodEnd must be exactly 1 month from now, NOT 3 months
-  const expectedPeriodEnd = new Date(now);
+  const expectedPeriodEnd = new Date(result.currentPeriodStart);
   expectedPeriodEnd.setMonth(expectedPeriodEnd.getMonth() + 1);
   assert.equal(result.currentPeriodEnd.getTime(), expectedPeriodEnd.getTime());
   // Verify it is NOT 3 months
-  const threeMonths = new Date(now);
+  const threeMonths = new Date(result.currentPeriodStart);
   threeMonths.setMonth(threeMonths.getMonth() + 3);
   assert.notEqual(result.currentPeriodEnd.getTime(), threeMonths.getTime());
   assert.equal(createdPayment.amount, 15000);
@@ -601,7 +600,6 @@ test("3 seats × 1 month sets seatCount=3 and extends periodEnd by exactly 1 mon
 });
 
 test("3 seats × 3 months sets seatCount=3 and extends periodEnd by exactly 3 months", async () => {
-  const now = new Date();
   let createdPayment = null;
 
   SubscriptionPlan.findOne = async () => defaultPlanDoc;
@@ -626,7 +624,7 @@ test("3 seats × 3 months sets seatCount=3 and extends periodEnd by exactly 3 mo
   assert.equal(result.status, "active");
   assert.equal(result.seatCount, 3);
   assert.equal(result.totalPrice, 15000);
-  const expectedPeriodEnd = new Date(now);
+  const expectedPeriodEnd = new Date(result.currentPeriodStart);
   expectedPeriodEnd.setMonth(expectedPeriodEnd.getMonth() + 3);
   assert.equal(result.currentPeriodEnd.getTime(), expectedPeriodEnd.getTime());
   assert.equal(createdPayment.amount, 45000);
