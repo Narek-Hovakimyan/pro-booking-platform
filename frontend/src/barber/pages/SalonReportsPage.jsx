@@ -6,6 +6,7 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import { getSalonReports } from "@/shared/api/salonReports";
@@ -119,6 +120,7 @@ export default function SalonReportsPage() {
   const [loadingSalons, setLoadingSalons] = useState(true);
   const [loadingReports, setLoadingReports] = useState(false);
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const initialLoadDone = useRef(false);
 
   // Date filter state
@@ -145,12 +147,14 @@ export default function SalonReportsPage() {
             setSelectedSalonId(getSalonId(nextSalons[0]));
           }
           setError("");
+          setErrorCode("");
         }
       } catch (requestError) {
         if (isMounted) {
           setError(
             requestError?.response?.data?.message || "Could not load salons."
           );
+          setErrorCode("");
         }
       } finally {
         if (isMounted) {
@@ -185,6 +189,7 @@ export default function SalonReportsPage() {
         if (isMounted) {
           setReports(data);
           setError("");
+          setErrorCode("");
 
           // Extract staff options from the byStaff response (only staff, no chair_renters)
           if (data.byStaff && data.byStaff.length > 0) {
@@ -202,6 +207,7 @@ export default function SalonReportsPage() {
           setError(
             requestError?.response?.data?.message || "Could not load reports."
           );
+          setErrorCode(requestError?.response?.data?.code || "");
         }
       } finally {
         if (isMounted) {
@@ -218,6 +224,7 @@ export default function SalonReportsPage() {
     setSelectedBarberId("");
     setReports(null);
     setStaffOptions([]);
+    setErrorCode("");
   };
 
   const handleRefresh = () => {
@@ -230,6 +237,7 @@ export default function SalonReportsPage() {
       .then((data) => {
         setReports(data);
         setError("");
+        setErrorCode("");
         if (data.byStaff && data.byStaff.length > 0) {
           setStaffOptions(
             data.byStaff.map((s) => ({
@@ -244,6 +252,7 @@ export default function SalonReportsPage() {
         setError(
           requestError?.response?.data?.message || "Could not load reports."
         );
+        setErrorCode(requestError?.response?.data?.code || "");
       })
       .finally(() => {
         setLoadingReports(false);
@@ -255,6 +264,8 @@ export default function SalonReportsPage() {
   const byDay = reports?.byDay || [];
   const byStaff = reports?.byStaff || [];
   const topServices = reports?.topServices || [];
+  const isSubscriptionRequiredError =
+    errorCode === "SALON_SUBSCRIPTION_REQUIRED";
 
   /* ── Render ── */
 
@@ -285,7 +296,7 @@ export default function SalonReportsPage() {
       </div>
 
       {/* ─── Error ─── */}
-      {error && (
+      {error && !isSubscriptionRequiredError && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error}
         </div>
@@ -407,6 +418,24 @@ export default function SalonReportsPage() {
             <Card>
               <CardContent className="text-sm text-neutral-500">
                 Loading reports...
+              </CardContent>
+            </Card>
+          ) : isSubscriptionRequiredError ? (
+            <Card>
+              <CardContent>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-neutral-950">
+                      Salon subscription required
+                    </h2>
+                    <p className="mt-1 text-sm text-neutral-500">
+                      Activate a salon subscription to view reports.
+                    </p>
+                  </div>
+                  <Button as={Link} to="/admin/salon/billing">
+                    Go to Salon Billing
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : !reports ? (
