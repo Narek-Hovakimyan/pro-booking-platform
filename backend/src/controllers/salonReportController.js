@@ -17,7 +17,10 @@ export const getReports = async (req, res) => {
     return res.json(reportData);
   } catch (error) {
     if (error instanceof ReportError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({
+        ...(error.code ? { code: error.code } : {}),
+        message: error.message,
+      });
     }
 
     return sendControllerError(res, error, "Could not fetch salon reports");

@@ -42,6 +42,11 @@ const getIdsForQuery = (ids) =>
 const isSubscriptionStatusActive = (status) =>
   PAID_SUBSCRIPTION_STATUSES.includes(status);
 
+const getOwnerIdForQuery = (ownerId) =>
+  mongoose.Types.ObjectId.isValid(ownerId)
+    ? new mongoose.Types.ObjectId(ownerId)
+    : ownerId;
+
 const resolveQuery = async (query) => {
   if (query && typeof query.lean === "function") {
     return query.lean();
@@ -167,6 +172,31 @@ export const getOrCreateDefaultSubscriptionPlan = async () => {
     ],
     isActive: true,
   });
+};
+
+export const salonHasActiveSubscription = async (
+  salonId,
+  { now = new Date() } = {}
+) => {
+  if (!salonId) return false;
+
+  const subscription = await resolveQuery(
+    Subscription.findOne({
+      ownerType: "salon",
+      ownerId: getOwnerIdForQuery(salonId),
+      status: { $in: PAID_SUBSCRIPTION_STATUSES },
+    })
+  );
+
+  if (!subscription || !isSubscriptionStatusActive(subscription.status)) {
+    return false;
+  }
+
+  if (!subscription.currentPeriodEnd) {
+    return false;
+  }
+
+  return new Date(subscription.currentPeriodEnd) > now;
 };
 
 /**

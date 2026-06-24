@@ -1,6 +1,7 @@
 import Booking from "../../models/Booking.js";
 import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
+import { salonHasActiveSubscription } from "../subscriptionService.js";
 import { isSalonAdmin, isSalonOwner } from "../../utils/salonPermissions.js";
 import {
   getRelationshipType,
@@ -33,10 +34,11 @@ const isValidDateString = (value) => {
 };
 
 export class ReportError extends Error {
-  constructor(statusCode, message) {
+  constructor(statusCode, message, code = "") {
     super(message);
     this.name = "ReportError";
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -474,6 +476,15 @@ export const getSalonReport = async (
 
   if (!isOwner && !isAdmin) {
     throw new ReportError(403, "Only salon owner or admin can access reports");
+  }
+
+  const hasSalonSubscription = await salonHasActiveSubscription(salon._id);
+  if (!hasSalonSubscription) {
+    throw new ReportError(
+      403,
+      "An active salon subscription is required to access reports",
+      "SALON_SUBSCRIPTION_REQUIRED"
+    );
   }
 
   parseDateRange(from, to);

@@ -1,8 +1,9 @@
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
 import Booking from "../../models/Booking.js";
 import Salon from "../../models/Salon.js";
+import Subscription from "../../models/Subscription.js";
 import User from "../../models/User.js";
 import {
   ReportError,
@@ -15,6 +16,7 @@ const originalMethods = {
   userFindById: User.findById,
   bookingAggregate: Booking.aggregate,
   bookingFind: Booking.find,
+  subscriptionFindOne: Subscription.findOne,
 };
 
 const salonId = "salon-1";
@@ -31,11 +33,33 @@ const rejectedStaffId = "rejected-staff-1";
 const legacyStaffId = "legacy-staff-1";
 const clientIdClient = "client-1";
 
+const futureDate = new Date("2099-01-01T00:00:00.000Z");
+const pastDate = new Date("2000-01-01T00:00:00.000Z");
+
 const makeLeanQuery = (results) => ({
   select: () => ({
     lean: async () => results,
   }),
 });
+
+const makeSubscription = (overrides = {}) => ({
+  _id: overrides._id || "subscription-1",
+  ownerType: "salon",
+  ownerId: salonId,
+  status: "active",
+  currentPeriodEnd: futureDate,
+  ...overrides,
+});
+
+const setSubscriptionFindOneMock = (subscriptions = [makeSubscription()]) => {
+  Subscription.findOne = async (query) =>
+    subscriptions.find(
+      (subscription) =>
+        sameId(subscription.ownerType, query.ownerType) &&
+        sameId(subscription.ownerId, query.ownerId) &&
+        query.status?.$in?.includes(subscription.status)
+    ) || null;
+};
 
 const makeStaffUser = (
   userId,
@@ -310,12 +334,17 @@ const setupEarningsReport = async ({ members, bookings, from = "2026-06-15", to 
   return getSalonReport(salonId, ownerId, { from, to });
 };
 
+beforeEach(() => {
+  setSubscriptionFindOneMock();
+});
+
 afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
   Booking.aggregate = originalMethods.bookingAggregate;
   Booking.find = originalMethods.bookingFind;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
 });
 
 test("owner can fetch reports", async () => {
@@ -378,6 +407,108 @@ test("admin can fetch reports", async () => {
 
   assert.ok(result.salon);
   assert.equal(result.summary.totalBookings, 0);
+});
+
+test("no salon subscription denied", async () => {
+  setupOwnerReportAccess();
+  setSubscriptionFindOneMock([]);
+
+  await assert.rejects(
+    () => getSalonReport(salonId, ownerId, { from: fromDate, to: toDate }),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+      return true;
+    }
+  );
+});
+
+test("cancelled or expired salon subscription denied", async () => {
+  setupOwnerReportAccess();
+
+  for (const subscription of [
+    makeSubscription({ status: "cancelled" }),
+    makeSubscription({ status: "active", currentPeriodEnd: pastDate }),
+  ]) {
+    setSubscriptionFindOneMock([subscription]);
+
+    await assert.rejects(
+      () => getSalonReport(salonId, ownerId, { from: fromDate, to: toDate }),
+      (error) => {
+        assert.ok(error instanceof ReportError);
+        assert.equal(error.statusCode, 403);
+        assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+        return true;
+      }
+    );
+  }
+});
+
+test("active salon subscription allowed", async () => {
+  setupOwnerReportAccess();
+  setSubscriptionFindOneMock([makeSubscription({ status: "active" })]);
+  Booking.aggregate = async () => [];
+  Booking.find = () => makeLeanQuery([]);
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: fromDate,
+    to: toDate,
+  });
+
+  assert.equal(result.summary.totalBookings, 0);
+});
+
+test("trialing salon subscription allowed", async () => {
+  setupOwnerReportAccess();
+  setSubscriptionFindOneMock([makeSubscription({ status: "trialing" })]);
+  Booking.aggregate = async () => [];
+  Booking.find = () => makeLeanQuery([]);
+
+  const result = await getSalonReport(salonId, ownerId, {
+    from: fromDate,
+    to: toDate,
+  });
+
+  assert.equal(result.summary.totalBookings, 0);
+});
+
+test("another salon active subscription denied", async () => {
+  setupOwnerReportAccess();
+  setSubscriptionFindOneMock([
+    makeSubscription({ _id: "subscription-2", ownerId: salonBId }),
+  ]);
+
+  await assert.rejects(
+    () => getSalonReport(salonId, ownerId, { from: fromDate, to: toDate }),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+      return true;
+    }
+  );
+});
+
+test("personal barber subscription does not unlock salon reports", async () => {
+  setupOwnerReportAccess();
+  setSubscriptionFindOneMock([
+    makeSubscription({
+      _id: "barber-subscription",
+      ownerType: "barber",
+      ownerId,
+    }),
+  ]);
+
+  await assert.rejects(
+    () => getSalonReport(salonId, ownerId, { from: fromDate, to: toDate }),
+    (error) => {
+      assert.ok(error instanceof ReportError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, "SALON_SUBSCRIPTION_REQUIRED");
+      return true;
+    }
+  );
 });
 
 test("normal member cannot fetch reports", async () => {
