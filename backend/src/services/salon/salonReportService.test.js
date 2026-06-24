@@ -274,12 +274,20 @@ const aggregateReportBookings = (bookings, pipeline) => {
           cancelled: 0,
           noShow: 0,
           revenue: 0,
+          completedBookingDates: [],
           uniqueClients: [],
         };
         groups[booking.barberId].totalBookings++;
         if (booking.status === "completed") {
           groups[booking.barberId].completed++;
           groups[booking.barberId].revenue += getTestBookingRevenue(booking);
+          const completedDate = getAppointmentDate(booking);
+          if (
+            completedDate &&
+            !groups[booking.barberId].completedBookingDates.includes(completedDate)
+          ) {
+            groups[booking.barberId].completedBookingDates.push(completedDate);
+          }
         }
         if (["cancelled", "late_cancelled"].includes(booking.status)) {
           groups[booking.barberId].cancelled++;
@@ -322,6 +330,13 @@ const assertPipelineUsesAppointmentRange = (pipeline, from, to) => {
     pipeline.find((stage) => stage.$match?.reportAppointmentDate)?.$match
       ?.reportAppointmentDate,
     { $gte: from, $lte: to }
+  );
+};
+
+const assertClose = (actual, expected) => {
+  assert.ok(
+    Math.abs(actual - expected) < 0.000001,
+    `expected ${actual} to be close to ${expected}`
   );
 };
 
@@ -808,13 +823,105 @@ test("earnings for none payment type leave gross revenue with salon", async () =
   assert.equal(result.summary.salonEarningsTotal, 80);
 });
 
-test("fixed payment type is not prorated and is marked separately", async () => {
+test("daily fixed pay uses unique completed booking dates", async () => {
+  const result = await setupEarningsReport({
+    from: "2026-06-15",
+    to: "2026-06-16",
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 100,
+          fixedPeriod: "daily",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 120,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "b2",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 80,
+        serviceName: "Trim",
+        clientId: "client-2",
+        bookingDate: "2026-06-16",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].grossRevenue, 200);
+  assert.equal(result.byStaff[0].staffEarnings, 200);
+  assert.equal(result.byStaff[0].salonEarnings, 0);
+  assert.equal(result.byStaff[0].paymentType, "fixed");
+  assert.equal(result.byStaff[0].fixedAmount, 100);
+  assert.equal(result.byStaff[0].fixedPeriod, "daily");
+  assert.equal(result.byStaff[0].fixedProratedDays, 2);
+  assert.equal(result.byStaff[0].fixedProrationUnits, 2);
+  assert.equal(result.byStaff[0].earningsCalculationStatus, "calculated_prorated");
+  assert.equal(result.summary.fixedPayNotProratedCount, 0);
+  assert.equal(result.summary.fixedPayProratedCount, 1);
+});
+
+test("daily fixed pay counts multiple completed bookings on same day once", async () => {
   const result = await setupEarningsReport({
     members: [
       makeStaffUser(staffOneId, "staff", "accepted", {
         staffPayment: {
           type: "fixed",
-          fixedAmount: 500,
+          fixedAmount: 100,
+          fixedPeriod: "daily",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 120,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+      {
+        _id: "b2",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 80,
+        serviceName: "Trim",
+        clientId: "client-2",
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].staffEarnings, 100);
+  assert.equal(result.byStaff[0].fixedProratedDays, 1);
+  assert.equal(result.byStaff[0].fixedProrationUnits, 1);
+});
+
+test("weekly fixed pay prorates by inclusive report range days", async () => {
+  const result = await setupEarningsReport({
+    from: "2026-06-15",
+    to: "2026-06-17",
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 700,
           fixedPeriod: "weekly",
         },
       }),
@@ -825,7 +932,7 @@ test("fixed payment type is not prorated and is marked separately", async () => 
         salonId,
         barberId: staffOneId,
         status: "completed",
-        price: 300,
+        price: 500,
         serviceName: "Color",
         clientId: clientIdClient,
         bookingDate: "2026-06-15",
@@ -833,14 +940,137 @@ test("fixed payment type is not prorated and is marked separately", async () => 
     ],
   });
 
-  assert.equal(result.byStaff[0].grossRevenue, 300);
+  assert.equal(result.byStaff[0].fixedProratedDays, 3);
+  assertClose(result.byStaff[0].fixedProrationUnits, 3 / 7);
+  assertClose(result.byStaff[0].staffEarnings, 300);
+  assertClose(result.byStaff[0].salonEarnings, 200);
+});
+
+test("monthly fixed pay prorates by actual calendar-month overlap", async () => {
+  const result = await setupEarningsReport({
+    from: "2026-01-16",
+    to: "2026-01-31",
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 3100,
+          fixedPeriod: "monthly",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 2000,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2026-01-16",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].fixedProratedDays, 16);
+  assertClose(result.byStaff[0].fixedProrationUnits, 16 / 31);
+  assertClose(result.byStaff[0].staffEarnings, 1600);
+  assertClose(result.byStaff[0].salonEarnings, 400);
+});
+
+test("monthly fixed pay handles leap-year February", async () => {
+  const result = await setupEarningsReport({
+    from: "2024-02-15",
+    to: "2024-02-29",
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 2900,
+          fixedPeriod: "monthly",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 2000,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2024-02-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].fixedProratedDays, 15);
+  assertClose(result.byStaff[0].fixedProrationUnits, 15 / 29);
+  assertClose(result.byStaff[0].staffEarnings, 1500);
+  assertClose(result.byStaff[0].salonEarnings, 500);
+});
+
+test("fixed pay without completed bookings returns zero staff earnings", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 100,
+          fixedPeriod: "daily",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "pending",
+        price: 200,
+        serviceName: "Color",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].grossRevenue, 0);
   assert.equal(result.byStaff[0].staffEarnings, 0);
-  assert.equal(result.byStaff[0].salonEarnings, 300);
-  assert.equal(result.byStaff[0].paymentType, "fixed");
-  assert.equal(result.byStaff[0].fixedAmount, 500);
-  assert.equal(result.byStaff[0].fixedPeriod, "weekly");
-  assert.equal(result.byStaff[0].earningsCalculationStatus, "fixed_not_prorated");
-  assert.equal(result.summary.fixedPayNotProratedCount, 1);
+  assert.equal(result.byStaff[0].salonEarnings, 0);
+  assert.equal(result.byStaff[0].fixedProratedDays, 0);
+  assert.equal(result.summary.fixedPayProratedCount, 0);
+});
+
+test("fixed pay salon earnings does not go below zero", async () => {
+  const result = await setupEarningsReport({
+    members: [
+      makeStaffUser(staffOneId, "staff", "accepted", {
+        staffPayment: {
+          type: "fixed",
+          fixedAmount: 500,
+          fixedPeriod: "daily",
+        },
+      }),
+    ],
+    bookings: [
+      {
+        _id: "b1",
+        salonId,
+        barberId: staffOneId,
+        status: "completed",
+        price: 100,
+        serviceName: "Trim",
+        clientId: clientIdClient,
+        bookingDate: "2026-06-15",
+      },
+    ],
+  });
+
+  assert.equal(result.byStaff[0].staffEarnings, 500);
+  assert.equal(result.byStaff[0].salonEarnings, 0);
 });
 
 test("earnings use only completed bookings for the requested salon and staff", async () => {

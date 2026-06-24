@@ -56,7 +56,7 @@ const formatPaymentLabel = (staff) => {
   }
 
   if (staff.paymentType === "fixed") {
-    return "Fixed — not prorated";
+    return "Fixed — prorated estimate";
   }
 
   return "Not configured";
@@ -521,11 +521,12 @@ export default function SalonReportsPage() {
                     label="Salon earnings"
                     value={formatCurrency(summary.salonEarningsTotal)}
                   />
-                  {Number(summary.fixedPayNotProratedCount || 0) > 0 && (
+                  {Number(summary.fixedPayProratedCount || 0) > 0 && (
                     <StatWidget
                       icon={DollarSign}
-                      label="Fixed not prorated"
-                      value={summary.fixedPayNotProratedCount}
+                      label="Fixed prorated"
+                      value={summary.fixedPayProratedCount}
+                      sub="Report activity estimate"
                     />
                   )}
                   <StatWidget
