@@ -37,6 +37,43 @@ const getSalonName = (salon) => {
 const formatCurrency = (amount, currency = "AMD") =>
   `${Number(amount || 0).toLocaleString()} ${currency}`;
 
+const formatPaymentLabel = (staff) => {
+  if (staff.paymentType === "commission") {
+    const staffPercent = staff.commissionStaffPercent;
+    const salonPercent = staff.commissionSalonPercent;
+
+    if (
+      staffPercent !== null &&
+      staffPercent !== undefined &&
+      salonPercent !== null &&
+      salonPercent !== undefined
+    ) {
+      return `Commission ${staffPercent}/${salonPercent}`;
+    }
+
+    return "Commission";
+  }
+
+  if (staff.paymentType === "fixed") {
+    return "Fixed — not prorated";
+  }
+
+  return "Not configured";
+};
+
+const formatFixedPaymentSub = (staff) => {
+  if (
+    staff.paymentType !== "fixed" ||
+    staff.fixedAmount === null ||
+    staff.fixedAmount === undefined
+  ) {
+    return "";
+  }
+
+  const period = staff.fixedPeriod ? ` / ${staff.fixedPeriod}` : "";
+  return `${formatCurrency(staff.fixedAmount)}${period}`;
+};
+
 const getTodayString = () => {
   const now = new Date();
   const y = now.getFullYear();
@@ -441,6 +478,29 @@ export default function SalonReportsPage() {
                   />
                   <StatWidget
                     icon={DollarSign}
+                    label="Gross revenue"
+                    value={formatCurrency(summary.grossRevenue)}
+                    sub="Completed booking gross"
+                  />
+                  <StatWidget
+                    icon={DollarSign}
+                    label="Staff earnings"
+                    value={formatCurrency(summary.staffEarningsTotal)}
+                  />
+                  <StatWidget
+                    icon={DollarSign}
+                    label="Salon earnings"
+                    value={formatCurrency(summary.salonEarningsTotal)}
+                  />
+                  {Number(summary.fixedPayNotProratedCount || 0) > 0 && (
+                    <StatWidget
+                      icon={DollarSign}
+                      label="Fixed not prorated"
+                      value={summary.fixedPayNotProratedCount}
+                    />
+                  )}
+                  <StatWidget
+                    icon={DollarSign}
                     label="Avg booking value"
                     value={formatCurrency(summary.averageBookingValue)}
                   />
@@ -583,7 +643,10 @@ export default function SalonReportsPage() {
                             <th className="pb-2 pr-3">Completed</th>
                             <th className="pb-2 pr-3">Cancelled</th>
                             <th className="pb-2 pr-3">No-show</th>
-                            <th className="pb-2 pr-3">Revenue</th>
+                            <th className="pb-2 pr-3">Gross revenue</th>
+                            <th className="pb-2 pr-3">Staff earnings</th>
+                            <th className="pb-2 pr-3">Salon earnings</th>
+                            <th className="pb-2 pr-3">Payment</th>
                             <th className="pb-2">Clients</th>
                           </tr>
                         </thead>
@@ -622,7 +685,27 @@ export default function SalonReportsPage() {
                                 {staff.noShow}
                               </td>
                               <td className="py-2 pr-3 text-neutral-700">
-                                {formatCurrency(staff.revenue)}
+                                {formatCurrency(
+                                  staff.grossRevenue ?? staff.revenue
+                                )}
+                              </td>
+                              <td className="py-2 pr-3 text-neutral-700">
+                                {formatCurrency(staff.staffEarnings)}
+                              </td>
+                              <td className="py-2 pr-3 text-neutral-700">
+                                {formatCurrency(staff.salonEarnings)}
+                              </td>
+                              <td className="py-2 pr-3 text-neutral-700">
+                                <div className="min-w-36">
+                                  <div className="font-medium text-neutral-800">
+                                    {formatPaymentLabel(staff)}
+                                  </div>
+                                  {formatFixedPaymentSub(staff) && (
+                                    <div className="mt-0.5 text-xs text-neutral-500">
+                                      {formatFixedPaymentSub(staff)}
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                               <td className="py-2 text-neutral-700">
                                 {staff.uniqueClients}
