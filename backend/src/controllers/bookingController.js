@@ -40,6 +40,7 @@ import {
   parseConsultationAndConsent,
   buildBookingCreatePayload,
 } from "../services/bookingCreatePayloadService.js";
+import { buildBookingStatusUpdate } from "../services/bookingStatusService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
@@ -718,10 +719,10 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      safeUpdates.status = "rejected";
-      safeUpdates.rejectionReason = rejectionReason;
-      safeUpdates.rejectedAt = new Date();
-      safeUpdates.rejectedBy = req.user._id;
+      Object.assign(
+        safeUpdates,
+        buildBookingStatusUpdate("rejected", { reason: rejectionReason, requester: req.user })
+      );
     }
 
     if (isCancelling) {
@@ -754,10 +755,10 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      safeUpdates.status = "cancelled";
-      safeUpdates.cancelReason = cancelReason;
-      safeUpdates.cancelledAt = new Date();
-      safeUpdates.cancelledBy = req.user._id;
+      Object.assign(
+        safeUpdates,
+        buildBookingStatusUpdate("cancelled", { reason: cancelReason, requester: req.user })
+      );
     }
 
     if (isRescheduling) {
