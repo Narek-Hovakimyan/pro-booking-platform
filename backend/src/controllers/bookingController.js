@@ -8,17 +8,13 @@ import LoyaltyProgram from "../models/LoyaltyProgram.js";
 import LoyaltyProgress from "../models/LoyaltyProgress.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
-import { calculateServiceDiscountedPrice } from "./serviceController.js";
 import { calculateDeposit } from "./depositSettingsController.js";
 
-
 import User from "../models/User.js";
-import Voucher from "../models/Voucher.js";
 import {
   getApprovedUserSalonIds,
   getPrimaryApprovedSalonId,
 } from "../services/salon/salonMembershipService.js";
-import { calculateLoyaltyDiscountForBooking } from "../services/barberClientService.js";
 import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
@@ -31,6 +27,15 @@ import {
   barberHasPaidAccessForSalon,
   barberHasPaidSeatAccessForSalon,
 } from "../services/subscriptionService.js";
+import {
+  calculateVoucherDiscount,
+  validateVoucherForBooking,
+  claimVoucherForBooking,
+  buildBookingPricing,
+  rollbackVoucherClaim,
+  recordVoucherRedemption,
+  restoreVoucherOnCancel,
+} from "../services/bookingPricingService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
@@ -196,241 +201,6 @@ const canManageBookingSalon = async (booking, userId) => {
 const sameId = (left, right) =>
   String(left || "") === String(right || "");
 
-/* ── Voucher helpers ──────────────────────────────────────────── */
-
-/**
- * Validate and atomically claim a voucher use before booking creation.
- *
- * Steps:
- * 1. Find voucher by code (active + not expired + not overused).
- * 2. Validate owner scope against barberId/salonId.
- * 3. Validate service match if voucher is service-specific.
- * 4. Atomically increment currentUses via findOneAndUpdate with guard.
- * 5. Return { voucher, voucherDiscount, finalPrice } or throw.
- *
- * If atomic claim fails (concurrency/overuse), throws descriptive error.
- */
-const calculateVoucherDiscount = ({ voucher, servicePrice }) => {
-  const voucherAmount = Number(voucher.amount);
-  const discountType = voucher.discountType || "fixed";
-
-  if (discountType === "percentage") {
-    const pct = Math.min(voucherAmount, 100);
-    return Math.round((servicePrice * pct) / 100);
-  }
-
-  return Math.min(voucherAmount, servicePrice);
-};
-
-const validateVoucherForBooking = async ({
-  voucherCode: rawCode,
-  barberId,
-  salonId,
-  serviceId,
-  servicePrice,
-}) => {
-  const code = String(rawCode || "").toUpperCase().trim();
-  if (!code) return null;
-
-  // 1. Find active, non-expired, not-overused voucher
-  const voucher = await Voucher.findOne({ code });
-  if (!voucher) {
-    throw Object.assign(new Error("Invalid voucher code"), { statusCode: 400 });
-  }
-  if (!voucher.active) {
-    throw Object.assign(new Error("This voucher is no longer active"), { statusCode: 400 });
-  }
-  if (voucher.expiresAt && new Date() > new Date(voucher.expiresAt)) {
-    throw Object.assign(new Error("This voucher has expired"), { statusCode: 400 });
-  }
-  if (voucher.currentUses >= voucher.maxUses) {
-    throw Object.assign(new Error("This voucher has been fully redeemed"), { statusCode: 400 });
-  }
-
-  // 2. Owner scope validation
-  if (voucher.ownerType === "barber") {
-    if (!sameId(voucher.ownerId, barberId)) {
-      throw Object.assign(new Error("This voucher does not apply to this barber"), { statusCode: 400 });
-    }
-  }
-  if (voucher.ownerType === "salon") {
-    if (!salonId || !sameId(voucher.ownerId, salonId)) {
-      throw Object.assign(new Error("This voucher does not apply to this salon"), { statusCode: 400 });
-    }
-  }
-
-  // 3. Service match — either serviceId (legacy) or applicableServiceIds (promotion)
-  if (voucher.serviceId) {
-    if (!sameId(voucher.serviceId, serviceId)) {
-      throw Object.assign(new Error("This voucher does not apply to this service"), { statusCode: 400 });
-    }
-  }
-  if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
-    const matchesService = voucher.applicableServiceIds.some(
-      (sid) => sameId(sid, serviceId)
-    );
-    if (!matchesService) {
-      throw Object.assign(new Error("This promotion does not apply to this service"), { statusCode: 400 });
-    }
-  }
-
-  // 4. Barber match (applicableBarberIds)
-  if (voucher.applicableBarberIds && voucher.applicableBarberIds.length > 0) {
-    const matchesBarber = voucher.applicableBarberIds.some(
-      (bid) => sameId(bid, barberId)
-    );
-    if (!matchesBarber) {
-      throw Object.assign(new Error("This promotion does not apply to this barber"), { statusCode: 400 });
-    }
-  }
-
-  // 5. Start date check
-  if (voucher.startDate) {
-    const now = new Date();
-    if (now < new Date(voucher.startDate)) {
-      throw Object.assign(new Error("This promotion is not yet active"), { statusCode: 400 });
-    }
-  }
-
-  const voucherDiscount = calculateVoucherDiscount({ voucher, servicePrice });
-  const finalPrice = Math.max(0, servicePrice - voucherDiscount);
-
-  return { voucher, voucherDiscount, finalPrice };
-};
-
-const claimVoucherForBooking = async ({
-  voucherCode: rawCode,
-  barberId,
-  salonId,
-  serviceId,
-  servicePrice,
-}) => {
-  const preview = await validateVoucherForBooking({
-    voucherCode: rawCode,
-    barberId,
-    salonId,
-    serviceId,
-    servicePrice,
-  });
-  const voucher = preview.voucher;
-
-  // 6. Atomically claim a use — guard: currentUses < maxUses AND still active
-  const claimFilter = {
-    _id: voucher._id,
-    active: true,
-    currentUses: { $lt: voucher.maxUses },
-  };
-  if (voucher.expiresAt) {
-    claimFilter.expiresAt = { $gt: new Date() };
-  }
-
-  const claimed = await Voucher.findOneAndUpdate(
-    claimFilter,
-    { $inc: { currentUses: 1 } },
-    { new: false } // return pre-update doc to inspect before state changed
-  );
-
-  if (!claimed) {
-    throw Object.assign(new Error("This promotion is no longer available"), { statusCode: 400 });
-  }
-
-  const voucherDiscount = calculateVoucherDiscount({ voucher: claimed, servicePrice });
-  const finalPrice = Math.max(0, servicePrice - voucherDiscount);
-
-  return { voucher: claimed, voucherDiscount, finalPrice };
-
-};
-
-const buildBookingPricing = async ({
-  barber,
-  barberId,
-  clientId,
-  service,
-  serviceId,
-  salonId,
-  voucherCode,
-  claimVoucher = false,
-}) => {
-  const parsedServicePrice = Number(service.price || 0);
-  const originalPrice = Number.isFinite(parsedServicePrice)
-    ? Math.max(0, parsedServicePrice)
-    : 0;
-  const {
-    discountAmount: serviceDiscountAmount,
-    discountedPrice: serviceDiscountedPrice,
-  } = calculateServiceDiscountedPrice(service);
-
-  let voucherClaim = null;
-  if (voucherCode) {
-    const voucherPayload = {
-      voucherCode,
-      barberId,
-      salonId,
-      serviceId,
-      servicePrice: serviceDiscountedPrice,
-    };
-    voucherClaim = claimVoucher
-      ? await claimVoucherForBooking(voucherPayload)
-      : await validateVoucherForBooking(voucherPayload);
-  }
-
-  const loyaltyDiscount = await calculateLoyaltyDiscountForBooking({
-    barber,
-    barberId,
-    clientId,
-    serviceDiscountedPrice,
-    hasVoucher: Boolean(voucherClaim),
-  });
-  const finalPrice = voucherClaim
-    ? voucherClaim.finalPrice
-    : loyaltyDiscount.finalPrice;
-
-  return {
-    originalPrice,
-    serviceDiscountAmount,
-    serviceDiscountedPrice,
-    voucherClaim,
-    voucherDiscountAmount: voucherClaim?.voucherDiscount || 0,
-    loyaltyDiscount,
-    finalPrice,
-  };
-};
-
-/**
- * Rollback a voucher claim if booking creation fails after the claim.
- */
-const rollbackVoucherClaim = async (voucherId) => {
-  if (!voucherId) return;
-  await Voucher.findByIdAndUpdate(voucherId, {
-    $inc: { currentUses: -1 },
-  }).catch(() => {});
-};
-
-/**
- * Push booking ID into voucher's redemptionBookingIds after booking exists.
- */
-const recordVoucherRedemption = async (voucherId, bookingId) => {
-  if (!voucherId || !bookingId) return;
-  await Voucher.findByIdAndUpdate(voucherId, {
-    $addToSet: { redemptionBookingIds: bookingId },
-  }).catch(() => {});
-};
-
-/**
- * Restore voucher use when a booking with voucherDiscount is cancelled/rejected.
- * Only restores once — guards against double-rollback by checking that
- * the booking was not already in a cancelled/rejected state before this update.
- */
-const restoreVoucherOnCancel = async (booking, previousStatus) => {
-  if (!booking.voucherId || !booking.voucherDiscount) return;
-  const terminalStatuses = new Set(["cancelled", "rejected"]);
-  if (terminalStatuses.has(previousStatus)) return; // already in terminal state — no double restore
-
-  await Voucher.findByIdAndUpdate(booking.voucherId, {
-    $inc: { currentUses: -1 },
-    $pull: { redemptionBookingIds: booking._id },
-  }).catch(() => {});
-};
 
 export const __bookingTestHooks = {
   allowedBookingDelayMinutes,
