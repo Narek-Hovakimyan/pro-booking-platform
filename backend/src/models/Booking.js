@@ -386,6 +386,57 @@ const bookingSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    currency: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "AMD",
+    },
+    paidAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    paymentStatus: {
+      type: String,
+      enum: [
+        "not_required",
+        "unpaid",
+        "pending",
+        "paid",
+        "failed",
+        "partially_refunded",
+        "refunded",
+      ],
+      default() {
+        return this.depositRequired ? "pending" : "not_required";
+      },
+    },
+    paymentProvider: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    paymentTransactionIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: "PaymentTransaction",
+      default: [],
+    },
+    refundStatus: {
+      type: String,
+      enum: ["none", "pending", "partially_refunded", "refunded", "failed"],
+      default: "none",
+    },
+    refundedAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    refundTransactionIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: "PaymentTransaction",
+      default: [],
+    },
   },
   { timestamps: true }
 );
@@ -394,6 +445,7 @@ bookingSchema.index({ barberId: 1, bookingDate: 1, time: 1 });
 bookingSchema.index({ barberId: 1, dayKey: 1, time: 1 });
 bookingSchema.index({ clientId: 1, createdAt: -1 });
 bookingSchema.index({ salonId: 1, barberId: 1, createdAt: -1 });
+bookingSchema.index({ paymentStatus: 1, createdAt: -1 });
 
 const Booking = mongoose.model("Booking", bookingSchema);
 
