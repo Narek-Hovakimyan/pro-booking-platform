@@ -868,7 +868,7 @@ export default function App() {
             />
             <Route
               path="/admin/salon/promotions"
-              element={renderAdminPage("salon-promotions", { requireSubscription: true })}
+              element={renderAdminPage("salon-promotions")}
             />
             <Route
               path="/admin/calendar"
