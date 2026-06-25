@@ -36,7 +36,10 @@ import {
   recordVoucherRedemption,
   restoreVoucherOnCancel,
 } from "../services/bookingPricingService.js";
-import { parseConsultationAndConsent } from "../services/bookingCreatePayloadService.js";
+import {
+  parseConsultationAndConsent,
+  buildBookingCreatePayload,
+} from "../services/bookingCreatePayloadService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
@@ -408,22 +411,21 @@ export const createBooking = async (req, res) => {
 
       let booking;
       try {
-        booking = await Booking.create({
+        const payload = buildBookingCreatePayload({
           barberId,
           serviceId,
           depositRequired,
           depositAmount,
           depositStatus,
-          depositMode: depositSettings.enabled ? (depositSettings.mode || "percentage") : "",
-          depositValue: depositSettings.enabled ? (depositSettings.value || 0) : 0,
-          depositPolicyText: depositSettings.enabled ? (depositSettings.noShowPolicyText || "") : "",
-          clientId: isManualBooking ? null : clientId,
+          depositSettings,
+          clientId,
           clientName: isManualBooking ? clientName : req.body.clientName,
           clientPhone,
-          phone: isManualBooking ? clientPhone : req.body.phone,
-          createdBy: isManualBooking ? "barber" : "client",
-          note: req.body.note || "",
-          referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+          phone: req.body.phone,
+          createdBy,
+          isManualBooking,
+          note: req.body.note,
+          referenceImages,
           salonId: salonResolution.salonId,
           bookingDate,
           time,
@@ -434,47 +436,13 @@ export const createBooking = async (req, res) => {
           status,
           consultation,
           consent,
-          ...(loyaltyDiscount.applied
-            ? {
-              originalPrice: bookingPrice,
-              finalPrice: loyaltyDiscount.finalPrice,
-              discountAmount: loyaltyDiscount.amount,
-              loyaltyDiscountApplied: true,
-              loyaltyDiscountPercent: loyaltyDiscount.percent,
-              loyaltyDiscountAmount: loyaltyDiscount.amount,
-              loyaltyEligibleCompletedBookings:
-                loyaltyDiscount.eligibleCompletedBookings,
-              loyaltyTierIndex: loyaltyDiscount.tierIndex,
-              loyaltyRuleSnapshot: loyaltyDiscount.ruleSnapshot,
-            }
-            : loyaltyDiscount.eligibleCompletedBookings > 0
-              ? {
-                loyaltyDiscountApplied: false,
-                loyaltyDiscountPercent: 0,
-                loyaltyDiscountAmount: 0,
-                loyaltyEligibleCompletedBookings:
-                  loyaltyDiscount.eligibleCompletedBookings,
-              }
-              : {}),
-          // Voucher fields (if applicable)
-          ...(voucherClaim
-            ? {
-              voucherId: voucherClaim.voucher._id,
-              promotionId: voucherClaim.voucher._id,
-              voucherCode: rawVoucherCode.toUpperCase().trim(),
-              promotionCode: rawVoucherCode.toUpperCase().trim(),
-              voucherDiscount: voucherClaim.voucherDiscount,
-              discountAmount: voucherClaim.voucherDiscount,
-              originalPrice: bookingPrice,
-              finalPrice: voucherClaim.finalPrice,
-              loyaltyDiscountApplied: false,
-              loyaltyDiscountPercent: 0,
-              loyaltyDiscountAmount: 0,
-            }
-            : {}),
-          serviceOriginalPrice: pricing.originalPrice,
-          serviceDiscountAmount: pricing.serviceDiscountAmount,
+          loyaltyDiscount,
+          bookingPrice,
+          voucherClaim,
+          rawVoucherCode,
+          pricing,
         });
+        booking = await Booking.create(payload);
       } catch (createErr) {
         // If voucher was claimed but Booking.create failed, roll back the claim
         if (voucherClaim) {

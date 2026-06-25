@@ -52,3 +52,113 @@ export const parseConsultationAndConsent = (body) => {
 
   return { consultation, consent };
 };
+
+/**
+ * Build the Booking.create payload object.
+ * Pure data assembly function — no DB calls, no side effects.
+ *
+ * All sensitive fields are set server-side (price, status, duration, serviceName,
+ * salonId, deposit snapshot, consultation/consent timestamps, referenceImages).
+ *
+ * @param {Object} params
+ * @returns {Object} Payload for Booking.create(...)
+ */
+export const buildBookingCreatePayload = ({
+  barberId,
+  serviceId,
+  depositRequired,
+  depositAmount,
+  depositStatus,
+  depositSettings,
+  clientId,
+  clientName,
+  clientPhone,
+  phone,
+  createdBy,
+  isManualBooking,
+  note,
+  referenceImages,
+  salonId,
+  bookingDate,
+  time,
+  dayKey,
+  serviceName,
+  duration,
+  price,
+  status,
+  consultation,
+  consent,
+  loyaltyDiscount,
+  bookingPrice,
+  voucherClaim,
+  rawVoucherCode,
+  pricing,
+}) => {
+  return {
+    barberId,
+    serviceId,
+    depositRequired,
+    depositAmount,
+    depositStatus,
+    depositMode: depositSettings.enabled ? (depositSettings.mode || "percentage") : "",
+    depositValue: depositSettings.enabled ? (depositSettings.value || 0) : 0,
+    depositPolicyText: depositSettings.enabled ? (depositSettings.noShowPolicyText || "") : "",
+    clientId: isManualBooking ? null : clientId,
+    clientName: isManualBooking ? clientName : clientName,
+    clientPhone,
+    phone: isManualBooking ? clientPhone : phone,
+    createdBy: isManualBooking ? "barber" : "client",
+    note: note || "",
+    referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
+    salonId,
+    bookingDate,
+    time,
+    dayKey,
+    serviceName,
+    duration,
+    price,
+    status,
+    consultation,
+    consent,
+    ...(loyaltyDiscount.applied
+      ? {
+        originalPrice: bookingPrice,
+        finalPrice: loyaltyDiscount.finalPrice,
+        discountAmount: loyaltyDiscount.amount,
+        loyaltyDiscountApplied: true,
+        loyaltyDiscountPercent: loyaltyDiscount.percent,
+        loyaltyDiscountAmount: loyaltyDiscount.amount,
+        loyaltyEligibleCompletedBookings:
+          loyaltyDiscount.eligibleCompletedBookings,
+        loyaltyTierIndex: loyaltyDiscount.tierIndex,
+        loyaltyRuleSnapshot: loyaltyDiscount.ruleSnapshot,
+      }
+      : loyaltyDiscount.eligibleCompletedBookings > 0
+        ? {
+          loyaltyDiscountApplied: false,
+          loyaltyDiscountPercent: 0,
+          loyaltyDiscountAmount: 0,
+          loyaltyEligibleCompletedBookings:
+            loyaltyDiscount.eligibleCompletedBookings,
+        }
+        : {}),
+    // Voucher fields (if applicable)
+    ...(voucherClaim
+      ? {
+        voucherId: voucherClaim.voucher._id,
+        promotionId: voucherClaim.voucher._id,
+        voucherCode: (rawVoucherCode || "").toUpperCase().trim(),
+        promotionCode: (rawVoucherCode || "").toUpperCase().trim(),
+        voucherDiscount: voucherClaim.voucherDiscount,
+        discountAmount: voucherClaim.voucherDiscount,
+        originalPrice: bookingPrice,
+        finalPrice: voucherClaim.finalPrice,
+        loyaltyDiscountApplied: false,
+        loyaltyDiscountPercent: 0,
+        loyaltyDiscountAmount: 0,
+      }
+      : {}),
+    serviceOriginalPrice: pricing.originalPrice,
+    serviceDiscountAmount: pricing.serviceDiscountAmount,
+  };
+};
