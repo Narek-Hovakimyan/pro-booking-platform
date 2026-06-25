@@ -12,7 +12,10 @@ import {
   validateBookingSlot,
   withBookingCreationLock,
 } from "../utils/bookingSlotValidation.js";
-import { normalizeBookingStatus } from "../utils/bookingUtils.js";
+import {
+  normalizeBookingStatus,
+  serializeBookingForResponse,
+} from "../utils/bookingUtils.js";
 import { createNotification } from "./notificationController.js";
 
 const getRescheduleErrorStatusCode = (error) => {
@@ -130,7 +133,7 @@ export const createRescheduleRequest = async (req, res) => {
 
     emitBookingUpdated(booking, "updated");
 
-    return res.status(201).json(booking);
+    return res.status(201).json(serializeBookingForResponse(booking));
   } catch (error) {
     return sendRescheduleError(res, error, "Could not request reschedule");
   }
@@ -259,7 +262,7 @@ export const acceptRescheduleRequest = async (req, res) => {
 
     emitBookingUpdated(updatedBooking, "updated");
 
-    return res.json(updatedBooking);
+    return res.json(serializeBookingForResponse(updatedBooking));
   } catch (error) {
     return sendRescheduleError(res, error, "Could not accept reschedule request");
   }
@@ -305,7 +308,7 @@ export const rejectRescheduleRequest = async (req, res) => {
 
     emitBookingUpdated(booking, "updated");
 
-    return res.json(booking);
+    return res.json(serializeBookingForResponse(booking));
   } catch (error) {
     return sendRescheduleError(res, error, "Could not reject reschedule request");
   }

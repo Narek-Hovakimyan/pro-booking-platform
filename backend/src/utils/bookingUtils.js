@@ -241,6 +241,36 @@ export const getBookingCreationLockKey = ({ barberId, bookingDate }) =>
 
 // ─── Serialization ───
 
+export const internalBookingPaymentFields = [
+  "paymentTransactionId",
+  "paymentTransactionIds",
+  "refundTransactionId",
+  "refundTransactionIds",
+  "providerPaymentId",
+  "providerTransactionId",
+  "providerIntentId",
+  "rawPaymentPayload",
+  "rawProviderPayload",
+  "rawProviderResponse",
+  "rawWebhookPayload",
+  "rawPayload",
+  "paymentIntent",
+  "providerClientSecret",
+  "clientSecret",
+];
+
+export const serializeBookingForResponse = (booking) => {
+  if (!booking || typeof booking !== "object") return booking;
+
+  const response = booking.toObject ? booking.toObject() : { ...booking };
+
+  for (const field of internalBookingPaymentFields) {
+    delete response[field];
+  }
+
+  return response;
+};
+
 export const serializeAvailabilityBooking = (booking, viewerUserId) => {
   const isOwnClientBooking =
     booking?.clientId && String(booking.clientId) === String(viewerUserId);

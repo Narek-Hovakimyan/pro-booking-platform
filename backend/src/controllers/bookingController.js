@@ -51,6 +51,7 @@ import {
   maxCancellationReasonLength,
   maxRejectionReasonLength,
   normalizeBookingStatus,
+  serializeBookingForResponse,
   slotOverlaps,
 } from "../utils/bookingUtils.js";
 import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
@@ -782,7 +783,7 @@ export const createBooking = async (req, res) => {
 
     emitBookingUpdated(booking, "created");
 
-    const responseBooking = booking?.toObject ? booking.toObject() : { ...booking };
+    const responseBooking = serializeBookingForResponse(booking);
     if (payment) {
       responseBooking.payment = payment;
       responseBooking.depositPayment = payment;
@@ -1262,7 +1263,7 @@ export const updateBooking = async (req, res) => {
 
     emitBookingUpdated(booking, "updated");
 
-    return res.json(booking);
+    return res.json(serializeBookingForResponse(booking));
   } catch (error) {
     return sendControllerError(res, error, "Could not update booking");
   }
@@ -1413,7 +1414,7 @@ export const delayBooking = async (req, res) => {
 
     emitBookingUpdated(updatedBooking, "updated");
 
-    return res.json(updatedBooking);
+    return res.json(serializeBookingForResponse(updatedBooking));
   } catch (error) {
     return sendControllerError(res, error, "Could not delay booking");
   }
@@ -1486,7 +1487,7 @@ export const updateTreatmentRecord = async (req, res) => {
     booking.treatmentRecord = treatmentRecord;
     await booking.save();
 
-    return res.json(booking);
+    return res.json(serializeBookingForResponse(booking));
   } catch (error) {
     return sendControllerError(res, error, "Could not update treatment record");
   }

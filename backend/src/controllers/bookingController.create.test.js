@@ -2113,6 +2113,22 @@ test("createBooking with enabled deposit stores pending deposit fields", async (
   const createdBookings = [];
   const paymentAttempts = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const createBookingRecord = Booking.create;
+  Booking.create = async (payload) => {
+    const booking = await createBookingRecord(payload);
+    booking.currency = "AMD";
+    booking.paidAmount = 0;
+    booking.paymentStatus = "pending";
+    booking.paymentProvider = "mock";
+    booking.refundStatus = "none";
+    booking.refundedAmount = 0;
+    booking.paymentTransactionIds = ["64b000000000000000009001"];
+    booking.refundTransactionIds = ["64b000000000000000009002"];
+    booking.providerPaymentId = "provider-payment-private";
+    booking.providerTransactionId = "provider-transaction-private";
+    booking.rawWebhookPayload = { secret: true };
+    return booking;
+  };
   SubscriptionPaymentAttempt.create = async (payload) => {
     paymentAttempts.push(payload);
     return {
@@ -2163,6 +2179,15 @@ test("createBooking with enabled deposit stores pending deposit fields", async (
   assert.equal(paymentAttempts[0].status, "pending");
   assert.equal(res.body.payment.paymentAttemptId, "deposit-payment-attempt-1");
   assert.equal(res.body.payment.paymentStatus, "pending");
+  assert.equal(res.body.currency, "AMD");
+  assert.equal(res.body.paymentStatus, "pending");
+  assert.equal(res.body.paymentProvider, "mock");
+  assert.equal(res.body.refundStatus, "none");
+  assert.equal(res.body.paymentTransactionIds, undefined);
+  assert.equal(res.body.refundTransactionIds, undefined);
+  assert.equal(res.body.providerPaymentId, undefined);
+  assert.equal(res.body.providerTransactionId, undefined);
+  assert.equal(res.body.rawWebhookPayload, undefined);
 });
 
 test("createBooking with disabled payment provider leaves required deposit pending without payment attempt", async () => {

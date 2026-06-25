@@ -5,7 +5,10 @@ import mongoose from "mongoose";
 import Booking from "../../models/Booking.js";
 import PaymentEvent from "../../models/PaymentEvent.js";
 import PaymentTransaction from "../../models/PaymentTransaction.js";
-import { serializeAvailabilityBooking } from "../../utils/bookingUtils.js";
+import {
+  serializeAvailabilityBooking,
+  serializeBookingForResponse,
+} from "../../utils/bookingUtils.js";
 
 const objectId = () => new mongoose.Types.ObjectId();
 
@@ -118,4 +121,42 @@ test("public booking availability serialization does not expose payment internal
   assert.equal(serialized.paymentProvider, undefined);
   assert.equal(serialized.paymentTransactionIds, undefined);
   assert.equal(serialized.rawPayload, undefined);
+});
+
+test("safe booking response keeps payment snapshot and hides ledger internals", () => {
+  const transactionId = objectId();
+  const refundTransactionId = objectId();
+  const booking = makeBooking({
+    currency: "amd",
+    paidAmount: 100,
+    paymentStatus: "paid",
+    paymentProvider: "mock",
+    paymentTransactionIds: [transactionId],
+    refundStatus: "partially_refunded",
+    refundedAmount: 25,
+    refundTransactionIds: [refundTransactionId],
+  });
+  booking.providerPaymentId = "provider-payment";
+  booking.providerTransactionId = "provider-transaction";
+  booking.rawWebhookPayload = { secret: true };
+
+  const serialized = serializeBookingForResponse(booking);
+
+  assert.equal(serialized.currency, "AMD");
+  assert.equal(serialized.paidAmount, 100);
+  assert.equal(serialized.paymentStatus, "paid");
+  assert.equal(serialized.paymentProvider, "mock");
+  assert.equal(serialized.refundStatus, "partially_refunded");
+  assert.equal(serialized.refundedAmount, 25);
+  assert.equal(serialized.paymentTransactionIds, undefined);
+  assert.equal(serialized.refundTransactionIds, undefined);
+  assert.equal(serialized.providerPaymentId, undefined);
+  assert.equal(serialized.providerTransactionId, undefined);
+  assert.equal(serialized.rawWebhookPayload, undefined);
+});
+
+test("PaymentEvent rawPayload remains internal by default", () => {
+  const rawPayloadPath = PaymentEvent.schema.path("rawPayload");
+
+  assert.equal(rawPayloadPath.options.select, false);
 });

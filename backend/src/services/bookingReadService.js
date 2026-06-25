@@ -1,5 +1,8 @@
 import Booking from "../models/Booking.js";
-import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
+import {
+  serializeAvailabilityBooking,
+  serializeBookingForResponse,
+} from "../utils/bookingUtils.js";
 
 export class BookingReadError extends Error {
   constructor(statusCode, message) {
@@ -14,7 +17,8 @@ export const getClientBookingsForRequester = async ({ clientId, requester }) => 
     throw new BookingReadError(403, "You can fetch only your own bookings");
   }
 
-  return Booking.find({ clientId }).select("-treatmentRecord");
+  const bookings = await Booking.find({ clientId }).select("-treatmentRecord");
+  return bookings.map(serializeBookingForResponse);
 };
 
 export const getBarberBookingsForRequester = async ({ barberId, requester }) => {
@@ -28,7 +32,7 @@ export const getBarberBookingsForRequester = async ({ barberId, requester }) => 
   const bookings = await Booking.find({ barberId });
 
   if (isOwnBarberCalendar) {
-    return bookings;
+    return bookings.map(serializeBookingForResponse);
   }
 
   return bookings.map((booking) =>

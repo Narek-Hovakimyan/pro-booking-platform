@@ -36,8 +36,16 @@ const createBooking = (overrides = {}) => ({
 });
 
 test("client can fetch own bookings with original shape and order", async () => {
-  const firstBooking = createBooking({ _id: "booking-1", time: "10:00" });
-  const secondBooking = createBooking({ _id: "booking-2", time: "11:00" });
+  const firstBooking = createBooking({
+    _id: "booking-1",
+    time: "10:00",
+    paymentTransactionIds: ["64b000000000000000009001"],
+  });
+  const secondBooking = createBooking({
+    _id: "booking-2",
+    time: "11:00",
+    refundTransactionIds: ["64b000000000000000009002"],
+  });
   const storedBookings = [firstBooking, secondBooking];
 
   Booking.find = (query) => ({
@@ -52,8 +60,10 @@ test("client can fetch own bookings with original shape and order", async () => 
     requester: { _id: clientId, role: "client" },
   });
 
-  assert.strictEqual(bookings, storedBookings);
+  assert.notStrictEqual(bookings, storedBookings);
   assert.deepEqual(bookings.map((booking) => booking._id), ["booking-1", "booking-2"]);
+  assert.equal(bookings[0].paymentTransactionIds, undefined);
+  assert.equal(bookings[1].refundTransactionIds, undefined);
 });
 
 test("client cannot fetch another client's bookings", async () => {
@@ -77,8 +87,16 @@ test("client cannot fetch another client's bookings", async () => {
 });
 
 test("barber can fetch own full bookings with original shape and order", async () => {
-  const firstBooking = createBooking({ _id: "booking-1", time: "10:00" });
-  const secondBooking = createBooking({ _id: "booking-2", time: "11:00" });
+  const firstBooking = createBooking({
+    _id: "booking-1",
+    time: "10:00",
+    providerPaymentId: "provider-payment-private",
+  });
+  const secondBooking = createBooking({
+    _id: "booking-2",
+    time: "11:00",
+    rawWebhookPayload: { secret: true },
+  });
   const storedBookings = [firstBooking, secondBooking];
 
   Booking.find = async (query) => {
@@ -91,8 +109,10 @@ test("barber can fetch own full bookings with original shape and order", async (
     requester: { _id: barberId, role: "barber" },
   });
 
-  assert.strictEqual(bookings, storedBookings);
+  assert.notStrictEqual(bookings, storedBookings);
   assert.deepEqual(bookings.map((booking) => booking._id), ["booking-1", "booking-2"]);
+  assert.equal(bookings[0].providerPaymentId, undefined);
+  assert.equal(bookings[1].rawWebhookPayload, undefined);
 });
 
 test("barber cannot fetch another barber's full bookings", async () => {
