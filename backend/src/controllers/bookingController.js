@@ -36,6 +36,7 @@ import {
   recordVoucherRedemption,
   restoreVoucherOnCancel,
 } from "../services/bookingPricingService.js";
+import { parseConsultationAndConsent } from "../services/bookingCreatePayloadService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
@@ -248,40 +249,16 @@ export const createBooking = async (req, res) => {
 
     // ── Consultation / Consent ──
     // JSON-stringified values arrive from multipart/FormData (when referenceImages included)
-    let consultation = req.body.consultation || {};
-    let consent = req.body.consent || {};
-    const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    let consultation, consent;
     try {
-      if (typeof consultation === "string") consultation = JSON.parse(consultation);
-    } catch {
+      const parsed = parseConsultationAndConsent(req.body);
+      consultation = parsed.consultation;
+      consent = parsed.consent;
+    } catch (parseError) {
       cleanup();
-      return res.status(400).json({ message: "Invalid consultation JSON" });
-    }
-    if (!isPlainObject(consultation)) {
-      cleanup();
-      return res.status(400).json({ message: "Invalid consultation JSON" });
-    }
-    try {
-      if (typeof consent === "string") consent = JSON.parse(consent);
-    } catch {
-      cleanup();
-      return res.status(400).json({ message: "Invalid consent JSON" });
-    }
-    if (!isPlainObject(consent)) {
-      cleanup();
-      return res.status(400).json({ message: "Invalid consent JSON" });
-    }
-    if (consent.accepted === true) {
-      if (!consent.textVersion || !consent.textVersion.trim()) {
-        cleanup();
-        return res.status(400).json({
-          message: "Consent requires a non-empty textVersion",
-        });
-      }
-      consent.acceptedAt = new Date(); // server-side only
-    } else {
-      consent.accepted = false;
-      consent.acceptedAt = null;
+      return res.status(parseError.statusCode || 400).json({
+        message: parseError.message,
+      });
     }
 
     if (!barberId || !serviceId || (!isManualBooking && !clientId)) {
