@@ -2276,4 +2276,11 @@ test("createBooking with disabled deposit keeps old no-deposit behavior", async 
   assert.equal(createdBookings[0].depositMode, "");
   assert.equal(createdBookings[0].depositValue, 0);
   assert.equal(createdBookings[0].depositPolicyText, "");
+  assert.equal(res.body.depositRequired, false);
+  assert.equal(res.body.depositAmount, 0);
+  assert.equal(res.body.depositStatus, "not_required");
+  assert.equal(res.body.payment, undefined);
+  assert.equal(res.body.depositPayment, undefined);
+  assert.equal(res.body.paymentStatus, undefined);
+  assert.equal(res.body.paymentProvider, undefined);
 });

@@ -159,6 +159,91 @@ test("createBooking with discounted package service uses discountedPrice as book
   assert.equal(createdBookings[0].price, 110);
 });
 
+test("contract: quote service discount fields match create persisted pricing fields", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  Service.findOne = async () => ({
+    _id: serviceId,
+    barberId,
+    name: "Discounted Cut",
+    duration: 30,
+    price: 100,
+    discountType: "percent",
+    discountValue: 20,
+  });
+
+  const quoteRes = createResponse();
+  await quoteBookingPrice(
+    {
+      user: client,
+      body: {
+        barberId,
+        serviceId,
+        salonId,
+      },
+    },
+    quoteRes
+  );
+
+  const createRes = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    createRes
+  );
+
+  assert.equal(quoteRes.statusCode, 200);
+  assert.deepEqual(Object.keys(quoteRes.body), [
+    "originalPrice",
+    "serviceDiscountAmount",
+    "serviceDiscountedPrice",
+    "voucherDiscountAmount",
+    "loyaltyDiscountApplied",
+    "loyaltyDiscountPercent",
+    "loyaltyDiscountAmount",
+    "loyaltyEligibleCompletedBookings",
+    "loyaltyTierIndex",
+    "loyaltyRuleSnapshot",
+    "finalPrice",
+  ]);
+  assert.deepEqual(
+    {
+      originalPrice: quoteRes.body.originalPrice,
+      serviceDiscountAmount: quoteRes.body.serviceDiscountAmount,
+      serviceDiscountedPrice: quoteRes.body.serviceDiscountedPrice,
+      finalPrice: quoteRes.body.finalPrice,
+    },
+    {
+      originalPrice: 100,
+      serviceDiscountAmount: 20,
+      serviceDiscountedPrice: 80,
+      finalPrice: 80,
+    }
+  );
+
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(createdBookings[0].serviceOriginalPrice, quoteRes.body.originalPrice);
+  assert.equal(createdBookings[0].serviceDiscountAmount, quoteRes.body.serviceDiscountAmount);
+  assert.equal(createdBookings[0].price, quoteRes.body.finalPrice);
+  assert.equal(createdBookings[0].originalPrice, undefined);
+  assert.equal(createdBookings[0].finalPrice, undefined);
+  assert.equal(createdBookings[0].discountAmount, undefined);
+  assert.equal(createdBookings[0].discountType, undefined);
+  assert.equal(createdBookings[0].discountValue, undefined);
+  assert.equal(createRes.body.price, quoteRes.body.finalPrice);
+});
+
 test("createBooking with discounted service + voucher caps voucherDiscount at discountedPrice", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
@@ -283,6 +368,102 @@ test("createBooking with discounted service + high-value voucher caps at 0", asy
   assert.equal(createdBookings[0].voucherDiscount, 80);
   assert.equal(createdBookings[0].price, 0);
   assert.equal(createdBookings[0].finalPrice, 0);
+});
+
+test("contract: voucher quote preview matches create pricing and create claims voucher", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+
+  Service.findOne = async () => ({
+    _id: serviceId,
+    barberId,
+    name: "Voucher Cut",
+    duration: 30,
+    price: 120,
+    discountType: "fixed",
+    discountValue: 20,
+  });
+
+  const voucher = {
+    _id: "voucher-contract",
+    ownerType: "barber",
+    ownerId: barberId,
+    code: "SAVE25",
+    title: "Save 25%",
+    type: "amount",
+    discountType: "percentage",
+    amount: 25,
+    maxUses: 5,
+    currentUses: 0,
+    active: true,
+    expiresAt: null,
+    redemptionBookingIds: [],
+  };
+  let claimCalls = 0;
+  const redemptionUpdates = [];
+  Voucher.findOne = async () => voucher;
+  Voucher.findOneAndUpdate = async () => {
+    claimCalls += 1;
+    return voucher;
+  };
+  Voucher.findByIdAndUpdate = async (voucherId, update) => {
+    redemptionUpdates.push({ voucherId, update });
+    return voucher;
+  };
+
+  const quoteRes = createResponse();
+  await quoteBookingPrice(
+    {
+      user: client,
+      body: {
+        barberId,
+        serviceId,
+        salonId,
+        voucherCode: "SAVE25",
+      },
+    },
+    quoteRes
+  );
+
+  assert.equal(quoteRes.statusCode, 200);
+  assert.equal(quoteRes.body.serviceDiscountedPrice, 100);
+  assert.equal(quoteRes.body.voucherDiscountAmount, 25);
+  assert.equal(quoteRes.body.finalPrice, 75);
+  assert.equal(claimCalls, 0);
+
+  const createRes = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        voucherCode: "SAVE25",
+      },
+    },
+    createRes
+  );
+
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(claimCalls, 1);
+  assert.equal(redemptionUpdates.length, 1);
+  assert.deepEqual(redemptionUpdates[0], {
+    voucherId: "voucher-contract",
+    update: { $addToSet: { redemptionBookingIds: "booking-1" } },
+  });
+  assert.equal(createdBookings[0].serviceOriginalPrice, quoteRes.body.originalPrice);
+  assert.equal(createdBookings[0].serviceDiscountAmount, quoteRes.body.serviceDiscountAmount);
+  assert.equal(createdBookings[0].originalPrice, quoteRes.body.serviceDiscountedPrice);
+  assert.equal(createdBookings[0].voucherDiscount, quoteRes.body.voucherDiscountAmount);
+  assert.equal(createdBookings[0].discountAmount, quoteRes.body.voucherDiscountAmount);
+  assert.equal(createdBookings[0].finalPrice, quoteRes.body.finalPrice);
+  assert.equal(createdBookings[0].price, quoteRes.body.finalPrice);
+  assert.equal(createRes.body.price, quoteRes.body.finalPrice);
 });
 
 test("createBooking applies loyalty discount after service discount", async () => {
@@ -734,6 +915,9 @@ test("quoteBookingPrice and createBooking use the same final price", async () =>
         time: "10:00",
         salonId,
         clientName: "Client",
+        finalPrice: 9999,
+        price: 9999,
+        discountAmount: 9999,
       },
     },
     createRes
@@ -749,5 +933,13 @@ test("quoteBookingPrice and createBooking use the same final price", async () =>
   assert.equal(quoteRes.body.loyaltyDiscountAmount, 46);
   assert.equal(quoteRes.body.finalPrice, 34);
   assert.equal(createdBookings[0].price, quoteRes.body.finalPrice);
+  assert.equal(createdBookings[0].originalPrice, quoteRes.body.serviceDiscountedPrice);
+  assert.equal(createdBookings[0].finalPrice, quoteRes.body.finalPrice);
+  assert.equal(createdBookings[0].discountAmount, quoteRes.body.loyaltyDiscountAmount);
+  assert.equal(createdBookings[0].loyaltyDiscountApplied, true);
+  assert.equal(createdBookings[0].loyaltyDiscountPercent, quoteRes.body.loyaltyDiscountPercent);
+  assert.equal(createdBookings[0].loyaltyDiscountAmount, quoteRes.body.loyaltyDiscountAmount);
+  assert.equal(createdBookings[0].loyaltyTierIndex, quoteRes.body.loyaltyTierIndex);
+  assert.deepEqual(createdBookings[0].loyaltyRuleSnapshot, quoteRes.body.loyaltyRuleSnapshot);
   assert.equal(createdBookings[0].depositAmount, 0);
 });
