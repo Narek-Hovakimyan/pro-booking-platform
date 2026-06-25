@@ -21,6 +21,7 @@ import {
   grantManualSubscription,
   extendManualSubscription,
   barberHasPaidAccess,
+  barberHasPaidAccessForSalon,
   cancelSubscriptionPaymentAttempt,
   confirmSubscriptionPaymentAttempt,
   createSubscriptionPaymentIntent,
@@ -732,6 +733,100 @@ test("salon subscription + active seat grants access", async () => {
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, true);
+});
+
+test("active individual subscription with past currentPeriodEnd does not grant access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") {
+      return makeSubDoc({
+        status: "active",
+        currentPeriodEnd: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+    }
+    return null;
+  };
+  SubscriptionSeat.findOne = () => chainableQuery(null);
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
+});
+
+test("trialing individual subscription with past currentPeriodEnd does not grant access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") {
+      return makeSubDoc({
+        status: "trialing",
+        currentPeriodEnd: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+    }
+    return null;
+  };
+  SubscriptionSeat.findOne = () => chainableQuery(null);
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
+});
+
+test("active and trialing unexpired individual subscriptions grant access", async () => {
+  SubscriptionSeat.findOne = () => chainableQuery(null);
+
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") {
+      return makeSubDoc({ status: "active" });
+    }
+    return null;
+  };
+  assert.equal(await barberHasPaidAccess(barberId), true);
+
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") {
+      return makeSubDoc({ status: "trialing" });
+    }
+    return null;
+  };
+  assert.equal(await barberHasPaidAccess(barberId), true);
+});
+
+test("active parent salon subscription with past currentPeriodEnd does not grant assigned seat access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return null;
+    return null;
+  };
+
+  const activeSeat = makeSubscriptionSeat({
+    subscriptionId: makeSubDoc({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    }),
+  });
+  SubscriptionSeat.findOne = () => chainableQuery(activeSeat);
+  User.findById = () => chainableQuery(makeBarberUser());
+
+  const hasAccess = await barberHasPaidAccess(barberId);
+  assert.equal(hasAccess, false);
+});
+
+test("trialing parent salon subscription with past currentPeriodEnd does not grant salon-scoped seat access", async () => {
+  Subscription.findOne = async (query) => {
+    if (query.ownerType === "barber") return null;
+    return null;
+  };
+
+  const activeSeat = makeSubscriptionSeat({
+    subscriptionId: makeSubDoc({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "trialing",
+      currentPeriodEnd: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    }),
+  });
+  SubscriptionSeat.find = () => chainableQuery([activeSeat]);
+  User.findById = () => chainableQuery(makeBarberUser());
+
+  const hasAccess = await barberHasPaidAccessForSalon(barberId, salonId);
+  assert.equal(hasAccess, false);
 });
 
 test("stale active seat does not grant barberHasPaidAccess", async () => {
@@ -2335,6 +2430,72 @@ test("salon owner can confirm salon payment attempt", async () => {
   assert.equal(result.subscription.totalPrice, defaultPlanDoc.pricePerSeat * 4);
   assert.equal(stubs.getPaymentRecords().length, 1);
   assert.equal(stubs.getPaymentRecords()[0].ownerType, "salon");
+});
+
+test("current salon admin can view salon payment attempt", async () => {
+  const attempt = makePaymentAttempt({
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId: otherUserId,
+  });
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+  Salon.findById = async () => makeSalonDoc({ admins: [adminId] });
+
+  const result = await getSubscriptionPaymentAttempt({
+    paymentAttemptId: attempt._id,
+    requester: { _id: adminId, role: "barber" },
+  });
+
+  assert.equal(String(result.ownerId), String(salonId));
+});
+
+test("removed salon admin cannot access old salon payment attempt as payer", async () => {
+  const attempt = makePaymentAttempt({
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId: adminId,
+  });
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+  Salon.findById = async () => makeSalonDoc({ ownerId: otherUserId, admins: [] });
+
+  await assert.rejects(
+    () =>
+      getSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        requester: { _id: adminId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "Only salon owner or admin can view payment attempts"
+  );
+});
+
+test("current salon owner cannot access another salon payment attempt", async () => {
+  const otherSalonId = new mongoose.Types.ObjectId();
+  const attempt = makePaymentAttempt({
+    ownerType: "salon",
+    ownerId: otherSalonId,
+    payerId: otherUserId,
+  });
+
+  SubscriptionPaymentAttempt.findById = async () => attempt;
+  Salon.findById = async (id) => {
+    assert.equal(String(id), String(otherSalonId));
+    return makeSalonDoc({ _id: otherSalonId, ownerId: otherUserId, admins: [] });
+  };
+
+  await assert.rejects(
+    () =>
+      getSubscriptionPaymentAttempt({
+        paymentAttemptId: attempt._id,
+        requester: { _id: ownerId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 403 &&
+      error.message === "Only salon owner or admin can view payment attempts"
+  );
 });
 
 test("client cannot confirm payment attempt", async () => {

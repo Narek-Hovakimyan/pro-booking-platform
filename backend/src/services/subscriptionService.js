@@ -42,6 +42,23 @@ const getIdsForQuery = (ids) =>
 const isSubscriptionStatusActive = (status) =>
   PAID_SUBSCRIPTION_STATUSES.includes(status);
 
+const hasUnexpiredPeriod = (subscription, now = new Date()) => {
+  if (!subscription?.currentPeriodEnd) return true;
+
+  const periodEnd = new Date(subscription.currentPeriodEnd);
+  return !Number.isNaN(periodEnd.getTime()) && periodEnd.getTime() >= now.getTime();
+};
+
+const subscriptionHasPaidAccess = (
+  subscription,
+  now = new Date(),
+  { statusAlreadyFiltered = false } = {}
+) =>
+  Boolean(subscription) &&
+  (isSubscriptionStatusActive(subscription.status) ||
+    (statusAlreadyFiltered && !subscription.status)) &&
+  hasUnexpiredPeriod(subscription, now);
+
 const getOwnerIdForQuery = (ownerId) =>
   mongoose.Types.ObjectId.isValid(ownerId)
     ? new mongoose.Types.ObjectId(ownerId)
@@ -139,8 +156,8 @@ const getActiveSeatsForBarber = async (barberId) => {
   return resolveQuery(populated);
 };
 
-const seatHasActiveParentSubscription = (seat) =>
-  PAID_SUBSCRIPTION_STATUSES.includes(seat?.subscriptionId?.status);
+const seatHasActiveParentSubscription = (seat, now = new Date()) =>
+  subscriptionHasPaidAccess(seat?.subscriptionId, now);
 
 const seatMatchesSalon = (seat, salonId) =>
   !salonId || getSeatSalonId(seat) === getIdString(salonId);
@@ -188,15 +205,9 @@ export const salonHasActiveSubscription = async (
     })
   );
 
-  if (!subscription || !isSubscriptionStatusActive(subscription.status)) {
-    return false;
-  }
-
-  if (!subscription.currentPeriodEnd) {
-    return false;
-  }
-
-  return new Date(subscription.currentPeriodEnd) > now;
+  return subscriptionHasPaidAccess(subscription, now, {
+    statusAlreadyFiltered: true,
+  });
 };
 
 /**
@@ -663,8 +674,6 @@ const validateSubscriptionRequester = async ({
   }
 
   if (ownerType === "salon") {
-    if (sameId(requester._id, payerId)) return null;
-
     const salon = await Salon.findById(ownerId);
     if (!salon) {
       const error = new Error("Salon not found");
@@ -767,7 +776,9 @@ export const barberHasPaidAccess = async (barberId) => {
     status: { $in: PAID_SUBSCRIPTION_STATUSES },
   });
 
-  if (individualSub) {
+  if (subscriptionHasPaidAccess(individualSub, new Date(), {
+    statusAlreadyFiltered: true,
+  })) {
     return true;
   }
 
@@ -781,8 +792,7 @@ export const barberHasPaidAccess = async (barberId) => {
     return false;
   }
 
-  const parentStatus = activeSeat.subscriptionId.status;
-  if (!PAID_SUBSCRIPTION_STATUSES.includes(parentStatus)) {
+  if (!seatHasActiveParentSubscription(activeSeat)) {
     return false;
   }
 
@@ -800,7 +810,9 @@ export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
     status: { $in: PAID_SUBSCRIPTION_STATUSES },
   });
 
-  if (individualSub) {
+  if (subscriptionHasPaidAccess(individualSub, new Date(), {
+    statusAlreadyFiltered: true,
+  })) {
     return true;
   }
 
@@ -857,7 +869,7 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
       ownerId: { $in: queryIds },
       status: { $in: PAID_SUBSCRIPTION_STATUSES },
     })
-      .select("ownerId")
+      .select("ownerId status currentPeriodEnd")
       .lean(),
     SubscriptionSeat.find({
       barberId: { $in: queryIds },
@@ -872,13 +884,19 @@ export const getPaidAccessByBarberIds = async (barberIds = []) => {
   );
 
   for (const subscription of individualSubscriptions || []) {
+    if (
+      !subscriptionHasPaidAccess(subscription, new Date(), {
+        statusAlreadyFiltered: true,
+      })
+    ) {
+      continue;
+    }
     const ownerId = getIdString(subscription.ownerId);
     if (ownerId) accessByBarberId.set(ownerId, true);
   }
 
   for (const seat of activeSeats || []) {
-    const parentStatus = seat?.subscriptionId?.status;
-    if (!PAID_SUBSCRIPTION_STATUSES.includes(parentStatus)) continue;
+    if (!seatHasActiveParentSubscription(seat)) continue;
 
     const barberId = getIdString(seat.barberId);
     const seatSalonId = getSeatSalonId(seat);
@@ -913,7 +931,7 @@ export const getPaidAccessByBarberIdsForSalon = async (
       ownerId: { $in: queryIds },
       status: { $in: PAID_SUBSCRIPTION_STATUSES },
     })
-      .select("ownerId")
+      .select("ownerId status currentPeriodEnd")
       .lean(),
     SubscriptionSeat.find({
       barberId: { $in: queryIds },
@@ -928,6 +946,13 @@ export const getPaidAccessByBarberIdsForSalon = async (
   );
 
   for (const subscription of individualSubscriptions || []) {
+    if (
+      !subscriptionHasPaidAccess(subscription, new Date(), {
+        statusAlreadyFiltered: true,
+      })
+    ) {
+      continue;
+    }
     const ownerId = getIdString(subscription.ownerId);
     if (ownerId) accessByBarberId.set(ownerId, true);
   }
@@ -1282,12 +1307,11 @@ export const getMySubscriptionAccess = async (user) => {
   }
 
   if (activeSeat && activeSeat.subscriptionId) {
-    const parentStatus = activeSeat.subscriptionId.status;
     const seatSalonId = getSeatSalonId(activeSeat);
     const barber = await fetchBarberMembership(barberId);
 
     if (
-      (parentStatus === "active" || parentStatus === "trialing") &&
+      subscriptionHasPaidAccess(activeSeat.subscriptionId) &&
       isAcceptedSalonStaffMember(barber, seatSalonId)
     ) {
       hasAccess = true;
@@ -1531,6 +1555,14 @@ export const assignSalonSubscriptionSeat = async ({
   if (!subscription) {
     const err = new Error(
       "Salon does not have an active or trialing subscription. Please activate a subscription first."
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!subscriptionHasPaidAccess(subscription)) {
+    const err = new Error(
+      "Salon subscription is expired. Please renew before assigning seats."
     );
     err.statusCode = 400;
     throw err;
