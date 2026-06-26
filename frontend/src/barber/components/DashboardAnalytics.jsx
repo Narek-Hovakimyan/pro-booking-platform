@@ -285,7 +285,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
     (shouldCheckManageableSalons && (!hasLoadedManageableSalonCount || manageableSalonLoading)) ||
     (shouldLoadPersonalDashboard && bookings.length === 0 && incomeLoading && ratingLoading);
 
-  // ---- Effects ----
+  // ---- Existing effects (unchanged) ----
 
   useEffect(() => {
     if (!shouldLoadPersonalDashboard) {
@@ -412,7 +412,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
 
   if (isDataLoading) {
     return (
-      <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
+      <Card className="overflow-hidden rounded-3xl border-0 shadow-lg lg:col-span-3">
         <CardContent className="space-y-4 p-4 sm:p-6">
           <div className="animate-pulse space-y-2">
             <div className="h-8 w-40 rounded-xl bg-neutral-100" />
@@ -434,7 +434,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
 
   if (hasMultipleManageableSalons) {
     return (
-      <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
+      <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg lg:col-span-3">
         <CardContent className="p-4 sm:p-6">
           <div className="flex flex-col gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex gap-3">
@@ -470,43 +470,17 @@ export default function DashboardAnalytics({ bookings = [] }) {
   // ---- Render ----
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
-      <CardContent className="space-y-6 p-4 sm:p-6">
+    <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg lg:col-span-3">
+      {/* Gradient header matching profile redesign */}
+      <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-5 text-white [&_.bg-neutral-100]:bg-white/20 [&_.bg-rose-50]:bg-white/20 [&_.text-neutral-400]:text-purple-100 [&_.text-neutral-500]:text-purple-100 [&_.text-neutral-600]:text-white [&_.text-rose-700]:text-white [&_h1]:text-white">
         <AnalyticsHeader
           primarySalon={primarySalon}
           todayDateLabel={todayDateLabel}
           unreadNotifications={unreadNotifications}
         />
+      </div>
 
-        {hasMultipleManageableSalons && (
-          <div className="flex flex-col gap-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex gap-3">
-              <span className="mt-0.5 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm">
-                <Info className="h-4 w-4" />
-              </span>
-              <div>
-                <h2 className="text-sm font-semibold">
-                  {t("dashboard.personal.title")}
-                </h2>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-sky-800">
-                  {t("dashboard.personal.description")}
-                </p>
-                <p className="mt-1 text-sm font-medium leading-6 text-sky-900">
-                  {t("dashboard.personal.multipleSalons")}
-                </p>
-              </div>
-            </div>
-            <Button
-              as={Link}
-              className="w-full gap-2 bg-sky-950 hover:bg-sky-900 sm:w-auto"
-              to="/admin/salon/dashboard"
-            >
-              {t("dashboard.personal.openSalonDashboard")}
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-
+      <CardContent className="space-y-6 p-5">
         <AnalyticsSummaryCards
           averageRating={averageRating}
           cancelledCount={cancelledCount}
