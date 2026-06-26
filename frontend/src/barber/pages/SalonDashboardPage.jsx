@@ -232,8 +232,8 @@ export default function SalonDashboardPage() {
       .finally(() => setLoadingDashboard(false));
   };
 
-  const subscription = dashboard?.subscription || null;
-  const staff = dashboard?.staff || null;
+  const subscription = dashboard?.subscriptionSummary || dashboard?.subscription || null;
+  const staff = dashboard?.staffSummary || dashboard?.staff || null;
   const bookings = dashboard?.bookingSummary || null;
   const revenue = dashboard?.revenueSummary || null;
   const reviews = dashboard?.reviewSummary || null;
@@ -244,465 +244,471 @@ export default function SalonDashboardPage() {
   /* ── Render ── */
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      {/* ─── Header ─── */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Salon Dashboard
-          </h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            Overview of salon performance and team.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Link
-            className="text-sm font-semibold text-neutral-700 underline underline-offset-2 transition hover:text-neutral-950"
-            to={selectedSalonId ? `/admin/salon/reports?salonId=${selectedSalonId}` : "/admin/salon/reports"}
-          >
-            Salon Reports
-          </Link>
-          <Button
-            className="gap-2"
-            disabled={!selectedSalonId || loadingDashboard}
-            onClick={handleRefresh}
-            variant="outline"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${loadingDashboard ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
-      {/* ─── Error ─── */}
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* ─── Loading salons ─── */}
-      {loadingSalons ? (
-        <Card>
-          <CardContent className="text-sm text-neutral-500">
-            Loading salons...
-          </CardContent>
-        </Card>
-      ) : salons.length === 0 ? (
-        /* ─── No manageable salons ─── */
-        <Card>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <Building2 className="h-8 w-8 text-neutral-300" />
+    <div className="min-h-screen bg-gradient-to-b from-purple-50/80 to-neutral-50">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
+        {/* ─── Gradient header ─── */}
+        <Card className="overflow-hidden rounded-3xl border-0 shadow-lg">
+          <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-neutral-950">
-                  No manageable salons
-                </h2>
-                <p className="mt-1 text-sm text-neutral-500">
-                  Salon dashboard appears after you own or administer a salon.
+                <h1 className="text-2xl font-bold text-white">Salon Dashboard</h1>
+                <p className="mt-1 text-sm text-purple-100">
+                  Overview of salon performance and team.
                 </p>
               </div>
+              <div className="flex items-center gap-3">
+                <Link
+                  className="text-sm font-semibold text-white/80 underline underline-offset-2 transition hover:text-white"
+                  to={selectedSalonId ? `/admin/salon/reports?salonId=${selectedSalonId}` : "/admin/salon/reports"}
+                >
+                  Salon Reports
+                </Link>
+                <Button
+                  className="gap-2 bg-white/20 text-white hover:bg-white/30"
+                  disabled={!selectedSalonId || loadingDashboard}
+                  onClick={handleRefresh}
+                  variant="outline"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${loadingDashboard ? "animate-spin" : ""}`}
+                  />
+                  Refresh
+                </Button>
+              </div>
             </div>
-          </CardContent>
+          </div>
         </Card>
-      ) : (
-        <>
-          {/* ─── Salon selector ─── */}
-          {salons.length > 1 && (
-            <Card>
-              <CardContent>
-                <label className="block">
-                  <span className="text-sm font-medium text-neutral-700">
-                    Salon
-                  </span>
-                  <select
-                    className="mt-1 h-11 w-full max-w-xs rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
-                    onChange={(event) =>
-                      handleSalonChange(event.target.value)
-                    }
-                    value={selectedSalonId}
-                  >
-                    {salons.map((salon) => (
-                      <option
-                        key={getSalonId(salon)}
-                        value={getSalonId(salon)}
-                      >
-                        {getSalonName(salon)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </CardContent>
-            </Card>
-          )}
 
-          {/* ─── Dashboard content ─── */}
-          {loadingDashboard ? (
-            <Card>
-              <CardContent className="text-sm text-neutral-500">
-                Loading dashboard data...
-              </CardContent>
-            </Card>
-          ) : !dashboard ? (
-            <Card>
-              <CardContent className="text-sm text-neutral-500">
-                No dashboard data available.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-5 sm:space-y-6">
-              {/* ─── Salon summary card ─── */}
-              {salonInfo && (
-                <Card>
-                  <CardContent>
-                    <div className="flex items-start gap-4">
-                      {salonInfo.imageUrl ? (
-                        <img
-                          alt={salonInfo.name}
-                          className="h-14 w-14 rounded-xl object-cover"
-                          src={salonInfo.imageUrl}
-                        />
-                      ) : (
-                        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-neutral-100">
-                          <Building2 className="h-6 w-6 text-neutral-400" />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <h2 className="text-xl font-bold text-neutral-950">
-                          {salonInfo.name}
-                        </h2>
-                        {salonInfo.city && (
-                          <p className="text-sm text-neutral-500">
-                            {salonInfo.city}
-                            {salonInfo.address
-                              ? `, ${salonInfo.address}`
-                              : ""}
-                          </p>
-                        )}
-                        {salonInfo.phone && (
-                          <p className="text-sm text-neutral-500">
-                            {salonInfo.phone}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+        {/* ─── Error ─── */}
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
-              {/* ─── Alerts ─── */}
-              {alerts.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold uppercase tracking-wider text-neutral-500">
-                    Alerts
-                  </h3>
-                  <div className="space-y-2">
-                    {alerts.map((alert, idx) => (
-                      <AlertRow alert={alert} key={idx} />
-                    ))}
-                  </div>
+        {/* ─── Loading salons ─── */}
+        {loadingSalons ? (
+          <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+            <CardContent className="text-sm text-neutral-500 p-5">
+              Loading salons...
+            </CardContent>
+          </Card>
+        ) : salons.length === 0 ? (
+          /* ─── No manageable salons ─── */
+          <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-3">
+                <Building2 className="h-8 w-8 text-neutral-300" />
+                <div>
+                  <h2 className="text-lg font-semibold text-neutral-950">
+                    No manageable salons
+                  </h2>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    Salon dashboard appears after you own or administer a salon.
+                  </p>
                 </div>
-              )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* ─── Salon selector ─── */}
+            {salons.length > 1 && (
+              <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                <CardContent className="p-5">
+                  <label className="block">
+                    <span className="text-sm font-medium text-neutral-700">
+                      Salon
+                    </span>
+                    <select
+                      className="mt-1 h-11 w-full max-w-xs rounded-xl border border-purple-100 bg-white px-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                      onChange={(event) =>
+                        handleSalonChange(event.target.value)
+                      }
+                      value={selectedSalonId}
+                    >
+                      {salons.map((salon) => (
+                        <option
+                          key={getSalonId(salon)}
+                          value={getSalonId(salon)}
+                        >
+                          {getSalonName(salon)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </CardContent>
+              </Card>
+            )}
 
-              {/* ─── Stats grid ─── */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
-                {/* Subscription card */}
-                <Card>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4 text-neutral-500" />
+            {/* ─── Dashboard content ─── */}
+            {loadingDashboard ? (
+              <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                <CardContent className="p-5 text-sm text-neutral-500">
+                  Loading dashboard data...
+                </CardContent>
+              </Card>
+            ) : !dashboard ? (
+              <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                <CardContent className="p-5 text-sm text-neutral-500">
+                  No dashboard data available.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-6">
+                {/* ─── Salon summary card ─── */}
+                {salonInfo && (
+                  <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                    <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-4">
+                      <h2 className="font-bold text-white">Salon</h2>
+                    </div>
+                    <CardContent className="p-5">
+                      <div className="flex items-start gap-4">
+                        {salonInfo.imageUrl ? (
+                          <img
+                            alt={salonInfo.name}
+                            className="h-14 w-14 rounded-xl object-cover ring-2 ring-purple-200"
+                            src={salonInfo.imageUrl}
+                          />
+                        ) : (
+                          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-purple-100">
+                            <Building2 className="h-6 w-6 text-purple-400" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <h2 className="text-xl font-bold text-neutral-950">
+                            {salonInfo.name}
+                          </h2>
+                          {salonInfo.city && (
+                            <p className="text-sm text-neutral-500">
+                              {salonInfo.city}
+                              {salonInfo.address
+                                ? `, ${salonInfo.address}`
+                                : ""}
+                            </p>
+                          )}
+                          {salonInfo.phone && (
+                            <p className="text-sm text-neutral-500">
+                              {salonInfo.phone}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* ─── Alerts ─── */}
+                {alerts.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold uppercase tracking-wider text-neutral-500">
+                      Alerts
+                    </h3>
+                    <div className="space-y-2">
+                      {alerts.map((alert, idx) => (
+                        <AlertRow alert={alert} key={idx} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ─── Stats grid ─── */}
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+                  {/* Subscription card */}
+                  <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                    <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-4">
+                      <CreditCard className="h-5 w-5 text-purple-500" />
                       <h3 className="font-semibold text-neutral-950">
                         Subscription
                       </h3>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <StatWidget
-                        label="Status"
-                        value={getSubscriptionStatusLabel(subscription?.status)}
-                      />
-                      <StatWidget
-                        label="Days remaining"
-                        value={
-                          subscription?.daysRemaining !== null &&
-                          subscription?.daysRemaining !== undefined
-                            ? subscription.daysRemaining
-                            : "—"
-                        }
-                      />
-                      <StatWidget
-                        label="Paid seats"
-                        value={subscription?.seatCount ?? 0}
-                      />
-                      <StatWidget
-                        label="Used seats"
-                        value={subscription?.usedSeats ?? 0}
-                      />
-                      <StatWidget
-                        label="Available seats"
-                        value={subscription?.availableSeats ?? 0}
-                      />
-                    </div>
-                    {(subscription?.isExpired ||
-                      subscription?.isExpiringSoon) && (
-                      <div
-                        className={`rounded-xl border p-3 text-xs ${
-                          subscription.isExpired
-                            ? "border-red-200 bg-red-50 text-red-700"
-                            : "border-amber-200 bg-amber-50 text-amber-800"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 font-semibold">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          {subscription.isExpired
-                            ? "Salon subscription expired"
-                            : `Expiring in ${subscription.daysRemaining} day(s)`}
-                        </div>
-                        <Link
-                          className="mt-1 block underline underline-offset-2 transition hover:opacity-70"
-                          to="/admin/salon/billing"
-                        >
-                          Go to Salon Billing
-                        </Link>
+                    <CardContent className="space-y-4 p-5">
+                      <div className="grid grid-cols-2 gap-3">
+                        <StatWidget
+                          label="Status"
+                          value={getSubscriptionStatusLabel(subscription?.status)}
+                        />
+                        <StatWidget
+                          label="Days remaining"
+                          value={
+                            subscription?.daysRemaining !== null &&
+                            subscription?.daysRemaining !== undefined
+                              ? subscription.daysRemaining
+                              : "—"
+                          }
+                        />
+                        <StatWidget
+                          label="Paid seats"
+                          value={subscription?.seatCount ?? 0}
+                        />
+                        <StatWidget
+                          label="Used seats"
+                          value={subscription?.usedSeats ?? 0}
+                        />
+                        <StatWidget
+                          label="Available seats"
+                          value={subscription?.availableSeats ?? 0}
+                        />
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
+                      {(subscription?.isExpired ||
+                        subscription?.isExpiringSoon) && (
+                        <div
+                          className={`rounded-xl border p-3 text-xs ${
+                            subscription.isExpired
+                              ? "border-red-200 bg-red-50 text-red-700"
+                              : "border-amber-200 bg-amber-50 text-amber-800"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-semibold">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            {subscription.isExpired
+                              ? "Salon subscription expired"
+                              : `Expiring in ${subscription.daysRemaining} day(s)`}
+                          </div>
+                          <Link
+                            className="mt-1 block underline underline-offset-2 transition hover:opacity-70"
+                            to="/admin/salon/billing"
+                          >
+                            Go to Salon Billing
+                          </Link>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
 
-                {/* Staff card */}
-                <Card>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-neutral-500" />
+                  {/* Staff card */}
+                  <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                    <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-4">
+                      <Users className="h-5 w-5 text-purple-500" />
                       <h3 className="font-semibold text-neutral-950">
                         Staff
                       </h3>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <StatWidget
-                        label="Approved staff"
-                        value={staff?.totalApprovedStaff ?? 0}
-                      />
-                      <StatWidget
-                        label="Chair renters"
-                        value={staff?.totalChairRenters ?? 0}
-                      />
-                      <StatWidget
-                        label="Pending requests"
-                        value={staff?.totalPendingRequests ?? 0}
-                        sub={
-                          staff?.totalPendingRequests > 0
-                            ? "Review in salon settings"
-                            : undefined
-                        }
-                      />
-                      <StatWidget
-                        label="Staff without seat"
-                        value={staff?.staffWithoutSeat ?? 0}
-                        sub={
-                          staff?.staffWithoutSeat > 0
-                            ? "Assign seats in billing"
-                            : undefined
-                        }
-                      />
-                    </div>
-                    {staff?.staffWithoutSeat > 0 && (
-                      <Link
-                        className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 underline underline-offset-2 transition hover:opacity-70"
-                        to="/admin/salon/billing"
-                      >
-                        {staff.staffWithoutSeat} staff member(s) without an
-                        active seat. Assign seats in Salon Billing.
-                      </Link>
-                    )}
-                    {staff?.totalPendingRequests > 0 && (
-                      <Link
-                        className="block rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 underline underline-offset-2 transition hover:opacity-70"
-                        to="/admin/settings/salon"
-                      >
-                        {staff.totalPendingRequests} pending join request(s).
-                        Review in salon settings.
-                      </Link>
-                    )}
-                  </CardContent>
-                </Card>
+                    <CardContent className="space-y-4 p-5">
+                      <div className="grid grid-cols-2 gap-3">
+                        <StatWidget
+                          label="Approved staff"
+                          value={staff?.totalApprovedStaff ?? 0}
+                        />
+                        <StatWidget
+                          label="Chair renters"
+                          value={staff?.totalChairRenters ?? 0}
+                        />
+                        <StatWidget
+                          label="Pending requests"
+                          value={staff?.totalPendingRequests ?? 0}
+                          sub={
+                            staff?.totalPendingRequests > 0
+                              ? "Review in salon settings"
+                              : undefined
+                          }
+                        />
+                        <StatWidget
+                          label="Staff without seat"
+                          value={staff?.staffWithoutSeat ?? 0}
+                          sub={
+                            staff?.staffWithoutSeat > 0
+                              ? "Assign seats in billing"
+                              : undefined
+                          }
+                        />
+                      </div>
+                      {staff?.staffWithoutSeat > 0 && (
+                        <Link
+                          className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 underline underline-offset-2 transition hover:opacity-70"
+                          to="/admin/salon/billing"
+                        >
+                          {staff.staffWithoutSeat} staff member(s) without an
+                          active seat. Assign seats in Salon Billing.
+                        </Link>
+                      )}
+                      {staff?.totalPendingRequests > 0 && (
+                        <Link
+                          className="block rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 underline underline-offset-2 transition hover:opacity-70"
+                          to="/admin/settings/salon"
+                        >
+                          {staff.totalPendingRequests} pending join request(s).
+                          Review in salon settings.
+                        </Link>
+                      )}
+                    </CardContent>
+                  </Card>
 
-                {/* Booking card */}
-                <Card>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <CalendarCheck className="h-4 w-4 text-neutral-500" />
+                  {/* Booking card */}
+                  <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                    <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-4">
+                      <CalendarCheck className="h-5 w-5 text-purple-500" />
                       <h3 className="font-semibold text-neutral-950">
                         Bookings
                       </h3>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <StatWidget
-                        icon={CalendarCheck}
-                        label="Today"
-                        value={bookings?.todayBookings ?? 0}
-                      />
-                      <StatWidget
-                        label="Upcoming"
-                        value={bookings?.upcomingBookingsCount ?? 0}
-                      />
-                      <StatWidget
-                        label="Pending"
-                        value={bookings?.pendingBookings ?? 0}
-                      />
-                      <StatWidget
-                        label="Completed (month)"
-                        value={bookings?.completedThisMonth ?? 0}
-                      />
-                      <StatWidget
-                        label="Cancelled (month)"
-                        value={bookings?.cancelledThisMonth ?? 0}
-                      />
-                      <StatWidget
-                        label="No-show (month)"
-                        value={bookings?.noShowThisMonth ?? 0}
-                      />
-                    </div>
-                    {bookings?.rejectedThisMonth > 0 && (
-                      <p className="text-xs text-neutral-500">
-                        + {bookings.rejectedThisMonth} rejected this month
-                      </p>
-                    )}
-                    {bookings?.lateCancelledThisMonth > 0 && (
-                      <p className="text-xs text-neutral-500">
-                        + {bookings.lateCancelledThisMonth} late cancellations
-                        this month
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
+                    <CardContent className="space-y-4 p-5">
+                      <div className="grid grid-cols-2 gap-3">
+                        <StatWidget
+                          icon={CalendarCheck}
+                          label="Today"
+                          value={bookings?.todayBookings ?? 0}
+                        />
+                        <StatWidget
+                          label="Upcoming"
+                          value={bookings?.upcomingBookingsCount ?? 0}
+                        />
+                        <StatWidget
+                          label="Pending"
+                          value={bookings?.pendingBookings ?? 0}
+                        />
+                        <StatWidget
+                          label="Completed (month)"
+                          value={bookings?.completedThisMonth ?? 0}
+                        />
+                        <StatWidget
+                          label="Cancelled (month)"
+                          value={bookings?.cancelledThisMonth ?? 0}
+                        />
+                        <StatWidget
+                          label="No-show (month)"
+                          value={bookings?.noShowThisMonth ?? 0}
+                        />
+                      </div>
+                      {bookings?.rejectedThisMonth > 0 && (
+                        <p className="text-xs text-neutral-500">
+                          + {bookings.rejectedThisMonth} rejected this month
+                        </p>
+                      )}
+                      {bookings?.lateCancelledThisMonth > 0 && (
+                        <p className="text-xs text-neutral-500">
+                          + {bookings.lateCancelledThisMonth} late cancellations
+                          this month
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
 
-                {/* Revenue card */}
-                <Card>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <DollarSign className="h-4 w-4 text-neutral-500" />
+                  {/* Revenue card */}
+                  <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                    <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-4">
+                      <DollarSign className="h-5 w-5 text-purple-500" />
                       <h3 className="font-semibold text-neutral-950">
                         Revenue
                       </h3>
                     </div>
-                    <p className="text-xs text-neutral-500">
-                      From completed bookings only (staff).
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <StatWidget
-                        label="Today"
-                        value={formatCurrency(revenue?.todayRevenue ?? 0)}
-                      />
-                      <StatWidget
-                        label="This month"
-                        value={formatCurrency(revenue?.monthRevenue ?? 0)}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
+                    <CardContent className="space-y-4 p-5">
+                      <p className="text-xs text-neutral-500">
+                        From completed bookings only (staff).
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <StatWidget
+                          label="Today"
+                          value={formatCurrency(revenue?.todayRevenue ?? 0)}
+                        />
+                        <StatWidget
+                          label="This month"
+                          value={formatCurrency(revenue?.monthRevenue ?? 0)}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                {/* Reviews card */}
-                <Card>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <Star className="h-4 w-4 text-neutral-500" />
+                  {/* Reviews card */}
+                  <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                    <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-4">
+                      <Star className="h-5 w-5 text-purple-500" />
                       <h3 className="font-semibold text-neutral-950">
                         Reviews
                       </h3>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <StatWidget
-                        label="Average rating"
-                        value={
-                          reviews?.averageRating
-                            ? Number(reviews.averageRating).toFixed(1)
-                            : "—"
-                        }
-                      />
-                      <StatWidget
-                        label="Total reviews"
-                        value={reviews?.totalReviews ?? 0}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+                    <CardContent className="space-y-4 p-5">
+                      <div className="grid grid-cols-2 gap-3">
+                        <StatWidget
+                          label="Average rating"
+                          value={
+                            reviews?.averageRating
+                              ? Number(reviews.averageRating).toFixed(1)
+                              : "—"
+                          }
+                        />
+                        <StatWidget
+                          label="Total reviews"
+                          value={reviews?.totalReviews ?? 0}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
 
-              {/* ─── Upcoming bookings ─── */}
-              <Card>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between gap-3">
+                {/* ─── Upcoming bookings ─── */}
+                <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+                  <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-4">
                     <div className="flex items-center gap-2">
-                      <CalendarCheck className="h-4 w-4 text-neutral-500" />
+                      <CalendarCheck className="h-5 w-5 text-purple-500" />
                       <h3 className="font-semibold text-neutral-950">
                         Upcoming Bookings
                       </h3>
                     </div>
                     {selectedSalonId && (
                       <Link
-                        className="text-sm font-semibold text-neutral-700 underline underline-offset-2 transition hover:text-neutral-950"
+                        className="text-sm font-semibold text-purple-600 underline underline-offset-2 transition hover:text-purple-800"
                         to={`/admin/salon/calendar?salonId=${selectedSalonId}`}
                       >
                         Open Salon Calendar
                       </Link>
                     )}
                   </div>
-                  {upcomingBookings.length === 0 ? (
-                    <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-500">
-                      No upcoming bookings.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead>
-                          <tr className="border-b border-neutral-200 text-xs font-medium uppercase text-neutral-500">
-                            <th className="pb-2 pr-3">Client</th>
-                            <th className="pb-2 pr-3">Barber</th>
-                            <th className="pb-2 pr-3">Service</th>
-                            <th className="pb-2 pr-3">Date</th>
-                            <th className="pb-2 pr-3">Time</th>
-                            <th className="pb-2">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {upcomingBookings.map((booking) => (
-                            <tr
-                              className="border-b border-neutral-100 last:border-0"
-                              key={booking.id}
-                            >
-                              <td className="py-2 pr-3 font-medium text-neutral-950">
-                                {booking.clientName}
-                              </td>
-                              <td className="py-2 pr-3 text-neutral-700">
-                                {booking.barberName}
-                              </td>
-                              <td className="py-2 pr-3 text-neutral-700">
-                                {booking.serviceName}
-                              </td>
-                              <td className="py-2 pr-3 text-neutral-700">
-                                {formatDate(booking.date)}
-                              </td>
-                              <td className="py-2 pr-3 text-neutral-700">
-                                {formatTime(booking.time || booking.date)}
-                              </td>
-                              <td className="py-2">
-                                <StatusBadge status={booking.status} />
-                              </td>
+                  <CardContent className="p-5">
+                    {upcomingBookings.length === 0 ? (
+                      <div className="rounded-xl bg-neutral-50 p-4 text-sm text-neutral-500">
+                        No upcoming bookings.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className="border-b border-neutral-200 text-xs font-medium uppercase text-neutral-500">
+                              <th className="pb-2 pr-3">Client</th>
+                              <th className="pb-2 pr-3">Barber</th>
+                              <th className="pb-2 pr-3">Service</th>
+                              <th className="pb-2 pr-3">Date</th>
+                              <th className="pb-2 pr-3">Time</th>
+                              <th className="pb-2">Status</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </>
-      )}
+                          </thead>
+                          <tbody>
+                            {upcomingBookings.map((booking) => (
+                              <tr
+                                className="border-b border-neutral-100 last:border-0"
+                                key={booking.id}
+                              >
+                                <td className="py-2 pr-3 font-medium text-neutral-950">
+                                  {booking.clientName}
+                                </td>
+                                <td className="py-2 pr-3 text-neutral-700">
+                                  {booking.barberName}
+                                </td>
+                                <td className="py-2 pr-3 text-neutral-700">
+                                  {booking.serviceName}
+                                </td>
+                                <td className="py-2 pr-3 text-neutral-700">
+                                  {formatDate(booking.date)}
+                                </td>
+                                <td className="py-2 pr-3 text-neutral-700">
+                                  {formatTime(booking.time || booking.date)}
+                                </td>
+                                <td className="py-2">
+                                  <StatusBadge status={booking.status} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
