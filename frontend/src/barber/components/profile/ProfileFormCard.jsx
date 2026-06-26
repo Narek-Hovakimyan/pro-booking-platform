@@ -14,21 +14,22 @@ export default function ProfileFormCard({
   onAvatarUploaded,
 }) {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
-      <CardContent className="space-y-5 p-4 sm:p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Profile</h1>
-          <p className="mt-2 text-neutral-500">
-            Update the information clients see before booking.
-          </p>
-        </div>
+    <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+      {/* Gradient header */}
+      <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-5">
+        <h1 className="text-xl font-bold text-white">Profile</h1>
+        <p className="mt-1 text-sm text-purple-100">
+          Update the information clients see before booking.
+        </p>
+      </div>
 
+      <CardContent className="space-y-5 p-5">
         <form className="space-y-4" onSubmit={onSaveProfile}>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-semibold">
               Name
               <input
-                className="w-full rounded-2xl border p-3 font-normal"
+                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
                 placeholder="Name"
                 value={profile.name}
@@ -39,7 +40,7 @@ export default function ProfileFormCard({
             <label className="grid gap-2 text-sm font-semibold">
               Phone
               <input
-                className="w-full rounded-2xl border p-3 font-normal"
+                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
                 placeholder="Phone"
                 value={profile.phone}
@@ -52,7 +53,7 @@ export default function ProfileFormCard({
             <label className="grid gap-2 text-sm font-semibold">
               Profession / Մասնագիտություն
               <select
-                className="w-full rounded-2xl border p-3 font-normal"
+                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
                 value={profile.profession || "barber"}
                 onChange={(event) => {
@@ -77,7 +78,7 @@ export default function ProfileFormCard({
               <label className="grid gap-2 text-sm font-semibold">
                 Barber type / Վարսահարդարի տեսակ
                 <select
-                  className="w-full rounded-2xl border p-3 font-normal"
+                  className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                   disabled={isProfileSaving}
                   value={profile.barberType || "unisex"}
                   onChange={(event) => onUpdateField("barberType", event.target.value)}
@@ -93,7 +94,7 @@ export default function ProfileFormCard({
           <label className="grid gap-2 text-sm font-semibold">
             Bio
             <textarea
-              className="min-h-28 w-full rounded-2xl border p-3 font-normal"
+              className="min-h-28 w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
               disabled={isProfileSaving}
               placeholder="Short introduction for clients"
               value={profile.bio}
@@ -105,7 +106,7 @@ export default function ProfileFormCard({
             <label className="grid gap-2 text-sm font-semibold">
               City
               <input
-                className="w-full rounded-2xl border p-3 font-normal"
+                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
                 placeholder="City"
                 value={profile.city}
@@ -116,7 +117,7 @@ export default function ProfileFormCard({
             <label className="grid gap-2 text-sm font-semibold">
               Address
               <input
-                className="w-full rounded-2xl border p-3 font-normal"
+                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
                 placeholder="Address"
                 value={profile.address}
@@ -129,7 +130,7 @@ export default function ProfileFormCard({
             <label className="grid gap-2 text-sm font-semibold">
               Instagram
               <input
-                className="w-full rounded-2xl border p-3 font-normal"
+                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
                 placeholder="Instagram"
                 value={profile.instagram}
@@ -138,15 +139,16 @@ export default function ProfileFormCard({
             </label>
           </div>
 
-          <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:grid-cols-[112px_1fr] sm:items-center">
+          {/* Upload photo block */}
+          <div className="grid gap-4 rounded-2xl border border-purple-100 bg-purple-50 p-4 sm:grid-cols-[112px_1fr] sm:items-center">
             {profile.imageUrl ? (
               <img
                 alt={profile.name || "Profile photo"}
-                className="aspect-square w-28 rounded-2xl object-cover"
+                className="aspect-square w-28 rounded-2xl object-cover ring-2 ring-purple-200"
                 src={getMediaUrl(profile.imageUrl)}
               />
             ) : (
-              <div className="flex aspect-square w-28 items-center justify-center rounded-2xl bg-white text-sm text-neutral-400">
+              <div className="flex aspect-square w-28 items-center justify-center rounded-2xl bg-white text-sm text-neutral-400 ring-2 ring-purple-200">
                 No photo
               </div>
             )}
@@ -177,13 +179,15 @@ export default function ProfileFormCard({
             </p>
           )}
 
-          <Button
-            className="w-full sm:w-auto"
-            disabled={isProfileSaving}
-            type="submit"
-          >
-            {isProfileSaving ? "Saving..." : "Save profile"}
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600 sm:w-auto"
+              disabled={isProfileSaving}
+              type="submit"
+            >
+              {isProfileSaving ? "Saving..." : "Save profile"}
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>

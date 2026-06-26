@@ -1,4 +1,4 @@
-import { Star } from "lucide-react";
+import { MapPin, Star, AtSign } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -38,73 +38,88 @@ export default function ProfileSidebarCard({
     profile.profession === "barber" ? barberTypeLabels[profile.barberType] : "";
   const headline = [professionLabel, barberTypeLabel].filter(Boolean).join(" · ");
   const hasRating = reviewsCount > 0 && reviewsAverage > 0;
-  const profileDetails = [
-    profile.city,
-    profile.address,
-    profile.instagram,
-  ].filter(Boolean);
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
-      <CardContent className="space-y-4 p-4 sm:p-6">
-        {profile.imageUrl ? (
+    <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
+      {/* Gradient header area */}
+      {profile.imageUrl ? (
+        <div className="relative">
           <img
             alt={displayName}
-            className="aspect-[4/3] w-full rounded-2xl object-cover"
+            className="aspect-[4/3] w-full object-cover"
             src={getMediaUrl(profile.imageUrl)}
           />
-        ) : null}
+          <div className="absolute inset-0 bg-gradient-to-t from-purple-900/40 to-transparent" />
+        </div>
+      ) : (
+        <div className="flex aspect-[4/3] items-center justify-center bg-gradient-to-br from-purple-100 to-pink-100">
+          <span className="text-4xl text-purple-300">
+            {displayName.charAt(0).toUpperCase()}
+          </span>
+        </div>
+      )}
 
-        <div className="space-y-2">
-          {displayName && (
-            <h2 className="text-2xl font-bold text-neutral-950">
-              {displayName}
-            </h2>
-          )}
+      <CardContent className="space-y-4 p-5">
+        {/* Name + headline */}
+        <div>
+          <h2 className="text-2xl font-bold text-neutral-950">{displayName}</h2>
           {headline && (
-            <p className="text-sm font-medium text-neutral-600">
-              {headline}
-            </p>
-          )}
-          {hasRating && (
-            <p className="text-sm text-neutral-600">
-              <Star className="mr-1 inline-block h-4 w-4 fill-amber-400 text-amber-500" />
-              {reviewsAverage.toFixed(1)} · {reviewsCount}{" "}
-              {reviewsCount === 1 ? "review" : "reviews"}
-            </p>
-          )}
-          {showSalonLink && (
-            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-              <Link
-                className="text-sm font-semibold text-neutral-800 transition hover:text-neutral-950"
-                to={`/salons/${salonId}`}
-              >
-                {salonName}
-              </Link>
-              {salonRating !== null && (
-                <p className="mt-0.5 text-xs text-neutral-500">
-                  <Star className="mr-0.5 inline-block h-3 w-3 fill-amber-400 text-amber-500" />
-                  {salonRating ? salonRating.toFixed(1) : "0.0"} ·{" "}
-                  {salonReviewsCount} reviews
-                </p>
-              )}
-            </div>
+            <p className="mt-1 text-sm font-medium text-purple-600">{headline}</p>
           )}
         </div>
 
-        {profile.bio && (
-          <p className="text-sm leading-6 text-neutral-600">
-            {profile.bio}
-          </p>
-        )}
-
-        {profileDetails.length > 0 && (
-          <div className="space-y-1 border-t border-neutral-100 pt-4 text-sm text-neutral-500">
-            {profile.city && <p>{profile.city}</p>}
-            {profile.address && <p>{profile.address}</p>}
-            {profile.instagram && <p>{profile.instagram}</p>}
+        {/* Rating */}
+        {hasRating && (
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm">
+            <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+            <span className="font-semibold text-amber-800">
+              {reviewsAverage.toFixed(1)}
+            </span>
+            <span className="text-amber-600">
+              ({reviewsCount} {reviewsCount === 1 ? "review" : "reviews"})
+            </span>
           </div>
         )}
+
+        {/* Salon link */}
+        {showSalonLink && (
+          <div className="rounded-xl border border-purple-100 bg-purple-50 p-3">
+            <Link
+              className="text-sm font-semibold text-purple-700 transition hover:text-purple-900"
+              to={`/salons/${salonId}`}
+            >
+              {salonName}
+            </Link>
+            {salonRating !== null && (
+              <p className="mt-0.5 text-xs text-purple-500">
+                <Star className="mr-0.5 inline-block h-3 w-3 fill-amber-400 text-amber-500" />
+                {salonRating ? salonRating.toFixed(1) : "0.0"} · {salonReviewsCount}{" "}
+                {salonReviewsCount === 1 ? "review" : "reviews"}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Bio */}
+        {profile.bio && (
+          <p className="text-sm leading-6 text-neutral-600">{profile.bio}</p>
+        )}
+
+        {/* Details */}
+        <div className="space-y-2 border-t border-neutral-100 pt-4 text-sm text-neutral-500">
+          {(profile.city || profile.address) && (
+            <div className="flex items-center gap-2">
+              <MapPin className="h-3.5 w-3.5 text-neutral-400" />
+              <span>{[profile.city, profile.address].filter(Boolean).join(", ")}</span>
+            </div>
+          )}
+          {profile.instagram && (
+            <div className="flex items-center gap-2">
+              <AtSign className="h-3.5 w-3.5 text-neutral-400" />
+              <span>{profile.instagram}</span>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
