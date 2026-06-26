@@ -277,6 +277,13 @@ export const updateSalonStaffPaymentSettings = async (
     throw new SalonStaffError(404, "Barber not found");
   }
 
+  if (sameId(salon.ownerId, barber._id)) {
+    throw new SalonStaffError(
+      400,
+      "Salon owner cannot receive staff payment settings"
+    );
+  }
+
   const salonEntry = (barber.salons || []).find((entry) =>
     sameId(entry?.salon, salon._id)
   );
@@ -346,6 +353,13 @@ export const updateSalonMemberRelationshipType = async (
 
   if (!barber || barber.role !== "barber") {
     throw new SalonStaffError(404, "Barber not found");
+  }
+
+  if (sameId(salon.ownerId, barber._id)) {
+    throw new SalonStaffError(
+      400,
+      "Salon owner relationship type cannot be changed"
+    );
   }
 
   barber.salons = Array.isArray(barber.salons) ? barber.salons : [];

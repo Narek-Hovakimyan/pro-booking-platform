@@ -216,6 +216,45 @@ test("admin request sets pending relationshipType", async () => {
   assert.equal(String(barber.salons[0].relationshipRequestedBy), String(adminId));
 });
 
+test("owner cannot update own relationshipType as salon staff", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const owner = {
+    _id: ownerId,
+    name: "Salon Owner",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return {
+        select: async () => ({ _id: ownerId, role: "barber" }),
+        ...owner,
+      };
+    }
+
+    return null;
+  };
+
+  const res = createResponse();
+  await updateMemberRelationshipType(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(ownerId) },
+      body: { relationshipType: "chair_renter" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /owner relationship type cannot be changed/);
+});
+
 test("normal member cannot update relationshipType", async () => {
   const ownerId = new mongoose.Types.ObjectId();
   const memberId = new mongoose.Types.ObjectId();
@@ -455,6 +494,51 @@ test("owner can update staff payment settings", async () => {
   assert.equal(barber.salons[0].staffPayment.commissionSalonPercent, 30);
   assert.ok(barber.salons[0].staffPayment.updatedAt instanceof Date);
   assert.equal(String(barber.salons[0].staffPayment.updatedBy), String(ownerId));
+});
+
+test("owner cannot update own staff payment settings", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const owner = {
+    _id: ownerId,
+    name: "Salon Owner",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", relationshipType: "staff" }],
+    async save() {
+      return this;
+    },
+  };
+
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return {
+        select: async () => ({ _id: ownerId, role: "barber" }),
+        ...owner,
+      };
+    }
+    return null;
+  };
+
+  const res = createResponse();
+  await updateStaffPaymentSettings(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(ownerId) },
+      body: {
+        staffPayment: {
+          type: "commission",
+          commissionStaffPercent: 70,
+          commissionSalonPercent: 30,
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /owner cannot receive staff payment/i);
+  assert.equal(owner.salons[0].staffPayment, undefined);
 });
 
 test("admin can update staff payment settings", async () => {

@@ -38,6 +38,8 @@ const paymentTypeOptions = [
   { value: "fixed", label: "Fixed pay" },
 ];
 
+const getPersonId = (person) => person?.id || person?._id || "";
+
 const fixedPeriodOptions = [
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
@@ -285,6 +287,14 @@ export default function ManagedSalonsSection({
         };
         const owner = adminData.owner;
         const admins = adminData.admins || [];
+        const ownerId = managedSalon.ownerId || getPersonId(owner);
+        const specialists = (managedSalon.barbers || []).filter((barber) => {
+          const barberId = getPersonId(barber);
+          return (
+            barber.roleInSalon !== "owner" &&
+            String(barberId || "") !== String(ownerId || "")
+          );
+        });
 
         return (
           <div
@@ -388,13 +398,13 @@ export default function ManagedSalonsSection({
               </div>
             )}
 
-            {managedSalon.barbers && managedSalon.barbers.length > 0 && (
+            {specialists.length > 0 && (
               <div className="mt-3">
                 <div className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
                   Specialists
                 </div>
                 <div className="mt-1 space-y-1">
-                  {managedSalon.barbers.map((barber) => {
+                  {specialists.map((barber) => {
                     const barberId = barber.id || barber._id;
                     const isSelf = String(barberId) === String(currentUserId);
                     const isBarberAdmin = managedSalon.adminIds.includes(

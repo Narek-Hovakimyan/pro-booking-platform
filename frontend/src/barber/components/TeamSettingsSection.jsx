@@ -1,6 +1,8 @@
 import ManagedSalonsSection from "@/barber/components/settings/ManagedSalonsSection";
 import SalonStaffSection from "@/barber/components/settings/SalonStaffSection";
 
+const getPersonId = (person) => person?.id || person?._id || "";
+
 export default function TeamSettingsSection({
   approvedSalonEntries,
   currentUserId,
@@ -29,14 +31,22 @@ export default function TeamSettingsSection({
     const adminData = salonAdmins[managedSalonId] || { admins: [] };
     const adminIds = (adminData.admins || []).map((a) => String(a.id || a._id));
     const isAdmin = adminIds.includes(String(currentUserId || ""));
+    const resolvedOwnerId = ownerId || getPersonId(adminData.owner);
+    const staffEntries = salonStaffById[managedSalonId] || [];
 
     return {
       ...managedSalon,
-      ownerId,
+      ownerId: resolvedOwnerId,
       isOwner,
       isAdmin,
       adminIds,
-      barbers: salonStaffById[managedSalonId] || [],
+      barbers: staffEntries.filter((barber) => {
+        const barberId = getPersonId(barber);
+        return (
+          barber.roleInSalon !== "owner" &&
+          String(barberId || "") !== String(resolvedOwnerId || "")
+        );
+      }),
     };
   });
 
