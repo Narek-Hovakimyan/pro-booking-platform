@@ -113,6 +113,7 @@ export default function EventDetailModal({
               <img
                 alt={getEventTitle(selectedEvent)}
                 className="mt-4 h-48 w-full rounded-xl object-cover"
+                loading="lazy"
                 src={getEventImage(selectedEvent)}
               />
             )}

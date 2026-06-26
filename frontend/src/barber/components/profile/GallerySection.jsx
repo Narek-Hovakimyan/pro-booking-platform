@@ -30,6 +30,7 @@ export default function GallerySection({ images = [] }) {
                 <img
                   alt="Gallery example of specialist work"
                   className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  loading="lazy"
                   src={getMediaUrl(imageUrl)}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />

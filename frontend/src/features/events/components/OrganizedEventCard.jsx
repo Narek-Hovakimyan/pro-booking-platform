@@ -25,6 +25,7 @@ export default function OrganizedEventCard({ event, variant = "upcoming" }) {
             <img
               alt={getEventTitle(event)}
               className="h-full w-full rounded-xl object-cover"
+              loading="lazy"
               src={getEventImage(event)}
             />
           ) : (

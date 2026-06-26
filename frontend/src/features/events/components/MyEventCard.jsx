@@ -34,6 +34,7 @@ export default function MyEventCard({
             <img
               alt={getEventTitle(event)}
               className="h-full w-full rounded-xl object-cover"
+              loading="lazy"
               src={getEventImage(event)}
             />
           ) : (
