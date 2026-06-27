@@ -1,7 +1,10 @@
 import bcrypt from "bcrypt";
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
+
+const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 
 const getUserData = (user) => ({
   id: user._id,
@@ -136,5 +139,103 @@ export const loginUser = async (req, res) => {
   } catch (error) {
     console.error("Login failed:", error);
     return res.status(500).json({ message: "Login failed" });
+  }
+};
+
+/**
+ * POST /api/auth/forgot-password
+ * Accepts phone. Returns generic response always.
+ * Stores SHA-256 hashed reset token with 15 min expiry.
+ * In production, would send email. In development, logs reset URL.
+ */
+export const forgotPassword = async (req, res) => {
+  try {
+    const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
+
+    if (!phone) {
+      return res.status(400).json({ message: "Phone is required" });
+    }
+
+    // Always return generic success to avoid user enumeration
+    const genericMessage = "If an account exists, password reset instructions have been sent.";
+
+    // Find user without exposing existence
+    const user = await User.findOne({ phone }).select("+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt");
+    if (!user) {
+      return res.json({ message: genericMessage });
+    }
+
+    // Generate random token and store SHA-256 hash
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+    user.resetPasswordTokenHash = tokenHash;
+    user.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
+    user.resetPasswordSentAt = new Date();
+    await user.save();
+
+    // In development, log the reset URL so dev can test
+    if (process.env.NODE_ENV !== "production") {
+      console.log(
+        `[DEV] Password reset link (phone: ${phone}): /reset-password?token=${rawToken}`
+      );
+    }
+
+    // TODO: Send email with reset link if user.email exists and email provider configured
+    // In production, this would call emailService.sendPasswordResetEmail(user.email, rawToken)
+
+    return res.json({ message: genericMessage });
+  } catch (error) {
+    console.error("Forgot password failed:", error);
+    // Always return generic on error too
+    return res.json({
+      message: "If an account exists, password reset instructions have been sent.",
+    });
+  }
+};
+
+/**
+ * POST /api/auth/reset-password
+ * Accepts token + password. Validates hash + expiry, updates password.
+ */
+export const resetPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    const resetToken = typeof token === "string" ? token.trim() : "";
+
+    if (!resetToken || !password) {
+      return res.status(400).json({ message: "Token and password are required" });
+    }
+
+    if (typeof password !== "string" || password.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    // Hash incoming token and find matching user
+    const tokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    }).select("+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt");
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired reset token" });
+    }
+
+    // Hash new password and update
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+    user.resetPasswordTokenHash = "";
+    user.resetPasswordExpires = null;
+    user.resetPasswordSentAt = null;
+    await user.save();
+
+    return res.json({ message: "Password has been reset successfully." });
+  } catch (error) {
+    console.error("Reset password failed:", error);
+    return res.status(500).json({ message: "Could not reset password" });
   }
 };

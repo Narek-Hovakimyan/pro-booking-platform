@@ -188,6 +188,21 @@ const userSchema = new mongoose.Schema({
     default: null,
     select: false,
   },
+  resetPasswordTokenHash: {
+    type: String,
+    default: "",
+    select: false,
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null,
+    select: false,
+  },
+  resetPasswordSentAt: {
+    type: Date,
+    default: null,
+    select: false,
+  },
   city: {
     type: String,
     trim: true,
