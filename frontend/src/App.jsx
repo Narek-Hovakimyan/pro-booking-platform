@@ -59,6 +59,8 @@ const SalonsPage = lazy(() => import("./client/pages/SalonsPage"));
 const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
 const EventsPage = lazy(() => import("./pages/EventsPage"));
 const CertificatePage = lazy(() => import("./pages/CertificatePage"));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const RevenuePage = lazy(() => import("./barber/pages/RevenuePage"));
 const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
 const SalonCalendarPage = lazy(() => import("./barber/pages/SalonCalendarPage"));
@@ -658,6 +660,8 @@ export default function App() {
             />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route
               path="/barbers"
               element={

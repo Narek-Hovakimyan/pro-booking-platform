@@ -101,6 +101,15 @@ export default function LoginPage() {
             />
           </label>
 
+          <div className="text-right text-sm">
+            <Link
+              className="font-medium text-purple-700 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+              to="/forgot-password"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
           {error && (
             <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error}
