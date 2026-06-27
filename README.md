@@ -6,6 +6,10 @@ A full-stack SaaS application for salon and barber appointment management. HairB
 **Monetization:** Individual barber subscriptions + salon seat subscriptions  
 **Privacy model:** Staff vs. Chair Renter — owners see movement for staff only
 
+## AI Project Context
+
+For detailed architecture, feature behavior, business rules, high-risk areas, and safe AI workflow, read `docs/AI_PROJECT_CONTEXT.md`. This file should be read before making major code changes.
+
 ---
 
 ## Tech Stack
