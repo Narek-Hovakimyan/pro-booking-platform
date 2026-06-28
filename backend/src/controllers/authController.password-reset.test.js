@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { afterEach, test } from "node:test";
 
 import User from "../models/User.js";
+import { setEmailTransportFactoryForTesting } from "../services/emailService.js";
 import { forgotPassword, resetPassword } from "./authController.js";
 
 const genericResetMessage =
@@ -11,8 +12,16 @@ const genericResetMessage =
 
 const originalFindOne = User.findOne;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalClientUrl = process.env.CLIENT_URL;
+const originalEmailHost = process.env.EMAIL_HOST;
+const originalEmailPort = process.env.EMAIL_PORT;
+const originalEmailSecure = process.env.EMAIL_SECURE;
+const originalEmailUser = process.env.EMAIL_USER;
+const originalEmailPass = process.env.EMAIL_PASS;
+const originalEmailFrom = process.env.EMAIL_FROM;
 const originalConsoleLog = console.log;
 const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
 
 const mockRes = () => {
   const res = { statusCode: 200 };
@@ -39,15 +48,40 @@ const hashToken = (token) =>
 
 afterEach(() => {
   User.findOne = originalFindOne;
+  setEmailTransportFactoryForTesting();
   console.log = originalConsoleLog;
   console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
 
   if (originalNodeEnv === undefined) {
     delete process.env.NODE_ENV;
   } else {
     process.env.NODE_ENV = originalNodeEnv;
   }
+  if (originalClientUrl === undefined) delete process.env.CLIENT_URL;
+  else process.env.CLIENT_URL = originalClientUrl;
+  if (originalEmailHost === undefined) delete process.env.EMAIL_HOST;
+  else process.env.EMAIL_HOST = originalEmailHost;
+  if (originalEmailPort === undefined) delete process.env.EMAIL_PORT;
+  else process.env.EMAIL_PORT = originalEmailPort;
+  if (originalEmailSecure === undefined) delete process.env.EMAIL_SECURE;
+  else process.env.EMAIL_SECURE = originalEmailSecure;
+  if (originalEmailUser === undefined) delete process.env.EMAIL_USER;
+  else process.env.EMAIL_USER = originalEmailUser;
+  if (originalEmailPass === undefined) delete process.env.EMAIL_PASS;
+  else process.env.EMAIL_PASS = originalEmailPass;
+  if (originalEmailFrom === undefined) delete process.env.EMAIL_FROM;
+  else process.env.EMAIL_FROM = originalEmailFrom;
 });
+
+const configureSmtpEnv = () => {
+  process.env.EMAIL_HOST = "smtp.example.com";
+  process.env.EMAIL_PORT = "587";
+  process.env.EMAIL_SECURE = "false";
+  process.env.EMAIL_USER = "smtp-user";
+  process.env.EMAIL_PASS = "smtp-pass";
+  process.env.EMAIL_FROM = "HairBook <no-reply@example.com>";
+};
 
 test("forgot-password known phone stores hashed token and expiry without returning raw token", async () => {
   process.env.NODE_ENV = "development";
@@ -120,6 +154,148 @@ test("forgot-password does not log reset token in production", async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: genericResetMessage });
   assert.deepEqual(logs, []);
+});
+
+test("forgot-password with missing CLIENT_URL in production does not send broken reset link", async () => {
+  process.env.NODE_ENV = "production";
+  delete process.env.CLIENT_URL;
+  configureSmtpEnv();
+  const logs = [];
+  let sendMailCalled = false;
+  const user = {
+    email: "test@example.com",
+    async save() {},
+  };
+
+  console.log = (...args) => logs.push(args.join(" "));
+  setEmailTransportFactoryForTesting(() => ({
+    sendMail: async () => {
+      sendMailCalled = true;
+    },
+  }));
+  User.findOne = () => selectable(user);
+
+  const res = mockRes();
+  await forgotPassword({ body: { phone: "+37400111222" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: genericResetMessage });
+  assert.equal(sendMailCalled, false);
+  assert.deepEqual(logs, []);
+});
+
+test("forgot-password known phone with email sends password reset email", async () => {
+  process.env.NODE_ENV = "production";
+  process.env.CLIENT_URL = "https://app.example.com";
+  configureSmtpEnv();
+  const calls = [];
+  let saved = false;
+  const user = {
+    email: "test@example.com",
+    async save() {
+      saved = true;
+    },
+  };
+
+  setEmailTransportFactoryForTesting((config) => {
+    calls.push({ config });
+    return {
+      sendMail: async (payload) => {
+        calls.push({ payload });
+        return { messageId: "reset-email-1" };
+      },
+    };
+  });
+  User.findOne = () => selectable(user);
+
+  const res = mockRes();
+  await forgotPassword({ body: { phone: "+37400111222" } }, res);
+  const resetUrl = calls[1].payload.text.match(/https:\/\/app\.example\.com\/reset-password\?token=[a-f0-9]{64}/)?.[0];
+  const rawToken = resetUrl?.split("token=")[1];
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: genericResetMessage });
+  assert.equal(saved, true);
+  assert.equal(calls[0].config.host, "smtp.example.com");
+  assert.equal(calls[1].payload.to, "test@example.com");
+  assert.equal(calls[1].payload.subject, "Reset your HairBook password");
+  assert.ok(resetUrl);
+  assert.equal(user.resetPasswordTokenHash, hashToken(rawToken));
+  assert.equal(JSON.stringify(res.body).includes(rawToken), false);
+});
+
+test("forgot-password unknown phone does not send email and returns generic response", async () => {
+  process.env.NODE_ENV = "production";
+  configureSmtpEnv();
+  let sendMailCalled = false;
+
+  setEmailTransportFactoryForTesting(() => ({
+    sendMail: async () => {
+      sendMailCalled = true;
+    },
+  }));
+  User.findOne = () => selectable(null);
+
+  const res = mockRes();
+  await forgotPassword({ body: { phone: "+37400999000" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: genericResetMessage });
+  assert.equal(sendMailCalled, false);
+});
+
+test("forgot-password user without email returns generic response without sending email", async () => {
+  process.env.NODE_ENV = "production";
+  configureSmtpEnv();
+  let sendMailCalled = false;
+  const user = {
+    async save() {},
+  };
+
+  setEmailTransportFactoryForTesting(() => ({
+    sendMail: async () => {
+      sendMailCalled = true;
+    },
+  }));
+  User.findOne = () => selectable(user);
+
+  const res = mockRes();
+  await forgotPassword({ body: { phone: "+37400111222" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: genericResetMessage });
+  assert.equal(sendMailCalled, false);
+});
+
+test("forgot-password email send failure still returns generic response without logging token", async () => {
+  process.env.NODE_ENV = "production";
+  process.env.CLIENT_URL = "https://app.example.com";
+  configureSmtpEnv();
+  const logs = [];
+  const warnings = [];
+  const user = {
+    email: "test@example.com",
+    async save() {},
+  };
+
+  console.log = (...args) => logs.push(args.join(" "));
+  console.warn = (...args) => warnings.push(args.join(" "));
+  setEmailTransportFactoryForTesting(() => ({
+    sendMail: async () => {
+      throw new Error("provider down");
+    },
+  }));
+  User.findOne = () => selectable(user);
+
+  const res = mockRes();
+  await forgotPassword({ body: { phone: "+37400111222" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: genericResetMessage });
+  assert.deepEqual(logs, []);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].includes("token="), false);
+  assert.equal(warnings[0].includes("test@example.com"), false);
 });
 
 test("reset-password rejects missing token or password", async () => {

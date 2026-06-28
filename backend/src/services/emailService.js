@@ -1,20 +1,149 @@
 /**
- * Email verification service.
+ * Email service.
  *
- * In development/test, or when EMAIL_VERIFICATION_LOG_URL=true is set,
- * verification URLs are logged to the console. No real email is sent.
- *
- * In production with EMAIL_PROVIDER=resend and RESEND_API_KEY configured,
- * emails are sent via the Resend SDK.
+ * SMTP is used for generic transactional email. Existing email verification
+ * delivery keeps Resend support until that flow is migrated to SMTP.
  */
+import nodemailer from "nodemailer";
 import { Resend } from "resend";
 
 const RESEND_PROVIDER = "resend";
+const SMTP_PROVIDER = "smtp";
 
 let createResendClient = (apiKey) => new Resend(apiKey);
+let createSmtpTransport = (config) => nodemailer.createTransport(config);
 
 export const setResendClientFactoryForTesting = (factory) => {
   createResendClient = factory || ((apiKey) => new Resend(apiKey));
+};
+
+export const setEmailTransportFactoryForTesting = (factory) => {
+  createSmtpTransport = factory || ((config) => nodemailer.createTransport(config));
+};
+
+const parseBooleanEnv = (value) => {
+  return ["1", "true", "yes"].includes(String(value || "").trim().toLowerCase());
+};
+
+const getSmtpConfig = () => {
+  const host = process.env.EMAIL_HOST || "";
+  const portValue = process.env.EMAIL_PORT || "";
+  const user = process.env.EMAIL_USER || "";
+  const pass = process.env.EMAIL_PASS || "";
+  const from = process.env.EMAIL_FROM || "";
+  const missing = [];
+
+  if (!host) missing.push("EMAIL_HOST");
+  const port = Number(portValue);
+
+  if (!portValue || !Number.isInteger(port) || port <= 0) missing.push("EMAIL_PORT");
+  if (!user) missing.push("EMAIL_USER");
+  if (!pass) missing.push("EMAIL_PASS");
+  if (!from) missing.push("EMAIL_FROM");
+
+  return {
+    host,
+    port,
+    secure: parseBooleanEnv(process.env.EMAIL_SECURE),
+    auth: { user, pass },
+    from,
+    missing,
+    isConfigured: missing.length === 0 && Number.isInteger(port) && port > 0,
+  };
+};
+
+/**
+ * Send a generic transactional email through SMTP.
+ *
+ * @param {Object} options
+ * @param {string} options.to
+ * @param {string} options.subject
+ * @param {string} options.text
+ * @param {string} options.html
+ * @returns {Promise<{ delivered: boolean, provider: string, disabled?: boolean, missing?: string[], id?: string }>}
+ */
+export const sendEmail = async ({ to, subject, text, html }) => {
+  const config = getSmtpConfig();
+
+  if (!config.isConfigured) {
+    return {
+      delivered: false,
+      provider: SMTP_PROVIDER,
+      disabled: true,
+      missing: config.missing,
+    };
+  }
+
+  try {
+    const transporter = createSmtpTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: config.auth,
+    });
+
+    const response = await transporter.sendMail({
+      from: config.from,
+      to,
+      subject,
+      text,
+      html,
+    });
+
+    return {
+      delivered: true,
+      provider: SMTP_PROVIDER,
+      id: response?.messageId,
+    };
+  } catch {
+    console.warn("[emailService] SMTP delivery failed. Check provider configuration and logs.");
+    return { delivered: false, provider: SMTP_PROVIDER };
+  }
+};
+
+export const sendPasswordResetEmail = async ({
+  to,
+  resetUrl,
+  appName = "HairBook",
+}) => {
+  const subject = `Reset your ${appName} password`;
+  const text = [
+    `Use this link to reset your ${appName} password:`,
+    "",
+    resetUrl,
+    "",
+    "This link expires in 15 minutes.",
+    "If you did not request this, you can safely ignore this email.",
+  ].join("\n");
+  const html = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; max-width: 480px; margin: 0 auto;">
+    <h2 style="font-size: 20px; margin-bottom: 12px;">Reset your ${appName} password</h2>
+    <p style="font-size: 14px; line-height: 1.6; color: #333;">
+      Click the link below to reset your password.
+    </p>
+    <a
+      href="${resetUrl}"
+      style="display: inline-block; margin: 16px 0; padding: 10px 24px; background-color: #d97706; color: #fff; text-decoration: none; border-radius: 12px; font-size: 14px; font-weight: 600;"
+    >
+      Reset password
+    </a>
+    <p style="font-size: 14px; line-height: 1.6; color: #666;">
+      This link expires in 15 minutes. If you did not request this, you can safely ignore this email.
+    </p>
+    <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+    <p style="font-size: 12px; color: #999;">
+      ${appName}
+    </p>
+  </body>
+</html>`;
+
+  return sendEmail({ to, subject, text, html });
 };
 
 /**

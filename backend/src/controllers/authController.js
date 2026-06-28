@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
+import { sendPasswordResetEmail } from "../services/emailService.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
 import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
 
@@ -38,6 +39,23 @@ const signToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
     expiresIn: "30d",
   });
+};
+
+const getPasswordResetClientUrl = () => {
+  const [clientUrl] = String(process.env.CLIENT_URL || "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+  if (clientUrl) {
+    return clientUrl.replace(/\/+$/, "");
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return "";
+  }
+
+  return "http://localhost:5173";
 };
 
 export const registerUser = async (req, res) => {
@@ -191,15 +209,24 @@ export const forgotPassword = async (req, res) => {
     user.resetPasswordSentAt = new Date();
     await user.save();
 
-    // In development, log the reset URL so dev can test
-    if (process.env.NODE_ENV !== "production") {
-      console.log(
-        `[DEV] Password reset link (phone: ${phone}): /reset-password?token=${rawToken}`
-      );
+    const resetClientUrl = getPasswordResetClientUrl();
+    const resetUrl = resetClientUrl ? `${resetClientUrl}/reset-password?token=${rawToken}` : "";
+    let emailResult = null;
+
+    if (user.email && resetUrl) {
+      emailResult = await sendPasswordResetEmail({
+        to: user.email,
+        resetUrl,
+        appName: "HairBook",
+      });
     }
 
-    // TODO: Send email with reset link if user.email exists and email provider configured
-    // In production, this would call emailService.sendPasswordResetEmail(user.email, rawToken)
+    // In development, log the reset URL so dev can test when email is unavailable
+    if (process.env.NODE_ENV !== "production" && resetUrl && (!user.email || !emailResult?.delivered)) {
+      console.log(
+        `[DEV] Password reset link (phone: ${phone}): ${resetUrl}`
+      );
+    }
 
     return res.json({ message: genericMessage });
   } catch (error) {
