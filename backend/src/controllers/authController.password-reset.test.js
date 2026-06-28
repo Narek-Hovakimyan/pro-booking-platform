@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import bcrypt from "bcrypt";
 import crypto from "node:crypto";
 import { afterEach, test } from "node:test";

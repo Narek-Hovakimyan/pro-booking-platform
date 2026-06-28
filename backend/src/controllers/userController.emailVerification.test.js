@@ -880,7 +880,44 @@ test("registerUser – still requires phone even if email is supplied", async ()
   );
 
   assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Name, phone, and password are required");
+  assert.equal(res.body.message, "Name, phone, email, and password are required");
+});
+
+test("registerUser – requires email", async () => {
+  const res = createResponse();
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        phone: "+37400000000",
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Name, phone, email, and password are required");
+});
+
+test("registerUser – rejects invalid email", async () => {
+  const res = createResponse();
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        email: "not-an-email",
+        phone: "+37400000000",
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid email format");
 });
 
 test("registerUser – rejects passwords shorter than eight characters", async () => {
@@ -890,6 +927,7 @@ test("registerUser – rejects passwords shorter than eight characters", async (
     {
       body: {
         name: "Test User",
+        email: "test@example.com",
         phone: "+37400000000",
         password: "secret",
       },
@@ -914,6 +952,7 @@ test("registerUser – trims phone before duplicate lookup", async () => {
     {
       body: {
         name: "Test User",
+        email: "test@example.com",
         phone: "  +37400000000  ",
         password: "secret123",
       },
@@ -933,6 +972,7 @@ test("registerUser – rejects phone values over max length", async () => {
     {
       body: {
         name: "Test User",
+        email: "test@example.com",
         phone: `+${"1".repeat(32)}`,
         password: "secret123",
       },
@@ -942,6 +982,97 @@ test("registerUser – rejects phone values over max length", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Phone must be 32 characters or less");
+});
+
+test("registerUser – normalizes email before duplicate lookup and save", async () => {
+  const res = createResponse();
+  let emailSeen;
+  let createPayload;
+
+  process.env.JWT_SECRET = "test-secret";
+  User.findOne = async (filter) => {
+    if (Object.hasOwn(filter, "email")) {
+      emailSeen = filter.email;
+    }
+    return null;
+  };
+  User.create = async (payload) => {
+    createPayload = payload;
+    return createBaseUser({ ...payload, _id: userId });
+  };
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        email: "  Test@Example.COM  ",
+        phone: "+37400000000",
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(emailSeen, "test@example.com");
+  assert.equal(createPayload.email, "test@example.com");
+  assert.equal(res.body.user.email, "test@example.com");
+  assert.equal(res.body.user.emailVerified, false);
+});
+
+test("registerUser – duplicate email returns safe 400", async () => {
+  const res = createResponse();
+
+  User.findOne = async (filter) => {
+    if (filter.phone) return null;
+    if (filter.email === "existing@example.com") {
+      return createBaseUser({ _id: otherUserId, email: filter.email });
+    }
+    return null;
+  };
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        email: " Existing@Example.COM ",
+        phone: "+37400000000",
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Email already in use");
+});
+
+test("registerUser – duplicate key email does not report phone error", async () => {
+  const res = createResponse();
+
+  process.env.JWT_SECRET = "test-secret";
+  User.findOne = async () => null;
+  User.create = async () => {
+    const error = new Error("duplicate key");
+    error.code = 11000;
+    error.keyPattern = { email: 1 };
+    throw error;
+  };
+
+  await registerUser(
+    {
+      body: {
+        name: "Test User",
+        email: "test@example.com",
+        phone: "+37400000000",
+        password: "secret123",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Email already in use");
 });
 
 test("registerUser – new barber receives trial subscription", async () => {
@@ -972,6 +1103,7 @@ test("registerUser – new barber receives trial subscription", async () => {
     {
       body: {
         name: "Trial Barber",
+        email: "trial-barber@example.com",
         phone: "+37400000000",
         password: "secret123",
         role: "barber",
@@ -982,6 +1114,8 @@ test("registerUser – new barber receives trial subscription", async () => {
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.user.role, "barber");
+  assert.equal(res.body.user.email, "trial-barber@example.com");
+  assert.equal(res.body.user.emailVerified, false);
   assert.ok(res.body.token);
   assert.equal(createdSubscription.ownerType, "barber");
   assert.equal(createdSubscription.ownerRefModel, "User");
@@ -1000,10 +1134,14 @@ test("registerUser – client registration does not create subscription", async 
     phone: "+37400000000",
   });
   let subscriptionCreateCalled = false;
+  let createdPayload = null;
 
   process.env.JWT_SECRET = "test-secret";
   User.findOne = async () => null;
-  User.create = async (payload) => ({ ...clientUser, ...payload });
+  User.create = async (payload) => {
+    createdPayload = payload;
+    return { ...clientUser, ...payload };
+  };
   Subscription.create = async () => {
     subscriptionCreateCalled = true;
     return {};
@@ -1013,6 +1151,7 @@ test("registerUser – client registration does not create subscription", async 
     {
       body: {
         name: "Free Client",
+        email: "free-client@example.com",
         phone: "+37400000000",
         password: "secret123",
         role: "client",
@@ -1023,6 +1162,8 @@ test("registerUser – client registration does not create subscription", async 
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.user.role, "client");
+  assert.equal(res.body.user.email, "free-client@example.com");
+  assert.equal(createdPayload.email, "free-client@example.com");
   assert.equal(subscriptionCreateCalled, false);
 });
 

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
+import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -43,15 +44,20 @@ export const registerUser = async (req, res) => {
   try {
     const { name, password, role = "client" } = req.body;
     const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
+    const email = normalizeEmail(req.body.email);
 
-    if (!name || !phone || !password) {
-      return res.status(400).json({ message: "Name, phone, and password are required" });
+    if (!name || !phone || !email || !password) {
+      return res.status(400).json({ message: "Name, phone, email, and password are required" });
     }
 
     if (phone.length > MAX_PHONE_LENGTH) {
       return res.status(400).json({
         message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
       });
+    }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
     }
 
     if (typeof password !== "string" || password.length < 8) {
@@ -70,10 +76,17 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "Phone already exists" });
     }
 
+    const existingEmailUser = await User.findOne({ email });
+
+    if (existingEmailUser) {
+      return res.status(400).json({ message: "Email already in use" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
       name,
       phone,
+      email,
       password: hashedPassword,
       role,
     });
@@ -101,6 +114,10 @@ export const registerUser = async (req, res) => {
     });
   } catch (error) {
     if (error.code === 11000) {
+      if (error.keyPattern?.email || error.keyValue?.email) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
+
       return res.status(400).json({ message: "Phone already exists" });
     }
 

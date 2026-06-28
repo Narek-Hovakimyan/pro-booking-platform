@@ -19,6 +19,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "",
+    email: "",
     phone: "",
     password: "",
     role: "client",
@@ -41,9 +42,15 @@ export default function RegisterPage() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    const normalizedEmail = form.email.trim().toLowerCase();
 
-    if (!form.name || !form.phone || !form.password || !form.role) {
+    if (!form.name || !normalizedEmail || !form.phone || !form.password || !form.role) {
       setError(t("auth.register.missingFields"));
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError(t("auth.register.invalidEmail"));
       return;
     }
 
@@ -52,6 +59,7 @@ export default function RegisterPage() {
     try {
       const { data } = await api.post("/auth/register", {
         name: form.name,
+        email: normalizedEmail,
         phone: form.phone,
         password: form.password,
         role: form.role,
@@ -90,6 +98,18 @@ export default function RegisterPage() {
               disabled={isLoading}
               value={form.name}
               onChange={(event) => updateField("name", event.target.value)}
+            />
+          </label>
+
+          <label className="grid gap-2 text-sm font-semibold">
+            {t("auth.fields.email")}
+            <input
+              className="w-full rounded-2xl border p-3 font-normal"
+              placeholder={t("auth.fields.email")}
+              type="email"
+              disabled={isLoading}
+              value={form.email}
+              onChange={(event) => updateField("email", event.target.value)}
             />
           </label>
 

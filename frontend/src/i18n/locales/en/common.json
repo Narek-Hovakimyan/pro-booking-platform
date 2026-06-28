@@ -67,6 +67,7 @@
   "auth": {
     "fields": {
       "accountType": "Account type",
+      "email": "Email",
       "name": "Name",
       "password": "Password",
       "phone": "Phone"
@@ -85,6 +86,7 @@
       "description": "Create an account as a client or specialist.",
       "failed": "Registration failed. Please try again.",
       "hasAccount": "Already have an account?",
+      "invalidEmail": "Enter a valid email address.",
       "loginLink": "Sign in",
       "missingFields": "Fill in all fields.",
       "submit": "Register",
