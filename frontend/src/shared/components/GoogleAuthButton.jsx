@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useDispatch } from "react-redux";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import api from "@/shared/api/axios";
 import { loginUser } from "@/store/slices/authSlice";
 import { Button } from "@/shared/components/ui/button";
@@ -115,6 +116,7 @@ function ProfileCompletionModal({ credential, onComplete, onCancel, onCredential
 export default function GoogleAuthButton() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [completionCredential, setCompletionCredential] = useState(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -175,7 +177,7 @@ export default function GoogleAuthButton() {
           <div className="w-full border-t border-neutral-200" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-white px-2 text-neutral-500">or</span>
+          <span className="bg-white px-2 text-neutral-500">{t("auth.or")}</span>
         </div>
       </div>
 

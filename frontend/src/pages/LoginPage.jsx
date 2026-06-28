@@ -8,6 +8,9 @@ import { Button } from "@/shared/components/ui/button";
 import GoogleAuthButton from "@/shared/components/GoogleAuthButton";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { loginUser } from "@/store/slices/authSlice";
+import { CalendarCheck, Scissors, ShieldCheck } from "lucide-react";
+
+const googleAvailable = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
 export default function LoginPage() {
   const dispatch = useDispatch();
@@ -58,8 +61,7 @@ export default function LoginPage() {
       navigate(redirectPath || (data.user.role === "barber" ? "/admin" : "/"));
     } catch (requestError) {
       setError(
-        requestError.response?.data?.message ||
-          t("auth.login.failed")
+        requestError.response?.data?.message || t("auth.login.failed")
       );
     } finally {
       setIsLoading(false);
@@ -67,73 +69,111 @@ export default function LoginPage() {
   };
 
   return (
-    <Card className="mx-auto w-full max-w-xl rounded-2xl sm:rounded-3xl">
-      <CardContent className="space-y-6 p-4 sm:p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            {t("auth.login.title")}
-          </h1>
-          <p className="mt-2 text-neutral-500">
-            {t("auth.login.description")}
-          </p>
-        </div>
-
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.phone")}
-            <input
-              className="w-full rounded-2xl border p-3 font-normal"
-              placeholder={t("auth.fields.phone")}
-              disabled={isLoading}
-              value={form.phone}
-              onChange={(event) => updateField("phone", event.target.value)}
-            />
-          </label>
-
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.password")}
-            <input
-              className="w-full rounded-2xl border p-3 font-normal"
-              placeholder={t("auth.fields.password")}
-              type="password"
-              disabled={isLoading}
-              value={form.password}
-              onChange={(event) => updateField("password", event.target.value)}
-            />
-          </label>
-
-          <div className="text-right text-sm">
-            <Link
-              className="font-medium text-purple-700 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
-              to="/forgot-password"
-            >
-              Forgot password?
-            </Link>
+    <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center bg-gradient-to-b from-purple-50/80 to-neutral-50 px-4 py-10">
+      <div className="flex w-full max-w-5xl flex-col gap-8 lg:flex-row lg:items-center">
+        {/* Left column — benefits */}
+        <div className="flex-1 space-y-6">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-neutral-950 sm:text-4xl">
+              {t("auth.login.title")}
+            </h1>
+            <p className="mt-2 text-neutral-500">{t("auth.login.description")}</p>
           </div>
 
-          {error && (
-            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
+          <ul className="space-y-3">
+            <li className="flex items-center gap-3 text-sm text-neutral-700">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
+                <CalendarCheck className="h-4 w-4 text-purple-600" />
+              </div>
+              <span>{t("auth.benefits.bookings")}</span>
+            </li>
+            <li className="flex items-center gap-3 text-sm text-neutral-700">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
+                <Scissors className="h-4 w-4 text-purple-600" />
+              </div>
+              <span>{t("auth.benefits.salon")}</span>
+            </li>
+            <li className="flex items-center gap-3 text-sm text-neutral-700">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
+                <ShieldCheck className="h-4 w-4 text-purple-600" />
+              </div>
+              <span>{t("auth.benefits.secure")}</span>
+            </li>
+          </ul>
+        </div>
+
+        {/* Right column — login card */}
+        <Card className="w-full max-w-md rounded-3xl border-0 bg-white shadow-lg">
+          <div className="h-1.5 rounded-t-3xl bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500" />
+          <CardContent className="space-y-5 p-6 sm:p-7">
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold text-neutral-900" htmlFor="login-phone">
+                  {t("auth.fields.phone")}
+                </label>
+                <input
+                  id="login-phone"
+                  className="w-full rounded-2xl border border-neutral-200 p-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  placeholder={t("auth.fields.phone")}
+                  disabled={isLoading}
+                  value={form.phone}
+                  onChange={(event) => updateField("phone", event.target.value)}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold text-neutral-900" htmlFor="login-password">
+                  {t("auth.fields.password")}
+                </label>
+                <input
+                  id="login-password"
+                  className="w-full rounded-2xl border border-neutral-200 p-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  placeholder={t("auth.fields.password")}
+                  type="password"
+                  disabled={isLoading}
+                  value={form.password}
+                  onChange={(event) => updateField("password", event.target.value)}
+                />
+              </div>
+
+              <div className="text-right text-sm">
+                <Link
+                  className="font-medium text-purple-700 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+                  to="/forgot-password"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+
+              {error && (
+                <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {error}
+                </p>
+              )}
+
+              <Button
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600"
+                type="submit"
+                disabled={isLoading}
+              >
+                {isLoading ? t("auth.login.submitting") : t("auth.login.submit")}
+              </Button>
+            </form>
+
+            {googleAvailable && <GoogleAuthButton />}
+
+            <p className="text-center text-sm text-neutral-500">
+              {t("auth.login.noAccount")}{" "}
+              <Link
+                className="font-semibold text-neutral-900 hover:text-purple-700"
+                to={redirectPath ? `/register?redirect=${encodeURIComponent(redirectPath)}` : "/register"}
+              >
+                {t("auth.login.registerLink")}
+              </Link>
             </p>
-          )}
-
-          <Button className="w-full" type="submit" disabled={isLoading}>
-            {isLoading ? t("auth.login.submitting") : t("auth.login.submit")}
-          </Button>
-        </form>
-
-        <GoogleAuthButton />
-
-        <p className="text-sm text-neutral-500">
-          {t("auth.login.noAccount")}{" "}
-          <Link
-            className="font-medium text-neutral-900"
-            to={redirectPath ? `/register?redirect=${encodeURIComponent(redirectPath)}` : "/register"}
-          >
-            {t("auth.login.registerLink")}
-          </Link>
-        </p>
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }

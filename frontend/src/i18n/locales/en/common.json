@@ -65,6 +65,12 @@
     }
   },
   "auth": {
+    "benefits": {
+      "bookings": "Book appointments faster",
+      "secure": "Secure account access",
+      "salon": "Manage salon services"
+    },
+    "or": "or continue with",
     "fields": {
       "accountType": "Account type",
       "email": "Email",

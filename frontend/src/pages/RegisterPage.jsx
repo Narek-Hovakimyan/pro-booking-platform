@@ -8,6 +8,9 @@ import { Button } from "@/shared/components/ui/button";
 import GoogleAuthButton from "@/shared/components/GoogleAuthButton";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { registerUser } from "@/store/slices/authSlice";
+import { CalendarCheck, Scissors, ShieldCheck } from "lucide-react";
+
+const googleAvailable = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
 export default function RegisterPage() {
   const dispatch = useDispatch();
@@ -70,109 +73,158 @@ export default function RegisterPage() {
       navigate(redirectPath || (data.user.role === "barber" ? "/admin" : "/"));
     } catch (requestError) {
       setError(
-        requestError.response?.data?.message ||
-          t("auth.register.failed")
+        requestError.response?.data?.message || t("auth.register.failed")
       );
     } finally {
       setIsLoading(false);
     }
   };
 
+  const inputClass =
+    "w-full rounded-2xl border border-neutral-200 p-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100";
+
   return (
-    <Card className="mx-auto w-full max-w-xl rounded-2xl sm:rounded-3xl">
-      <CardContent className="space-y-6 p-4 sm:p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            {t("auth.register.title")}
-          </h1>
-          <p className="mt-2 text-neutral-500">
-            {t("auth.register.description")}
-          </p>
+    <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center bg-gradient-to-b from-purple-50/80 to-neutral-50 px-4 py-10">
+      <div className="flex w-full max-w-5xl flex-col gap-8 lg:flex-row lg:items-center">
+        {/* Left column — benefits */}
+        <div className="flex-1 space-y-6">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-neutral-950 sm:text-4xl">
+              {t("auth.register.title")}
+            </h1>
+            <p className="mt-2 text-neutral-500">{t("auth.register.description")}</p>
+          </div>
+
+          <ul className="space-y-3">
+            <li className="flex items-center gap-3 text-sm text-neutral-700">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
+                <CalendarCheck className="h-4 w-4 text-purple-600" />
+              </div>
+              <span>{t("auth.benefits.bookings")}</span>
+            </li>
+            <li className="flex items-center gap-3 text-sm text-neutral-700">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
+                <Scissors className="h-4 w-4 text-purple-600" />
+              </div>
+              <span>{t("auth.benefits.salon")}</span>
+            </li>
+            <li className="flex items-center gap-3 text-sm text-neutral-700">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
+                <ShieldCheck className="h-4 w-4 text-purple-600" />
+              </div>
+              <span>{t("auth.benefits.secure")}</span>
+            </li>
+          </ul>
         </div>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.name")}
-            <input
-              className="w-full rounded-2xl border p-3 font-normal"
-              placeholder={t("auth.fields.name")}
-              disabled={isLoading}
-              value={form.name}
-              onChange={(event) => updateField("name", event.target.value)}
-            />
-          </label>
+        {/* Right column — register card */}
+        <Card className="w-full max-w-md rounded-3xl border-0 bg-white shadow-lg">
+          <div className="h-1.5 rounded-t-3xl bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500" />
+          <CardContent className="space-y-5 p-6 sm:p-7">
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold" htmlFor="reg-name">
+                  {t("auth.fields.name")}
+                </label>
+                <input
+                  id="reg-name"
+                  className={inputClass}
+                  placeholder={t("auth.fields.name")}
+                  disabled={isLoading}
+                  value={form.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                />
+              </div>
 
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.email")}
-            <input
-              className="w-full rounded-2xl border p-3 font-normal"
-              placeholder={t("auth.fields.email")}
-              type="email"
-              disabled={isLoading}
-              value={form.email}
-              onChange={(event) => updateField("email", event.target.value)}
-            />
-          </label>
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold" htmlFor="reg-email">
+                  {t("auth.fields.email")}
+                </label>
+                <input
+                  id="reg-email"
+                  className={inputClass}
+                  placeholder={t("auth.fields.email")}
+                  type="email"
+                  disabled={isLoading}
+                  value={form.email}
+                  onChange={(event) => updateField("email", event.target.value)}
+                />
+              </div>
 
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.phone")}
-            <input
-              className="w-full rounded-2xl border p-3 font-normal"
-              placeholder={t("auth.fields.phone")}
-              disabled={isLoading}
-              value={form.phone}
-              onChange={(event) => updateField("phone", event.target.value)}
-            />
-          </label>
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold" htmlFor="reg-phone">
+                  {t("auth.fields.phone")}
+                </label>
+                <input
+                  id="reg-phone"
+                  className={inputClass}
+                  placeholder={t("auth.fields.phone")}
+                  disabled={isLoading}
+                  value={form.phone}
+                  onChange={(event) => updateField("phone", event.target.value)}
+                />
+              </div>
 
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.password")}
-            <input
-              className="w-full rounded-2xl border p-3 font-normal"
-              placeholder={t("auth.fields.password")}
-              type="password"
-              disabled={isLoading}
-              value={form.password}
-              onChange={(event) => updateField("password", event.target.value)}
-            />
-          </label>
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold" htmlFor="reg-password">
+                  {t("auth.fields.password")}
+                </label>
+                <input
+                  id="reg-password"
+                  className={inputClass}
+                  placeholder={t("auth.fields.password")}
+                  type="password"
+                  disabled={isLoading}
+                  value={form.password}
+                  onChange={(event) => updateField("password", event.target.value)}
+                />
+              </div>
 
-          <label className="grid gap-2 text-sm font-semibold">
-            {t("auth.fields.accountType")}
-            <select
-              className="w-full rounded-2xl border bg-white p-3 font-normal"
-              disabled={isLoading}
-              value={form.role}
-              onChange={(event) => updateField("role", event.target.value)}
-            >
-              <option value="client">{t("auth.roles.client")}</option>
-              <option value="barber">{t("auth.roles.barber")}</option>
-            </select>
-          </label>
+              <div className="grid gap-2">
+                <label className="text-sm font-semibold" htmlFor="reg-role">
+                  {t("auth.fields.accountType")}
+                </label>
+                <select
+                  id="reg-role"
+                  className={inputClass + " bg-white"}
+                  disabled={isLoading}
+                  value={form.role}
+                  onChange={(event) => updateField("role", event.target.value)}
+                >
+                  <option value="client">{t("auth.roles.client")}</option>
+                  <option value="barber">{t("auth.roles.barber")}</option>
+                </select>
+              </div>
 
-          {error && (
-            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
+              {error && (
+                <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {error}
+                </p>
+              )}
+
+              <Button
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600"
+                type="submit"
+                disabled={isLoading}
+              >
+                {isLoading ? t("auth.register.submitting") : t("auth.register.submit")}
+              </Button>
+            </form>
+
+            {googleAvailable && <GoogleAuthButton />}
+
+            <p className="text-center text-sm text-neutral-500">
+              {t("auth.register.hasAccount")}{" "}
+              <Link
+                className="font-semibold text-neutral-900 hover:text-purple-700"
+                to={redirectPath ? `/login?redirect=${encodeURIComponent(redirectPath)}` : "/login"}
+              >
+                {t("auth.register.loginLink")}
+              </Link>
             </p>
-          )}
-
-          <Button className="w-full" type="submit" disabled={isLoading}>
-            {isLoading ? t("auth.register.submitting") : t("auth.register.submit")}
-          </Button>
-        </form>
-
-        <GoogleAuthButton />
-
-        <p className="text-sm text-neutral-500">
-          {t("auth.register.hasAccount")}{" "}
-          <Link
-            className="font-medium text-neutral-900"
-            to={redirectPath ? `/login?redirect=${encodeURIComponent(redirectPath)}` : "/login"}
-          >
-            {t("auth.register.loginLink")}
-          </Link>
-        </p>
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
