@@ -379,4 +379,22 @@ describe("User Google auth foundation", () => {
     assert.equal(user.validateSync(), undefined);
     assert.ok(invalidUser.validateSync()?.errors?.["authProviders.0"]);
   });
+
+  test("password remains required for password users but not Google-only users", () => {
+    const passwordUser = new User({
+      name: "Password User",
+      phone: phone("password-required"),
+      authProviders: ["password"],
+    });
+    const googleUser = new User({
+      name: "Google User",
+      phone: phone("google-no-password"),
+      email: "google@example.com",
+      googleId: "google-sub",
+      authProviders: ["google"],
+    });
+
+    assert.ok(passwordUser.validateSync()?.errors?.password);
+    assert.equal(googleUser.validateSync(), undefined);
+  });
 });

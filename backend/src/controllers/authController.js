@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { sendPasswordResetEmail } from "../services/emailService.js";
+import { verifyGoogleIdToken } from "../services/googleAuthService.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
 import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
 
@@ -56,6 +57,51 @@ const getPasswordResetClientUrl = () => {
   }
 
   return "http://localhost:5173";
+};
+
+const addAuthProvider = (user, provider) => {
+  const providers = Array.isArray(user.authProviders) ? user.authProviders : [];
+
+  if (!providers.includes(provider)) {
+    user.authProviders = [...providers, provider];
+    return true;
+  }
+
+  return false;
+};
+
+const applyGoogleLink = (user, googlePayload) => {
+  let changed = false;
+
+  if (!user.googleId) {
+    user.googleId = googlePayload.googleId;
+    changed = true;
+  }
+
+  if (addAuthProvider(user, "google")) {
+    changed = true;
+  }
+
+  if (
+    user.emailVerified !== true &&
+    normalizeEmail(user.email) === googlePayload.email
+  ) {
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    changed = true;
+  }
+
+  if (!user.avatarUrl && googlePayload.picture) {
+    user.avatarUrl = googlePayload.picture;
+    changed = true;
+  }
+
+  return changed;
+};
+
+const getGoogleDisplayName = ({ name, email }) => {
+  const fallback = email.split("@")[0] || "Google User";
+  return name || fallback;
 };
 
 export const registerUser = async (req, res) => {
@@ -159,6 +205,10 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid phone or password" });
     }
 
+    if (!user.password) {
+      return res.status(401).json({ message: "Invalid phone or password" });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
@@ -174,6 +224,133 @@ export const loginUser = async (req, res) => {
   } catch (error) {
     console.error("Login failed:", error);
     return res.status(500).json({ message: "Login failed" });
+  }
+};
+
+export const googleAuth = async (req, res) => {
+  try {
+    const credential = req.body?.credential || req.body?.idToken;
+
+    if (!credential || typeof credential !== "string") {
+      return res.status(400).json({ message: "Google credential is required" });
+    }
+
+    let googlePayload;
+
+    try {
+      googlePayload = await verifyGoogleIdToken(credential);
+    } catch {
+      return res.status(401).json({ message: "Invalid Google credential" });
+    }
+
+    const existingGoogleUser = await User.findOne({
+      googleId: googlePayload.googleId,
+    }).select("+googleId");
+
+    if (existingGoogleUser) {
+      if (applyGoogleLink(existingGoogleUser, googlePayload)) {
+        await existingGoogleUser.save();
+      }
+
+      const token = signToken(existingGoogleUser._id);
+      return res.json({ token, user: getUserData(existingGoogleUser) });
+    }
+
+    const existingEmailUser = await User.findOne({
+      email: googlePayload.email,
+    }).select("+googleId");
+
+    if (existingEmailUser) {
+      if (
+        existingEmailUser.googleId &&
+        existingEmailUser.googleId !== googlePayload.googleId
+      ) {
+        return res.status(409).json({ message: "Google account conflict" });
+      }
+
+      if (applyGoogleLink(existingEmailUser, googlePayload)) {
+        await existingEmailUser.save();
+      }
+
+      const token = signToken(existingEmailUser._id);
+      return res.json({ token, user: getUserData(existingEmailUser) });
+    }
+
+    const { role } = req.body || {};
+    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    const missingFields = [];
+
+    if (!role) missingFields.push("role");
+    if (!phone) missingFields.push("phone");
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: "Additional information required",
+        requiresProfileCompletion: true,
+        fields: missingFields,
+      });
+    }
+
+    if (!["client", "barber"].includes(role)) {
+      return res.status(400).json({ message: "Role must be client or barber" });
+    }
+
+    if (phone.length > MAX_PHONE_LENGTH) {
+      return res.status(400).json({
+        message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
+      });
+    }
+
+    const existingPhoneUser = await User.findOne({ phone });
+
+    if (existingPhoneUser) {
+      return res.status(400).json({ message: "Phone already exists" });
+    }
+
+    const user = await User.create({
+      name: getGoogleDisplayName(googlePayload),
+      phone,
+      email: googlePayload.email,
+      emailVerified: true,
+      emailVerifiedAt: new Date(),
+      googleId: googlePayload.googleId,
+      authProviders: ["google"],
+      role,
+      avatarUrl: googlePayload.picture || "",
+    });
+
+    if (role === "barber") {
+      try {
+        await createTrialSubscription({
+          ownerType: "barber",
+          ownerId: user._id,
+          payerId: user._id,
+          seatCount: 1,
+        });
+      } catch (subscriptionError) {
+        await User.findByIdAndDelete(user._id).catch(() => {});
+        console.error("Google registration trial creation failed:", subscriptionError);
+        return res.status(500).json({ message: "Google registration failed" });
+      }
+    }
+
+    const token = signToken(user._id);
+    return res.status(201).json({ token, user: getUserData(user) });
+  } catch (error) {
+    if (error.code === 11000) {
+      if (error.keyPattern?.googleId || error.keyValue?.googleId) {
+        return res.status(409).json({ message: "Google account conflict" });
+      }
+
+      if (error.keyPattern?.email || error.keyValue?.email) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
+
+      return res.status(400).json({ message: "Phone already exists" });
+    }
+
+    console.error("Google authentication failed:", error);
+    return res.status(500).json({ message: "Google authentication failed" });
   }
 };
 

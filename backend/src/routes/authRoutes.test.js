@@ -64,16 +64,19 @@ test("auth routes apply rate limiters before controllers", () => {
   const forgotPasswordRoute = authRoutes.stack.find(
     (layer) => layer.route.path === "/forgot-password"
   );
+  const googleRoute = authRoutes.stack.find((layer) => layer.route.path === "/google");
   const resetPasswordRoute = authRoutes.stack.find(
     (layer) => layer.route.path === "/reset-password"
   );
 
   assert.equal(loginRoute.route.stack[0].handle, authLimiter);
   assert.equal(registerRoute.route.stack[0].handle, authLimiter);
+  assert.equal(googleRoute.route.stack[0].handle, authLimiter);
   assert.equal(forgotPasswordRoute.route.stack[0].handle, authLimiter);
   assert.equal(resetPasswordRoute.route.stack[0].handle, authLimiter);
   assert.deepEqual(routes["/login"], ["<anonymous>", "loginUser"]);
   assert.deepEqual(routes["/register"], ["<anonymous>", "registerUser"]);
+  assert.deepEqual(routes["/google"], ["<anonymous>", "googleAuth"]);
   assert.deepEqual(routes["/forgot-password"], ["<anonymous>", "forgotPassword"]);
   assert.deepEqual(routes["/reset-password"], ["<anonymous>", "resetPassword"]);
 });
