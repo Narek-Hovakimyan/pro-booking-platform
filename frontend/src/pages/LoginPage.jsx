@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
+import GoogleAuthButton from "@/shared/components/GoogleAuthButton";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { loginUser } from "@/store/slices/authSlice";
 
@@ -120,6 +121,8 @@ export default function LoginPage() {
             {isLoading ? t("auth.login.submitting") : t("auth.login.submit")}
           </Button>
         </form>
+
+        <GoogleAuthButton />
 
         <p className="text-sm text-neutral-500">
           {t("auth.login.noAccount")}{" "}
