@@ -173,6 +173,20 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  googleId: {
+    type: String,
+    trim: true,
+    select: false,
+  },
+  authProviders: {
+    type: [
+      {
+        type: String,
+        enum: ["password", "google"],
+      },
+    ],
+    default: ["password"],
+  },
   emailVerificationTokenHash: {
     type: String,
     default: "",
@@ -378,6 +392,7 @@ userSchema.methods.hasApprovedSalon = function (salonId) {
 };
 
 userSchema.index({ email: 1 }, { unique: true, sparse: true });
+userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 
 const User = mongoose.model("User", userSchema);
 

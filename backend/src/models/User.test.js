@@ -352,3 +352,31 @@ describe("User platform admin role model", () => {
     assert.equal(barberAdmin.platformRole, "admin");
   });
 });
+
+describe("User Google auth foundation", () => {
+  test("googleId is hidden by default and has sparse unique index", () => {
+    assert.equal(User.schema.path("googleId").options.select, false);
+    assert.deepEqual(
+      User.schema.indexes().find(([fields]) => fields.googleId === 1),
+      [{ googleId: 1 }, { unique: true, sparse: true }]
+    );
+  });
+
+  test("authProviders defaults to password and only allows supported providers", () => {
+    const user = new User({
+      name: "Provider User",
+      phone: phone("provider-user"),
+      password: "password123",
+    });
+    const invalidUser = new User({
+      name: "Invalid Provider",
+      phone: phone("invalid-provider"),
+      password: "password123",
+      authProviders: ["facebook"],
+    });
+
+    assert.deepEqual(user.authProviders, ["password"]);
+    assert.equal(user.validateSync(), undefined);
+    assert.ok(invalidUser.validateSync()?.errors?.["authProviders.0"]);
+  });
+});
