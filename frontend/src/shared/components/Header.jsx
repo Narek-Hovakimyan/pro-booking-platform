@@ -445,20 +445,28 @@ export default function Header() {
           )}
 
           {!isAuthenticated && (
-            <>
+            <div className="flex items-center gap-0.5 rounded-xl bg-neutral-800 p-0.5">
               <Link
                 to="/login"
-                className="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-300 transition hover:bg-white/10 hover:text-white"
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  pathname === "/login" || pathname.startsWith("/forgot-password") || pathname.startsWith("/reset-password")
+                    ? "bg-white text-neutral-950 shadow-sm"
+                    : "text-neutral-300 hover:bg-white/10 hover:text-white"
+                }`}
               >
                 {t("nav.signIn")}
               </Link>
               <Link
                 to="/register"
-                className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-neutral-200"
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  pathname === "/register"
+                    ? "bg-white text-neutral-950 shadow-sm"
+                    : "text-neutral-300 hover:bg-white/10 hover:text-white"
+                }`}
               >
                 {t("nav.join")}
               </Link>
-            </>
+            </div>
           )}
 
           {/* Mobile menu toggle */}
