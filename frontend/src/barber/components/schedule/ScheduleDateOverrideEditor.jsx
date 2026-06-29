@@ -3,6 +3,28 @@ import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
 import { formatDateLabel } from "@/shared/utils/dates";
 
+const WORK_TIME_PRESETS = ["09:00", "10:00", "18:00", "20:00"];
+const BREAK_TIME_PRESETS = ["12:00", "13:00", "14:00", "15:00"];
+
+function TimePresetChips({ disabled, label, onSelect, presets }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs font-normal text-neutral-400">{label}</span>
+      {presets.map((preset) => (
+        <button
+          key={preset}
+          type="button"
+          disabled={disabled}
+          onClick={() => onSelect(preset)}
+          className="rounded-full border border-purple-100 bg-white px-2.5 py-1 text-xs font-semibold tabular-nums text-purple-700 shadow-sm transition hover:border-purple-200 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {preset}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function ScheduleDateOverrideEditor({
   dateOptions,
   dateStatusMap,
@@ -218,6 +240,15 @@ export default function ScheduleDateOverrideEditor({
                       aria-describedby={fieldErrors.startTime ? "start-time-error" : undefined}
                       aria-invalid={Boolean(fieldErrors.startTime)}
                     />
+                    <p className="text-xs font-normal text-neutral-400">
+                      Use 24-hour format, for example 09:00.
+                    </p>
+                    <TimePresetChips
+                      disabled={isSaving}
+                      label="Set start:"
+                      presets={WORK_TIME_PRESETS}
+                      onSelect={(value) => onUpdateTimeDraft("startTime", value)}
+                    />
                     {fieldErrors.startTime && (
                       <p id="start-time-error" className="text-xs font-normal text-red-600" role="alert">
                         {fieldErrors.startTime}
@@ -237,6 +268,15 @@ export default function ScheduleDateOverrideEditor({
                       aria-label="Work end time"
                       aria-describedby={fieldErrors.endTime ? "end-time-error" : undefined}
                       aria-invalid={Boolean(fieldErrors.endTime)}
+                    />
+                    <p className="text-xs font-normal text-neutral-400">
+                      End time must be after start time.
+                    </p>
+                    <TimePresetChips
+                      disabled={isSaving}
+                      label="Set end:"
+                      presets={WORK_TIME_PRESETS}
+                      onSelect={(value) => onUpdateTimeDraft("endTime", value)}
                     />
                     {fieldErrors.endTime && (
                       <p id="end-time-error" className="text-xs font-normal text-red-600" role="alert">
@@ -275,48 +315,68 @@ export default function ScheduleDateOverrideEditor({
                     </button>
                   )}
                 </div>
+                <p className="mb-3 text-xs text-neutral-400">
+                  Break start and end are optional, but both must be filled when used.
+                </p>
                 {isBreakEnabled && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-1.5 text-sm font-medium">
-                      Break start
-                      <input
-                        className={timeInputClass(Boolean(fieldErrors.breakStart))}
-                        disabled={isSaving}
-                        inputMode="numeric"
-                        pattern="[0-9]{2}:[0-9]{2}"
-                        value={activeDraft.breakStart || ""}
-                        onChange={(e) => onUpdateTimeDraft("breakStart", e.target.value)}
-                        placeholder="e.g. 12:00"
-                        aria-label="Break start time"
-                        aria-describedby={fieldErrors.breakStart ? "break-start-error" : undefined}
-                        aria-invalid={Boolean(fieldErrors.breakStart)}
-                      />
-                      {fieldErrors.breakStart && (
-                        <p id="break-start-error" className="text-xs font-normal text-red-600" role="alert">
-                          {fieldErrors.breakStart}
-                        </p>
-                      )}
-                    </label>
-                    <label className="grid gap-1.5 text-sm font-medium">
-                      Break end
-                      <input
-                        className={timeInputClass(Boolean(fieldErrors.breakEnd))}
-                        disabled={isSaving}
-                        inputMode="numeric"
-                        pattern="[0-9]{2}:[0-9]{2}"
-                        value={activeDraft.breakEnd || ""}
-                        onChange={(e) => onUpdateTimeDraft("breakEnd", e.target.value)}
-                        placeholder="e.g. 13:00"
-                        aria-label="Break end time"
-                        aria-describedby={fieldErrors.breakEnd ? "break-end-error" : undefined}
-                        aria-invalid={Boolean(fieldErrors.breakEnd)}
-                      />
-                      {fieldErrors.breakEnd && (
-                        <p id="break-end-error" className="text-xs font-normal text-red-600" role="alert">
-                          {fieldErrors.breakEnd}
-                        </p>
-                      )}
-                    </label>
+                  <div className="rounded-2xl border border-purple-100 bg-white p-3 shadow-sm">
+                    <p className="mb-3 text-xs text-neutral-500">
+                      Break time must be inside working hours.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1.5 text-sm font-medium">
+                        Break start
+                        <input
+                          className={timeInputClass(Boolean(fieldErrors.breakStart))}
+                          disabled={isSaving}
+                          inputMode="numeric"
+                          pattern="[0-9]{2}:[0-9]{2}"
+                          value={activeDraft.breakStart || ""}
+                          onChange={(e) => onUpdateTimeDraft("breakStart", e.target.value)}
+                          placeholder="e.g. 12:00"
+                          aria-label="Break start time"
+                          aria-describedby={fieldErrors.breakStart ? "break-start-error" : undefined}
+                          aria-invalid={Boolean(fieldErrors.breakStart)}
+                        />
+                        <TimePresetChips
+                          disabled={isSaving}
+                          label="Set start:"
+                          presets={BREAK_TIME_PRESETS}
+                          onSelect={(value) => onUpdateTimeDraft("breakStart", value)}
+                        />
+                        {fieldErrors.breakStart && (
+                          <p id="break-start-error" className="text-xs font-normal text-red-600" role="alert">
+                            {fieldErrors.breakStart}
+                          </p>
+                        )}
+                      </label>
+                      <label className="grid gap-1.5 text-sm font-medium">
+                        Break end
+                        <input
+                          className={timeInputClass(Boolean(fieldErrors.breakEnd))}
+                          disabled={isSaving}
+                          inputMode="numeric"
+                          pattern="[0-9]{2}:[0-9]{2}"
+                          value={activeDraft.breakEnd || ""}
+                          onChange={(e) => onUpdateTimeDraft("breakEnd", e.target.value)}
+                          placeholder="e.g. 13:00"
+                          aria-label="Break end time"
+                          aria-describedby={fieldErrors.breakEnd ? "break-end-error" : undefined}
+                          aria-invalid={Boolean(fieldErrors.breakEnd)}
+                        />
+                        <TimePresetChips
+                          disabled={isSaving}
+                          label="Set end:"
+                          presets={BREAK_TIME_PRESETS}
+                          onSelect={(value) => onUpdateTimeDraft("breakEnd", value)}
+                        />
+                        {fieldErrors.breakEnd && (
+                          <p id="break-end-error" className="text-xs font-normal text-red-600" role="alert">
+                            {fieldErrors.breakEnd}
+                          </p>
+                        )}
+                      </label>
+                    </div>
                   </div>
                 )}
                 <p className="mt-2 text-xs text-neutral-400">
