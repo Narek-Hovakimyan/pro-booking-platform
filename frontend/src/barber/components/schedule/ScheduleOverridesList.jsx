@@ -11,16 +11,21 @@ export default function ScheduleOverridesList({
   disabled,
 }) {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40">
       <CardContent className="p-4 sm:p-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold">Date-Specific Overrides</h2>
-            <p className="mt-1 text-xs text-neutral-500">
+            <p className="text-xs font-semibold uppercase tracking-wider text-purple-500">
+              Saved Changes
+            </p>
+            <h2 className="mt-1 text-lg font-bold text-neutral-950">
+              Date-specific overrides
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
               Review custom dates, day-off overrides, and break changes for this salon.
             </p>
           </div>
-          <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-600">
+          <span className="w-fit rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700 ring-1 ring-purple-100">
             {overrides.length} saved
           </span>
         </div>
@@ -46,8 +51,8 @@ export default function ScheduleOverridesList({
                   className={cn(
                     "rounded-2xl border p-4 shadow-sm transition hover:shadow-md",
                     isWorkingOverride
-                      ? "border-blue-100 bg-blue-50/40"
-                      : "border-red-100 bg-red-50/60"
+                      ? "border-emerald-100 bg-emerald-50/50"
+                      : "border-rose-100 bg-rose-50/60"
                   )}
                   key={dateKey}
                 >
@@ -64,8 +69,8 @@ export default function ScheduleOverridesList({
                       className={cn(
                         "inline-flex shrink-0 items-center rounded-full px-3 py-1 text-sm font-semibold shadow-sm ring-1",
                         isWorkingOverride
-                          ? "bg-blue-100 text-blue-800 ring-blue-200"
-                          : "bg-red-100 text-red-700 ring-red-200"
+                          ? "bg-emerald-100 text-emerald-800 ring-emerald-200"
+                          : "bg-rose-100 text-rose-700 ring-rose-200"
                       )}
                     >
                       {isWorkingOverride ? "Working" : "Off"}
@@ -103,16 +108,16 @@ export default function ScheduleOverridesList({
 
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                     <Button
-                      className="w-full sm:w-auto"
                       disabled={disabled}
                       onClick={() => onEdit(dateKey)}
                       size="sm"
                       variant="outline"
+                      className="w-full border-purple-200 text-purple-700 hover:bg-purple-50 sm:w-auto"
                     >
                       Edit
                     </Button>
                     <Button
-                      className="w-full border-red-200 text-red-700 hover:bg-red-50 sm:w-auto"
+                      className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
                       disabled={disabled}
                       onClick={() => onRemove(dateKey)}
                       size="sm"

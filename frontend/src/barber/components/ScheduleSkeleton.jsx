@@ -3,14 +3,14 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 function SkeletonBlock({ className = "" }) {
   return (
     <div
-      className={`animate-pulse rounded-xl bg-neutral-100 ${className}`}
+      className={`animate-pulse rounded-2xl bg-purple-100/70 ${className}`}
     />
   );
 }
 
 export default function ScheduleSkeleton() {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
+    <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40 lg:col-span-3">
       <CardContent className="space-y-5 p-4 sm:p-6">
         <SkeletonBlock className="h-8 w-40" />
         <SkeletonBlock className="h-4 w-72" />

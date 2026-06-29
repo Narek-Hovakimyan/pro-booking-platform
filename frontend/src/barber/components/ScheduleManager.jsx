@@ -33,8 +33,8 @@ import {
 
 const timeInputClass = (hasError) =>
   cn(
-    "h-11 w-full rounded-xl border px-3 py-2 text-sm font-normal tabular-nums transition",
-    "focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
+    "h-12 w-full rounded-2xl border border-purple-100 bg-white px-3 py-2 text-sm font-normal tabular-nums text-neutral-900 shadow-sm transition",
+    "focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-100",
     "disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400 disabled:opacity-60",
     hasError &&
       "border-red-400 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-200"
@@ -694,7 +694,7 @@ export default function ScheduleManager({
   // No salon memberships
   if (approvedSalons.length === 0) {
     return (
-      <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
+      <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40 lg:col-span-3">
         <CardContent className="space-y-5 p-4 sm:p-6">
           <h2 className="text-xl font-bold sm:text-2xl">Schedule</h2>
           <EmptyState
@@ -710,13 +710,13 @@ export default function ScheduleManager({
   if (!activeSalonId) {
     return (
       <>
-        <Card className="rounded-2xl sm:rounded-3xl lg:col-span-3">
+        <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40 lg:col-span-3">
           <CardContent className="space-y-5 p-4 sm:p-6">
             <h2 className="text-xl font-bold sm:text-2xl">Schedule</h2>
             <p className="text-neutral-500">
               Please select a salon to manage schedule.
             </p>
-            <Button className="w-full sm:w-auto" onClick={openDrawer} variant="outline">
+            <Button className="w-full border-purple-200 text-purple-700 hover:bg-purple-50 sm:w-auto" onClick={openDrawer} variant="outline">
               Select Salon
             </Button>
           </CardContent>
@@ -738,14 +738,23 @@ export default function ScheduleManager({
   const isScheduleEmpty = hasNoScheduleData && !isLoadingEffective;
 
   return (
-    <div className={cn("space-y-6", approvedSalons.length > 0 && activeSalonId ? "lg:col-span-3" : "")}>
+    <div
+      className={cn(
+        "w-full rounded-[2rem] border border-purple-100 bg-gradient-to-br from-purple-50 via-white to-pink-50/70 p-3 shadow-sm shadow-purple-100/70 sm:p-5",
+        approvedSalons.length > 0 && activeSalonId ? "lg:col-span-3" : ""
+      )}
+    >
+      <div className="mx-auto max-w-6xl space-y-6">
       {/* ─── Header ─── */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+      <div className="rounded-3xl border border-white/70 bg-white/75 p-5 shadow-sm shadow-purple-100/60 backdrop-blur sm:p-6">
+        <p className="text-xs font-semibold uppercase tracking-wider text-purple-500">
+          Admin schedule
+        </p>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-neutral-950 sm:text-3xl">
           Schedule
         </h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Set your working hours, breaks, and day-specific overrides for the selected salon.
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
+          Set weekly hours, days off, breaks, and date overrides for the selected salon.
         </p>
       </div>
 
@@ -761,7 +770,7 @@ export default function ScheduleManager({
       {isLoadingEffective ? (
         <ScheduleSkeleton />
       ) : isScheduleEmpty ? (
-        <Card className="rounded-2xl sm:rounded-3xl">
+        <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40">
           <CardContent className="p-4 sm:p-6">
             <EmptyState
               title="No schedule configured yet"
@@ -774,7 +783,7 @@ export default function ScheduleManager({
           {/* ─── Inline Status Banner ─── */}
           {displayError && (
             <div
-              className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+              className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-sm"
               role="alert"
             >
               <strong className="block font-semibold">Error</strong>
@@ -783,7 +792,7 @@ export default function ScheduleManager({
           )}
           {saveSuccess && (
             <div
-              className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700"
+              className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-700 shadow-sm"
               role="status"
             >
               {saveSuccess}
@@ -838,6 +847,7 @@ export default function ScheduleManager({
         onSelect={handleSalonSelect}
         isLoading={false}
       />
+      </div>
     </div>
   );
 }

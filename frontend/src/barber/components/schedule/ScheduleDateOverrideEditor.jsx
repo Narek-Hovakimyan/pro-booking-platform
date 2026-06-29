@@ -27,10 +27,15 @@ export default function ScheduleDateOverrideEditor({
   onMarkDayOff,
 }) {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40">
       <CardContent className="p-4 sm:p-6">
-        <h2 className="text-lg font-bold">Date-Specific Override</h2>
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="text-xs font-semibold uppercase tracking-wider text-purple-500">
+          Date Overrides
+        </p>
+        <h2 className="mt-1 text-lg font-bold text-neutral-950">
+          Date-specific override
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-500">
           Customize hours or mark a day off for a specific date.
         </p>
 
@@ -50,13 +55,13 @@ export default function ScheduleDateOverrideEditor({
                   aria-pressed={day.value === selectedDateKey}
                   aria-label={`${day.label} — ${status.isCustom ? "Custom" : status.isDayOff ? "Day off" : "Default"}`}
                   className={cn(
-                    "flex flex-col items-center gap-0 rounded-xl px-0.5 py-2 text-[10px] leading-tight transition",
-                    "focus:outline-none focus:ring-2 focus:ring-neutral-900/20",
+                    "flex min-h-[76px] flex-col items-center justify-center gap-0 rounded-2xl border px-0.5 py-2 text-[10px] leading-tight transition",
+                    "focus:outline-none focus:ring-2 focus:ring-purple-200",
                     day.value === selectedDateKey
-                      ? "bg-neutral-900 text-white shadow-sm"
+                      ? "border-purple-500 bg-gradient-to-br from-purple-600 to-pink-500 text-white shadow-md shadow-purple-200"
                       : status.isPast
-                        ? "text-neutral-300 cursor-not-allowed"
-                        : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+                        ? "cursor-not-allowed border-neutral-100 bg-neutral-50 text-neutral-300"
+                        : "border-purple-100 bg-white text-neutral-600 shadow-sm shadow-purple-100/40 hover:border-purple-200 hover:bg-purple-50 hover:text-neutral-900"
                   )}
                 >
                   <span className="text-[10px] font-semibold uppercase tracking-wide">
@@ -88,7 +93,7 @@ export default function ScheduleDateOverrideEditor({
           <label className="mt-3 grid max-w-xs gap-1.5 text-sm font-medium">
             <span>Or pick a custom date</span>
             <input
-              className="rounded-xl border border-neutral-200 px-3 py-2.5 text-sm font-normal focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+              className="h-12 rounded-2xl border border-purple-100 px-3 py-2.5 text-sm font-normal shadow-sm focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-100"
               min={todayKey}
               type="date"
               value={selectedDateKey}
@@ -98,15 +103,15 @@ export default function ScheduleDateOverrideEditor({
           </label>
         </div>
 
-        <div className="mt-5 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="mt-5 rounded-3xl border border-purple-100 bg-gradient-to-br from-white to-purple-50/40 p-4 shadow-sm sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-semibold text-neutral-900">
                   {formatDateLabel(selectedDateObject)}
                 </h3>
                 {isNonWorkingDay && (
-                  <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700 shadow-sm ring-1 ring-red-200">
+                  <span className="inline-flex items-center rounded-full bg-rose-100 px-3 py-1 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200">
                     Day off
                   </span>
                 )}
@@ -116,7 +121,7 @@ export default function ScheduleDateOverrideEditor({
                   </span>
                 )}
                 {!hasCustomHours && !isNonWorkingDay && (
-                  <span className="inline-flex items-center rounded-full bg-neutral-100 px-3 py-1 text-sm font-semibold text-neutral-600 shadow-sm ring-1 ring-neutral-200">
+                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 shadow-sm ring-1 ring-emerald-200">
                     Default
                   </span>
 
@@ -132,12 +137,12 @@ export default function ScheduleDateOverrideEditor({
             </div>
           )}
           {isNonWorkingDay && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               This date is marked as non-working. No bookings will be accepted.
             </div>
           )}
 
-          <div className="mt-4 border-b border-neutral-100 pb-4">
+          <div className="mt-4 rounded-2xl border border-purple-100 bg-white p-3 shadow-sm">
             <label className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium">Specialist works this date</span>
               <button
@@ -151,7 +156,7 @@ export default function ScheduleDateOverrideEditor({
                   "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
                   "focus:outline-none focus:ring-2 focus:ring-neutral-900/20 focus:ring-offset-2",
                   "disabled:cursor-not-allowed disabled:opacity-50",
-                  activeDraft.isWorking ? "bg-neutral-900" : "bg-neutral-200"
+                  activeDraft.isWorking ? "bg-emerald-500" : "bg-rose-300"
                 )}
               >
                 <span
@@ -223,7 +228,7 @@ export default function ScheduleDateOverrideEditor({
                       type="button"
                       onClick={() => onToggleBreakTime(false)}
                       disabled={isSaving}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
                       aria-label="Remove break time"
                     >
                       Remove break
@@ -233,7 +238,7 @@ export default function ScheduleDateOverrideEditor({
                       type="button"
                       onClick={() => onToggleBreakTime(true)}
                       disabled={isSaving}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 shadow-sm transition hover:bg-neutral-50 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 shadow-sm transition hover:bg-purple-50 disabled:opacity-50"
                       aria-label="Add break time"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -305,13 +310,13 @@ export default function ScheduleDateOverrideEditor({
             </p>
           )}
 
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             {!isNonWorkingDay && (
               <Button
                 onClick={onMarkDayOff}
                 disabled={!canMarkDayOff || isSaving}
                 variant="outline"
-                className="w-full border-red-200 text-red-700 hover:bg-red-50 sm:w-auto"
+                className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
                 aria-label="Mark selected date as day off"
               >
                 Mark selected date as day off
@@ -320,7 +325,7 @@ export default function ScheduleDateOverrideEditor({
             <Button
               onClick={onSaveSelectedDateSchedule}
               disabled={isSaving}
-              className="w-full sm:w-auto"
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
               aria-label="Save date override"
             >
               {isSaving ? "Saving…" : "Save date schedule"}
@@ -330,7 +335,7 @@ export default function ScheduleDateOverrideEditor({
                 variant="outline"
                 onClick={onResetDraftToDefault}
                 disabled={isSaving}
-                className="w-full sm:w-auto"
+                className="w-full border-purple-200 text-purple-700 hover:bg-purple-50 sm:w-auto"
                 aria-label="Reset to default hours"
               >
                 Restore to default hours
@@ -341,7 +346,7 @@ export default function ScheduleDateOverrideEditor({
                 variant="outline"
                 onClick={() => onRemoveOverride(selectedDateKey)}
                 disabled={isSaving}
-                className="w-full border-red-200 text-red-700 hover:bg-red-50 sm:w-auto"
+                className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
                 aria-label="Remove date override"
               >
                 Remove override

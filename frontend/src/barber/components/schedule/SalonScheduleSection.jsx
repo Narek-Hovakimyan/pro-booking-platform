@@ -36,13 +36,20 @@ export default function SalonScheduleSection({
 }) {
   return (
     <>
-      <div>
-        <h2 className="text-lg font-bold sm:text-xl">Date Overrides & Day Offs</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          Customize hours or mark specific dates as non-working.
-        </p>
+      <div className="space-y-5">
+        <div className="rounded-3xl border border-purple-100 bg-white p-4 shadow-lg shadow-purple-100/40 sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-wider text-purple-500">
+            Salon Schedule
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-neutral-950 sm:text-xl">
+            Date overrides and days off
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-neutral-500">
+            Customize hours or mark specific dates as non-working.
+          </p>
+        </div>
 
-        <div className="mt-4 space-y-6">
+        <div className="space-y-6">
           <ScheduleDateOverrideEditor
             dateOptions={dateOptions}
             dateStatusMap={dateStatusMap}
@@ -93,8 +100,8 @@ export default function SalonScheduleSection({
 
       {/* ─── Save Feedback Bar ─── */}
       {isSaving && (
-        <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
-          <svg className="h-5 w-5 animate-spin text-neutral-400" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <div className="flex items-center gap-3 rounded-2xl border border-purple-100 bg-white p-4 text-sm text-neutral-600 shadow-sm shadow-purple-100/50">
+          <svg className="h-5 w-5 animate-spin text-purple-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>

@@ -12,10 +12,10 @@ export default function ScheduleSalonSelector({
   const salonAddress = getSalonAddressFromEntry(activeSalon);
 
   return (
-    <Card className="overflow-hidden rounded-2xl border-neutral-200 bg-gradient-to-br from-white to-neutral-50 sm:rounded-3xl">
+    <Card className="overflow-hidden rounded-3xl border-purple-100 bg-white shadow-lg shadow-purple-100/40">
       <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-neutral-400">
+          <p className="text-xs font-semibold uppercase tracking-wider text-purple-500">
             Selected salon
           </p>
           <p className="mt-0.5 truncate text-lg font-bold text-neutral-900">
@@ -31,7 +31,7 @@ export default function ScheduleSalonSelector({
           onClick={onOpenDrawer}
           variant="outline"
           size="sm"
-          className="w-full shrink-0 sm:w-auto"
+          className="w-full shrink-0 border-purple-200 text-purple-700 hover:bg-purple-50 sm:w-auto"
           aria-label="Change salon"
         >
           {approvedSalons.length > 1 ? "Change Salon" : "Select Salon"}

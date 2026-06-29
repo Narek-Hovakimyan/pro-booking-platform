@@ -9,10 +9,15 @@ export default function ScheduleNonWorkingDaysSection({
   onRestoreWorkingDate,
 }) {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40">
       <CardContent className="p-4 sm:p-6">
-        <h2 className="text-lg font-bold">Non-Working Days</h2>
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="text-xs font-semibold uppercase tracking-wider text-purple-500">
+          Time Off
+        </p>
+        <h2 className="mt-1 text-lg font-bold text-neutral-950">
+          Non-working days
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-500">
           Dates marked as days off. Use the Date-Specific Override editor above to mark a date as day off.
         </p>
 
@@ -33,11 +38,11 @@ export default function ScheduleNonWorkingDaysSection({
 
                 return (
                   <div
-                    className="flex flex-col gap-3 rounded-xl border border-red-100 bg-red-50/40 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-3 rounded-2xl border border-rose-100 bg-rose-50/50 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
                     key={dateKey}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100 text-sm font-bold text-red-600" aria-hidden="true">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-100 text-sm font-bold text-rose-600" aria-hidden="true">
                         ✕
                       </span>
                       <div>
@@ -52,7 +57,7 @@ export default function ScheduleNonWorkingDaysSection({
                       variant="outline"
                       disabled={isSaving}
                       size="sm"
-                      className="w-full border-red-200 text-red-700 hover:bg-red-50 sm:w-auto"
+                      className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
                       aria-label={`Restore ${label} as working day`}
                     >
                       Restore to default

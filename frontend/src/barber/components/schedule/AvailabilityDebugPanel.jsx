@@ -7,7 +7,7 @@ import { CardContent } from "@/shared/components/ui/card";
 import { formatDateKey } from "@/shared/utils/dates";
 
 const inputClass =
-  "h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-900 outline-none transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10 disabled:bg-neutral-100 disabled:text-neutral-400";
+  "h-10 w-full rounded-xl border border-purple-100 bg-white px-3 text-sm text-neutral-900 outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100 disabled:bg-neutral-100 disabled:text-neutral-400";
 
 const checkLabels = {
   isPast: "Past time",
@@ -22,7 +22,7 @@ const getServiceId = (service) => service?.id || service?._id || "";
 function ResultBadge({ result }) {
   if (!result?.time) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-100">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700 ring-1 ring-inset ring-purple-100">
         <Info className="h-3.5 w-3.5" />
         Date diagnostic
       </span>
@@ -35,7 +35,7 @@ function ResultBadge({ result }) {
       Available
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-100">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-100">
       <XCircle className="h-3.5 w-3.5" />
       Unavailable
     </span>
@@ -103,16 +103,16 @@ export default function AvailabilityDebugPanel({
   };
 
   return (
-    <details className="group rounded-2xl border-2 border-dashed border-neutral-200 sm:rounded-3xl open:shadow-sm">
+    <details className="group rounded-3xl border-2 border-dashed border-purple-200 bg-white/70 open:shadow-sm open:shadow-purple-100/60">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
         <div className="flex items-center gap-2">
-          <Bug className="h-5 w-5 text-neutral-400" aria-hidden="true" />
+          <Bug className="h-5 w-5 text-purple-400" aria-hidden="true" />
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-neutral-700">
+                <h2 className="text-base font-semibold text-neutral-700">
                 Testing tools
               </h2>
-              <svg className="h-4 w-4 text-neutral-400 transition group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <svg className="h-4 w-4 text-purple-400 transition group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </div>
@@ -181,10 +181,10 @@ export default function AvailabilityDebugPanel({
 
           <div className="flex items-end">
             <Button
-              className="w-full md:w-auto"
               disabled={!canCheck || isChecking}
               onClick={checkAvailability}
               variant="outline"
+              className="w-full border-purple-200 text-purple-700 hover:bg-purple-50 md:w-auto"
               size="sm"
             >
               <Search className="mr-2 h-4 w-4" />
@@ -200,19 +200,19 @@ export default function AvailabilityDebugPanel({
         )}
 
         {error && (
-          <p className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+          <p className="rounded-xl border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">
             {error}
           </p>
         )}
 
         {servicesError && (
-          <p className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+          <p className="rounded-xl border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">
             {servicesError}
           </p>
         )}
 
         {result && (
-          <div className="space-y-4 rounded-2xl border border-neutral-100 bg-neutral-50 p-4">
+          <div className="space-y-4 rounded-2xl border border-purple-100 bg-purple-50/50 p-4">
             <div className="space-y-1">
               <p className="text-sm font-semibold text-neutral-950">
                 {result.explanation}
@@ -280,7 +280,7 @@ export default function AvailabilityDebugPanel({
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   {result.blockingBookings.map((booking) => (
                     <div
-                      className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700"
+                      className="rounded-xl border border-purple-100 bg-white px-3 py-2 text-sm text-neutral-700"
                       key={booking.id}
                     >
                       <span className="font-semibold">
@@ -322,7 +322,7 @@ function CheckRow({ label, active }) {
     <div
       className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ${
         active
-          ? "bg-red-50 text-red-700"
+          ? "bg-rose-50 text-rose-700"
           : "bg-white text-neutral-500"
       }`}
     >
