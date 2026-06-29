@@ -96,6 +96,12 @@ const selectable = (result, onSelect = () => {}) => ({
   },
 });
 
+const createPersistedUser = async (payload) => {
+  const user = new User({ ...payload, _id: userId });
+  await User.schema.s.hooks.execPre("save", user, []);
+  return user;
+};
+
 const mockGooglePayload = (payload) => {
   process.env.GOOGLE_CLIENT_ID = "google-client-id";
   setGoogleAuthClientFactoryForTesting(() => ({
@@ -322,6 +328,7 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   process.env.JWT_SECRET = "test-secret";
   mockGooglePayload(baseGooglePayload);
   let createPayload;
+  let createdUser;
 
   User.findOne = (filter) => {
     if (filter.googleId || filter.email) return selectable(null);
@@ -329,7 +336,8 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   };
   User.create = async (payload) => {
     createPayload = payload;
-    return createUser({ ...payload, _id: userId });
+    createdUser = await createPersistedUser(payload);
+    return createdUser;
   };
 
   const res = createResponse();
@@ -345,6 +353,17 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   assert.equal(createPayload.phone, "+37400111222");
   assert.equal(createPayload.role, "client");
   assert.deepEqual(createPayload.authProviders, ["google"]);
+  const rawUser = createdUser.toObject();
+  assert.deepEqual(rawUser.favoriteBarbers, []);
+  assert.deepEqual(rawUser.favoriteSalons, []);
+  assert.equal("profession" in rawUser, false);
+  assert.equal("barberType" in rawUser, false);
+  assert.equal("specialty" in rawUser, false);
+  assert.equal("loyaltyDiscountSettings" in rawUser, false);
+  assert.equal("workHistory" in rawUser, false);
+  assert.equal("salons" in rawUser, false);
+  assert.equal("salon" in rawUser, false);
+  assert.equal("salonStatus" in rawUser, false);
 });
 
 test("googleAuth creates first-time barber user with trial subscription", async () => {
@@ -352,12 +371,16 @@ test("googleAuth creates first-time barber user with trial subscription", async 
   mockGooglePayload(baseGooglePayload);
   const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
   let subscriptionPayload;
+  let createdUser;
 
   User.findOne = (filter) => {
     if (filter.googleId || filter.email) return selectable(null);
     return null;
   };
-  User.create = async (payload) => createUser({ ...payload, _id: userId, role: "barber" });
+  User.create = async (payload) => {
+    createdUser = await createPersistedUser(payload);
+    return createdUser;
+  };
   Subscription.findOne = async () => null;
   SubscriptionPlan.findOne = async () => plan;
   Subscription.create = async (payload) => {
@@ -374,6 +397,14 @@ test("googleAuth creates first-time barber user with trial subscription", async 
   assert.equal(String(subscriptionPayload.ownerId), userId);
   assert.equal(subscriptionPayload.ownerRefModel, "User");
   assert.equal(subscriptionPayload.status, "trialing");
+  const rawUser = createdUser.toObject();
+  assert.equal(rawUser.profession, "barber");
+  assert.equal(rawUser.barberType, "unisex");
+  assert.equal(rawUser.specialty, "unisex");
+  assert.deepEqual(rawUser.salons, []);
+  assert.equal(rawUser.salonStatus, "none");
+  assert.deepEqual(rawUser.workHistory, []);
+  assert.equal(rawUser.loyaltyDiscountSettings.enabled, false);
 });
 
 test("Google-only user cannot login with phone/password, while password user still can", async () => {
@@ -423,4 +454,93 @@ test("normal registration still requires password", async () => {
   assert.deepEqual(res.body, {
     message: "Name, phone, email, and password are required",
   });
+});
+
+test("normal registration creates clean client user fields", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  let createPayload;
+  let createdUser;
+
+  User.findOne = () => null;
+  User.create = async (payload) => {
+    createPayload = payload;
+    createdUser = await createPersistedUser(payload);
+    return createdUser;
+  };
+
+  const res = createResponse();
+  await registerUser(
+    {
+      body: {
+        name: "Password Client",
+        phone: "+37400111222",
+        email: "client@example.com",
+        password: "password123",
+        role: "client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createPayload.role, "client");
+  assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
+  const rawUser = createdUser.toObject();
+  assert.deepEqual(rawUser.favoriteBarbers, []);
+  assert.deepEqual(rawUser.favoriteSalons, []);
+  assert.equal("profession" in rawUser, false);
+  assert.equal("barberType" in rawUser, false);
+  assert.equal("specialty" in rawUser, false);
+  assert.equal("loyaltyDiscountSettings" in rawUser, false);
+  assert.equal("workHistory" in rawUser, false);
+  assert.equal("salons" in rawUser, false);
+  assert.equal("salon" in rawUser, false);
+  assert.equal("salonStatus" in rawUser, false);
+});
+
+test("normal registration creates barber fields and trial subscription", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
+  let createdUser;
+  let subscriptionPayload;
+
+  User.findOne = () => null;
+  User.create = async (payload) => {
+    createdUser = await createPersistedUser(payload);
+    return createdUser;
+  };
+  Subscription.findOne = async () => null;
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.create = async (payload) => {
+    subscriptionPayload = payload;
+    return { _id: "subscription-1", ...payload };
+  };
+
+  const res = createResponse();
+  await registerUser(
+    {
+      body: {
+        name: "Password Barber",
+        phone: "+37400111222",
+        email: "barber@example.com",
+        password: "password123",
+        role: "barber",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.user.role, "barber");
+  assert.equal(subscriptionPayload.ownerType, "barber");
+  assert.equal(String(subscriptionPayload.ownerId), userId);
+  assert.equal(subscriptionPayload.status, "trialing");
+  const rawUser = createdUser.toObject();
+  assert.equal(rawUser.profession, "barber");
+  assert.equal(rawUser.barberType, "unisex");
+  assert.equal(rawUser.specialty, "unisex");
+  assert.deepEqual(rawUser.salons, []);
+  assert.equal(rawUser.salonStatus, "none");
+  assert.deepEqual(rawUser.workHistory, []);
+  assert.equal(rawUser.loyaltyDiscountSettings.enabled, false);
 });

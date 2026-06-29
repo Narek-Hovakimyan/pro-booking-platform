@@ -398,3 +398,54 @@ describe("User Google auth foundation", () => {
     assert.equal(googleUser.validateSync(), undefined);
   });
 });
+
+describe("User role-specific defaults", () => {
+  test("new client users do not receive barber-only defaults", () => {
+    const user = new User({
+      name: "Clean Client",
+      phone: phone("clean-client"),
+      email: "clean-client@example.com",
+      password: "password123",
+      role: "client",
+    });
+    const raw = user.toObject();
+
+    assert.equal(raw.role, "client");
+    assert.deepEqual(raw.favoriteBarbers, []);
+    assert.deepEqual(raw.favoriteSalons, []);
+    assert.equal("profession" in raw, false);
+    assert.equal("barberType" in raw, false);
+    assert.equal("specialty" in raw, false);
+    assert.equal("loyaltyDiscountSettings" in raw, false);
+    assert.equal("workHistory" in raw, false);
+    assert.equal("salons" in raw, false);
+    assert.equal("salon" in raw, false);
+    assert.equal("salonStatus" in raw, false);
+  });
+
+  test("new barber users keep barber defaults", async () => {
+    const user = await runSaveHooks(new User({
+      name: "Defaulted Barber",
+      phone: phone("defaulted-barber"),
+      email: "defaulted-barber@example.com",
+      password: "password123",
+      role: "barber",
+    }));
+    const raw = user.toObject();
+
+    assert.equal(raw.role, "barber");
+    assert.equal(raw.profession, "barber");
+    assert.equal(raw.barberType, "unisex");
+    assert.equal(raw.specialty, "unisex");
+    assert.deepEqual(raw.salons, []);
+    assert.equal(raw.salon, null);
+    assert.equal(raw.salonStatus, "none");
+    assert.deepEqual(raw.workHistory, []);
+    assert.deepEqual(raw.loyaltyDiscountSettings, {
+      enabled: false,
+      thresholdCompletedBookings: 5,
+      discountPercent: 10,
+      maxDiscountPercent: 30,
+    });
+  });
+});

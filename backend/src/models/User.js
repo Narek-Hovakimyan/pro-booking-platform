@@ -147,6 +147,8 @@ const loyaltyDiscountSettingsSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const hasBarberRole = (doc) => doc?.role === "barber";
+
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -248,64 +250,83 @@ const userSchema = new mongoose.Schema({
   salon: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Salon",
-    default: null,
+    default() {
+      return hasBarberRole(this) ? null : undefined;
+    },
   },
   salonStatus: {
     type: String,
     enum: ["none", "pending", "approved", "rejected"],
-    default: "none",
+    default() {
+      return hasBarberRole(this) ? "none" : undefined;
+    },
   },
   // New multi-salon support
   salons: {
     type: [salonEntrySchema],
-    default: [],
+    default() {
+      return hasBarberRole(this) ? [] : undefined;
+    },
   },
   profession: {
     type: String,
     enum: ["barber", "hair_stylist", "nail_master", "makeup_artist", "cosmetologist", "lash_brow", "massage", "other"],
-    default: "barber",
+    default() {
+      return hasBarberRole(this) ? "barber" : undefined;
+    },
   },
   barberType: {
     type: String,
     enum: ["men", "women", "unisex", ""],
-    default: "",
+    default() {
+      return hasBarberRole(this) ? "" : undefined;
+    },
   },
   // Kept for backward compatibility — derived from profession/barberType on read
   specialty: {
     type: String,
     enum: ["men", "women", "unisex"],
-    default: "unisex",
+    default() {
+      return hasBarberRole(this) ? "unisex" : undefined;
+    },
   },
   loyaltyDiscountSettings: {
     type: loyaltyDiscountSettingsSchema,
-    default: () => ({}),
-  },
-  workHistory: [
-    {
-      salon: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Salon",
-        default: null,
-      },
-      salonName: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      startDate: {
-        type: Date,
-        default: Date.now,
-      },
-      endDate: {
-        type: Date,
-        default: null,
-      },
-      isCurrent: {
-        type: Boolean,
-        default: false,
-      },
+    default() {
+      return hasBarberRole(this) ? {} : undefined;
     },
-  ],
+  },
+  workHistory: {
+    type: [
+      {
+        salon: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Salon",
+          default: null,
+        },
+        salonName: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+        startDate: {
+          type: Date,
+          default: Date.now,
+        },
+        endDate: {
+          type: Date,
+          default: null,
+        },
+        isCurrent: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+    default() {
+      return hasBarberRole(this) ? [] : undefined;
+    },
+  },
   favoriteBarbers: [
     {
       type: mongoose.Schema.Types.ObjectId,
