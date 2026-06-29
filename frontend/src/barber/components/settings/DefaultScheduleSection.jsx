@@ -21,6 +21,28 @@ const DAYS = [
   { label: "Sun", key: "sun" },
 ];
 
+const WORK_TIME_PRESETS = ["09:00", "10:00", "18:00", "20:00"];
+const BREAK_TIME_PRESETS = ["12:00", "13:00", "14:00", "15:00"];
+
+function TimePresetChips({ disabled, label, onSelect, presets }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs font-normal text-neutral-400">{label}</span>
+      {presets.map((preset) => (
+        <button
+          key={preset}
+          type="button"
+          disabled={disabled}
+          onClick={() => onSelect(preset)}
+          className="rounded-full border border-purple-100 bg-white px-2.5 py-1 text-xs font-semibold tabular-nums text-purple-700 shadow-sm transition hover:border-purple-200 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {preset}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const getWeeklyDayState = (schedule, dayKey) => {
   const weeklyDay = schedule.weeklySchedule?.[dayKey] || {};
   const isWorking = weeklyDay.working !== false;
@@ -100,6 +122,17 @@ export default function DefaultScheduleSection({
                       }
                       placeholder="HH:mm"
                     />
+                    <p className="text-xs font-normal text-neutral-400">
+                      Use 24-hour format, for example 09:00.
+                    </p>
+                    <TimePresetChips
+                      disabled={isSaving}
+                      label="Set start:"
+                      presets={WORK_TIME_PRESETS}
+                      onSelect={(value) =>
+                        onUpdateSchedule(salonId, "startTime", value)
+                      }
+                    />
                   </label>
 
                   <label className="grid gap-2 text-sm font-semibold">
@@ -114,10 +147,22 @@ export default function DefaultScheduleSection({
                       }
                       placeholder="HH:mm"
                     />
+                    <p className="text-xs font-normal text-neutral-400">
+                      End time must be after start time.
+                    </p>
+                    <TimePresetChips
+                      disabled={isSaving}
+                      label="Set end:"
+                      presets={WORK_TIME_PRESETS}
+                      onSelect={(value) =>
+                        onUpdateSchedule(salonId, "endTime", value)
+                      }
+                    />
                   </label>
                 </div>
 
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="mt-4 rounded-2xl border border-purple-100 bg-white p-3 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h5 className="font-semibold text-neutral-950 text-sm">
                       Break time
@@ -139,6 +184,10 @@ export default function DefaultScheduleSection({
                   </label>
                 </div>
 
+                  <p className="mt-3 text-xs text-neutral-500">
+                    Break time should stay inside working hours. It remains optional.
+                  </p>
+
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm font-semibold">
                     Break start
@@ -152,6 +201,14 @@ export default function DefaultScheduleSection({
                         onUpdateSchedule(salonId, "breakStart", e.target.value)
                       }
                       placeholder="HH:mm"
+                    />
+                    <TimePresetChips
+                      disabled={isSaving || !schedule.hasBreak}
+                      label="Set start:"
+                      presets={BREAK_TIME_PRESETS}
+                      onSelect={(value) =>
+                        onUpdateSchedule(salonId, "breakStart", value)
+                      }
                     />
                   </label>
 
@@ -168,7 +225,16 @@ export default function DefaultScheduleSection({
                       }
                       placeholder="HH:mm"
                     />
+                    <TimePresetChips
+                      disabled={isSaving || !schedule.hasBreak}
+                      label="Set end:"
+                      presets={BREAK_TIME_PRESETS}
+                      onSelect={(value) =>
+                        onUpdateSchedule(salonId, "breakEnd", value)
+                      }
+                    />
                   </label>
+                </div>
                 </div>
 
                 <div className="mt-5">
@@ -188,16 +254,28 @@ export default function DefaultScheduleSection({
                       return (
                         <div
                           key={key}
-                          className="rounded-xl border border-neutral-200 bg-white p-3"
+                          className={cn(
+                            "rounded-2xl border p-3 shadow-sm transition",
+                            dayState.isWorking
+                              ? "border-emerald-100 bg-emerald-50/40"
+                              : "border-rose-100 bg-rose-50/50"
+                          )}
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                               <div className="text-sm font-bold text-neutral-950">
                                 {label}
                               </div>
-                              <div className="text-xs text-neutral-500">
+                              <span
+                                className={cn(
+                                  "mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
+                                  dayState.isWorking
+                                    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+                                    : "bg-rose-100 text-rose-700 ring-rose-200"
+                                )}
+                              >
                                 {dayState.isWorking ? "Working" : "Day off / Rest day"}
-                              </div>
+                              </span>
                             </div>
 
                             <label className="inline-flex items-center gap-2 text-sm font-semibold">
@@ -250,6 +328,23 @@ export default function DefaultScheduleSection({
                                 }
                                 placeholder="HH:mm"
                               />
+                              <p className="font-normal text-neutral-400">
+                                Use 24-hour format.
+                              </p>
+                              <TimePresetChips
+                                disabled={isSaving || !dayState.isWorking}
+                                label="Set:"
+                                presets={WORK_TIME_PRESETS}
+                                onSelect={(value) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: value,
+                                    to: dayState.to || schedule.endTime,
+                                    breakFrom: dayState.breakFrom || "",
+                                    breakTo: dayState.breakTo || "",
+                                  })
+                                }
+                              />
                             </label>
 
                             <label className="grid gap-1 text-xs font-semibold text-neutral-600">
@@ -271,8 +366,30 @@ export default function DefaultScheduleSection({
                                 }
                                 placeholder="HH:mm"
                               />
+                              <p className="font-normal text-neutral-400">
+                                End time must be after start time.
+                              </p>
+                              <TimePresetChips
+                                disabled={isSaving || !dayState.isWorking}
+                                label="Set:"
+                                presets={WORK_TIME_PRESETS}
+                                onSelect={(value) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: dayState.from || schedule.startTime,
+                                    to: value,
+                                    breakFrom: dayState.breakFrom || "",
+                                    breakTo: dayState.breakTo || "",
+                                  })
+                                }
+                              />
                             </label>
 
+                            <div className="rounded-xl border border-purple-100 bg-white p-3 sm:col-span-2">
+                              <p className="mb-2 text-xs font-normal text-neutral-400">
+                                Break time should stay inside working hours and is optional.
+                              </p>
+                              <div className="grid gap-2 sm:grid-cols-2">
                             <label className="grid gap-1 text-xs font-semibold text-neutral-600">
                               Break start
                               <input
@@ -291,6 +408,20 @@ export default function DefaultScheduleSection({
                                   })
                                 }
                                 placeholder="HH:mm"
+                              />
+                              <TimePresetChips
+                                disabled={isSaving || !dayState.isWorking}
+                                label="Set:"
+                                presets={BREAK_TIME_PRESETS}
+                                onSelect={(value) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: dayState.from || schedule.startTime,
+                                    to: dayState.to || schedule.endTime,
+                                    breakFrom: value,
+                                    breakTo: dayState.breakTo || "",
+                                  })
+                                }
                               />
                             </label>
 
@@ -313,7 +444,23 @@ export default function DefaultScheduleSection({
                                 }
                                 placeholder="HH:mm"
                               />
+                              <TimePresetChips
+                                disabled={isSaving || !dayState.isWorking}
+                                label="Set:"
+                                presets={BREAK_TIME_PRESETS}
+                                onSelect={(value) =>
+                                  onUpdateWeeklyDay(salonId, key, {
+                                    working: true,
+                                    from: dayState.from || schedule.startTime,
+                                    to: dayState.to || schedule.endTime,
+                                    breakFrom: dayState.breakFrom || "",
+                                    breakTo: value,
+                                  })
+                                }
+                              />
                             </label>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       );
