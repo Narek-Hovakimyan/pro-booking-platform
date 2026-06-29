@@ -12,6 +12,7 @@ export default function SalonScheduleSection({
   isNonWorkingDay,
   hasCustomHours,
   activeDraft,
+  hasUnsavedChanges,
   isSaving,
   fieldErrors,
   isBreakEnabled,
@@ -59,6 +60,7 @@ export default function SalonScheduleSection({
             isNonWorkingDay={isNonWorkingDay}
             hasCustomHours={hasCustomHours}
             activeDraft={activeDraft}
+            hasUnsavedChanges={hasUnsavedChanges}
             isSaving={isSaving}
             fieldErrors={fieldErrors}
             isBreakEnabled={isBreakEnabled}

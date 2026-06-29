@@ -12,6 +12,7 @@ export default function ScheduleDateOverrideEditor({
   isNonWorkingDay,
   hasCustomHours,
   activeDraft,
+  hasUnsavedChanges,
   isSaving,
   fieldErrors,
   isBreakEnabled,
@@ -26,6 +27,10 @@ export default function ScheduleDateOverrideEditor({
   onRemoveOverride,
   onMarkDayOff,
 }) {
+  const validationMessages = Array.from(
+    new Set(Object.values(fieldErrors || {}).filter(Boolean))
+  );
+
   return (
     <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40">
       <CardContent className="p-4 sm:p-6">
@@ -136,6 +141,15 @@ export default function ScheduleDateOverrideEditor({
               This date has custom hours.
             </div>
           )}
+          {hasUnsavedChanges && (
+            <div
+              className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+              role="status"
+            >
+              <span className="font-semibold">Unsaved changes.</span>{" "}
+              Save your changes before leaving this section.
+            </div>
+          )}
           {isNonWorkingDay && (
             <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               This date is marked as non-working. No bookings will be accepted.
@@ -172,6 +186,19 @@ export default function ScheduleDateOverrideEditor({
 
           {activeDraft.isWorking ? (
             <div className="mt-4 space-y-4">
+              {validationMessages.length > 0 && (
+                <div
+                  className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                  role="alert"
+                >
+                  <p className="font-semibold">Fix these schedule details:</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {validationMessages.map((message) => (
+                      <li key={message}>{message}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div>
                 <h4 className="mb-2 text-sm font-semibold text-neutral-700">
                   Working hours
@@ -310,48 +337,60 @@ export default function ScheduleDateOverrideEditor({
             </p>
           )}
 
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {!isNonWorkingDay && (
+          <div className="sticky bottom-3 z-10 mt-5 rounded-2xl border border-purple-100 bg-white/95 p-3 shadow-lg shadow-purple-200/50 backdrop-blur sm:static sm:flex sm:flex-wrap sm:gap-2 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-0">
+            <div className="mb-2 flex items-center justify-between gap-3 sm:hidden">
+              <span className="text-xs font-semibold text-neutral-500">
+                {hasUnsavedChanges ? "Unsaved changes" : "Date schedule"}
+              </span>
+              {hasUnsavedChanges && (
+                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
+                  Unsaved
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {!isNonWorkingDay && (
+                <Button
+                  onClick={onMarkDayOff}
+                  disabled={!canMarkDayOff || isSaving}
+                  variant="outline"
+                  className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
+                  aria-label="Mark selected date as day off"
+                >
+                  Mark selected date as day off
+                </Button>
+              )}
               <Button
-                onClick={onMarkDayOff}
-                disabled={!canMarkDayOff || isSaving}
-                variant="outline"
-                className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
-                aria-label="Mark selected date as day off"
-              >
-                Mark selected date as day off
-              </Button>
-            )}
-            <Button
-              onClick={onSaveSelectedDateSchedule}
-              disabled={isSaving}
-              className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
-              aria-label="Save date override"
-            >
-              {isSaving ? "Saving…" : "Save date schedule"}
-            </Button>
-            {hasCustomHours && (
-              <Button
-                variant="outline"
-                onClick={onResetDraftToDefault}
+                onClick={onSaveSelectedDateSchedule}
                 disabled={isSaving}
-                className="w-full border-purple-200 text-purple-700 hover:bg-purple-50 sm:w-auto"
-                aria-label="Reset to default hours"
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
+                aria-label="Save date override"
               >
-                Restore to default hours
+                {isSaving ? "Saving..." : "Save date schedule"}
               </Button>
-            )}
-            {hasCustomHours && (
-              <Button
-                variant="outline"
-                onClick={() => onRemoveOverride(selectedDateKey)}
-                disabled={isSaving}
-                className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
-                aria-label="Remove date override"
-              >
-                Remove override
-              </Button>
-            )}
+              {hasCustomHours && (
+                <Button
+                  variant="outline"
+                  onClick={onResetDraftToDefault}
+                  disabled={isSaving}
+                  className="w-full border-purple-200 text-purple-700 hover:bg-purple-50 sm:w-auto"
+                  aria-label="Reset to default hours"
+                >
+                  Restore to default hours
+                </Button>
+              )}
+              {hasCustomHours && (
+                <Button
+                  variant="outline"
+                  onClick={() => onRemoveOverride(selectedDateKey)}
+                  disabled={isSaving}
+                  className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 sm:w-auto"
+                  aria-label="Remove date override"
+                >
+                  Remove override
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </CardContent>

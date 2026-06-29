@@ -373,6 +373,13 @@ export default function ScheduleManager({
   );
   const validationError =
     validationState.dateKey === selectedDateKey ? validationState.message : "";
+  const hasUnsavedDateChanges = useMemo(
+    () =>
+      ["isWorking", "startTime", "endTime", "breakStart", "breakEnd"].some(
+        (field) => String(activeDraft[field] || "") !== String(normalizedOverride[field] || "")
+      ),
+    [activeDraft, normalizedOverride]
+  );
   const hasBreakTime = Boolean(activeDraft.breakStart || activeDraft.breakEnd);
   const isBreakEnabled =
     breakToggleState.dateKey === selectedDateKey
@@ -453,6 +460,13 @@ export default function ScheduleManager({
     setSaveSuccess("");
 
     if (!activeDraft.isWorking) {
+      if (
+        !isNonWorkingDay &&
+        !window.confirm("Mark this day as non-working?")
+      ) {
+        return;
+      }
+
       await savePerSalonSchedule({
         scheduleOverrides: {
           ...scheduleOverrides,
@@ -578,6 +592,7 @@ export default function ScheduleManager({
 
   const restoreWorkingDate = async (dateKey) => {
     if (!currentUserId || !activeSalonId) return;
+    if (!window.confirm("Restore this working day?")) return;
 
     setSaveSuccess("");
 
@@ -598,6 +613,7 @@ export default function ScheduleManager({
 
   const markDayOff = async () => {
     if (!currentUserId || !activeSalonId || !canMarkDayOff) return;
+    if (!window.confirm("Mark this day as non-working?")) return;
 
     setSaveSuccess("");
 
@@ -612,6 +628,7 @@ export default function ScheduleManager({
 
   const removeOverride = async (dateKey) => {
     if (!currentUserId || !activeSalonId) return;
+    if (!window.confirm("Remove this date override?")) return;
 
     const nextOverrides = { ...scheduleOverrides };
     delete nextOverrides[dateKey];
@@ -813,6 +830,7 @@ export default function ScheduleManager({
             isNonWorkingDay={isNonWorkingDay}
             hasCustomHours={hasCustomHours}
             activeDraft={activeDraft}
+            hasUnsavedChanges={hasUnsavedDateChanges}
             isSaving={isSaving}
             fieldErrors={fieldErrors}
             isBreakEnabled={isBreakEnabled}
