@@ -1,6 +1,6 @@
 import express from "express";
 import { protect } from "../middleware/authMiddleware.js";
-import { requirePlatformAdmin } from "../middleware/platformMiddleware.js";
+import { requirePlatformSuperuser } from "../middleware/platformMiddleware.js";
 import {
   listSalonBillingSummaries,
   getSalonBillingDetailHandler,
@@ -18,141 +18,141 @@ const router = express.Router();
 
 /**
  * GET /api/platform/access-check
- * Protected — platform admin only.
- * Returns safe platform admin identity info.
+ * Protected — platform superuser only.
+ * Returns safe platform superuser identity info.
  */
-router.get("/access-check", protect, requirePlatformAdmin, (req, res) => {
+router.get("/access-check", protect, requirePlatformSuperuser, (req, res) => {
   return res.json({
     id: req.user._id,
     email: req.user.email || "",
     name: req.user.name,
-    platformRole: req.user.platformRole || null,
+    platformRole: req.user.platformRole === "superuser" ? "superuser" : null,
   });
 });
 
 /**
  * GET /api/platform/billing/salons
  * List all salon billing summaries (paginated + filtered).
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  */
 router.get(
   "/billing/salons",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   listSalonBillingSummaries
 );
 
 /**
  * GET /api/platform/billing/salons/:salonId
  * Get full billing detail for one salon.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  */
 router.get(
   "/billing/salons/:salonId",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   getSalonBillingDetailHandler
 );
 
 /**
  * GET /api/platform/billing/salons/:salonId/payments
  * Get payment attempts for one salon.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  */
 router.get(
   "/billing/salons/:salonId/payments",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   getSalonPaymentsHandler
 );
 
 /**
  * GET /api/platform/billing/payments
  * All salon subscription payments across platform.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  */
 router.get(
   "/billing/payments",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   listAllSalonPayments
 );
 
 /**
  * PATCH /api/platform/billing/salons/:salonId/subscription/activate
  * Activate or renew a salon subscription manually.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  * Body: { seatCount?, months?, note }
  */
 router.patch(
   "/billing/salons/:salonId/subscription/activate",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   activateSubscription
 );
 
 /**
  * PATCH /api/platform/billing/salons/:salonId/subscription/seat-count
  * Update the seat count on a salon subscription.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  * Body: { seatCount, note }
  */
 router.patch(
   "/billing/salons/:salonId/subscription/seat-count",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   updateSeatCount
 );
 
 /**
  * POST /api/platform/billing/salons/:salonId/seats/assign
  * Assign a subscription seat to an accepted staff barber.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  * Body: { barberId, note }
  */
 router.post(
   "/billing/salons/:salonId/seats/assign",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   assignSeat
 );
 
 /**
  * POST /api/platform/billing/salons/:salonId/seats/revoke
  * Revoke a subscription seat from an assigned staff barber.
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  * Body: { barberId, note }
  */
 router.post(
   "/billing/salons/:salonId/seats/revoke",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   revokeSeat
 );
 
 /**
  * POST /api/platform/billing/salons/:salonId/subscription/cancel
  * Cancel/deactivate a salon subscription (soft cancel).
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  * Body: { note }
  */
 router.post(
   "/billing/salons/:salonId/subscription/cancel",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   cancelSubscription
 );
 
 /**
  * POST /api/platform/billing/payments/:paymentId/confirm
  * Manually confirm a salon subscription payment (manual provider only).
- * Protected — platform admin only.
+ * Protected — platform superuser only.
  * Body: { note }
  */
 router.post(
   "/billing/payments/:paymentId/confirm",
   protect,
-  requirePlatformAdmin,
+  requirePlatformSuperuser,
   confirmPayment
 );
 

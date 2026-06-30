@@ -68,7 +68,7 @@ const ownerDoc = {
   city: "Yerevan",
   phone: "+374111111",
   password: "hashed-password",
-  platformRole: "admin",
+  platformRole: "superuser",
   emailVerificationTokenHash: "secret-token",
 };
 
@@ -116,7 +116,7 @@ const acceptedStaffDoc = {
   profession: "hair",
   barberType: "staff",
   password: "hashed-password",
-  platformRole: "admin",
+  platformRole: "superuser",
   emailVerificationTokenHash: "secret-token",
   salons: [
     {
@@ -220,7 +220,7 @@ const acceptedSeatDoc = {
     profession: "hair",
     barberType: "staff",
     password: "hashed-password",
-    platformRole: "admin",
+    platformRole: "superuser",
     emailVerificationTokenHash: "secret-token",
   },
   status: "active",

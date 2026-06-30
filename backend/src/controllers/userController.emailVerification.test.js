@@ -311,6 +311,44 @@ test("updateMyProfile – uploaded avatar updates user avatar and barber image",
   assert.equal(res.body.imageUrl, "/uploads/avatars/uploaded.png");
 });
 
+test("updateMyProfile – ignores role, platformRole, and auth internals", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    body: {
+      name: "Safe Update",
+      role: "barber",
+      platformRole: "superuser",
+      authProviders: ["google"],
+      googleId: "attacker-google-id",
+      emailVerified: true,
+      resetPasswordTokenHash: "attacker-reset",
+      emailVerificationTokenHash: "attacker-email",
+    },
+  });
+  let updatesSeen;
+
+  BarberProfile.findOneAndUpdate = async () => null;
+  Salon.find = async () => ({ select: async () => [] });
+  Salon.findById = async () => null;
+  User.findByIdAndUpdate = (_id, updates) => {
+    updatesSeen = updates;
+    return updateAndSelect(applyUpdate(createBaseUser(), updates));
+  };
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(updatesSeen.name, "Safe Update");
+  assert.equal(Object.hasOwn(updatesSeen, "role"), false);
+  assert.equal(Object.hasOwn(updatesSeen, "platformRole"), false);
+  assert.equal(Object.hasOwn(updatesSeen, "authProviders"), false);
+  assert.equal(Object.hasOwn(updatesSeen, "googleId"), false);
+  assert.equal(Object.hasOwn(updatesSeen, "emailVerified"), false);
+  assert.equal(Object.hasOwn(updatesSeen, "resetPasswordTokenHash"), false);
+  assert.equal(Object.hasOwn(updatesSeen, "emailVerificationTokenHash"), false);
+  assert.equal(res.body.platformRole, undefined);
+});
+
 // ── updateMyProfile – change email from verified → unverified ─────────
 
 test("updateMyProfile – changing email from verified marks unverified and clears emailVerifiedAt", async () => {

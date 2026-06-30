@@ -63,7 +63,7 @@ export default function Header() {
   const moreMenuRef = useRef(null);
   const isClient = currentUser?.role === "client";
   const isBarber = currentUser?.role === "barber";
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "admin");
+  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
   const currentUserId = currentUser?.id || currentUser?._id;
   const canShowManageHiring =
     isAuthenticated && isBarber && Boolean(currentUserId) && Boolean(token) && canManageSalon;

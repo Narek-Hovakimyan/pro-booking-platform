@@ -260,7 +260,7 @@ export default function PlatformSalonBillingDetailPage() {
   const [payments, setPayments] = useState([]);
   const [paymentsTotal, setPaymentsTotal] = useState(0);
   const [paymentsPage, setPaymentsPage] = useState(1);
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "admin");
+  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -278,7 +278,7 @@ export default function PlatformSalonBillingDetailPage() {
       return result;
     } catch (err) {
       if (err.response?.status === 403) {
-        setError("Access denied. Platform admin privileges required.");
+        setError("Access denied. Platform superuser privileges required.");
       } else if (err.response?.status === 404) {
         setError("Salon not found.");
       } else {
@@ -375,7 +375,7 @@ export default function PlatformSalonBillingDetailPage() {
     } catch (err) {
       const status = err.response?.status;
       if (status === 403 || status === 401) {
-        setModalError("Forbidden. Platform admin privileges required.");
+        setModalError("Forbidden. Platform superuser privileges required.");
       } else if (status === 400) {
         setModalError(err.response?.data?.message || "Validation error.");
       } else {

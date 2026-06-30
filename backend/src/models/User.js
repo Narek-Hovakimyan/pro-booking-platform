@@ -148,6 +148,17 @@ const loyaltyDiscountSettingsSchema = new mongoose.Schema(
 );
 
 const hasBarberRole = (doc) => doc?.role === "barber";
+const isLegacyPlatformRoleValue = (doc, value) =>
+  !doc?.isNew &&
+  typeof doc?.isModified === "function" &&
+  !doc.isModified("platformRole") &&
+  (value === "admin" || value === null);
+
+const isValidPlatformRole = function (value) {
+  if (value === undefined) return true;
+  if (value === "superuser") return true;
+  return isLegacyPlatformRoleValue(this, value);
+};
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -240,11 +251,14 @@ const userSchema = new mongoose.Schema({
     enum: ["client", "barber"],
     default: "client",
   },
-  // Platform-level admin role (optional — independent of app business role)
+  // Platform-level superuser role (optional — independent of app business role)
   platformRole: {
     type: String,
-    enum: ["admin"],
-    default: null,
+    default: undefined,
+    validate: {
+      validator: isValidPlatformRole,
+      message: "platformRole must be superuser",
+    },
   },
   // Legacy single-salon fields (kept for backward compatibility)
   salon: {
@@ -416,6 +430,13 @@ userSchema.methods.hasApprovedSalon = function (salonId) {
 
 userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
+userSchema.index(
+  { platformRole: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { platformRole: "superuser" },
+  }
+);
 
 const User = mongoose.model("User", userSchema);
 

@@ -122,7 +122,7 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
 test("getBarbers includes safe deposit settings and hides platformRole", async () => {
   const paidBarber = makeBarber({
     name: "Deposit Barber",
-    platformRole: "admin",
+    platformRole: "superuser",
   });
 
   User.find = () => chainableQuery([paidBarber]);

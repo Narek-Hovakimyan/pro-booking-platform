@@ -3,7 +3,9 @@ import { afterEach, test } from "node:test";
 
 import {
   isPlatformAdmin,
+  isPlatformSuperuser,
   requirePlatformAdmin,
+  requirePlatformSuperuser,
   resetAllowlistCache,
 } from "./platformMiddleware.js";
 
@@ -44,24 +46,39 @@ test("isPlatformAdmin returns false for normal client without platformRole and w
   assert.equal(isPlatformAdmin(user), false);
 });
 
-test("isPlatformAdmin returns true for user with platformRole admin", () => {
+test("isPlatformSuperuser returns true for user with platformRole superuser", () => {
   const user = {
     _id: "64b000000000000000000003",
     role: "barber",
-    email: "admin-barber@example.com",
-    platformRole: "admin",
+    email: "superuser-barber@example.com",
+    platformRole: "superuser",
   };
+  assert.equal(isPlatformSuperuser(user), true);
   assert.equal(isPlatformAdmin(user), true);
 });
 
-test("isPlatformAdmin returns true for user with platformRole admin even without allowlist", () => {
+test("isPlatformAdmin returns false for old platformRole admin without allowlist", () => {
   const user = {
     _id: "64b000000000000000000004",
     role: "barber",
-    email: "admin-no-allowlist@example.com",
+    email: "old-admin-no-allowlist@example.com",
     platformRole: "admin",
   };
-  assert.equal(isPlatformAdmin(user), true);
+  assert.equal(isPlatformAdmin(user), false);
+  assert.equal(isPlatformSuperuser(user), false);
+});
+
+test("old platformRole admin can pass only through env allowlist", () => {
+  process.env.PLATFORM_ADMIN_EMAILS = "old-admin@example.com";
+
+  const user = {
+    _id: "64b000000000000000000004",
+    role: "barber",
+    email: "old-admin@example.com",
+    emailVerified: true,
+    platformRole: "admin",
+  };
+  assert.equal(isPlatformSuperuser(user), true);
 });
 
 test("isPlatformAdmin returns true for env allowlisted email", () => {
@@ -72,9 +89,24 @@ test("isPlatformAdmin returns true for env allowlisted email", () => {
     _id: "64b000000000000000000005",
     role: "barber",
     email: "admin@example.com",
+    emailVerified: true,
     platformRole: null,
   };
   assert.equal(isPlatformAdmin(user), true);
+});
+
+test("isPlatformAdmin returns false for unverified env allowlisted email", () => {
+  process.env.PLATFORM_ADMIN_EMAILS = "admin@example.com";
+  resetAllowlistCache();
+
+  const user = {
+    _id: "64b000000000000000000033",
+    role: "barber",
+    email: "admin@example.com",
+    emailVerified: false,
+    platformRole: null,
+  };
+  assert.equal(isPlatformAdmin(user), false);
 });
 
 test("isPlatformAdmin returns false for non-allowlisted email", () => {
@@ -125,6 +157,7 @@ test("isPlatformAdmin respects both allowlists simultaneously", () => {
     _id: "64b000000000000000000099",
     role: "barber",
     email: "email-admin@example.com",
+    emailVerified: true,
     platformRole: null,
   };
   assert.equal(isPlatformAdmin(byEmail), true);
@@ -146,6 +179,7 @@ test("isPlatformAdmin is case-insensitive for email allowlist", () => {
     _id: "64b000000000000000000030",
     role: "barber",
     email: "admin@example.com",
+    emailVerified: true,
     platformRole: null,
   };
   assert.equal(isPlatformAdmin(user), true);
@@ -158,6 +192,7 @@ test("isPlatformAdmin trims user email and ignores empty allowlist entries", () 
     _id: "64b000000000000000000031",
     role: "barber",
     email: " Admin@Example.com ",
+    emailVerified: true,
     platformRole: null,
   };
 
@@ -169,6 +204,7 @@ test("isPlatformAdmin reflects env allowlist changes without stale cache", () =>
     _id: "64b000000000000000000032",
     role: "barber",
     email: "revoked@example.com",
+    emailVerified: true,
     platformRole: null,
   };
 
@@ -241,7 +277,7 @@ test("requirePlatformAdmin returns 403 for authenticated normal barber", () => {
 
   assert.equal(statusCode, 403);
   assert.equal(body.code, "FORBIDDEN");
-  assert.equal(body.message, "Platform admin access required");
+  assert.equal(body.message, "Platform superuser access required");
 });
 
 test("requirePlatformAdmin returns 403 for authenticated normal client", () => {
@@ -274,21 +310,40 @@ test("requirePlatformAdmin returns 403 for authenticated normal client", () => {
   assert.equal(statusCode, 403);
 });
 
-test("requirePlatformAdmin calls next for platformRole admin", () => {
+test("requirePlatformSuperuser calls next for platformRole superuser", () => {
   const req = {
     user: {
       _id: "64b000000000000000000003",
       role: "barber",
-      email: "admin@example.com",
-      platformRole: "admin",
+      email: "superuser@example.com",
+      platformRole: "superuser",
     },
   };
   const res = { status() { return this; }, json() { return this; } };
 
   let nextCalled = false;
-  requirePlatformAdmin(req, res, () => { nextCalled = true; });
+  requirePlatformSuperuser(req, res, () => { nextCalled = true; });
 
   assert.equal(nextCalled, true);
+});
+
+test("requirePlatformAdmin alias uses platform superuser logic", () => {
+  const req = {
+    user: {
+      _id: "64b000000000000000000007",
+      role: "client",
+      email: "old-admin@example.com",
+      platformRole: "admin",
+    },
+  };
+  const res = { statusCode: 200, body: undefined, status(code) { this.statusCode = code; return this; }, json(payload) { this.body = payload; return this; } };
+
+  requirePlatformAdmin(req, res, () => {
+    assert.fail("next should not be called");
+  });
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.message, "Platform superuser access required");
 });
 
 test("requirePlatformAdmin calls next for env allowlisted email", () => {
@@ -300,6 +355,7 @@ test("requirePlatformAdmin calls next for env allowlisted email", () => {
       _id: "64b000000000000000000004",
       role: "barber",
       email: "admin@example.com",
+      emailVerified: true,
       platformRole: null,
     },
   };

@@ -327,29 +327,84 @@ describe("User platform admin role model", () => {
     const error = user.validateSync();
 
     assert.ok(error?.errors?.platformRole, "platformRole validation error expected");
-    assert.match(error.errors.platformRole.message, /user/);
+    assert.match(error.errors.platformRole.message, /superuser/);
   });
 
   test("existing client and barber business roles remain valid without platformRole", () => {
     const client = makeUser({ role: "client" });
     const barber = makeUser({ role: "barber" });
 
-    assert.equal(client.platformRole, null);
-    assert.equal(barber.platformRole, null);
+    assert.equal(client.platformRole, undefined);
+    assert.equal(barber.platformRole, undefined);
     assert.equal(client.validateSync(), undefined);
     assert.equal(barber.validateSync(), undefined);
   });
 
-  test("platformRole admin is separate from business role", () => {
-    const clientAdmin = makeUser({ role: "client", platformRole: "admin" });
-    const barberAdmin = makeUser({ role: "barber", platformRole: "admin" });
+  test("platformRole admin is rejected", () => {
+    const user = makeUser({ role: "client", platformRole: "admin" });
+    const error = user.validateSync();
 
-    assert.equal(clientAdmin.validateSync(), undefined);
-    assert.equal(barberAdmin.validateSync(), undefined);
-    assert.equal(clientAdmin.role, "client");
-    assert.equal(barberAdmin.role, "barber");
-    assert.equal(clientAdmin.platformRole, "admin");
-    assert.equal(barberAdmin.platformRole, "admin");
+    assert.ok(error?.errors?.platformRole, "platformRole validation error expected");
+    assert.match(error.errors.platformRole.message, /superuser/);
+  });
+
+  test("platformRole null is rejected for new users", () => {
+    const user = makeUser({ role: "client", platformRole: null });
+    const error = user.validateSync();
+
+    assert.ok(error?.errors?.platformRole, "platformRole validation error expected");
+    assert.match(error.errors.platformRole.message, /superuser/);
+  });
+
+  test("legacy admin and null platformRole values do not block unrelated saves", () => {
+    const oldAdmin = User.hydrate({
+      _id: "64b000000000000000000011",
+      name: "Old Admin",
+      phone: phone("legacy-admin"),
+      password: "password123",
+      role: "client",
+      platformRole: "admin",
+    });
+    oldAdmin.name = "Old Admin Renamed";
+
+    const oldNull = User.hydrate({
+      _id: "64b000000000000000000012",
+      name: "Old Null",
+      phone: phone("legacy-null"),
+      password: "password123",
+      role: "client",
+      platformRole: null,
+    });
+    oldNull.name = "Old Null Renamed";
+
+    assert.equal(oldAdmin.validateSync(), undefined);
+    assert.equal(oldNull.validateSync(), undefined);
+  });
+
+  test("platformRole superuser is separate from business role", () => {
+    const clientSuperuser = makeUser({ role: "client", platformRole: "superuser" });
+    const barberSuperuser = makeUser({ role: "barber", platformRole: "superuser" });
+
+    assert.equal(clientSuperuser.validateSync(), undefined);
+    assert.equal(barberSuperuser.validateSync(), undefined);
+    assert.equal(clientSuperuser.role, "client");
+    assert.equal(barberSuperuser.role, "barber");
+    assert.equal(clientSuperuser.platformRole, "superuser");
+    assert.equal(barberSuperuser.platformRole, "superuser");
+  });
+
+  test("platformRole has partial unique index for one superuser", () => {
+    assert.equal(User.schema.path("platformRole").options.default, undefined);
+    assert.deepEqual(
+      User.schema.indexes().find(([fields]) => fields.platformRole === 1),
+      [
+        { platformRole: 1 },
+        {
+          unique: true,
+          partialFilterExpression: { platformRole: "superuser" },
+        },
+      ]
+    );
   });
 });
 

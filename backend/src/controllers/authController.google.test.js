@@ -171,7 +171,7 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   const existingUser = createUser({
     googleId: "google-sub",
     role: "barber",
-    platformRole: "admin",
+    platformRole: "superuser",
     salon: "salon-1",
     salonStatus: "approved",
     salons: [{ salon: "salon-1", status: "approved" }],
@@ -190,7 +190,7 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   assert.ok(res.body.token);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
   assert.equal(res.body.user.role, "barber");
-  assert.equal(res.body.user.platformRole, "admin");
+  assert.equal(res.body.user.platformRole, "superuser");
   assert.equal(existingUser.phone, "+37400111222");
   assert.deepEqual(existingUser.salons, [{ salon: "salon-1", status: "approved" }]);
   assert.equal(existingUser.authProviders.includes("google"), true);
@@ -232,7 +232,7 @@ test("googleAuth links existing verified email without changing role or phone", 
     googleId: "",
     role: "barber",
     phone: "+37400111222",
-    platformRole: "admin",
+    platformRole: "superuser",
     salon: "salon-1",
     salonStatus: "approved",
     salons: [{ salon: "salon-1", status: "approved" }],
@@ -255,7 +255,7 @@ test("googleAuth links existing verified email without changing role or phone", 
   assert.equal(existingUser.emailVerified, true);
   assert.equal(existingUser.role, "barber");
   assert.equal(existingUser.phone, "+37400111222");
-  assert.equal(existingUser.platformRole, "admin");
+  assert.equal(existingUser.platformRole, "superuser");
   assert.deepEqual(existingUser.salons, [{ salon: "salon-1", status: "approved" }]);
   assert.equal(existingUser.avatarUrl, "https://example.com/avatar.png");
 });
@@ -318,7 +318,14 @@ test("googleAuth first-time user rejects invalid role and duplicate phone", asyn
     return selectable(null);
   };
   res = createResponse();
-  await googleAuth({ body: { credential: "valid-google-token", role: "client", phone: "  +37400111222  " } }, res);
+  await googleAuth({
+    body: {
+      credential: "valid-google-token",
+      role: "client",
+      phone: "  +37400111222  ",
+      platformRole: "superuser",
+    },
+  }, res);
 
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.body, { message: "Phone already exists" });
@@ -352,6 +359,8 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   assert.equal(createPayload.password, undefined);
   assert.equal(createPayload.phone, "+37400111222");
   assert.equal(createPayload.role, "client");
+  assert.equal(createPayload.platformRole, undefined);
+  assert.equal(res.body.user.platformRole, undefined);
   assert.deepEqual(createPayload.authProviders, ["google"]);
   const rawUser = createdUser.toObject();
   assert.deepEqual(rawUser.favoriteBarbers, []);
@@ -364,6 +373,36 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   assert.equal("salons" in rawUser, false);
   assert.equal("salon" in rawUser, false);
   assert.equal("salonStatus" in rawUser, false);
+  assert.equal("platformRole" in rawUser, false);
+});
+
+test("googleAuth first-time user ignores malicious admin platformRole", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  mockGooglePayload(baseGooglePayload);
+  let createPayload;
+
+  User.findOne = (filter) => {
+    if (filter.googleId || filter.email) return selectable(null);
+    return null;
+  };
+  User.create = async (payload) => {
+    createPayload = payload;
+    return createPersistedUser(payload);
+  };
+
+  const res = createResponse();
+  await googleAuth({
+    body: {
+      credential: "valid-google-token",
+      role: "client",
+      phone: "+37400111222",
+      platformRole: "admin",
+    },
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createPayload.platformRole, undefined);
+  assert.equal(res.body.user.platformRole, undefined);
 });
 
 test("googleAuth creates first-time barber user with trial subscription", async () => {
@@ -477,6 +516,7 @@ test("normal registration creates clean client user fields", async () => {
         email: "client@example.com",
         password: "password123",
         role: "client",
+        platformRole: "superuser",
       },
     },
     res
@@ -484,6 +524,8 @@ test("normal registration creates clean client user fields", async () => {
 
   assert.equal(res.statusCode, 201);
   assert.equal(createPayload.role, "client");
+  assert.equal(createPayload.platformRole, undefined);
+  assert.equal(res.body.user.platformRole, undefined);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
   const rawUser = createdUser.toObject();
   assert.deepEqual(rawUser.favoriteBarbers, []);
@@ -496,6 +538,37 @@ test("normal registration creates clean client user fields", async () => {
   assert.equal("salons" in rawUser, false);
   assert.equal("salon" in rawUser, false);
   assert.equal("salonStatus" in rawUser, false);
+  assert.equal("platformRole" in rawUser, false);
+});
+
+test("normal registration ignores malicious admin platformRole", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  let createPayload;
+
+  User.findOne = () => null;
+  User.create = async (payload) => {
+    createPayload = payload;
+    return createPersistedUser(payload);
+  };
+
+  const res = createResponse();
+  await registerUser(
+    {
+      body: {
+        name: "Password Client",
+        phone: "+37400111222",
+        email: "client@example.com",
+        password: "password123",
+        role: "client",
+        platformRole: "admin",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createPayload.platformRole, undefined);
+  assert.equal(res.body.user.platformRole, undefined);
 });
 
 test("normal registration creates barber fields and trial subscription", async () => {

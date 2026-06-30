@@ -241,7 +241,7 @@ test("card summary returns barber card data without per-barber requests", async 
     city: "City",
     avatarUrl: "/uploads/avatars/barber.png",
     role: "barber",
-    platformRole: "admin",
+    platformRole: "superuser",
     salonStatus: "none",
     salons: [
       {

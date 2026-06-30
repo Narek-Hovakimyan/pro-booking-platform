@@ -30,7 +30,7 @@ const checkMiddleware = (route, expectedMiddlewares) => {
 
 /* ── Route structure tests ────────────────────────────── */
 
-test("all routes have protect + requirePlatformAdmin middleware", () => {
+test("all routes have protect + requirePlatformSuperuser middleware", () => {
   const expectedPaths = [
     { path: "/access-check", method: "get" },
     { path: "/billing/salons", method: "get" },
@@ -53,7 +53,7 @@ test("all routes have protect + requirePlatformAdmin middleware", () => {
     );
     assert.ok(route, `Route ${path} should exist`);
     assert.ok(route.route.methods[method], `${path} should accept ${method.toUpperCase()}`);
-    checkMiddleware(route, ["protect", "requirePlatformAdmin"]);
+    checkMiddleware(route, ["protect", "requirePlatformSuperuser"]);
   }
 });
 
@@ -127,21 +127,21 @@ const makeReqRes = (userOverrides = {}) => {
 /**
  * Call the /access-check route handler directly via Router.handle.
  *
- * The route middleware chain is: protect -> requirePlatformAdmin -> handler.
+ * The route middleware chain is: protect -> requirePlatformSuperuser -> handler.
  * Since protect is the first middleware, we need to simulate it by
  * either directly testing the handler via a custom approach, or by
  * stubbing protect to just pass through.
  *
  * Simpler approach: test the route's handler directly by walking
  * the middleware stack up to the final handler (3rd item in stack).
- * But since protect/requirePlatformAdmin are external middlewares that
+ * But since protect/requirePlatformSuperuser are external middlewares that
  * check req.user, we simulate the chain manually.
  */
 
 /**
  * Wrap the route's middleware chain into a single callable.
  * This skips the actual `protect` import and simulates
- * a pre-authenticated request going through requirePlatformAdmin + handler.
+ * a pre-authenticated request going through requirePlatformSuperuser + handler.
  */
 const callAccessCheck = async (req, res) => {
   const routeLayer = platformRoutes.stack.find(
@@ -150,8 +150,8 @@ const callAccessCheck = async (req, res) => {
   assert.ok(routeLayer, "access-check route not found");
 
   const stack = routeLayer.route.stack;
-  // stack[0] = protect, stack[1] = requirePlatformAdmin, stack[2] = handler
-  const requirePlatformAdminFn = stack[1].handle;
+  // stack[0] = protect, stack[1] = requirePlatformSuperuser, stack[2] = handler
+  const requirePlatformSuperuserFn = stack[1].handle;
   const handlerFn = stack[2].handle;
 
   let middlewareError = null;
@@ -159,8 +159,8 @@ const callAccessCheck = async (req, res) => {
     middlewareError = err;
   };
 
-  // Run requirePlatformAdmin
-  await requirePlatformAdminFn(req, res, next);
+  // Run requirePlatformSuperuser
+  await requirePlatformSuperuserFn(req, res, next);
 
   if (res.statusCode >= 400) {
     // Middleware rejected — handler should not be called
@@ -179,10 +179,10 @@ const runRoutePlatformGate = async (routePath, req, res) => {
   assert.ok(routeLayer, `${routePath} route not found`);
 
   const stack = routeLayer.route.stack;
-  const requirePlatformAdminFn = stack[1].handle;
+  const requirePlatformSuperuserFn = stack[1].handle;
 
   let nextCalled = false;
-  await requirePlatformAdminFn(req, res, () => {
+  await requirePlatformSuperuserFn(req, res, () => {
     nextCalled = true;
   });
 
@@ -197,10 +197,10 @@ test("unauthenticated request rejected with 401", async () => {
     (l) => l.route && l.route.path === "/access-check"
   );
   const stack = routeLayer.route.stack;
-  const requirePlatformAdminFn = stack[1].handle;
+  const requirePlatformSuperuserFn = stack[1].handle;
 
   let middlewareError = null;
-  await requirePlatformAdminFn(req, res, (err) => {
+  await requirePlatformSuperuserFn(req, res, (err) => {
     middlewareError = err;
   });
 
@@ -232,13 +232,13 @@ test("authenticated normal client rejected with 403", async () => {
   assert.equal(res.body.code, "FORBIDDEN");
 });
 
-test("user with platformRole admin allowed and returns identity info", async () => {
+test("user with platformRole superuser allowed and returns identity info", async () => {
   const { req, res } = makeReqRes({
     _id: "64b000000000000000000003",
-    name: "Platform Admin",
-    email: "admin@example.com",
+    name: "Platform Superuser",
+    email: "superuser@example.com",
     role: "barber",
-    platformRole: "admin",
+    platformRole: "superuser",
     token: "should-not-leak",
     password: "should-not-leak",
     subscription: { status: "active" },
@@ -254,9 +254,9 @@ test("user with platformRole admin allowed and returns identity info", async () 
     "platformRole",
   ]);
   assert.equal(body.id, "64b000000000000000000003");
-  assert.equal(body.name, "Platform Admin");
-  assert.equal(body.email, "admin@example.com");
-  assert.equal(body.platformRole, "admin");
+  assert.equal(body.name, "Platform Superuser");
+  assert.equal(body.email, "superuser@example.com");
+  assert.equal(body.platformRole, "superuser");
   assert.equal(body.token, undefined);
   assert.equal(body.password, undefined);
   assert.equal(body.subscription, undefined);
@@ -271,6 +271,7 @@ test("env allowlisted email allowed and returns identity info", async () => {
     _id: "64b000000000000000000004",
     name: "Allowlisted Admin",
     email: "allowlisted@example.com",
+    emailVerified: true,
     role: "barber",
     platformRole: null,
   });
@@ -279,6 +280,19 @@ test("env allowlisted email allowed and returns identity info", async () => {
   assert.ok(body, "Body should be defined");
   assert.equal(body.id, "64b000000000000000000004");
   assert.equal(body.platformRole, null); // DB field is null, but access granted by allowlist
+});
+
+test("old platformRole admin is rejected without env allowlist", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000013",
+    role: "barber",
+    email: "old-admin@example.com",
+    platformRole: "admin",
+  });
+
+  await callAccessCheck(req, res);
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, "FORBIDDEN");
 });
 
 test("env allowlisted id allowed and returns identity info", async () => {
@@ -326,7 +340,7 @@ test("billing route rejects normal barber", async () => {
   assert.equal(res.statusCode, 403);
 });
 
-test("billing route rejects salon owner/admin without platform admin role", async () => {
+test("billing route rejects salon owner/admin without platform superuser role", async () => {
   const { req, res } = makeReqRes({
     _id: "64b000000000000000000022",
     role: "barber",
@@ -349,11 +363,11 @@ test("billing route rejects salon owner/admin without platform admin role", asyn
   assert.equal(res.statusCode, 403);
 });
 
-test("billing route allows platformRole admin", async () => {
+test("billing route allows platformRole superuser", async () => {
   const { req, res } = makeReqRes({
     _id: "64b000000000000000000023",
     role: "barber",
-    platformRole: "admin",
+    platformRole: "superuser",
   });
 
   const nextCalled = await runRoutePlatformGate("/billing/salons", req, res);
@@ -362,7 +376,7 @@ test("billing route allows platformRole admin", async () => {
   assert.equal(res.statusCode, 200);
 });
 
-test("billing route allows env allowlisted platform admin", async () => {
+test("billing route allows env allowlisted platform superuser", async () => {
   process.env.PLATFORM_ADMIN_EMAILS = "billing-admin@example.com";
   resetAllowlistCache();
 
@@ -370,6 +384,7 @@ test("billing route allows env allowlisted platform admin", async () => {
     _id: "64b000000000000000000024",
     role: "client",
     email: "billing-admin@example.com",
+    emailVerified: true,
     platformRole: null,
   });
 
@@ -379,7 +394,7 @@ test("billing route allows env allowlisted platform admin", async () => {
   assert.equal(res.statusCode, 200);
 });
 
-test("write billing routes reject business-role users and allow platform admins only", async () => {
+test("write billing routes reject business-role users and allow platform superusers only", async () => {
   for (const routePath of writeBillingRoutes) {
     const client = makeReqRes({
       _id: "64b000000000000000000025",
@@ -415,17 +430,17 @@ test("write billing routes reject business-role users and allow platform admins 
     assert.equal(await runRoutePlatformGate(routePath, salonAdmin.req, salonAdmin.res), false);
     assert.equal(salonAdmin.res.statusCode, 403);
 
-    const platformAdmin = makeReqRes({
+    const platformSuperuser = makeReqRes({
       _id: "64b000000000000000000028",
       role: "barber",
-      platformRole: "admin",
+      platformRole: "superuser",
     });
-    assert.equal(await runRoutePlatformGate(routePath, platformAdmin.req, platformAdmin.res), true);
-    assert.equal(platformAdmin.res.statusCode, 200);
+    assert.equal(await runRoutePlatformGate(routePath, platformSuperuser.req, platformSuperuser.res), true);
+    assert.equal(platformSuperuser.res.statusCode, 200);
   }
 });
 
-test("write billing routes allow env allowlisted platform admin", async () => {
+test("write billing routes allow env allowlisted platform superuser", async () => {
   process.env.PLATFORM_ADMIN_IDS = "64b000000000000000000029";
   resetAllowlistCache();
 

@@ -851,7 +851,7 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
     _id: id,
     name,
     role: "barber",
-    platformRole: "admin",
+    platformRole: "superuser",
     avatarUrl: "",
     specialty: "unisex",
     city: "Yerevan",

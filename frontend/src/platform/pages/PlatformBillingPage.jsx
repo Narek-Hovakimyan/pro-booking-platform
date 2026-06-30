@@ -79,7 +79,7 @@ export default function PlatformBillingPage() {
   const [error, setError] = useState("");
 
   // Determine if user can view this page
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "admin");
+  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -103,7 +103,7 @@ export default function PlatformBillingPage() {
       } catch (err) {
         if (!isMounted) return;
         if (err.response?.status === 403) {
-          setError("Access denied. Platform admin privileges required.");
+          setError("Access denied. Platform superuser privileges required.");
         } else {
           setError(err.response?.data?.message || "Failed to load salon billing data.");
         }
