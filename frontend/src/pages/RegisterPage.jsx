@@ -11,6 +11,10 @@ import { registerUser } from "@/store/slices/authSlice";
 import { CalendarCheck, Scissors, ShieldCheck } from "lucide-react";
 
 const googleAvailable = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
+const getPostRegistrationPath = (userRole, redirectPath) => {
+  if (redirectPath) return redirectPath;
+  return userRole === "barber" ? "/admin/settings/salon" : "/";
+};
 
 export default function RegisterPage() {
   const dispatch = useDispatch();
@@ -70,7 +74,7 @@ export default function RegisterPage() {
       });
 
       dispatch(registerUser(data));
-      navigate(redirectPath || (data.user.role === "barber" ? "/admin" : "/"));
+      navigate(getPostRegistrationPath(data.user.role, redirectPath));
     } catch (requestError) {
       setError(
         requestError.response?.data?.message || t("auth.register.failed")

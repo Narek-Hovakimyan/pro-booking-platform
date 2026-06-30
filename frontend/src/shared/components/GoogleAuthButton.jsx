@@ -9,6 +9,10 @@ import { Button } from "@/shared/components/ui/button";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAvailable = Boolean(GOOGLE_CLIENT_ID);
+const getPostGoogleRegistrationPath = (userRole, redirectPath) => {
+  if (redirectPath) return redirectPath;
+  return userRole === "barber" ? "/admin/settings/salon" : "/";
+};
 
 function ProfileCompletionModal({ credential, onComplete, onCancel, onCredentialError }) {
   const [role, setRole] = useState("");
@@ -157,7 +161,7 @@ export default function GoogleAuthButton() {
     setError("");
     dispatch(loginUser(data));
     const redirectPath = searchParams.get("redirect") || "";
-    navigate(redirectPath || (data.user.role === "barber" ? "/admin" : "/"));
+    navigate(getPostGoogleRegistrationPath(data.user.role, redirectPath));
   };
 
   const handleCancel = () => {
