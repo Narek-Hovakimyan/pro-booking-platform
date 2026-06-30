@@ -893,6 +893,9 @@ export default function BarberSettings({
         {settingsView === "salon" && (
           <>
             <h2 className="text-xl font-bold sm:text-2xl">Salon Settings</h2>
+            <p className="text-sm leading-6 text-neutral-500">
+              Choose how you work: create your own salon or join an existing one.
+            </p>
           {error && (
             <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error}

@@ -10,6 +10,7 @@ import {
   Clock3,
   Info,
   Scissors,
+  Store,
   UserCircle,
 } from "lucide-react";
 import { useSelector } from "react-redux";
@@ -37,6 +38,18 @@ const getSalonList = (data) => {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.salons)) return data.salons;
   return [];
+};
+
+const hasApprovedSalonAccess = (statusData, currentUser) => {
+  const apiSalons = getSalonList(statusData);
+  const userSalons = Array.isArray(currentUser?.salons) ? currentUser.salons : [];
+
+  return (
+    apiSalons.some((entry) => entry?.status === "approved") ||
+    userSalons.some((entry) => entry?.status === "approved") ||
+    statusData?.salonStatus === "approved" ||
+    currentUser?.salonStatus === "approved"
+  );
 };
 
 const getWeekBounds = () => {
@@ -118,6 +131,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
   const [incomeLoading, setIncomeLoading] = useState(true);
   const [ratingLoading, setRatingLoading] = useState(true);
   const [manageableSalonCount, setManageableSalonCount] = useState(0);
+  const [hasApprovedSalonMembership, setHasApprovedSalonMembership] = useState(false);
   const [manageableSalonLoading, setManageableSalonLoading] = useState(true);
   const [manageableSalonUserId, setManageableSalonUserId] = useState(null);
 
@@ -125,6 +139,12 @@ export default function DashboardAnalytics({ bookings = [] }) {
   const hasLoadedManageableSalonCount = !shouldCheckManageableSalons || manageableSalonUserId === currentUserId;
   const hasMultipleManageableSalons =
     shouldCheckManageableSalons && hasLoadedManageableSalonCount && manageableSalonCount > 1;
+  const shouldShowSalonOnboarding =
+    shouldCheckManageableSalons &&
+    hasLoadedManageableSalonCount &&
+    !manageableSalonLoading &&
+    manageableSalonCount === 0 &&
+    !hasApprovedSalonMembership;
   const shouldLoadPersonalDashboard =
     Boolean(currentUserId) &&
     (!shouldCheckManageableSalons ||
@@ -364,17 +384,32 @@ export default function DashboardAnalytics({ bookings = [] }) {
 
     let isMounted = true;
 
-    api
-      .get("/salons/mine/manageable")
-      .then(({ data }) => {
+    Promise.allSettled([
+      api.get("/salons/mine/manageable"),
+      api.get("/salons/me/status"),
+    ])
+      .then(([manageableResult, statusResult]) => {
         if (isMounted) {
-          setManageableSalonCount(getSalonList(data).length);
+          const manageableData =
+            manageableResult.status === "fulfilled"
+              ? manageableResult.value.data
+              : [];
+          const statusData =
+            statusResult.status === "fulfilled" ? statusResult.value.data : {};
+
+          setManageableSalonCount(getSalonList(manageableData).length);
+          setHasApprovedSalonMembership(
+            hasApprovedSalonAccess(statusData, currentUser)
+          );
           setManageableSalonUserId(currentUserId);
         }
       })
       .catch(() => {
         if (isMounted) {
           setManageableSalonCount(0);
+          setHasApprovedSalonMembership(
+            hasApprovedSalonAccess({}, currentUser)
+          );
           setManageableSalonUserId(currentUserId);
         }
       })
@@ -385,7 +420,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.role, currentUserId, shouldCheckManageableSalons]);
+  }, [currentUser, currentUser?.role, currentUserId, shouldCheckManageableSalons]);
 
   // ---- Today's date display ----
 
@@ -481,6 +516,37 @@ export default function DashboardAnalytics({ bookings = [] }) {
       </div>
 
       <CardContent className="space-y-6 p-5">
+        {shouldShowSalonOnboarding && (
+          <div className="rounded-3xl border border-purple-100 bg-gradient-to-br from-white via-purple-50/70 to-pink-50 p-4 shadow-sm shadow-purple-100/70 sm:p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex gap-3">
+                <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-purple-600 shadow-sm">
+                  <Store className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <div>
+                  <h2 className="text-base font-bold text-neutral-950">
+                    Set up your salon
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">
+                    To manage bookings and schedule, create your salon or join an existing salon.
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-purple-700">
+                    After approval, schedule controls will appear automatically.
+                  </p>
+                </div>
+              </div>
+              <Button
+                as={Link}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
+                to="/admin/settings/salon"
+              >
+                Create or join a salon
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
         <AnalyticsSummaryCards
           averageRating={averageRating}
           cancelledCount={cancelledCount}

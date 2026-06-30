@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { Link } from "react-router-dom";
 
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -716,8 +717,21 @@ export default function ScheduleManager({
           <h2 className="text-xl font-bold sm:text-2xl">Schedule</h2>
           <EmptyState
             title="No salons available for schedule management"
-            description="Once you are approved for a salon, you can manage that salon's schedule here."
-          />
+            description="Schedule is salon-based. Create your salon or join an existing salon to start managing working hours."
+            action={
+              <Button
+                as={Link}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
+                to="/admin/settings/salon"
+              >
+                Create or join a salon
+              </Button>
+            }
+          >
+            <p className="mt-2 text-sm text-neutral-500">
+              After approval, schedule controls will appear automatically.
+            </p>
+          </EmptyState>
         </CardContent>
       </Card>
     );
