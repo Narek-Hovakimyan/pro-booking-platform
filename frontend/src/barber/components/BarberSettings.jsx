@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link } from "react-router-dom";
-import { ArrowRight, BriefcaseBusiness, Calendar, Store, Clock, Award } from "lucide-react";
+import { ArrowRight, BriefcaseBusiness, Calendar, Store, Clock, Award, UserPlus } from "lucide-react";
 
 import api from "@/shared/api/axios";
 import CertificationsManager from "@/barber/components/CertificationsManager";
@@ -892,10 +892,53 @@ export default function BarberSettings({
 
         {settingsView === "salon" && (
           <>
-            <h2 className="text-xl font-bold sm:text-2xl">Salon Settings</h2>
-            <p className="text-sm leading-6 text-neutral-500">
-              Choose how you work: create your own salon or join an existing one.
-            </p>
+            <section className="overflow-hidden rounded-3xl border border-purple-100 bg-gradient-to-br from-white via-purple-50/70 to-pink-50 p-4 shadow-sm shadow-purple-100/60 sm:p-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="max-w-2xl">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-purple-700 shadow-sm">
+                    <Store className="h-3.5 w-3.5" />
+                    Salon onboarding
+                  </div>
+                  <h2 className="mt-4 text-2xl font-bold tracking-tight text-neutral-950 sm:text-3xl">
+                    Set up your salon
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-neutral-600 sm:text-base">
+                    Create your own salon or join an existing one to start managing schedules, bookings, and services.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:w-[28rem]">
+                  <a
+                    className="group rounded-2xl border border-white bg-white/90 p-4 shadow-sm transition hover:border-purple-200 hover:shadow-md"
+                    href="#create-salon"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-purple-100 text-purple-700">
+                      <Store className="h-5 w-5" />
+                    </span>
+                    <span className="mt-3 block text-sm font-bold text-neutral-950">
+                      Create my salon
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500">
+                      Open a new salon profile and manage it as owner.
+                    </span>
+                  </a>
+                  <a
+                    className="group rounded-2xl border border-white bg-white/90 p-4 shadow-sm transition hover:border-pink-200 hover:shadow-md"
+                    href="#join-salon"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-pink-100 text-pink-700">
+                      <UserPlus className="h-5 w-5" />
+                    </span>
+                    <span className="mt-3 block text-sm font-bold text-neutral-950">
+                      Join existing salon
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500">
+                      Request access to a salon that is already listed.
+                    </span>
+                  </a>
+                </div>
+              </div>
+            </section>
           {error && (
             <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error}
