@@ -116,12 +116,12 @@ export default function ServiceCategoryManager({
   if (categoryType !== "custom") return null;
 
   return (
-    <>
+    <div className="space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
       {/* ── Custom category dropdown ── */}
       <label className="grid gap-1.5 text-sm font-semibold">
         Custom category
         {categoriesLoading ? (
-          <div className="flex items-center gap-2 rounded-2xl border border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-400">
+          <div className="flex items-center gap-2 rounded-2xl border border-indigo-100 bg-white p-3 text-sm text-neutral-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading categories...
           </div>
@@ -131,7 +131,7 @@ export default function ServiceCategoryManager({
           </div>
         ) : (
           <select
-            className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+            className="w-full rounded-2xl border border-indigo-200 bg-white p-3 font-normal transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             disabled={isSaving}
             value={customCategoryId}
             onChange={(e) =>
@@ -154,23 +154,23 @@ export default function ServiceCategoryManager({
             type="button"
             disabled={isSaving || categoriesLoading}
             onClick={openCreateForm}
-            className="mt-1.5 flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 transition-colors"
+            className="mt-1.5 flex w-fit items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 ring-1 ring-indigo-100 transition-colors hover:bg-indigo-100 hover:text-indigo-900"
           >
             <FolderPlus className="h-4 w-4" />
-            + Add custom category
+            Add custom category
           </button>
         )}
       </label>
 
       {/* ── Inline create category form ── */}
       {showCreateCategory && (
-        <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 space-y-2">
+        <div className="space-y-2 rounded-2xl border border-indigo-200 bg-white p-3">
           {createCategoryError && (
             <p className="text-xs text-red-600">{createCategoryError}</p>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
-              className="flex-1 rounded-xl border border-indigo-300 bg-white p-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="w-full flex-1 rounded-xl border border-indigo-200 bg-white p-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
               placeholder="Category name"
               disabled={creatingCategory}
               value={newCategoryName}
@@ -187,7 +187,7 @@ export default function ServiceCategoryManager({
               size="sm"
               disabled={creatingCategory || !newCategoryName.trim()}
               onClick={handleCreateCategory}
-              className="bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"
+              className="whitespace-nowrap rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
             >
               {creatingCategory ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -199,13 +199,13 @@ export default function ServiceCategoryManager({
               type="button"
               disabled={creatingCategory}
               onClick={dismissCreateForm}
-              className="rounded-full p-1.5 text-neutral-400 hover:text-neutral-600"
+              className="self-center rounded-xl p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

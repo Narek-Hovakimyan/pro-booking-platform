@@ -59,6 +59,7 @@ export default function AdminPanel({
             error={error}
             isLoading={isLoading}
             isSaving={isSaving}
+            fullPage={section === "services"}
           />
         )}
 

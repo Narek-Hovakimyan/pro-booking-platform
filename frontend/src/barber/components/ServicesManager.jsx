@@ -12,6 +12,8 @@ import {
   Scissors,
   Eye,
   EyeOff,
+  CheckCircle2,
+  Tag,
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -74,6 +76,7 @@ export default function ServicesManager({
   isLoading = false,
   isSaving = false,
   error = "",
+  fullPage = false,
 }) {
   const { currentUser } = useSelector((state) => state.auth);
   const barberId = currentUser?.id || currentUser?._id;
@@ -129,6 +132,8 @@ export default function ServicesManager({
       service.type !== "package" &&
       (!editingService || String(service.id) !== String(editingService.id))
   );
+  const activeServices = services.filter((service) => service.active);
+  const inactiveServices = services.filter((service) => !service.active);
 
   /* ── Modal open/close ── */
   const openAddModal = () => {
@@ -360,19 +365,254 @@ export default function ServicesManager({
     );
   };
 
+  const renderServiceCard = (service) => {
+    const priceInfo = getServicePriceInfo(service);
+
+    return (
+      <div
+        key={service.id}
+        className={`group relative overflow-hidden rounded-3xl border bg-white shadow-sm shadow-purple-100/40 transition-all hover:-translate-y-0.5 hover:shadow-md ${
+          service.active
+            ? "border-purple-100"
+            : "border-dashed border-neutral-200 bg-neutral-50/80"
+        }`}
+      >
+        <div
+          className={`absolute inset-x-0 top-0 h-1 ${
+            service.active
+              ? "bg-gradient-to-r from-purple-500 to-pink-500"
+              : "bg-neutral-200"
+          }`}
+        />
+
+        <div className="flex flex-col gap-4 p-4 pt-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3
+                    className={`break-words text-base font-bold ${
+                      service.active ? "text-neutral-950" : "text-neutral-500"
+                    }`}
+                  >
+                    {service.name}
+                  </h3>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      service.active
+                        ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+                        : "bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200"
+                    }`}
+                  >
+                    {service.active ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    )}
+                    {service.active ? "Active" : "Inactive"}
+                  </span>
+                  {priceInfo.hasDiscount && (
+                    <span className="inline-flex rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 ring-1 ring-rose-100">
+                      {priceInfo.discountLabel}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {renderCategoryLabel(service)}
+                  {service.type === "package" && (
+                    <span className="mt-1 inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-100">
+                      Package
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              <div className="flex items-center gap-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-neutral-600">
+                <Clock className="h-4 w-4 text-purple-500" />
+                <span className="font-semibold text-neutral-900">
+                  {service.duration} min
+                </span>
+              </div>
+              <div className="flex items-center gap-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-neutral-600 sm:col-span-1 lg:col-span-2">
+                <Wallet className="h-4 w-4 text-pink-500" />
+                {priceInfo.hasDiscount ? (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-neutral-400 line-through">
+                      {formatPrice(priceInfo.originalPrice)} դր
+                    </span>
+                    <span className="font-bold text-neutral-950">
+                      {formatPrice(priceInfo.discountedPrice)} դր
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-bold text-neutral-950">
+                    {formatPrice(priceInfo.originalPrice)} դր
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {service.description && (
+              <p className="line-clamp-2 text-sm leading-relaxed text-neutral-500">
+                {service.description}
+              </p>
+            )}
+            {Array.isArray(service.tags) && service.tags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
+                <Tag className="h-3.5 w-3.5 text-neutral-400" />
+                {service.tags.slice(0, 4).map((tag, index) => (
+                  <span
+                    key={`${tag}-${index}`}
+                    className="rounded-full bg-neutral-100 px-2 py-0.5"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center justify-end gap-1 border-t border-neutral-100 pt-3 sm:border-t-0 sm:pt-0">
+            <Button
+              disabled={isSaving}
+              size="icon"
+              variant="ghost"
+              className="h-10 w-10 rounded-2xl text-neutral-500 hover:bg-amber-50 hover:text-amber-700"
+              title={service.active ? "Deactivate" : "Activate"}
+              onClick={() => handleToggleActive(service)}
+            >
+              {service.active ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              disabled={isSaving}
+              size="icon"
+              variant="ghost"
+              className="h-10 w-10 rounded-2xl text-neutral-500 hover:bg-purple-50 hover:text-purple-700"
+              title="Edit"
+              onClick={() => openEditModal(service)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+
+            {deleteConfirmId === service.id ? (
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-10 rounded-2xl px-3 text-xs"
+                  onClick={() => handleDelete(service.id)}
+                >
+                  Delete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-10 rounded-2xl px-3 text-xs"
+                  onClick={() => setDeleteConfirmId(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                disabled={isSaving}
+                size="icon"
+                variant="ghost"
+                className="h-10 w-10 rounded-2xl text-red-500 hover:bg-red-50 hover:text-red-700"
+                title="Delete"
+                onClick={() => setDeleteConfirmId(service.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderServiceSection = (title, count, sectionServices, tone) => {
+    if (sectionServices.length === 0) return null;
+
+    return (
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-bold text-neutral-800">{title}</h3>
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+              tone === "active"
+                ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+                : "bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200"
+            }`}
+          >
+            {count}
+          </span>
+        </div>
+        <div className={`grid gap-3 ${fullPage ? "xl:grid-cols-2" : ""}`}>
+          {sectionServices.map(renderServiceCard)}
+        </div>
+      </section>
+    );
+  };
+
   return (
     <>
-      <Card className="rounded-2xl sm:rounded-3xl">
-        <CardContent className="space-y-5 p-4 sm:p-6">
+      <Card
+        className={`overflow-hidden rounded-3xl border-purple-100 bg-gradient-to-br from-purple-50/80 via-white to-pink-50/60 shadow-lg shadow-purple-100/40 ${
+          fullPage ? "lg:col-span-3" : ""
+        }`}
+      >
+        <CardContent className="space-y-6 p-4 sm:p-6">
           {/* Header */}
-          <div>
-            <h2 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
-              <Settings className="h-6 w-6 text-neutral-700" />
-              Ծառայություններ
-            </h2>
-            <p className="mt-1 text-sm text-neutral-500">
-              {services.length} service{services.length !== 1 ? "s" : ""}
-            </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-purple-700 shadow-sm ring-1 ring-purple-100">
+                  <Settings className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="text-2xl font-bold text-neutral-950 sm:text-3xl">
+                    Services
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-sm text-neutral-600">
+                    Manage service prices, duration, categories, and booking
+                    options clients see when booking.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white bg-white/80 p-2 text-center shadow-sm">
+              <div className="px-2">
+                <p className="text-lg font-bold text-neutral-950">
+                  {services.length}
+                </p>
+                <p className="text-[11px] font-semibold uppercase text-neutral-400">
+                  Total
+                </p>
+              </div>
+              <div className="px-2">
+                <p className="text-lg font-bold text-emerald-700">
+                  {activeServices.length}
+                </p>
+                <p className="text-[11px] font-semibold uppercase text-neutral-400">
+                  Active
+                </p>
+              </div>
+              <div className="px-2">
+                <p className="text-lg font-bold text-neutral-500">
+                  {inactiveServices.length}
+                </p>
+                <p className="text-[11px] font-semibold uppercase text-neutral-400">
+                  Inactive
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Global error */}
@@ -385,14 +625,18 @@ export default function ServicesManager({
 
           {/* Loading state */}
           {isLoading && (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
+            <div className="grid gap-3 xl:grid-cols-2">
+              {[1, 2, 3, 4].map((i) => (
                 <div
                   key={i}
-                  className="animate-pulse rounded-2xl border border-neutral-200 bg-white p-4"
+                  className="animate-pulse rounded-3xl border border-purple-100 bg-white p-5 shadow-sm"
                 >
-                  <div className="mb-2 h-4 w-32 rounded-full bg-neutral-200" />
-                  <div className="h-3 w-24 rounded-full bg-neutral-100" />
+                  <div className="mb-4 h-4 w-36 rounded-full bg-purple-100" />
+                  <div className="mb-3 grid grid-cols-2 gap-2">
+                    <div className="h-10 rounded-2xl bg-neutral-100" />
+                    <div className="h-10 rounded-2xl bg-neutral-100" />
+                  </div>
+                  <div className="h-3 w-2/3 rounded-full bg-neutral-100" />
                 </div>
               ))}
             </div>
@@ -400,21 +644,22 @@ export default function ServicesManager({
 
           {/* Empty state */}
           {!isLoading && services.length === 0 && (
-            <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-10 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-200">
-                <Scissors className="h-7 w-7 text-neutral-500" />
+            <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-purple-200 bg-white/80 p-8 text-center shadow-sm sm:p-10">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50 text-purple-700">
+                <Scissors className="h-7 w-7" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-neutral-700">
+                <p className="text-lg font-bold text-neutral-900">
                   No services yet
                 </p>
-                <p className="mt-1 text-sm text-neutral-500">
-                  Add your first service to start accepting bookings.
+                <p className="mt-1 max-w-md text-sm text-neutral-500">
+                  Add your first service so clients can choose a price,
+                  duration, and booking option.
                 </p>
               </div>
               <Button
                 onClick={openAddModal}
-                className="bg-blue-600 text-white hover:bg-blue-700 rounded-lg px-5 py-2.5 font-medium"
+                className="rounded-2xl bg-gradient-to-r from-purple-600 to-pink-500 px-5 py-2.5 font-semibold text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600"
               >
                 <Plus className="mr-2 h-5 w-5" />
                 Add your first service
@@ -426,161 +671,33 @@ export default function ServicesManager({
           {!isLoading && services.length > 0 && (
             <>
               {/* Add button above list */}
-              <div className="flex sm:justify-end">
+              <div className="flex flex-col gap-3 rounded-3xl border border-white bg-white/80 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-neutral-600">
+                  Services remain visible here whether active or inactive.
+                </p>
                 <Button
                   onClick={openAddModal}
                   disabled={isSaving}
-                  className="w-full sm:w-auto bg-blue-600 text-white hover:bg-blue-700 rounded-lg px-4 py-2 font-medium"
+                  className="w-full rounded-2xl bg-gradient-to-r from-purple-600 to-pink-500 px-4 py-2 font-semibold text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   Add Service
                 </Button>
               </div>
 
-              <div className="space-y-3">
-                {services.map((s) => {
-                  const priceInfo = getServicePriceInfo(s);
-
-                  return (
-                    <div
-                      key={s.id}
-                      className={`group relative overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:shadow-md ${
-                        !s.active
-                          ? "border-dashed border-neutral-300 bg-neutral-50/50"
-                          : "border-neutral-200"
-                      }`}
-                    >
-                      {/* Active/inactive indicator bar */}
-                      <div
-                        className={`absolute left-0 top-0 h-full w-1 ${
-                          s.active ? "bg-emerald-500" : "bg-neutral-300"
-                        }`}
-                      />
-
-                      <div className="flex items-center justify-between gap-4 p-4 pl-5">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={`font-semibold ${
-                                s.active
-                                  ? "text-neutral-950"
-                                  : "text-neutral-400"
-                              }`}
-                            >
-                              {s.name}
-                            </span>
-                            {priceInfo.hasDiscount && (
-                              <span className="inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
-                                {priceInfo.discountLabel}
-                              </span>
-                            )}
-                            {!s.active && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-600">
-                                <EyeOff className="h-3 w-3" />
-                                Inactive
-                              </span>
-                            )}
-                          </div>
-
-                          {renderCategoryLabel(s)}
-
-                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm">
-                            <span className="inline-flex items-center gap-1 text-neutral-600">
-                              <Clock className="h-3.5 w-3.5" />
-                              {s.duration} min
-                            </span>
-                            <span className="inline-flex items-center gap-1 font-medium text-neutral-900">
-                              <Wallet className="h-3.5 w-3.5" />
-                              {priceInfo.hasDiscount ? (
-                                <>
-                                  <span className="text-neutral-400 line-through">
-                                    {formatPrice(priceInfo.originalPrice)} դր
-                                  </span>
-                                  <span className="font-bold text-emerald-700">
-                                    {formatPrice(priceInfo.discountedPrice)} դր
-                                  </span>
-                                </>
-                              ) : (
-                                <span>{formatPrice(priceInfo.originalPrice)} դր</span>
-                              )}
-                            </span>
-                          </div>
-
-                          {s.description && (
-                            <p className="mt-1.5 text-xs leading-relaxed text-neutral-400 line-clamp-2">
-                              {s.description}
-                            </p>
-                          )}
-                          {Array.isArray(s.tags) && s.tags.length > 0 && (
-                            <p className="mt-1 text-xs text-neutral-400">
-                              {s.tags.slice(0, 4).join(", ")}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            disabled={isSaving}
-                            size="icon"
-                            variant="ghost"
-                            className="h-9 w-9 text-neutral-400 hover:text-amber-600"
-                            title={s.active ? "Deactivate" : "Activate"}
-                            onClick={() => handleToggleActive(s)}
-                          >
-                            {s.active ? (
-                              <EyeOff className="h-4 w-4" />
-                            ) : (
-                              <Eye className="h-4 w-4" />
-                            )}
-                          </Button>
-                          <Button
-                            disabled={isSaving}
-                            size="icon"
-                            variant="ghost"
-                            className="h-9 w-9 text-neutral-400 hover:text-blue-600"
-                            title="Edit"
-                            onClick={() => openEditModal(s)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-
-                          {deleteConfirmId === s.id ? (
-                            <div className="flex items-center gap-1">
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                className="h-9 px-3 text-xs"
-                                onClick={() => handleDelete(s.id)}
-                              >
-                                Delete
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-9 px-3 text-xs"
-                                onClick={() => setDeleteConfirmId(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button
-                              disabled={isSaving}
-                              size="icon"
-                              variant="ghost"
-                              className="h-9 w-9 text-neutral-400 hover:text-red-600"
-                              title="Delete"
-                              onClick={() => setDeleteConfirmId(s.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="space-y-6">
+                {renderServiceSection(
+                  "Active services",
+                  activeServices.length,
+                  activeServices,
+                  "active"
+                )}
+                {renderServiceSection(
+                  "Inactive services",
+                  inactiveServices.length,
+                  inactiveServices,
+                  "inactive"
+                )}
               </div>
             </>
           )}
@@ -595,24 +712,22 @@ export default function ServicesManager({
             if (e.target === e.currentTarget) closeModal();
           }}
         >
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col animate-in rounded-3xl bg-white shadow-2xl">
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col animate-in overflow-hidden rounded-3xl bg-white shadow-2xl">
             {/* Modal header — sticky top */}
-            <div className="flex items-center justify-between border-b border-neutral-100 p-6 pb-4">
+            <div className="flex items-center justify-between border-b border-purple-100 bg-gradient-to-r from-purple-50 to-pink-50 px-4 py-4 sm:px-6">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-purple-100">
                   {editingService ? (
-                    <Pencil className="h-5 w-5 text-blue-600" />
+                    <Pencil className="h-5 w-5 text-purple-700" />
                   ) : (
-                    <Plus className="h-5 w-5 text-emerald-600" />
+                    <Plus className="h-5 w-5 text-purple-700" />
                   )}
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold">
-                    {editingService
-                      ? "Խմբագրել ծառայությունը"
-                      : "Ավելացնել ծառայություն"}
+                  <h3 className="text-lg font-bold text-neutral-950">
+                    {editingService ? "Edit service" : "Add service"}
                   </h3>
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-neutral-500 sm:text-sm">
                     {editingService
                       ? "Update the service details below"
                       : "Fill in the details for the new service"}
@@ -621,14 +736,14 @@ export default function ServicesManager({
               </div>
               <button
                 onClick={closeModal}
-                className="rounded-full p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                className="rounded-2xl p-2 text-neutral-400 transition-colors hover:bg-white hover:text-neutral-700"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Modal body — scrollable */}
-            <div className="flex-1 overflow-y-auto p-6 pt-4">
+            <div className="flex-1 overflow-y-auto bg-neutral-50/60 p-4 sm:p-6">
               {/* Modal error */}
               {modalError && (
                 <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -637,59 +752,83 @@ export default function ServicesManager({
                 </div>
               )}
 
-              <div className="space-y-4">
-                {/* Service name */}
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Service name
-                  <input
-                    className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                    placeholder="e.g. Haircut, Beard Trim"
-                    disabled={isSaving}
-                    value={form.name}
-                    onChange={(e) => handleFieldChange("name", e.target.value)}
-                    autoFocus
-                  />
-                </label>
+              <div className="space-y-5">
+                <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
+                  <div>
+                    <p className="text-sm font-bold text-neutral-900">
+                      Basic details
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Name the service and choose whether it is a single service
+                      or package.
+                    </p>
+                  </div>
 
-                {/* ── Service type toggle ── */}
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Service type
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => {
-                      handleFieldChange("type", "single");
-                      handleFieldChange("includedServiceIds", []);
-                      handleFieldChange("packagePriceMode", "manual");
-                      handleFieldChange("packageDurationMode", "manual");
-                    }}
-                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                      form.type === "single"
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                    }`}
-                  >
-                    Single service
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => handleFieldChange("type", "package")}
-                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                      form.type === "package"
-                        ? "border-violet-500 bg-violet-50 text-violet-700"
-                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                    }`}
-                  >
-                    Package
-                  </button>
-                </div>
+                  {/* Service name */}
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Service name
+                    <input
+                      className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                      placeholder="e.g. Haircut, Beard Trim"
+                      disabled={isSaving}
+                      value={form.name}
+                      onChange={(e) =>
+                        handleFieldChange("name", e.target.value)
+                      }
+                      autoFocus
+                    />
+                  </label>
+
+                  {/* ── Service type toggle ── */}
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Service type
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => {
+                        handleFieldChange("type", "single");
+                        handleFieldChange("includedServiceIds", []);
+                        handleFieldChange("packagePriceMode", "manual");
+                        handleFieldChange("packageDurationMode", "manual");
+                      }}
+                      className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                        form.type === "single"
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                          : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                      }`}
+                    >
+                      Single service
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleFieldChange("type", "package")}
+                      className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                        form.type === "package"
+                          ? "border-violet-500 bg-violet-50 text-violet-700"
+                          : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                      }`}
+                    >
+                      Package
+                    </button>
+                  </div>
+                </section>
 
                 {/* ── Price & Duration ── */}
-                {/* For package services, show computed hint when sum mode */}
-                {form.type === "package" ? (
+                <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
+                  <div>
+                    <p className="text-sm font-bold text-neutral-900">
+                      Price and duration
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      These values are saved exactly as entered or as package
+                      sum mode defines them.
+                    </p>
+                  </div>
+                  {/* For package services, show computed hint when sum mode */}
+                  {form.type === "package" ? (
                   <div className="space-y-3 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">
                       Package pricing & duration
@@ -920,7 +1059,8 @@ export default function ServicesManager({
                       </div>
                     </label>
                   </div>
-                )}
+                  )}
+                </section>
 
                 {/* ── Service discount ── */}
                 <div className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/40 p-4">
@@ -980,112 +1120,130 @@ export default function ServicesManager({
                   </div>
                 </div>
 
-                {/* ── Category type toggle ── */}
-                <label className="grid gap-1.5 text-sm font-semibold">
-                  Category type
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => handleFieldChange("categoryType", "system")}
-                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                      form.categoryType === "system"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                    }`}
-                  >
-                    System category
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => handleFieldChange("categoryType", "custom")}
-                    className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                      form.categoryType === "custom"
-                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                        : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                    }`}
-                  >
-                    Custom category
-                  </button>
-                </div>
+                <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
+                  <div>
+                    <p className="text-sm font-bold text-neutral-900">
+                      Category and description
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Help clients understand where this service belongs.
+                    </p>
+                  </div>
 
-                {/* ── System category dropdown ── */}
-                {form.categoryType === "system" && (
+                  {/* ── Category type toggle ── */}
                   <label className="grid gap-1.5 text-sm font-semibold">
-                    Category
-                    <select
-                      className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                      disabled={isSaving}
-                      value={form.category}
-                      onChange={(e) =>
-                        handleFieldChange("category", e.target.value)
-                      }
-                    >
-                      {serviceCategories.map((category) => (
-                        <option key={category.value} value={category.value}>
-                          {category.label}
-                        </option>
-                      ))}
-                    </select>
+                    Category type
                   </label>
-                )}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() =>
+                        handleFieldChange("categoryType", "system")
+                      }
+                      className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                        form.categoryType === "system"
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                      }`}
+                    >
+                      System category
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() =>
+                        handleFieldChange("categoryType", "custom")
+                      }
+                      className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
+                        form.categoryType === "custom"
+                          ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                          : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
+                      }`}
+                    >
+                      Custom category
+                    </button>
+                  </div>
 
-                {/* ── Custom category dropdown (managed by child) ── */}
-                <ServiceCategoryManager
-                  barberId={barberId}
-                  form={form}
-                  isSaving={isSaving}
-                  onCustomCategoriesChange={setCustomCategories}
-                  onCustomCategoryIdChange={(id) =>
-                    handleFieldChange("customCategoryId", id)
-                  }
-                />
+                  {/* ── System category dropdown ── */}
+                  {form.categoryType === "system" && (
+                    <label className="grid gap-1.5 text-sm font-semibold">
+                      Category
+                      <select
+                        className="w-full rounded-2xl border border-neutral-300 bg-white p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                        disabled={isSaving}
+                        value={form.category}
+                        onChange={(e) =>
+                          handleFieldChange("category", e.target.value)
+                        }
+                      >
+                        {serviceCategories.map((category) => (
+                          <option key={category.value} value={category.value}>
+                            {category.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
 
-                {/* ── Tags ── */}
-                <label className="grid gap-1 text-sm font-semibold">
-                  Tags
-                  <span className="text-xs font-normal text-neutral-400">
-                    Optional comma-separated search terms
-                  </span>
-                  <input
-                    className="w-full rounded-2xl border border-neutral-300 p-2.5 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                    placeholder="e.g. manicure, gel, bridal"
-                    disabled={isSaving}
-                    value={form.tags}
-                    onChange={(e) => handleFieldChange("tags", e.target.value)}
-                  />
-                </label>
-
-                {/* ── Description ── */}
-                <label className="grid gap-1 text-sm font-semibold">
-                  Description
-                  <span className="text-xs font-normal text-neutral-400">
-                    Optional — briefly describe what this service includes
-                  </span>
-                  <textarea
-                    className="w-full rounded-2xl border border-neutral-300 p-2.5 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                    placeholder="e.g. Includes wash, cut, and styling"
-                    rows={2}
-                    disabled={isSaving}
-                    value={form.description}
-                    onChange={(e) =>
-                      handleFieldChange("description", e.target.value)
+                  {/* ── Custom category dropdown (managed by child) ── */}
+                  <ServiceCategoryManager
+                    barberId={barberId}
+                    form={form}
+                    isSaving={isSaving}
+                    onCustomCategoriesChange={setCustomCategories}
+                    onCustomCategoryIdChange={(id) =>
+                      handleFieldChange("customCategoryId", id)
                     }
                   />
-                </label>
+
+                  {/* ── Tags ── */}
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Tags
+                    <span className="text-xs font-normal text-neutral-400">
+                      Optional comma-separated search terms
+                    </span>
+                    <input
+                      className="w-full rounded-2xl border border-neutral-300 p-2.5 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                      placeholder="e.g. manicure, gel, bridal"
+                      disabled={isSaving}
+                      value={form.tags}
+                      onChange={(e) =>
+                        handleFieldChange("tags", e.target.value)
+                      }
+                    />
+                  </label>
+
+                  {/* ── Description ── */}
+                  <label className="grid gap-1 text-sm font-semibold">
+                    Description
+                    <span className="text-xs font-normal text-neutral-400">
+                      Optional — briefly describe what this service includes
+                    </span>
+                    <textarea
+                      className="w-full rounded-2xl border border-neutral-300 p-2.5 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                      placeholder="e.g. Includes wash, cut, and styling"
+                      rows={2}
+                      disabled={isSaving}
+                      value={form.description}
+                      onChange={(e) =>
+                        handleFieldChange("description", e.target.value)
+                      }
+                    />
+                  </label>
+                </section>
               </div>
             </div>
 
             {/* Modal footer — sticky bottom */}
-            <div className="flex items-center justify-end gap-3 border-t border-neutral-100 px-6 py-4">
+            <div className="flex flex-col-reverse gap-2 border-t border-neutral-100 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
               <Button
                 variant="ghost"
                 disabled={isSaving}
                 onClick={closeModal}
+                className="w-full rounded-2xl sm:w-auto"
               >
-                Չեղարկել
+                Cancel
               </Button>
               <Button
                 disabled={
@@ -1093,12 +1251,13 @@ export default function ServicesManager({
                   (form.categoryType === "custom" && !form.customCategoryId)
                 }
                 onClick={handleSave}
+                className="w-full rounded-2xl bg-gradient-to-r from-purple-600 to-pink-500 font-semibold text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
               >
                 {isSaving
                   ? "Saving..."
                   : editingService
-                    ? "Պահպանել"
-                    : "Ավելացնել"}
+                    ? "Save service"
+                    : "Add service"}
               </Button>
             </div>
           </div>
