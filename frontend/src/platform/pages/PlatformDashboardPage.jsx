@@ -30,8 +30,18 @@ const formatDate = (value) => {
   });
 };
 
-const formatCurrency = (amount = 0) =>
-  `${Number(amount).toLocaleString()} AMD`;
+const formatCurrency = (amount = 0, currency = "AMD") =>
+  `${Number(amount || 0).toLocaleString()} ${currency || "AMD"}`;
+
+const formatMoney = (money) => {
+  if (!money) return "0 AMD";
+  if (money.currency === "MIXED" && Array.isArray(money.byCurrency)) {
+    return money.byCurrency
+      .map((entry) => formatCurrency(entry.amount, entry.currency))
+      .join(" + ");
+  }
+  return formatCurrency(money.amount, money.currency);
+};
 
 const getStatusBadge = (status) => {
   const colors = {
@@ -98,9 +108,13 @@ export default function PlatformDashboardPage() {
   const overview = summary?.overview || {};
   const revenue = summary?.revenueThisMonth || {};
   const payments = summary?.recentPayments || [];
-  const alerts = summary?.alerts || [];
+  const alertGroups = summary?.alerts || {};
+  const alerts = [
+    ...(alertGroups.expired || []),
+    ...(alertGroups.pastDue || []),
+  ];
 
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "admin");
+  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
 
   if (!isPlatformAdmin) {
     return (
@@ -187,7 +201,7 @@ export default function PlatformDashboardPage() {
               <StatCard
                 icon={Users}
                 label="Total individuals"
-                value={overview.totalIndividuals ?? 0}
+                value={overview.totalBarbers ?? 0}
               />
               <StatCard
                 icon={CreditCard}
@@ -226,7 +240,7 @@ export default function PlatformDashboardPage() {
                       Salon revenue
                     </div>
                     <div className="text-lg font-bold text-neutral-950">
-                      {formatCurrency(revenue.salonRevenue)}
+                      {formatMoney(revenue.salon)}
                     </div>
                   </div>
                   <div className="rounded-2xl border border-neutral-100 bg-neutral-50 p-3">
@@ -234,7 +248,7 @@ export default function PlatformDashboardPage() {
                       Individual revenue
                     </div>
                     <div className="text-lg font-bold text-neutral-950">
-                      {formatCurrency(revenue.individualRevenue)}
+                      {formatMoney(revenue.individual)}
                     </div>
                   </div>
                   <div className="rounded-2xl border border-neutral-100 bg-neutral-50 p-3">
@@ -242,7 +256,7 @@ export default function PlatformDashboardPage() {
                       Total revenue
                     </div>
                     <div className="text-lg font-bold text-neutral-950">
-                      {formatCurrency(revenue.totalRevenue)}
+                      {formatMoney(revenue.total)}
                     </div>
                   </div>
                 </div>
@@ -278,7 +292,7 @@ export default function PlatformDashboardPage() {
                         </div>
                         <div className="text-right">
                           <div className="font-semibold text-neutral-950">
-                            {formatCurrency(payment.amount)}
+                            {formatCurrency(payment.amount, payment.currency)}
                           </div>
                           <div className="text-xs text-neutral-500">
                             {payment.status === "paid" ? "Paid" : payment.status || "—"}
@@ -309,10 +323,10 @@ export default function PlatformDashboardPage() {
                   </h2>
                 </div>
                 <CardContent className="space-y-2 p-5">
-                  {alerts.map((alert) => (
+                  {alerts.map((alert, index) => (
                     <div
                       className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm"
-                      key={alert.id}
+                      key={`${alert.ownerType}-${alert.ownerName}-${alert.status}-${alert.currentPeriodEnd || index}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -329,7 +343,7 @@ export default function PlatformDashboardPage() {
                             </span>
                           </div>
                           <div className="mt-0.5 text-xs text-amber-600">
-                            Period end: {formatDate(alert.periodEnd)}
+                            Period end: {formatDate(alert.currentPeriodEnd)}
                           </div>
                         </div>
                         <Link
