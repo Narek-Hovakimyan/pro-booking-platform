@@ -1,6 +1,7 @@
 import express from "express";
 import { protect } from "../middleware/authMiddleware.js";
 import { requirePlatformSuperuser } from "../middleware/platformMiddleware.js";
+import { getPlatformDashboardSummaryHandler } from "../controllers/platformDashboardController.js";
 import {
   listSalonBillingSummaries,
   getSalonBillingDetailHandler,
@@ -31,6 +32,18 @@ router.get("/access-check", protect, requirePlatformSuperuser, (req, res) => {
     platformRole: req.user.platformRole === "superuser" ? "superuser" : null,
   });
 });
+
+/**
+ * GET /api/platform/dashboard/summary
+ * Safe read-only platform dashboard summary.
+ * Protected — platform superuser only.
+ */
+router.get(
+  "/dashboard/summary",
+  protect,
+  requirePlatformSuperuser,
+  getPlatformDashboardSummaryHandler
+);
 
 /**
  * GET /api/platform/billing/salons

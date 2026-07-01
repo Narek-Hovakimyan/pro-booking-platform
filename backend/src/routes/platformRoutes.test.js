@@ -33,6 +33,7 @@ const checkMiddleware = (route, expectedMiddlewares) => {
 test("all routes have protect + requirePlatformSuperuser middleware", () => {
   const expectedPaths = [
     { path: "/access-check", method: "get" },
+    { path: "/dashboard/summary", method: "get" },
     { path: "/billing/salons", method: "get" },
     { path: "/billing/salons/:salonId", method: "get" },
     { path: "/billing/salons/:salonId/payments", method: "get" },
@@ -69,6 +70,7 @@ test("read handler names are correct", () => {
   };
 
   assert.equal(getHandlerName("/billing/salons"), "listSalonBillingSummaries");
+  assert.equal(getHandlerName("/dashboard/summary"), "getPlatformDashboardSummaryHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId"), "getSalonBillingDetailHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId/payments"), "getSalonPaymentsHandler");
   assert.equal(getHandlerName("/billing/payments"), "listAllSalonPayments");
@@ -359,6 +361,45 @@ test("individual billing route rejects normal barber", async () => {
 
   assert.equal(nextCalled, false);
   assert.equal(res.statusCode, 403);
+});
+
+test("dashboard summary route rejects normal users and old admin role", async () => {
+  const client = makeReqRes({
+    _id: "64b000000000000000000033",
+    role: "client",
+    platformRole: null,
+  });
+  assert.equal(await runRoutePlatformGate("/dashboard/summary", client.req, client.res), false);
+  assert.equal(client.res.statusCode, 403);
+
+  const barber = makeReqRes({
+    _id: "64b000000000000000000034",
+    role: "barber",
+    platformRole: null,
+  });
+  assert.equal(await runRoutePlatformGate("/dashboard/summary", barber.req, barber.res), false);
+  assert.equal(barber.res.statusCode, 403);
+
+  const oldAdmin = makeReqRes({
+    _id: "64b000000000000000000035",
+    role: "barber",
+    platformRole: "admin",
+  });
+  assert.equal(await runRoutePlatformGate("/dashboard/summary", oldAdmin.req, oldAdmin.res), false);
+  assert.equal(oldAdmin.res.statusCode, 403);
+});
+
+test("dashboard summary route allows platformRole superuser", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000036",
+    role: "barber",
+    platformRole: "superuser",
+  });
+
+  const nextCalled = await runRoutePlatformGate("/dashboard/summary", req, res);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
 });
 
 test("billing route rejects normal barber", async () => {
