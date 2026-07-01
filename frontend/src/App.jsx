@@ -70,6 +70,9 @@ const PlatformBillingPage = lazy(() => import("./platform/pages/PlatformBillingP
 const PlatformSalonBillingDetailPage = lazy(() =>
   import("./platform/pages/PlatformSalonBillingDetailPage")
 );
+const PlatformIndividualBillingPage = lazy(() =>
+  import("./platform/pages/PlatformIndividualBillingPage")
+);
 
 export default function App() {
   const dispatch = useDispatch();
@@ -971,6 +974,10 @@ export default function App() {
             />
             <Route
               path="/admin/platform/billing"
+              element={<Navigate to="/admin/platform/billing/salons" replace />}
+            />
+            <Route
+              path="/admin/platform/billing/salons"
               element={
                 <ProtectedRoute>
                   <PlatformBillingPage />
@@ -982,6 +989,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <PlatformSalonBillingDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/platform/billing/individuals"
+              element={
+                <ProtectedRoute>
+                  <PlatformIndividualBillingPage />
                 </ProtectedRoute>
               }
             />

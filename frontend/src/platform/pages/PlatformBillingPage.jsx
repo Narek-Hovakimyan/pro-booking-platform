@@ -4,12 +4,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  ReceiptText,
   Search,
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 
 import { getPlatformBillingSalons } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -60,6 +61,11 @@ const getProviderLabel = (provider) => {
   if (provider === "disabled") return "Disabled provider";
   return provider;
 };
+
+const billingTabs = [
+  { to: "/admin/platform/billing/salons", label: "Salon Billing", icon: Building2 },
+  { to: "/admin/platform/billing/individuals", label: "Individual Billing", icon: ReceiptText },
+];
 
 export default function PlatformBillingPage() {
   const navigate = useNavigate();
@@ -161,9 +167,9 @@ export default function PlatformBillingPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-neutral-900">Platform Billing</h1>
+          <h1 className="text-xl font-bold text-neutral-900">Salon Billing</h1>
           <p className="text-sm text-neutral-500">
-            Salon subscription billing overview
+            Platform view for salon subscriptions, seats, and payment status.
           </p>
         </div>
 
@@ -173,6 +179,25 @@ export default function PlatformBillingPage() {
             {total} salon{total !== 1 ? "s" : ""}
           </span>
         </div>
+      </div>
+
+      <div className="grid gap-2 rounded-2xl border border-violet-100 bg-violet-50/60 p-1 sm:inline-grid sm:grid-cols-2">
+        {billingTabs.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              `flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                isActive
+                  ? "bg-white text-violet-700 shadow-sm"
+                  : "text-neutral-600 hover:bg-white/70 hover:text-neutral-900"
+              }`
+            }
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </NavLink>
+        ))}
       </div>
 
       {/* Search + Filter */}

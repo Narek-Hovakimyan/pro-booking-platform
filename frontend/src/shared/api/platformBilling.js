@@ -38,6 +38,33 @@ export async function getPlatformBillingSalonPayments(salonId, params = {}) {
 }
 
 /**
+ * Fetch paginated list of individual barber billing summaries (platform admin only).
+ * @param {object} params
+ * @param {number} params.page
+ * @param {number} params.limit
+ * @param {string} [params.search] – barber name/email search
+ * @param {string} [params.subscriptionStatus] – 'active' | 'expired' | 'none'
+ * @returns {Promise<object>} { individuals, total }
+ */
+export async function getPlatformBillingIndividuals(params = {}) {
+  const { data } = await api.get("/platform/billing/individuals", { params });
+  return data;
+}
+
+/**
+ * Fetch paginated subscription payment history for one barber (platform admin only).
+ * @param {string} barberId
+ * @param {object} params
+ * @param {number} params.page
+ * @param {number} params.limit
+ * @returns {Promise<object>} { barber, payments, total }
+ */
+export async function getPlatformBillingIndividualPayments(barberId, params = {}) {
+  const { data } = await api.get(`/platform/billing/individuals/${barberId}/payments`, { params });
+  return data;
+}
+
+/**
  * Activate or renew a salon subscription (platform admin only).
  * @param {string} salonId
  * @param {object} payload - { seatCount?, months?, note }
