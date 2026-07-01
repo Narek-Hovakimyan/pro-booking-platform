@@ -37,6 +37,8 @@ test("all routes have protect + requirePlatformSuperuser middleware", () => {
     { path: "/billing/salons/:salonId", method: "get" },
     { path: "/billing/salons/:salonId/payments", method: "get" },
     { path: "/billing/payments", method: "get" },
+    { path: "/billing/individuals", method: "get" },
+    { path: "/billing/individuals/:barberId/payments", method: "get" },
     { path: "/billing/salons/:salonId/subscription/activate", method: "patch" },
     { path: "/billing/salons/:salonId/subscription/seat-count", method: "patch" },
     { path: "/billing/salons/:salonId/seats/assign", method: "post" },
@@ -70,6 +72,8 @@ test("read handler names are correct", () => {
   assert.equal(getHandlerName("/billing/salons/:salonId"), "getSalonBillingDetailHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId/payments"), "getSalonPaymentsHandler");
   assert.equal(getHandlerName("/billing/payments"), "listAllSalonPayments");
+  assert.equal(getHandlerName("/billing/individuals"), "listIndividualBillingSummaries");
+  assert.equal(getHandlerName("/billing/individuals/:barberId/payments"), "getIndividualPaymentsHandler");
 });
 
 test("write handler names are correct", () => {
@@ -327,6 +331,36 @@ test("billing route rejects normal client", async () => {
   assert.equal(res.body.code, "FORBIDDEN");
 });
 
+test("individual billing route rejects normal client", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000030",
+    role: "client",
+    platformRole: null,
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/individuals", req, res);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
+test("individual billing route rejects normal barber", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000031",
+    role: "barber",
+    platformRole: null,
+  });
+
+  const nextCalled = await runRoutePlatformGate(
+    "/billing/individuals/:barberId/payments",
+    req,
+    res
+  );
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
 test("billing route rejects normal barber", async () => {
   const { req, res } = makeReqRes({
     _id: "64b000000000000000000021",
@@ -371,6 +405,19 @@ test("billing route allows platformRole superuser", async () => {
   });
 
   const nextCalled = await runRoutePlatformGate("/billing/salons", req, res);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+});
+
+test("individual billing route allows platformRole superuser", async () => {
+  const { req, res } = makeReqRes({
+    _id: "64b000000000000000000032",
+    role: "barber",
+    platformRole: "superuser",
+  });
+
+  const nextCalled = await runRoutePlatformGate("/billing/individuals", req, res);
 
   assert.equal(nextCalled, true);
   assert.equal(res.statusCode, 200);

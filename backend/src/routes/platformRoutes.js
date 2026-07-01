@@ -6,6 +6,8 @@ import {
   getSalonBillingDetailHandler,
   getSalonPaymentsHandler,
   listAllSalonPayments,
+  listIndividualBillingSummaries,
+  getIndividualPaymentsHandler,
   activateSubscription,
   updateSeatCount,
   assignSeat,
@@ -76,6 +78,30 @@ router.get(
   protect,
   requirePlatformSuperuser,
   listAllSalonPayments
+);
+
+/**
+ * GET /api/platform/billing/individuals
+ * List individual barber billing summaries (paginated + filtered).
+ * Protected — platform superuser only.
+ */
+router.get(
+  "/billing/individuals",
+  protect,
+  requirePlatformSuperuser,
+  listIndividualBillingSummaries
+);
+
+/**
+ * GET /api/platform/billing/individuals/:barberId/payments
+ * Get individual barber subscription payments.
+ * Protected — platform superuser only.
+ */
+router.get(
+  "/billing/individuals/:barberId/payments",
+  protect,
+  requirePlatformSuperuser,
+  getIndividualPaymentsHandler
 );
 
 /**

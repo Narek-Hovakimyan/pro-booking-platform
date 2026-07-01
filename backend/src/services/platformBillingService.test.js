@@ -21,6 +21,8 @@ import {
   getSalonBillingDetail,
   getSalonPayments,
   getAllSalonPayments,
+  getAllIndividualBillingSummaries,
+  getIndividualPayments,
 } from "./platformBillingService.js";
 
 /* ── ObjectId helpers ────────────────────────────────── */
@@ -40,12 +42,16 @@ const chairRenterId = oid("64b000000000000000040003");
 const pendingStaffId = oid("64b000000000000000040004");
 const rejectedStaffId = oid("64b000000000000000040005");
 const unassignedAcceptedId = oid("64b000000000000000040006");
+const individualBarberId = oid("64b000000000000000040007");
 
 const subscriptionId = oid("64b000000000000000050000");
 const otherSubscriptionId = oid("64b000000000000000050001");
 const paymentId = oid("64b000000000000000060000");
 const depositPaymentId = oid("64b000000000000000060001");
 const otherSalonPaymentId = oid("64b000000000000000060002");
+const individualSubscriptionId = oid("64b000000000000000050002");
+const individualPaymentId = oid("64b000000000000000060003");
+const individualRecordId = oid("64b000000000000000060004");
 
 /* ── Shared mock data ────────────────────────────────── */
 
@@ -208,6 +214,37 @@ const unassignedAcceptedDoc = {
   ],
 };
 
+const individualBarberDoc = {
+  _id: individualBarberId,
+  name: "Individual Barber",
+  email: "individual@example.com",
+  avatarUrl: "/individual.jpg",
+  city: "Gyumri",
+  profession: "barber",
+  barberType: "unisex",
+  role: "barber",
+  password: "hashed-password",
+  platformRole: "superuser",
+  emailVerificationTokenHash: "secret-token",
+  createdAt: new Date("2025-02-01"),
+};
+
+const individualSubscriptionDoc = {
+  _id: individualSubscriptionId,
+  ownerType: "barber",
+  ownerId: individualBarberId,
+  status: "active",
+  seatCount: 1,
+  pricePerSeat: 100,
+  totalPrice: 100,
+  provider: "manual",
+  currentPeriodStart: new Date("2025-06-01"),
+  currentPeriodEnd: new Date("2025-07-01"),
+  lastPaymentAt: new Date("2025-06-01"),
+  createdAt: new Date("2025-06-01"),
+  updatedAt: new Date("2025-06-01"),
+};
+
 const acceptedSeatDoc = {
   _id: oid("64b000000000000000070001"),
   subscriptionId,
@@ -364,6 +401,50 @@ const otherSalonPaymentDoc = {
   updatedAt: new Date("2025-06-01"),
   checkoutUrl: null,
   providerPaymentId: null,
+};
+
+const individualPaymentDoc = {
+  _id: individualPaymentId,
+  purpose: "subscription",
+  ownerType: "barber",
+  ownerId: individualBarberId,
+  payerId: individualBarberId,
+  subscriptionId: individualSubscriptionId,
+  amount: 100,
+  currency: "AMD",
+  status: "paid",
+  provider: "manual",
+  seatCount: 1,
+  months: 1,
+  paidAt: new Date("2025-06-01"),
+  confirmedAt: new Date("2025-06-01"),
+  createdAt: new Date("2025-06-01"),
+  updatedAt: new Date("2025-06-01"),
+  checkoutUrl: "https://pay.example/internal",
+  providerPaymentId: "provider-secret",
+  providerIntentId: "intent-secret",
+  metadata: { action: "renew", internal: "secret" },
+  createdBy: ownerId,
+  processedWebhookEventIds: ["evt-secret"],
+};
+
+const individualPaymentRecordDoc = {
+  _id: individualRecordId,
+  subscriptionId: individualSubscriptionId,
+  payerId: individualBarberId,
+  ownerType: "barber",
+  ownerId: individualBarberId,
+  amount: 100,
+  currency: "AMD",
+  seatCount: 1,
+  periodStart: new Date("2025-06-01"),
+  periodEnd: new Date("2025-07-01"),
+  status: "paid",
+  provider: "manual",
+  providerPaymentId: "record-provider-secret",
+  paidAt: new Date("2025-06-02"),
+  createdAt: new Date("2025-06-02"),
+  updatedAt: new Date("2025-06-02"),
 };
 
 /* ── Mock infrastructure ────────────────────────────── */
@@ -862,6 +943,131 @@ test("getSalonPayments includes paid payment records with period details", async
   assert.equal(result.payments[0].periodStart.getTime(), paymentRecordDoc.periodStart.getTime());
 });
 
+test("individual billing summaries return only barber ownerType data", async () => {
+  let subscriptionFilter;
+  let attemptFilter;
+  let recordFilter;
+
+  mockMethod(User, "countDocuments", async (filter) => {
+    assert.equal(filter.role, "barber");
+    return 1;
+  });
+  mockMethod(User, "find", (filter) => {
+    assert.equal(filter.role, "barber");
+    return qc([individualBarberDoc]);
+  });
+  mockMethod(Subscription, "find", (filter) => {
+    subscriptionFilter = filter;
+    return qc([individualSubscriptionDoc]);
+  });
+  mockMethod(SubscriptionPaymentAttempt, "find", (filter) => {
+    attemptFilter = filter;
+    return qc([individualPaymentDoc]);
+  });
+  mockMethod(PaymentRecord, "find", (filter) => {
+    recordFilter = filter;
+    return qc([individualPaymentRecordDoc]);
+  });
+
+  const result = await getAllIndividualBillingSummaries({ page: 1, limit: 20 });
+
+  assert.equal(subscriptionFilter.ownerType, "barber");
+  assert.equal(attemptFilter.ownerType, "barber");
+  assert.equal(attemptFilter.purpose, "subscription");
+  assert.equal(recordFilter.ownerType, "barber");
+  assert.equal(result.individuals.length, 1);
+  assert.equal(String(result.individuals[0].barberId), String(individualBarberId));
+  assert.equal(result.individuals[0].subscription.ownerType, "barber");
+  assert.equal(result.individuals[0].subscription._id, undefined);
+  assert.equal(result.individuals[0].subscription.ownerId, undefined);
+  assert.equal(result.individuals[0].barber.password, undefined);
+  assert.equal(result.individuals[0].barber.platformRole, undefined);
+  assert.equal(result.individuals[0].latestPayment.providerPaymentId, undefined);
+  assert.equal(result.individuals[0].latestPayment.metadata, undefined);
+});
+
+test("individual billing summaries support safe name or email search", async () => {
+  let userFilter;
+
+  mockMethod(User, "countDocuments", async (filter) => {
+    userFilter = filter;
+    return 0;
+  });
+  mockMethod(User, "find", (filter) => {
+    userFilter = filter;
+    return qc([]);
+  });
+  mockQuery(Subscription, "find", []);
+  mockQuery(SubscriptionPaymentAttempt, "find", []);
+  mockQuery(PaymentRecord, "find", []);
+
+  await getAllIndividualBillingSummaries({ search: "individual@example.com" });
+
+  assert.equal(userFilter.role, "barber");
+  assert.equal(userFilter.$or.length, 2);
+});
+
+test("individual payment history filters ownerType=barber and excludes internals", async () => {
+  let attemptFilter;
+  let recordFilter;
+
+  mockMethod(User, "findOne", (filter) => {
+    assert.equal(String(filter._id), String(individualBarberId));
+    assert.equal(filter.role, "barber");
+    return qc(individualBarberDoc);
+  });
+  mockMethod(SubscriptionPaymentAttempt, "countDocuments", async (filter) => {
+    attemptFilter = filter;
+    return 1;
+  });
+  mockMethod(SubscriptionPaymentAttempt, "find", (filter) => {
+    attemptFilter = filter;
+    return qc([individualPaymentDoc]);
+  });
+  mockMethod(PaymentRecord, "countDocuments", async (filter) => {
+    recordFilter = filter;
+    return 1;
+  });
+  mockMethod(PaymentRecord, "find", (filter) => {
+    recordFilter = filter;
+    return qc([individualPaymentRecordDoc]);
+  });
+
+  const result = await getIndividualPayments(individualBarberId.toString(), {
+    page: 1,
+    limit: 20,
+  });
+
+  assert.equal(attemptFilter.ownerType, "barber");
+  assert.equal(attemptFilter.purpose, "subscription");
+  assert.equal(String(attemptFilter.ownerId), String(individualBarberId));
+  assert.equal(recordFilter.ownerType, "barber");
+  assert.equal(String(recordFilter.ownerId), String(individualBarberId));
+  assert.equal(result.payments.length, 2);
+  const attempt = result.payments.find((payment) => payment.source === "payment_attempt");
+  assert.equal(attempt.providerPaymentId, undefined);
+  assert.equal(attempt.providerIntentId, undefined);
+  assert.equal(attempt.subscriptionId, undefined);
+  assert.equal(attempt.payerId, undefined);
+  assert.equal(attempt.metadata, undefined);
+  assert.equal(attempt.createdBy, undefined);
+  assert.equal(attempt.processedWebhookEventIds, undefined);
+  assert.equal(attempt.checkoutUrl, undefined);
+  assert.equal(attempt.action, "renew");
+  const record = result.payments.find((payment) => payment.source === "payment_record");
+  assert.equal(record.providerPaymentId, undefined);
+  assert.equal(record.subscriptionId, undefined);
+  assert.equal(record.periodStart.getTime(), individualPaymentRecordDoc.periodStart.getTime());
+});
+
+test("individual payment history returns null for non-barber", async () => {
+  mockMethod(User, "findOne", () => qc(null));
+
+  const result = await getIndividualPayments(individualBarberId.toString());
+
+  assert.equal(result, null);
+});
+
 /* ════════════════════════════════════════════════════════ */
 /* Test 14: cancelSalonSubscription soft cancels           */
 /* ════════════════════════════════════════════════════════ */
@@ -1107,7 +1313,7 @@ test("getAllSalonBillingSummaries applies active subscription filter before pagi
   const activeSubscriptionDoc = {
     ...subscriptionDoc,
     currentPeriodStart: new Date("2026-06-01"),
-    currentPeriodEnd: new Date("2026-07-01"),
+    currentPeriodEnd: new Date("2027-07-01"),
   };
   let capturedSalonFilter;
   let subscriptionFindCallCount = 0;

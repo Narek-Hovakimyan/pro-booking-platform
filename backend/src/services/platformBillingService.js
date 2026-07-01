@@ -12,6 +12,7 @@ import { getDaysRemaining, getOrCreateDefaultSubscriptionPlan } from "./subscrip
 const SAFE_OWNER_FIELDS = "name email avatarUrl city emailVerified profession barberType";
 const SAFE_BARBER_SEAT_FIELDS =
   "name avatarUrl profession barberType email salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist";
+const SAFE_INDIVIDUAL_FIELDS = "name email avatarUrl city profession barberType createdAt";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -224,6 +225,29 @@ const serializeSubscriptionForPlatform = (subscription, now = new Date()) => {
   };
 };
 
+const serializeIndividualSubscriptionForPlatform = (subscription, now = new Date()) => {
+  const serialized = serializeSubscriptionForPlatform(subscription, now);
+  if (!serialized) return null;
+
+  return {
+    ownerType: serialized.ownerType,
+    status: serialized.status,
+    isExpired: serialized.isExpired,
+    seatCount: serialized.seatCount,
+    pricePerSeat: serialized.pricePerSeat,
+    totalPrice: serialized.totalPrice,
+    provider: serialized.provider,
+    currentPeriodStart: serialized.currentPeriodStart,
+    currentPeriodEnd: serialized.currentPeriodEnd,
+    daysRemaining: serialized.daysRemaining,
+    lastPaymentAt: serialized.lastPaymentAt,
+    trialEndsAt: serialized.trialEndsAt,
+    cancelledAt: serialized.cancelledAt,
+    createdAt: serialized.createdAt,
+    updatedAt: serialized.updatedAt,
+  };
+};
+
 /* ── Payment attempt helper ───────────────────────────── */
 
 const SAFE_PAYMENT_FIELDS = [
@@ -262,6 +286,62 @@ const serializePaymentRecord = (record) => {
   safe.source = "payment_record";
   safe.purpose = "subscription";
   return safe;
+};
+
+const getPaymentSortTime = (payment) =>
+  new Date(payment?.paidAt || payment?.confirmedAt || payment?.createdAt || 0).getTime();
+
+const serializeIndividualPaymentAttempt = (attempt) => {
+  if (!attempt) return null;
+
+  return {
+    id: attempt._id,
+    amount: attempt.amount,
+    currency: attempt.currency,
+    status: attempt.status,
+    provider: attempt.provider,
+    purpose: attempt.purpose || "subscription",
+    ownerType: attempt.ownerType,
+    seatCount: attempt.seatCount,
+    months: attempt.months,
+    createdAt: attempt.createdAt || null,
+    updatedAt: attempt.updatedAt || null,
+    paidAt: attempt.paidAt || null,
+    confirmedAt: attempt.confirmedAt || null,
+    failedAt: attempt.failedAt || null,
+    cancelledAt: attempt.cancelledAt || null,
+    refundedAt: attempt.refundedAt || null,
+    expiresAt: attempt.expiresAt || null,
+    source: "payment_attempt",
+    action: attempt.metadata?.action,
+  };
+};
+
+const serializeIndividualPaymentRecord = (record) => {
+  if (!record) return null;
+
+  return {
+    id: record._id,
+    amount: record.amount,
+    currency: record.currency,
+    status: record.status,
+    provider: record.provider,
+    purpose: "subscription",
+    ownerType: record.ownerType,
+    seatCount: record.seatCount,
+    createdAt: record.createdAt || null,
+    updatedAt: record.updatedAt || null,
+    paidAt: record.paidAt || null,
+    periodStart: record.periodStart || null,
+    periodEnd: record.periodEnd || null,
+    source: "payment_record",
+  };
+};
+
+const toObjectIdOrNull = (value) => {
+  const id = getIdString(value);
+  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+  return new mongoose.Types.ObjectId(id);
 };
 
 /* ── Audit log helper ─────────────────────────────────── */
@@ -590,6 +670,203 @@ export const getAllSalonPayments = async ({ page = 1, limit = 20 } = {}) => {
   return {
     payments: attempts.map(serializePaymentAttempt),
     total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};
+
+/**
+ * Get paginated individual barber billing summaries for platform superusers.
+ */
+export const getAllIndividualBillingSummaries = async ({
+  page = 1,
+  limit = 20,
+  search,
+  subscriptionStatus,
+} = {}) => {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const now = new Date();
+  const filter = { role: "barber" };
+
+  if (search) {
+    const escaped = escapeRegex(search);
+    filter.$or = [
+      { name: { $regex: escaped, $options: "i" } },
+      { email: { $regex: escaped, $options: "i" } },
+    ];
+  }
+
+  if (subscriptionStatus) {
+    const subscriptions = await Subscription.find({ ownerType: "barber" }).lean();
+    const barberIdsWithSubscriptions = subscriptions
+      .map((sub) => sub.ownerId)
+      .filter(Boolean);
+
+    if (subscriptionStatus === "none") {
+      filter._id = { $nin: barberIdsWithSubscriptions };
+    } else if (subscriptionStatus === "active" || subscriptionStatus === "expired") {
+      const matchingBarberIds = subscriptions
+        .filter((sub) => {
+          const serialized = serializeSubscriptionForPlatform(sub, now);
+          return subscriptionStatus === "active"
+            ? !serialized.isExpired
+            : serialized.isExpired;
+        })
+        .map((sub) => sub.ownerId)
+        .filter(Boolean);
+
+      filter._id = { $in: matchingBarberIds };
+    }
+  }
+
+  const total = await User.countDocuments(filter);
+  const barbers = await paginateQuery(
+    User.find(filter).select(SAFE_INDIVIDUAL_FIELDS).sort({ createdAt: -1 }),
+    { page: safePage, limit: safeLimit }
+  );
+  const barberIds = barbers.map((barber) => barber._id);
+
+  const [subscriptions, attempts, records] = await Promise.all([
+    Subscription.find({
+      ownerType: "barber",
+      ownerId: { $in: barberIds },
+    }).lean(),
+    SubscriptionPaymentAttempt.find({
+      ownerType: "barber",
+      ownerId: { $in: barberIds },
+      purpose: "subscription",
+    })
+      .sort({ createdAt: -1 })
+      .lean(),
+    PaymentRecord.find({
+      ownerType: "barber",
+      ownerId: { $in: barberIds },
+    })
+      .sort({ paidAt: -1, createdAt: -1 })
+      .lean(),
+  ]);
+
+  const subscriptionMap = {};
+  for (const subscription of subscriptions) {
+    subscriptionMap[getIdString(subscription.ownerId)] = subscription;
+  }
+
+  const latestPaymentMap = {};
+  for (const attempt of attempts) {
+    const ownerId = getIdString(attempt.ownerId);
+    if (!ownerId) continue;
+    const payment = serializeIndividualPaymentAttempt(attempt);
+    const existing = latestPaymentMap[ownerId];
+    if (!existing || getPaymentSortTime(payment) > getPaymentSortTime(existing)) {
+      latestPaymentMap[ownerId] = payment;
+    }
+  }
+  for (const record of records) {
+    const ownerId = getIdString(record.ownerId);
+    if (!ownerId) continue;
+    const payment = serializeIndividualPaymentRecord(record);
+    const existing = latestPaymentMap[ownerId];
+    if (!existing || getPaymentSortTime(payment) > getPaymentSortTime(existing)) {
+      latestPaymentMap[ownerId] = payment;
+    }
+  }
+
+  return {
+    individuals: barbers.map((barber) => {
+      const barberId = getIdString(barber._id);
+      return {
+        barberId: barber._id,
+        barber: {
+          id: barber._id,
+          name: barber.name,
+          email: barber.email || "",
+          avatarUrl: barber.avatarUrl || "",
+          city: barber.city || "",
+          profession: barber.profession || "",
+          barberType: barber.barberType || "",
+          createdAt: barber.createdAt || null,
+        },
+        subscription: serializeIndividualSubscriptionForPlatform(
+          subscriptionMap[barberId] || null,
+          now
+        ),
+        latestPayment: latestPaymentMap[barberId] || null,
+      };
+    }),
+    total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};
+
+/**
+ * Get individual barber subscription payment history for platform superusers.
+ */
+export const getIndividualPayments = async (
+  barberId,
+  { page = 1, limit = 20 } = {}
+) => {
+  const barberObjectId = toObjectIdOrNull(barberId);
+  if (!barberObjectId) return null;
+
+  const barber = await User.findOne({
+    _id: barberObjectId,
+    role: "barber",
+  })
+    .select(SAFE_INDIVIDUAL_FIELDS)
+    .lean();
+
+  if (!barber || !barber._id) return null;
+
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const skip = (safePage - 1) * safeLimit;
+  const fetchLimit = skip + safeLimit;
+
+  const attemptFilter = {
+    ownerType: "barber",
+    ownerId: barberObjectId,
+    purpose: "subscription",
+  };
+  const recordFilter = {
+    ownerType: "barber",
+    ownerId: barberObjectId,
+  };
+
+  const [attemptTotal, recordTotal, attempts, records] = await Promise.all([
+    SubscriptionPaymentAttempt.countDocuments(attemptFilter),
+    PaymentRecord.countDocuments(recordFilter),
+    SubscriptionPaymentAttempt.find(attemptFilter)
+      .sort({ createdAt: -1 })
+      .limit(fetchLimit)
+      .lean(),
+    PaymentRecord.find(recordFilter)
+      .sort({ paidAt: -1, createdAt: -1 })
+      .limit(fetchLimit)
+      .lean(),
+  ]);
+
+  const payments = [
+    ...attempts.map(serializeIndividualPaymentAttempt),
+    ...records.map(serializeIndividualPaymentRecord),
+  ]
+    .filter(Boolean)
+    .sort((left, right) => getPaymentSortTime(right) - getPaymentSortTime(left))
+    .slice(skip, skip + safeLimit);
+
+  return {
+    barber: {
+      id: barber._id,
+      name: barber.name,
+      email: barber.email || "",
+      avatarUrl: barber.avatarUrl || "",
+      city: barber.city || "",
+      profession: barber.profession || "",
+      barberType: barber.barberType || "",
+    },
+    payments,
+    total: attemptTotal + recordTotal,
     page: safePage,
     limit: safeLimit,
   };

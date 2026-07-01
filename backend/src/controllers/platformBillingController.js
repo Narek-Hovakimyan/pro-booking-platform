@@ -4,6 +4,8 @@ import {
   getSalonBillingDetail,
   getSalonPayments,
   getAllSalonPayments,
+  getAllIndividualBillingSummaries,
+  getIndividualPayments,
   activateSalonSubscription,
   updateSalonSeatCount,
   assignSalonSeat,
@@ -85,6 +87,48 @@ export const listAllSalonPayments = async (req, res, next) => {
       page: Number(page) || 1,
       limit: Number(limit) || 20,
     });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/platform/billing/individuals
+ * List all individual barber billing summaries (paginated).
+ */
+export const listIndividualBillingSummaries = async (req, res, next) => {
+  try {
+    const { page, limit, search, subscriptionStatus } = req.query;
+    const result = await getAllIndividualBillingSummaries({
+      page: Number(page) || 1,
+      limit: Number(limit) || 20,
+      search: search || undefined,
+      subscriptionStatus: subscriptionStatus || undefined,
+    });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/platform/billing/individuals/:barberId/payments
+ * Get subscription payment history for one individual barber.
+ */
+export const getIndividualPaymentsHandler = async (req, res, next) => {
+  try {
+    const { barberId } = req.params;
+    const { page, limit } = req.query;
+    const result = await getIndividualPayments(barberId, {
+      page: Number(page) || 1,
+      limit: Number(limit) || 20,
+    });
+
+    if (!result) {
+      return res.status(404).json({ message: "Barber not found" });
+    }
+
     return res.json(result);
   } catch (error) {
     next(error);
