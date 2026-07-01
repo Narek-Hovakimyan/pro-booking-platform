@@ -84,7 +84,7 @@ const getPaymentActionLabel = (payment) => {
   if (payment?.action === "update_seats") return "Seat update";
   if (payment?.action === "renew") return "Renewal";
   if (payment?.source === "payment_record") return "Paid record";
-  return payment?.purpose === "subscription" ? "Subscription" : "—";
+  return "Subscription";
 };
 
 const getSubscriptionStatusLabel = (subscription) => {
@@ -479,9 +479,7 @@ export default function PlatformSalonBillingDetailPage() {
 
   // Determine if a payment attempt is eligible for manual confirmation
   const isConfirmablePayment = latestPendingAttempt
-    ? latestPendingAttempt.purpose === "subscription" &&
-      latestPendingAttempt.ownerType === "salon" &&
-      latestPendingAttempt.provider === "manual" &&
+    ? latestPendingAttempt.provider === "manual" &&
       (latestPendingAttempt.status === "pending" ||
         latestPendingAttempt.status === "requires_action")
     : false;
@@ -841,7 +839,7 @@ export default function PlatformSalonBillingDetailPage() {
                   onClick={() =>
                     setModal({
                       type: "confirmPayment",
-                      extra: { paymentId: latestPendingAttempt._id },
+                      extra: { paymentId: latestPendingAttempt.id },
                     })
                   }
                   variant="success"
@@ -862,9 +860,6 @@ export default function PlatformSalonBillingDetailPage() {
                 label="Provider"
                 value={getProviderLabel(latestPendingAttempt.provider)}
               />
-              {latestPendingAttempt.checkoutUrl && (
-                <InfoRow label="Checkout URL" value={latestPendingAttempt.checkoutUrl} />
-              )}
               <InfoRow
                 label="Created"
                 value={formatDateTime(latestPendingAttempt.createdAt)}
@@ -910,7 +905,7 @@ export default function PlatformSalonBillingDetailPage() {
 
               {payments.map((payment) => (
                 <div
-                  key={`${payment.source || "payment"}-${payment._id}`}
+                  key={`${payment.source || "payment"}-${payment.id}`}
                   className="grid grid-cols-12 gap-3 rounded-xl border border-neutral-100 px-3 py-2.5 text-sm"
                 >
                   <div className="col-span-3 text-neutral-500">

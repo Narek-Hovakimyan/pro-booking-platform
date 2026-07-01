@@ -225,6 +225,28 @@ const serializeSubscriptionForPlatform = (subscription, now = new Date()) => {
   };
 };
 
+const serializeSalonSubscriptionForPlatform = (subscription, now = new Date()) => {
+  const serialized = serializeSubscriptionForPlatform(subscription, now);
+  if (!serialized) return null;
+
+  return {
+    status: serialized.status,
+    isExpired: serialized.isExpired,
+    seatCount: serialized.seatCount,
+    pricePerSeat: serialized.pricePerSeat,
+    totalPrice: serialized.totalPrice,
+    provider: serialized.provider,
+    currentPeriodStart: serialized.currentPeriodStart,
+    currentPeriodEnd: serialized.currentPeriodEnd,
+    daysRemaining: serialized.daysRemaining,
+    lastPaymentAt: serialized.lastPaymentAt,
+    trialEndsAt: serialized.trialEndsAt,
+    cancelledAt: serialized.cancelledAt,
+    createdAt: serialized.createdAt,
+    updatedAt: serialized.updatedAt,
+  };
+};
+
 const serializeIndividualSubscriptionForPlatform = (subscription, now = new Date()) => {
   const serialized = serializeSubscriptionForPlatform(subscription, now);
   if (!serialized) return null;
@@ -251,17 +273,18 @@ const serializeIndividualSubscriptionForPlatform = (subscription, now = new Date
 /* ── Payment attempt helper ───────────────────────────── */
 
 const SAFE_PAYMENT_FIELDS = [
-  "_id", "amount", "currency", "status", "provider", "purpose",
-  "ownerType", "ownerId", "payerId", "subscriptionId",
+  "amount", "currency", "status", "provider",
   "seatCount", "months", "createdAt", "updatedAt",
   "paidAt", "confirmedAt", "failedAt", "cancelledAt",
-  "refundedAt", "expiresAt", "checkoutUrl", "providerPaymentId",
-  "periodStart", "periodEnd", "source", "action",
+  "refundedAt", "expiresAt", "periodStart", "periodEnd",
+  "source", "action",
 ];
 
 const serializePaymentAttempt = (attempt) => {
   if (!attempt) return null;
-  const safe = {};
+  const safe = {
+    id: attempt._id,
+  };
   for (const field of SAFE_PAYMENT_FIELDS) {
     if (attempt[field] !== undefined) {
       safe[field] = attempt[field];
@@ -277,14 +300,15 @@ const serializePaymentAttempt = (attempt) => {
 
 const serializePaymentRecord = (record) => {
   if (!record) return null;
-  const safe = {};
+  const safe = {
+    id: record._id,
+  };
   for (const field of SAFE_PAYMENT_FIELDS) {
     if (record[field] !== undefined) {
       safe[field] = record[field];
     }
   }
   safe.source = "payment_record";
-  safe.purpose = "subscription";
   return safe;
 };
 
@@ -499,7 +523,7 @@ export const getAllSalonBillingSummaries = async ({
       city: salon.city,
       imageUrl: salon.imageUrl,
       owner: safeOwner,
-      subscription: serializeSubscriptionForPlatform(subscription, now),
+      subscription: serializeSalonSubscriptionForPlatform(subscription, now),
       seats: seatUsage,
       latestPaymentAttempt: latestAttempt
         ? serializePaymentAttempt(latestAttempt)
@@ -575,7 +599,7 @@ export const getSalonBillingDetail = async (salonId) => {
       createdAt: salon.createdAt,
     },
     owner: safeOwner,
-    subscription: serializeSubscriptionForPlatform(subscription),
+    subscription: serializeSalonSubscriptionForPlatform(subscription),
     seats: seatUsage,
     acceptedStaff: acceptedStaff.map((s) => ({
       _id: s._id,

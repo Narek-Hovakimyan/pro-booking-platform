@@ -882,6 +882,11 @@ test("getSalonPayments excludes other salon subscription attempts", async () => 
 test("payment responses exclude sensitive metadata and tokens", async () => {
   const paymentWithMetadata = {
     ...subscriptionPaymentDoc,
+    checkoutUrl: "https://pay.example/internal",
+    providerPaymentId: "provider-secret",
+    providerIntentId: "intent-secret",
+    createdBy: ownerId,
+    processedWebhookEventIds: ["evt-secret"],
     metadata: { action: "renew", internal: "secret" },
     rawProviderResponse: { secret: true },
   };
@@ -902,6 +907,17 @@ test("payment responses exclude sensitive metadata and tokens", async () => {
   assert.equal(result.payments.length, 1, "One payment returned");
 
   const payment = result.payments[0];
+  assert.equal(String(payment.id), String(paymentId), "stable id present");
+  assert.equal(payment._id, undefined, "_id excluded");
+  assert.equal(payment.providerPaymentId, undefined, "providerPaymentId excluded");
+  assert.equal(payment.providerIntentId, undefined, "providerIntentId excluded");
+  assert.equal(payment.checkoutUrl, undefined, "checkoutUrl excluded");
+  assert.equal(payment.payerId, undefined, "payerId excluded");
+  assert.equal(payment.subscriptionId, undefined, "subscriptionId excluded");
+  assert.equal(payment.ownerId, undefined, "ownerId excluded");
+  assert.equal(payment.ownerType, undefined, "ownerType excluded");
+  assert.equal(payment.createdBy, undefined, "createdBy excluded");
+  assert.equal(payment.processedWebhookEventIds, undefined, "webhook ids excluded");
   assert.equal(payment.metadata, undefined, "metadata excluded");
   assert.equal(payment.rawProviderResponse, undefined, "rawProviderResponse excluded");
   assert.equal(payment.action, "renew", "safe action present");
@@ -939,7 +955,11 @@ test("getSalonPayments includes paid payment records with period details", async
   assert.equal(result.payments.length, 1);
   assert.equal(result.payments[0].source, "payment_record");
   assert.equal(result.payments[0].status, "paid");
-  assert.equal(result.payments[0].purpose, "subscription");
+  assert.equal(String(result.payments[0].id), String(paymentRecordDoc._id));
+  assert.equal(result.payments[0]._id, undefined);
+  assert.equal(result.payments[0].providerPaymentId, undefined);
+  assert.equal(result.payments[0].payerId, undefined);
+  assert.equal(result.payments[0].subscriptionId, undefined);
   assert.equal(result.payments[0].periodStart.getTime(), paymentRecordDoc.periodStart.getTime());
 });
 
@@ -1220,8 +1240,16 @@ test("salon billing detail includes latest pending or requires_action subscripti
 
   assert.deepEqual(capturedFilter.status, { $in: ["pending", "requires_action"] });
   assert.equal(detail.latestPendingAttempt.status, "requires_action");
-  assert.equal(detail.latestPendingAttempt.purpose, "subscription");
-  assert.equal(detail.latestPendingAttempt.ownerType, "salon");
+  assert.equal(String(detail.latestPendingAttempt.id), String(paymentId));
+  assert.equal(detail.latestPendingAttempt._id, undefined);
+  assert.equal(detail.latestPendingAttempt.purpose, undefined);
+  assert.equal(detail.latestPendingAttempt.ownerType, undefined);
+  assert.equal(detail.latestPendingAttempt.ownerId, undefined);
+  assert.equal(detail.latestPendingAttempt.payerId, undefined);
+  assert.equal(detail.latestPendingAttempt.subscriptionId, undefined);
+  assert.equal(detail.latestPendingAttempt.checkoutUrl, undefined);
+  assert.equal(detail.latestPendingAttempt.providerPaymentId, undefined);
+  assert.equal(detail.latestPendingAttempt.metadata, undefined);
 });
 
 /* ════════════════════════════════════════════════════════ */
@@ -1258,6 +1286,9 @@ test("expired subscription returns subscription with isExpired=true and 0 days r
   assert.equal(detail.subscription.isExpired, true, "isExpired = true");
   assert.equal(detail.subscription.status, "expired", "status = expired");
   assert.equal(detail.subscription.daysRemaining, 0, "daysRemaining = 0");
+  assert.equal(detail.subscription._id, undefined, "subscription _id excluded");
+  assert.equal(detail.subscription.ownerId, undefined, "subscription ownerId excluded");
+  assert.equal(detail.subscription.ownerType, undefined, "subscription ownerType excluded");
 });
 
 /* ════════════════════════════════════════════════════════ */
@@ -1269,7 +1300,9 @@ test("getAllSalonBillingSummaries returns paginated results", async () => {
   mockMethod(Salon, "find", () => qc([{ ...salonDoc, ownerId }]));
   mockMethod(User, "find", () => qc([ownerDoc]));
   mockMethod(Subscription, "find", () => qc([subscriptionDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "aggregate", async () => []);
+  mockMethod(SubscriptionPaymentAttempt, "aggregate", async () => [
+    { _id: salonId, doc: subscriptionPaymentDoc },
+  ]);
   // Second User.find call inside getSeatUsageForSalon
   mockMethod(SubscriptionSeat, "find", () => qc([]));
 
@@ -1278,6 +1311,17 @@ test("getAllSalonBillingSummaries returns paginated results", async () => {
   assert.equal(result.salons.length, 1, "One salon returned");
   assert.equal(result.total, 1, "Total = 1");
   assert.equal(result.page, 1, "Page = 1");
+  assert.equal(result.salons[0].subscription._id, undefined);
+  assert.equal(result.salons[0].subscription.ownerId, undefined);
+  assert.equal(result.salons[0].subscription.ownerType, undefined);
+  assert.equal(String(result.salons[0].latestPaymentAttempt.id), String(paymentId));
+  assert.equal(result.salons[0].latestPaymentAttempt._id, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt.providerPaymentId, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt.checkoutUrl, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt.payerId, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt.subscriptionId, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt.ownerId, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt.ownerType, undefined);
 });
 
 test("getAllSalonBillingSummaries searches by salon name", async () => {
@@ -1746,4 +1790,10 @@ test("confirmSalonPayment manually confirms subscription payment with audit and 
   assert.equal(auditPayload.requestIp, requestIp);
   assert.equal(result.paymentAttempt.metadata, undefined);
   assert.equal(result.paymentAttempt.rawProviderResponse, undefined);
+  assert.equal(result.paymentAttempt.providerPaymentId, undefined);
+  assert.equal(result.paymentAttempt.checkoutUrl, undefined);
+  assert.equal(result.paymentAttempt.payerId, undefined);
+  assert.equal(result.paymentAttempt.subscriptionId, undefined);
+  assert.equal(result.paymentAttempt.ownerId, undefined);
+  assert.equal(result.paymentAttempt.ownerType, undefined);
 });
