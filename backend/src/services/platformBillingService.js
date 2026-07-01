@@ -163,10 +163,9 @@ const getSeatUsageForSalon = async (salonId, subscriptionId) => {
   const assignments = filteredSeats.map((seat) => {
     const barber = seat.barberId || {};
     const safeBarber = typeof barber === "object" && barber._id
-      ? { _id: barber._id, name: barber.name, avatarUrl: barber.avatarUrl, email: barber.email }
-      : { _id: barber };
+      ? { id: barber._id, name: barber.name, avatarUrl: barber.avatarUrl, email: barber.email }
+      : { id: barber };
     return {
-      _id: seat._id,
       barber: safeBarber,
       assignedAt: seat.assignedAt,
       status: seat.status,
@@ -252,7 +251,6 @@ const serializeIndividualSubscriptionForPlatform = (subscription, now = new Date
   if (!serialized) return null;
 
   return {
-    ownerType: serialized.ownerType,
     status: serialized.status,
     isExpired: serialized.isExpired,
     seatCount: serialized.seatCount,
@@ -324,8 +322,6 @@ const serializeIndividualPaymentAttempt = (attempt) => {
     currency: attempt.currency,
     status: attempt.status,
     provider: attempt.provider,
-    purpose: attempt.purpose || "subscription",
-    ownerType: attempt.ownerType,
     seatCount: attempt.seatCount,
     months: attempt.months,
     createdAt: attempt.createdAt || null,
@@ -350,8 +346,6 @@ const serializeIndividualPaymentRecord = (record) => {
     currency: record.currency,
     status: record.status,
     provider: record.provider,
-    purpose: "subscription",
-    ownerType: record.ownerType,
     seatCount: record.seatCount,
     createdAt: record.createdAt || null,
     updatedAt: record.updatedAt || null,
@@ -514,11 +508,11 @@ export const getAllSalonBillingSummaries = async ({
     }
 
     const safeOwner = owner
-      ? { _id: owner._id, name: owner.name, email: owner.email, avatarUrl: owner.avatarUrl, city: owner.city }
+      ? { id: owner._id, name: owner.name, email: owner.email, avatarUrl: owner.avatarUrl, city: owner.city }
       : null;
 
     results.push({
-      _id: salon._id,
+      id: salon._id,
       name: salon.name,
       city: salon.city,
       imageUrl: salon.imageUrl,
@@ -554,7 +548,7 @@ export const getSalonBillingDetail = async (salonId) => {
     .lean();
 
   const safeOwner = owner
-    ? { _id: owner._id, name: owner.name, email: owner.email, avatarUrl: owner.avatarUrl, city: owner.city, phone: owner.phone }
+    ? { id: owner._id, name: owner.name, email: owner.email, avatarUrl: owner.avatarUrl, city: owner.city, phone: owner.phone }
     : null;
 
   // Subscription
@@ -590,7 +584,7 @@ export const getSalonBillingDetail = async (salonId) => {
 
   return {
     salon: {
-      _id: salon._id,
+      id: salon._id,
       name: salon.name,
       city: salon.city,
       address: salon.address,
@@ -602,7 +596,7 @@ export const getSalonBillingDetail = async (salonId) => {
     subscription: serializeSalonSubscriptionForPlatform(subscription),
     seats: seatUsage,
     acceptedStaff: acceptedStaff.map((s) => ({
-      _id: s._id,
+      id: s._id,
       name: s.name,
       avatarUrl: s.avatarUrl,
       email: s.email,

@@ -271,8 +271,8 @@ export default function PlatformBillingPage() {
         <div className="space-y-3">
           {salons.map((salon) => (
             <button
-              key={salon._id}
-              onClick={() => handleSalonClick(salon._id)}
+              key={salon.id}
+              onClick={() => handleSalonClick(salon.id)}
               className="flex w-full items-start gap-4 rounded-2xl border border-neutral-200 bg-white p-4 text-left shadow-sm transition hover:border-neutral-300 hover:shadow-md sm:items-center"
               type="button"
             >

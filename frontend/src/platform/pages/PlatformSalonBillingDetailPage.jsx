@@ -474,7 +474,7 @@ export default function PlatformSalonBillingDetailPage() {
   const subscriptionIsCancelled = subscription?.status === "cancelled";
   const totalPaymentsPages = Math.max(1, Math.ceil(paymentsTotal / 10));
   const assignedBarberIds = new Set(
-    (seats?.assignments || []).map((a) => String(a.barber?._id || a.barber))
+    (seats?.assignments || []).map((a) => String(a.barber?.id || a.barber))
   );
 
   // Determine if a payment attempt is eligible for manual confirmation
@@ -741,11 +741,11 @@ export default function PlatformSalonBillingDetailPage() {
               </div>
 
               {acceptedStaff.map((staff) => {
-                const hasSeat = assignedBarberIds.has(String(staff._id));
+                const hasSeat = assignedBarberIds.has(String(staff.id));
 
                 return (
                   <div
-                    key={staff._id}
+                    key={staff.id}
                     className="grid grid-cols-12 gap-3 rounded-xl border border-neutral-100 px-3 py-2.5 text-sm"
                   >
                     <div className="col-span-4 flex items-center gap-2">
@@ -781,7 +781,7 @@ export default function PlatformSalonBillingDetailPage() {
                               onClick={() =>
                                 setModal({
                                   type: "revoke",
-                                  extra: { barberId: staff._id, barberName: staff.name },
+                                  extra: { barberId: staff.id, barberName: staff.name },
                                 })
                               }
                               className="rounded-lg p-1 text-red-400 transition hover:bg-red-50 hover:text-red-600"
@@ -803,7 +803,7 @@ export default function PlatformSalonBillingDetailPage() {
                               onClick={() =>
                                 setModal({
                                   type: "assign",
-                                  extra: { barberId: staff._id, barberName: staff.name },
+                                  extra: { barberId: staff.id, barberName: staff.name },
                                 })
                               }
                               className="rounded-lg p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
@@ -1117,7 +1117,7 @@ export default function PlatformSalonBillingDetailPage() {
               defaultValue=""
               onChange={(e) =>
                 setModal((prev) => {
-                  const selected = acceptedStaff.find((s) => s._id === e.target.value);
+                  const selected = acceptedStaff.find((s) => s.id === e.target.value);
                   return prev
                     ? {
                         ...prev,
@@ -1134,9 +1134,9 @@ export default function PlatformSalonBillingDetailPage() {
                 -- Select staff --
               </option>
               {acceptedStaff
-                .filter((s) => !assignedBarberIds.has(String(s._id)))
+                .filter((s) => !assignedBarberIds.has(String(s.id)))
                 .map((s) => (
-                  <option key={s._id} value={s._id}>
+                  <option key={s.id} value={s.id}>
                     {s.name || "Unnamed"} {s.email ? `(${s.email})` : ""}
                   </option>
                 ))}
@@ -1182,7 +1182,7 @@ export default function PlatformSalonBillingDetailPage() {
               defaultValue=""
               onChange={(e) =>
                 setModal((prev) => {
-                  const selected = acceptedStaff.find((s) => s._id === e.target.value);
+                  const selected = acceptedStaff.find((s) => s.id === e.target.value);
                   return prev
                     ? {
                         ...prev,
@@ -1199,9 +1199,9 @@ export default function PlatformSalonBillingDetailPage() {
                 -- Select staff --
               </option>
               {acceptedStaff
-                .filter((s) => assignedBarberIds.has(String(s._id)))
+                .filter((s) => assignedBarberIds.has(String(s.id)))
                 .map((s) => (
-                  <option key={s._id} value={s._id}>
+                  <option key={s.id} value={s.id}>
                     {s.name || "Unnamed"} {s.email ? `(${s.email})` : ""}
                   </option>
                 ))}

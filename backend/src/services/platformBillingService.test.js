@@ -600,11 +600,20 @@ test("salon billing detail includes modern accepted staff", async () => {
   assert.equal(detail.seats.used, 1, "Only 1 accepted staff seat used");
   assert.equal(detail.seats.total, 3, "Total seats = subscription seatCount");
   assert.equal(detail.seats.available, 2, "Available = total - used");
+  assert.equal(String(detail.salon.id), String(salonId), "Salon stable id present");
+  assert.equal(detail.salon._id, undefined, "Salon _id excluded");
+  assert.equal(String(detail.owner.id), String(ownerId), "Owner stable id present");
+  assert.equal(detail.owner._id, undefined, "Owner _id excluded");
   assert.equal(detail.owner.password, undefined, "Owner password excluded");
   assert.equal(detail.owner.platformRole, undefined, "Owner platformRole excluded");
   assert.equal(detail.owner.emailVerificationTokenHash, undefined, "Owner private auth fields excluded");
+  assert.equal(String(detail.acceptedStaff[0].id), String(acceptedStaffId), "Staff stable id present");
+  assert.equal(detail.acceptedStaff[0]._id, undefined, "Staff _id excluded");
   assert.equal(detail.acceptedStaff[0].password, undefined, "Staff password excluded");
   assert.equal(detail.acceptedStaff[0].platformRole, undefined, "Staff platformRole excluded");
+  assert.equal(String(detail.seats.assignments[0].barber.id), String(acceptedStaffId), "Seat barber stable id present");
+  assert.equal(detail.seats.assignments[0]._id, undefined, "Seat assignment _id excluded");
+  assert.equal(detail.seats.assignments[0].barber._id, undefined, "Seat barber _id excluded");
   assert.equal(detail.seats.assignments[0].barber.password, undefined, "Seat barber password excluded");
   assert.equal(detail.seats.assignments[0].barber.platformRole, undefined, "Seat barber platformRole excluded");
 });
@@ -997,11 +1006,13 @@ test("individual billing summaries return only barber ownerType data", async () 
   assert.equal(recordFilter.ownerType, "barber");
   assert.equal(result.individuals.length, 1);
   assert.equal(String(result.individuals[0].barberId), String(individualBarberId));
-  assert.equal(result.individuals[0].subscription.ownerType, "barber");
+  assert.equal(result.individuals[0].subscription.ownerType, undefined);
   assert.equal(result.individuals[0].subscription._id, undefined);
   assert.equal(result.individuals[0].subscription.ownerId, undefined);
   assert.equal(result.individuals[0].barber.password, undefined);
   assert.equal(result.individuals[0].barber.platformRole, undefined);
+  assert.equal(result.individuals[0].latestPayment.ownerType, undefined);
+  assert.equal(result.individuals[0].latestPayment.purpose, undefined);
   assert.equal(result.individuals[0].latestPayment.providerPaymentId, undefined);
   assert.equal(result.individuals[0].latestPayment.metadata, undefined);
 });
@@ -1069,6 +1080,8 @@ test("individual payment history filters ownerType=barber and excludes internals
   assert.equal(attempt.providerIntentId, undefined);
   assert.equal(attempt.subscriptionId, undefined);
   assert.equal(attempt.payerId, undefined);
+  assert.equal(attempt.ownerType, undefined);
+  assert.equal(attempt.purpose, undefined);
   assert.equal(attempt.metadata, undefined);
   assert.equal(attempt.createdBy, undefined);
   assert.equal(attempt.processedWebhookEventIds, undefined);
@@ -1077,6 +1090,8 @@ test("individual payment history filters ownerType=barber and excludes internals
   const record = result.payments.find((payment) => payment.source === "payment_record");
   assert.equal(record.providerPaymentId, undefined);
   assert.equal(record.subscriptionId, undefined);
+  assert.equal(record.ownerType, undefined);
+  assert.equal(record.purpose, undefined);
   assert.equal(record.periodStart.getTime(), individualPaymentRecordDoc.periodStart.getTime());
 });
 
@@ -1311,6 +1326,10 @@ test("getAllSalonBillingSummaries returns paginated results", async () => {
   assert.equal(result.salons.length, 1, "One salon returned");
   assert.equal(result.total, 1, "Total = 1");
   assert.equal(result.page, 1, "Page = 1");
+  assert.equal(String(result.salons[0].id), String(salonId));
+  assert.equal(result.salons[0]._id, undefined);
+  assert.equal(String(result.salons[0].owner.id), String(ownerId));
+  assert.equal(result.salons[0].owner._id, undefined);
   assert.equal(result.salons[0].subscription._id, undefined);
   assert.equal(result.salons[0].subscription.ownerId, undefined);
   assert.equal(result.salons[0].subscription.ownerType, undefined);
