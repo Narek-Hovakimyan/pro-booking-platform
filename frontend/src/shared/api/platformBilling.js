@@ -130,3 +130,13 @@ export async function confirmPlatformSalonPayment(paymentId, payload) {
   const { data } = await api.post(`/platform/billing/payments/${paymentId}/confirm`, payload);
   return data;
 }
+
+/**
+ * Fetch platform dashboard summary (platform admin only).
+ * Returns overview, revenue, recent payments, and alerts.
+ * @returns {Promise<object>} Dashboard summary data
+ */
+export async function getPlatformDashboardSummary() {
+  const { data } = await api.get("/platform/dashboard/summary");
+  return data;
+}
