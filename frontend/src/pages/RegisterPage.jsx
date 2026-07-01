@@ -85,10 +85,10 @@ export default function RegisterPage() {
   };
 
   const inputClass =
-    "w-full rounded-2xl border border-neutral-200 p-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100";
+    "w-full rounded-2xl border border-neutral-200 p-3 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 
   return (
-    <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center bg-gradient-to-b from-purple-50/80 to-neutral-50 px-4 py-10">
+    <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center bg-surface-subtle px-4 py-10">
       <div className="flex w-full max-w-5xl flex-col gap-8 lg:flex-row lg:items-center">
         {/* Left column — benefits */}
         <div className="flex-1 space-y-6">
@@ -101,20 +101,20 @@ export default function RegisterPage() {
 
           <ul className="space-y-3">
             <li className="flex items-center gap-3 text-sm text-neutral-700">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
-                <CalendarCheck className="h-4 w-4 text-purple-600" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50">
+                <CalendarCheck className="h-4 w-4 text-brand-600" />
               </div>
               <span>{t("auth.benefits.bookings")}</span>
             </li>
             <li className="flex items-center gap-3 text-sm text-neutral-700">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
-                <Scissors className="h-4 w-4 text-purple-600" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50">
+                <Scissors className="h-4 w-4 text-brand-600" />
               </div>
               <span>{t("auth.benefits.salon")}</span>
             </li>
             <li className="flex items-center gap-3 text-sm text-neutral-700">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100">
-                <ShieldCheck className="h-4 w-4 text-purple-600" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50">
+                <ShieldCheck className="h-4 w-4 text-brand-600" />
               </div>
               <span>{t("auth.benefits.secure")}</span>
             </li>
@@ -123,7 +123,7 @@ export default function RegisterPage() {
 
         {/* Right column — register card */}
         <Card className="w-full max-w-md rounded-3xl border-0 bg-white shadow-lg">
-          <div className="h-1.5 rounded-t-3xl bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500" />
+          <div className="h-1.5 rounded-t-3xl bg-gradient-to-r from-brand-400 to-brand-500" />
           <CardContent className="space-y-5 p-6 sm:p-7">
             <form className="space-y-4" onSubmit={handleSubmit}>
               <div className="grid gap-2">
@@ -207,7 +207,7 @@ export default function RegisterPage() {
               )}
 
               <Button
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600"
+                className="w-full bg-gradient-to-r from-brand-500 to-brand-600 text-white shadow-md hover:from-brand-600 hover:to-brand-700"
                 type="submit"
                 disabled={isLoading}
               >
@@ -220,7 +220,7 @@ export default function RegisterPage() {
             <p className="text-center text-sm text-neutral-500">
               {t("auth.register.hasAccount")}{" "}
               <Link
-                className="font-semibold text-neutral-900 hover:text-purple-700"
+                className="font-semibold text-neutral-900 hover:text-brand-700"
                 to={redirectPath ? `/login?redirect=${encodeURIComponent(redirectPath)}` : "/login"}
               >
                 {t("auth.register.loginLink")}
