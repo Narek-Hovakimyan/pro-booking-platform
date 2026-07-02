@@ -3,6 +3,10 @@ import { cn } from "@/shared/lib/utils";
 const variants = {
   default:
     "bg-neutral-950 text-white shadow-sm hover:bg-neutral-800 active:bg-neutral-950",
+  primary:
+    "bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800 focus-visible:outline-brand-600",
+  destructive:
+    "bg-red-600 text-white shadow-sm hover:bg-red-700 active:bg-red-800 focus-visible:outline-red-600",
   outline:
     "border border-neutral-200 bg-white text-neutral-900 shadow-sm hover:border-neutral-300 hover:bg-neutral-50",
   ghost: "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950",
