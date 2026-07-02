@@ -31,7 +31,7 @@ export default function BarberProfileHero({
   totalCerts,
 }) {
   return (
-    <Card className="overflow-hidden rounded-2xl sm:rounded-3xl">
+    <Card className="overflow-hidden rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="grid gap-0 lg:grid-cols-[340px_1fr]">
         <div className="relative overflow-hidden bg-neutral-100 lg:min-h-full">
           {barber.imageUrl ? (
@@ -140,7 +140,7 @@ export default function BarberProfileHero({
           )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-semibold text-neutral-800">
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700">
               {startingPrice
                 ? `From ${startingPrice.toLocaleString()} դրամ`
                 : "No active services"}

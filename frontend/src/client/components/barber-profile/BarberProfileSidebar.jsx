@@ -13,7 +13,7 @@ export default function BarberProfileSidebar({
 }) {
   return (
     <div className="space-y-6">
-      <Card className="rounded-2xl sm:rounded-3xl">
+      <Card className="rounded-2xl shadow-card sm:rounded-3xl">
         <CardContent className="space-y-5 p-5 sm:p-7">
           <div>
             <h2 className="flex items-center gap-2 text-xl font-bold">
@@ -117,7 +117,7 @@ export default function BarberProfileSidebar({
         </CardContent>
       </Card>
 
-      <Card className="rounded-2xl sm:rounded-3xl">
+      <Card className="rounded-2xl shadow-card sm:rounded-3xl">
         <CardContent className="space-y-4 p-5 sm:p-7">
           <h3 className="text-sm font-bold uppercase tracking-wider text-neutral-400">
             Quick info
@@ -136,8 +136,8 @@ export default function BarberProfileSidebar({
             })()}
             {startingPrice && (
               <div className="flex items-center gap-3 text-sm">
-                <Calendar className="h-4 w-4 shrink-0 text-neutral-400" />
-                <span className="text-neutral-700">
+                <Calendar className="h-4 w-4 shrink-0 text-brand-600" />
+                <span className="font-semibold text-brand-700">
                   From {startingPrice.toLocaleString()} դրամ
                 </span>
               </div>
