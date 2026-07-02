@@ -17,6 +17,7 @@ const getMenuGroups = (
       key: "platform",
       label: t("nav.platform"),
       children: [
+        { label: "Platform Dashboard", to: "/admin/platform/dashboard" },
         { label: t("nav.platformBilling"), to: "/admin/platform/billing" },
       ],
     });
@@ -120,6 +121,12 @@ export default function NestedHeaderMenu({
 }) {
   const { pathname } = useLocation();
   const { t } = useTranslation();
+
+  const isNavActive = (itemTo) => {
+    if (!itemTo) return false;
+    if (pathname === itemTo) return true;
+    return pathname.startsWith(`${itemTo}/`);
+  };
   const [activeGroup, setActiveGroup] = useState(null);
   const [expandedGroup, setExpandedGroup] = useState(null);
   const menuRef = useRef(null);
@@ -220,7 +227,7 @@ export default function NestedHeaderMenu({
                   {group.children.map((child) => (
                     <button
                       key={child.to}
-                      className={linkClass(pathname === child.to)}
+                      className={linkClass(isNavActive(child.to))}
                       onClick={() => handleNavigate(child.to)}
                       role="menuitem"
                       type="button"
@@ -283,7 +290,7 @@ export default function NestedHeaderMenu({
                 {group.children.map((child) => (
                   <button
                     key={child.to}
-                    className={linkClass(pathname === child.to)}
+                    className={linkClass(isNavActive(child.to))}
                     onClick={() => handleNavigate(child.to)}
                     type="button"
                   >
