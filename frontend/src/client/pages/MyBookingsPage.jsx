@@ -11,6 +11,7 @@ import LoyaltyBanner from "@/client/components/LoyaltyBanner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import api from "@/shared/api/axios";
 import { getSocket } from "@/shared/lib/socket";
+import { Container } from "@/shared/components/ui/Container";
 import {
   fetchBarberBookings,
   fetchClientBookings,
@@ -621,7 +622,8 @@ export default function MyBookingsPage() {
   };
 
   return (
-    <div className="space-y-5 sm:space-y-6">
+    <Container size="wide">
+      <div className="space-y-6 sm:space-y-8">
       <MyBookingsHeader error={error} />
       <LoyaltyBanner />
 
@@ -686,6 +688,7 @@ export default function MyBookingsPage() {
         onSubmitCancel={cancelClientBooking}
         onSubmitDelay={delayClientBooking}
       />
-    </div>
+      </div>
+    </Container>
   );
 }
