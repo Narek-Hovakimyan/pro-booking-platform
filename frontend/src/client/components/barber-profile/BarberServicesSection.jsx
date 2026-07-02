@@ -19,7 +19,7 @@ function ServiceCard({ service, barber, profileBarberId }) {
             {service?.name || "Service"}
           </div>
           <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
-            <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600">
               {getServiceDisplayCategory(service)}
             </span>
             <span className="inline-flex items-center gap-1">
@@ -34,10 +34,10 @@ function ServiceCard({ service, barber, profileBarberId }) {
           )}
         </div>
         <div className="shrink-0 py-4 pr-4 text-right">
-          <div className="text-xl font-bold text-neutral-950">
+          <div className="text-xl font-bold text-brand-700">
             {Number(service?.price || 0).toLocaleString()}
           </div>
-          <div className="text-xs text-neutral-400">դրամ</div>
+          <div className="text-xs text-neutral-500">դրամ</div>
           <Button
             as={Link}
             className="mt-2"
@@ -61,7 +61,7 @@ export default function BarberServicesSection({
   const groupedServices = groupServicesByDisplayCategory(barberServices);
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="space-y-4 p-5 sm:p-7">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-xl font-bold">
