@@ -562,7 +562,7 @@ export default function ClientBooking({
   };
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="p-4 sm:p-6">
         {/* Salon context banner */}
         {selectedSalonName && (
@@ -583,50 +583,6 @@ export default function ClientBooking({
             </p>
           </div>
         )}
-
-        {/* Step indicator */}
-        <div className="mb-6 flex items-center gap-1 sm:gap-2">
-          {[
-            { num: 1, label: "Service" },
-            { num: 2, label: "Date & Time" },
-            { num: 3, label: "Your Info" },
-            { num: 4, label: "Confirm" },
-          ].map((s, i) => {
-            // step prop: 2=service, 3=date/time, 4=details, 0 after-confirm=done
-            const currentStep = step === 0 ? 5 : step - 1; // map to 1-4
-            const isDone = currentStep > s.num;
-            const isActive = currentStep === s.num;
-            return (
-              <div key={s.num} className="flex items-center gap-1 sm:gap-2">
-                <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition sm:h-8 sm:w-8 sm:text-sm ${
-                    isDone
-                      ? "bg-neutral-900 text-white"
-                      : isActive
-                        ? "bg-neutral-900 text-white ring-2 ring-neutral-900/20"
-                        : "bg-neutral-100 text-neutral-400"
-                  }`}
-                >
-                  {isDone ? "✓" : s.num}
-                </div>
-                <span
-                  className={`hidden text-xs font-medium sm:inline ${
-                    isActive ? "text-neutral-900" : "text-neutral-400"
-                  }`}
-                >
-                  {s.label}
-                </span>
-                {i < 3 && (
-                  <div
-                    className={`mx-0.5 h-px w-3 sm:mx-1 sm:w-6 ${
-                      currentStep > s.num ? "bg-neutral-900" : "bg-neutral-200"
-                    }`}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
 
         {step === 2 && (
           <ServiceStep
@@ -723,9 +679,8 @@ export default function ClientBooking({
 
             {/* Selected date/time display */}
             {selectedDate && selectedTime && (
-              <div className="rounded-2xl border border-green-200 bg-green-50 p-3 text-sm text-green-800">
-                <span className="font-semibold">Selected:</span>{" "}
-                {selectedDateLabel || selectedDate} at {selectedTime}
+              <div className="rounded-2xl border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-800">
+                Selected: {selectedDateLabel || selectedDate} at {selectedTime}
               </div>
             )}
 
