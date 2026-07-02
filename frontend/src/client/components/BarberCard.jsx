@@ -168,7 +168,7 @@ export default function BarberCard({
     : `/booking/${barberId}`;
 
   return (
-    <Card className="rounded-2xl transition-shadow hover:shadow-md sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card transition-shadow hover:shadow-card-hover sm:rounded-3xl">
       <CardContent className="space-y-4 p-4 sm:p-6">
         {/* Image section */}
         <div className="relative">
@@ -201,23 +201,46 @@ export default function BarberCard({
           )}
         </div>
 
-        {/* Name and contact */}
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-neutral-950">
-            {barber?.name || "Specialist"}
-          </h2>
-          {barber?.phone && (
-            <p className="mt-0.5 text-sm text-neutral-500">{barber.phone}</p>
+        {/* Name and rating */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-bold tracking-tight text-neutral-950">
+              {barber?.name || "Specialist"}
+            </h2>
+          </div>
+          {/* Rating trust badge */}
+          {reviewStats.average > 0 && (
+            <div className="flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-sm font-semibold text-amber-700">
+              <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+              {reviewStats.average.toFixed(1)}
+            </div>
           )}
         </div>
 
-        {/* Location */}
-        {barber?.city && (
-          <p className="flex items-center gap-2 text-sm text-neutral-500">
-            <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>{barber.city}</span>
-          </p>
+        {barber?.phone && (
+          <p className="text-sm text-neutral-500">{barber.phone}</p>
         )}
+
+        {/* Location + salon row */}
+        <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+          {barber?.city && (
+            <span className="flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+              {barber.city}
+            </span>
+          )}
+          {showSalonLink && (
+            <button
+              className="flex items-center gap-1.5 text-left text-sm font-medium text-brand-600 hover:text-brand-700"
+              onClick={handleSalonClick}
+              type="button"
+              aria-label={`View salon: ${salonName}`}
+            >
+              <Store className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="truncate">{salonName}</span>
+            </button>
+          )}
+        </div>
 
         {/* Profession / specialty badge */}
         {(() => {
@@ -232,21 +255,8 @@ export default function BarberCard({
           );
         })()}
 
-        {/* Salon link */}
-        {showSalonLink && (
-          <button
-            className="flex w-full cursor-pointer items-center gap-2 rounded-xl bg-blue-50 px-3 py-2 text-left text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
-            onClick={handleSalonClick}
-            type="button"
-            aria-label={`View salon: ${salonName}`}
-          >
-            <Store className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">{salonName}</span>
-          </button>
-        )}
-
         {/* Pricing */}
-        <div className="flex items-center gap-2 rounded-xl bg-neutral-50 p-3">
+        <div className="flex items-center gap-2 rounded-xl bg-brand-50 p-3">
           {prices.length > 0 ? (
             <>
               <span className="text-lg font-bold text-neutral-900">
@@ -256,19 +266,6 @@ export default function BarberCard({
             </>
           ) : (
             <span className="text-sm font-medium text-neutral-500">No services yet</span>
-          )}
-        </div>
-
-        {/* Rating row */}
-        <div className="flex items-center gap-1.5 text-sm text-neutral-600">
-          <Star className="h-4 w-4 fill-amber-400 text-amber-500" aria-hidden="true" />
-          {reviewStats.average ? (
-            <span>
-              <span className="font-semibold text-neutral-900">{reviewStats.average.toFixed(1)}</span>
-              <span className="text-neutral-400"> · {reviewStats.count} {reviewStats.count === 1 ? "review" : "reviews"}</span>
-            </span>
-          ) : (
-            <span className="text-neutral-400">No reviews yet</span>
           )}
         </div>
 
@@ -286,12 +283,12 @@ export default function BarberCard({
           </div>
         )}
 
-        {/* Category chips — handles both system and custom categories */}
+        {/* Category chips — brand accent */}
         {showCategoryChips && (
           <div className="flex flex-wrap gap-1.5" aria-label="Service categories">
             {nonOtherEntries.slice(0, 3).map(([key, label]) => (
               <span
-                className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                className="inline-flex items-center rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-600"
                 key={key}
               >
                 {label}
@@ -313,7 +310,7 @@ export default function BarberCard({
             <Button
               as={Link}
               to={`/specialists/${barberId}/profile`}
-              className="w-full sm:w-full"
+              className="w-full"
               variant="outline"
             >
               <UserRound className="mr-2 h-4 w-4" aria-hidden="true" />

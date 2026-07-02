@@ -6,15 +6,21 @@ function SkeletonBlock({ className = "" }) {
 
 export function BarberCardSkeleton() {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="space-y-4 p-4 sm:p-6">
         <SkeletonBlock className="aspect-[4/3] w-full rounded-2xl" />
         <div className="space-y-2">
           <SkeletonBlock className="h-6 w-2/3" />
           <SkeletonBlock className="h-4 w-1/2" />
+          <SkeletonBlock className="h-4 w-1/4" />
+        </div>
+        <SkeletonBlock className="h-4 w-3/4" />
+        <div className="flex gap-1.5">
+          <SkeletonBlock className="h-6 w-16 rounded-full" />
+          <SkeletonBlock className="h-6 w-20 rounded-full" />
+          <SkeletonBlock className="h-6 w-14 rounded-full" />
         </div>
         <SkeletonBlock className="h-10 w-full" />
-        <SkeletonBlock className="h-4 w-3/4" />
         <SkeletonBlock className="h-10 w-full" />
         <SkeletonBlock className="h-10 w-full" />
       </CardContent>

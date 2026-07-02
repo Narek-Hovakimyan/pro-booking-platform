@@ -6,6 +6,7 @@ import api from "@/shared/api/axios";
 import Drawer from "@/shared/components/common/Drawer";
 import BarbersFiltersPanel from "@/client/components/barbers/BarbersFiltersPanel";
 import BarbersGrid from "@/client/components/barbers/BarbersGrid";
+import { Container } from "@/shared/components/ui/Container";
 import { Button } from "@/shared/components/ui/button";
 import {
   getServiceCategoryLabel,
@@ -560,114 +561,117 @@ export default function BarbersPage() {
   const refreshing = isLoading && barbers.length > 0;
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Specialists
-          </h1>
-          <p className="mt-2 text-neutral-500">
-            Find a specialist, then choose an available appointment time.
-          </p>
-        </div>
+    <Container size="wide">
+      <div className="space-y-6">
+        <div className="grid gap-4 sm:flex sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-neutral-950 sm:text-4xl">
+              Specialists
+            </h1>
+            <p className="mt-2 text-neutral-500">
+              Find a specialist, then choose an available appointment time.
+            </p>
+          </div>
 
-        <div className="grid gap-2 sm:flex">
-          <Button
-            className="relative w-full sm:w-auto"
-            onClick={() => setIsFilterDrawerOpen(true)}
-            variant="outline"
-          >
-            <SlidersHorizontal className="mr-2 h-4 w-4" />
-            Filters
-            {activeFiltersCount > 0 && (
-              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">
-                {activeFiltersCount}
-              </span>
-            )}
-          </Button>
-          {hasActiveFilters && (
+          <div className="grid gap-2 sm:flex">
             <Button
-              className="w-full sm:w-auto"
-              onClick={resetFilters}
+              className="relative w-full sm:w-auto"
+              onClick={() => setIsFilterDrawerOpen(true)}
               variant="outline"
             >
-              Clear Filters
+              <SlidersHorizontal className="mr-2 h-4 w-4" />
+              Filters
+              {activeFiltersCount > 0 && (
+                <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">
+                  {activeFiltersCount}
+                </span>
+              )}
             </Button>
-          )}
+            {hasActiveFilters && (
+              <Button
+                className="w-full sm:w-auto"
+                onClick={resetFilters}
+                variant="outline"
+              >
+                Clear Filters
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
 
-      {refreshing && (
-        <p className="rounded-xl bg-neutral-50 px-3 py-2 text-sm text-neutral-500">
-          Refreshing specialists...
-        </p>
-      )}
+        {refreshing && (
+          <div className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-600">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-500" />
+            Refreshing specialists...
+          </div>
+        )}
 
-      {error && barbers.length > 0 && (
-        <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </p>
-      )}
+        {error && barbers.length > 0 && (
+          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
 
-      <Drawer
-        closeLabel="Close filters"
-        description="Refine the specialist list instantly."
-        footer={
-          <>
-            <Button onClick={() => setIsFilterDrawerOpen(false)}>
-              Apply filters
-            </Button>
-            <Button onClick={resetFilters} variant="outline">
-              Clear filters
-            </Button>
-          </>
-        }
-        isOpen={isFilterDrawerOpen}
-        onClose={() => setIsFilterDrawerOpen(false)}
-        title="Filters"
-      >
-        <BarbersFiltersPanel
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          selectedCity={selectedCity}
-          onCityChange={setSelectedCity}
-          cities={cities}
-          selectedService={selectedService}
-          onServiceChange={setSelectedService}
-          serviceNames={serviceNames}
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          selectedProfession={selectedProfession}
-          onProfessionChange={(value) => {
-            setSelectedProfession(value);
-            if (value !== "barber") {
-              setSelectedBarberType("");
-            }
-          }}
-          selectedBarberType={selectedBarberType}
-          onBarberTypeChange={setSelectedBarberType}
-          priceRange={priceRange}
-          onPriceRangeChange={updatePriceRange}
-          discountFilter={discountFilter}
-          onDiscountFilterChange={setDiscountFilter}
-          rating={rating}
-          onRatingChange={setRating}
-          filterChips={filterChips}
+        <Drawer
+          closeLabel="Close filters"
+          description="Refine the specialist list instantly."
+          footer={
+            <>
+              <Button onClick={() => setIsFilterDrawerOpen(false)}>
+                Apply filters
+              </Button>
+              <Button onClick={resetFilters} variant="outline">
+                Clear filters
+              </Button>
+            </>
+          }
+          isOpen={isFilterDrawerOpen}
+          onClose={() => setIsFilterDrawerOpen(false)}
+          title="Filters"
+        >
+          <BarbersFiltersPanel
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            selectedCity={selectedCity}
+            onCityChange={setSelectedCity}
+            cities={cities}
+            selectedService={selectedService}
+            onServiceChange={setSelectedService}
+            serviceNames={serviceNames}
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+            selectedProfession={selectedProfession}
+            onProfessionChange={(value) => {
+              setSelectedProfession(value);
+              if (value !== "barber") {
+                setSelectedBarberType("");
+              }
+            }}
+            selectedBarberType={selectedBarberType}
+            onBarberTypeChange={setSelectedBarberType}
+            priceRange={priceRange}
+            onPriceRangeChange={updatePriceRange}
+            discountFilter={discountFilter}
+            onDiscountFilterChange={setDiscountFilter}
+            rating={rating}
+            onRatingChange={setRating}
+            filterChips={filterChips}
+          />
+        </Drawer>
+
+        <BarbersGrid
+          barbers={sortedBarbers}
+          isLoading={isLoading}
+          error={error}
+          hasActiveFilters={hasActiveFilters}
+          favorites={favorites}
+          currentUser={currentUser}
+          reviews={reviews}
+          services={services}
+          onToggleFavorite={toggleFavorite}
+          onResetFilters={resetFilters}
         />
-      </Drawer>
-
-      <BarbersGrid
-        barbers={sortedBarbers}
-        isLoading={isLoading}
-        error={error}
-        hasActiveFilters={hasActiveFilters}
-        favorites={favorites}
-        currentUser={currentUser}
-        reviews={reviews}
-        services={services}
-        onToggleFavorite={toggleFavorite}
-        onResetFilters={resetFilters}
-      />
-    </div>
+      </div>
+    </Container>
   );
 }

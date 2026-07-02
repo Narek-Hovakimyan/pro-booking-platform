@@ -28,7 +28,7 @@ export default function BarbersGrid({
 
   if (initialLoading) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2, 3, 4, 5].map((item) => (
           <BarberCardSkeleton key={item} />
         ))}
@@ -43,7 +43,7 @@ export default function BarbersGrid({
         description={
           hasActiveFilters
             ? "Try removing filters or searching a different name."
-            : "There are no specialists available right now."
+            : "There are no specialists available right now. Check back later."
         }
         onAction={onResetFilters}
         title="No specialists found"
@@ -52,8 +52,8 @@ export default function BarbersGrid({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div>
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {barbers.map((barber) => {
           const barberId = barber?.id || barber?._id;
 
