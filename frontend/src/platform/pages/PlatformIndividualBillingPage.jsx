@@ -98,9 +98,21 @@ const billingTabs = [
   { to: "/admin/platform/billing/individuals", label: "Individual Billing", icon: ReceiptText },
 ];
 
+const statusFilters = [
+  { value: "paid", label: "Paid" },
+  { value: "active", label: "Active" },
+  { value: "trial", label: "Trial" },
+  { value: "expired", label: "Expired" },
+  { value: "none", label: "No subscription" },
+];
+
+const supportedStatusFilters = new Set(statusFilters.map((filter) => filter.value));
+
 export default function PlatformIndividualBillingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useSelector((state) => state.auth);
+  const initialStatus = searchParams.get("status") || "";
+  const hasInitialStatus = supportedStatusFilters.has(initialStatus);
 
   const [individuals, setIndividuals] = useState([]);
   const [total, setTotal] = useState(0);
@@ -111,7 +123,10 @@ export default function PlatformIndividualBillingPage() {
     () => searchParams.get("search") || ""
   );
   const [subscriptionStatus, setSubscriptionStatus] = useState(
-    () => searchParams.get("status") || ""
+    () => (hasInitialStatus ? initialStatus : "paid")
+  );
+  const [hasExplicitStatus, setHasExplicitStatus] = useState(
+    () => hasInitialStatus
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -130,8 +145,12 @@ export default function PlatformIndividualBillingPage() {
 
       try {
         const params = { page, limit };
-        if (search.trim()) params.search = search.trim();
-        if (subscriptionStatus) params.subscriptionStatus = subscriptionStatus;
+        const trimmedSearch = search.trim();
+        const shouldSendStatus = hasExplicitStatus || !trimmedSearch;
+        if (trimmedSearch) params.search = trimmedSearch;
+        if (shouldSendStatus && subscriptionStatus) {
+          params.subscriptionStatus = subscriptionStatus;
+        }
 
         const result = await getPlatformBillingIndividuals(params);
         if (!isMounted) return;
@@ -158,15 +177,15 @@ export default function PlatformIndividualBillingPage() {
     return () => {
       isMounted = false;
     };
-  }, [page, limit, search, subscriptionStatus]);
+  }, [page, limit, search, subscriptionStatus, hasExplicitStatus]);
 
   useEffect(() => {
     const params = {};
     if (page > 1) params.page = String(page);
     if (search) params.search = search;
-    if (subscriptionStatus) params.status = subscriptionStatus;
+    if (hasExplicitStatus && subscriptionStatus) params.status = subscriptionStatus;
     setSearchParams(params, { replace: true });
-  }, [page, search, subscriptionStatus, setSearchParams]);
+  }, [page, search, subscriptionStatus, hasExplicitStatus, setSearchParams]);
 
   const loadPayments = async (barberId, nextPage = 1) => {
     setPaymentState((state) => ({
@@ -216,7 +235,8 @@ export default function PlatformIndividualBillingPage() {
 
   const handleStatusFilter = (status) => {
     setPage(1);
-    setSubscriptionStatus(status === subscriptionStatus ? "" : status);
+    setSubscriptionStatus(status);
+    setHasExplicitStatus(true);
   };
 
   const handleTogglePayments = (barberId) => {
@@ -248,7 +268,7 @@ export default function PlatformIndividualBillingPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Individual Billing</h1>
           <p className="text-sm text-neutral-500">
-            Platform view for individual barber subscriptions and payments.
+            Showing paid individual subscriptions by default. Search can find any barber.
           </p>
         </div>
 
@@ -292,28 +312,28 @@ export default function PlatformIndividualBillingPage() {
         </form>
 
         <div className="flex flex-wrap gap-1.5">
-          {["", "active", "expired", "none"].map((status) => (
+          {statusFilters.map(({ value, label }) => (
             <button
-              key={status}
-              onClick={() => handleStatusFilter(status)}
+              key={value}
+              onClick={() => handleStatusFilter(value)}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                subscriptionStatus === status
+                subscriptionStatus === value && (hasExplicitStatus || !search.trim())
                   ? "bg-neutral-950 text-white"
                   : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
               }`}
               type="button"
             >
-              {status === ""
-                ? "All"
-                : status === "active"
-                  ? "Active"
-                  : status === "expired"
-                    ? "Expired"
-                    : "No subscription"}
+              {label}
             </button>
           ))}
         </div>
       </div>
+
+      {search.trim() && !hasExplicitStatus && (
+        <p className="text-xs text-neutral-500">
+          Showing all matching search results. Select a filter to narrow by billing status.
+        </p>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

@@ -43,6 +43,9 @@ const pendingStaffId = oid("64b000000000000000040004");
 const rejectedStaffId = oid("64b000000000000000040005");
 const unassignedAcceptedId = oid("64b000000000000000040006");
 const individualBarberId = oid("64b000000000000000040007");
+const unpaidBarberId = oid("64b000000000000000040008");
+const trialBarberId = oid("64b000000000000000040009");
+const expiredIndividualBarberId = oid("64b000000000000000040010");
 
 const subscriptionId = oid("64b000000000000000050000");
 const otherSubscriptionId = oid("64b000000000000000050001");
@@ -50,6 +53,8 @@ const paymentId = oid("64b000000000000000060000");
 const depositPaymentId = oid("64b000000000000000060001");
 const otherSalonPaymentId = oid("64b000000000000000060002");
 const individualSubscriptionId = oid("64b000000000000000050002");
+const trialIndividualSubscriptionId = oid("64b000000000000000050003");
+const expiredIndividualSubscriptionId = oid("64b000000000000000050004");
 const individualPaymentId = oid("64b000000000000000060003");
 const individualRecordId = oid("64b000000000000000060004");
 
@@ -229,6 +234,42 @@ const individualBarberDoc = {
   createdAt: new Date("2025-02-01"),
 };
 
+const unpaidBarberDoc = {
+  _id: unpaidBarberId,
+  name: "Unpaid Barber",
+  email: "unpaid@example.com",
+  avatarUrl: "/unpaid.jpg",
+  city: "Yerevan",
+  profession: "barber",
+  barberType: "unisex",
+  role: "barber",
+  createdAt: new Date("2025-03-01"),
+};
+
+const trialBarberDoc = {
+  _id: trialBarberId,
+  name: "Trial Barber",
+  email: "trial@example.com",
+  avatarUrl: "/trial.jpg",
+  city: "Vanadzor",
+  profession: "barber",
+  barberType: "unisex",
+  role: "barber",
+  createdAt: new Date("2025-04-01"),
+};
+
+const expiredIndividualBarberDoc = {
+  _id: expiredIndividualBarberId,
+  name: "Expired Barber",
+  email: "expired@example.com",
+  avatarUrl: "/expired.jpg",
+  city: "Gyumri",
+  profession: "barber",
+  barberType: "unisex",
+  role: "barber",
+  createdAt: new Date("2025-05-01"),
+};
+
 const individualSubscriptionDoc = {
   _id: individualSubscriptionId,
   ownerType: "barber",
@@ -243,6 +284,39 @@ const individualSubscriptionDoc = {
   lastPaymentAt: new Date("2025-06-01"),
   createdAt: new Date("2025-06-01"),
   updatedAt: new Date("2025-06-01"),
+};
+
+const trialIndividualSubscriptionDoc = {
+  _id: trialIndividualSubscriptionId,
+  ownerType: "barber",
+  ownerId: trialBarberId,
+  status: "trialing",
+  seatCount: 1,
+  pricePerSeat: 100,
+  totalPrice: 100,
+  provider: "manual",
+  currentPeriodStart: new Date("2025-06-01"),
+  currentPeriodEnd: new Date("2099-07-01"),
+  trialEndsAt: new Date("2099-07-01"),
+  lastPaymentAt: null,
+  createdAt: new Date("2025-06-01"),
+  updatedAt: new Date("2025-06-01"),
+};
+
+const expiredIndividualSubscriptionDoc = {
+  _id: expiredIndividualSubscriptionId,
+  ownerType: "barber",
+  ownerId: expiredIndividualBarberId,
+  status: "expired",
+  seatCount: 1,
+  pricePerSeat: 100,
+  totalPrice: 100,
+  provider: "manual",
+  currentPeriodStart: new Date("2024-01-01"),
+  currentPeriodEnd: new Date("2024-02-01"),
+  lastPaymentAt: new Date("2024-01-01"),
+  createdAt: new Date("2024-01-01"),
+  updatedAt: new Date("2024-01-01"),
 };
 
 const acceptedSeatDoc = {
@@ -1015,6 +1089,189 @@ test("individual billing summaries return only barber ownerType data", async () 
   assert.equal(result.individuals[0].latestPayment.purpose, undefined);
   assert.equal(result.individuals[0].latestPayment.providerPaymentId, undefined);
   assert.equal(result.individuals[0].latestPayment.metadata, undefined);
+});
+
+test("individual billing summaries default to paid PaymentRecord barbers", async () => {
+  let paidLookupSeen = false;
+
+  mockMethod(User, "countDocuments", async (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.deepEqual(
+      (filter._id?.$in || []).map(String),
+      [String(individualBarberId)]
+    );
+    return 1;
+  });
+  mockMethod(User, "find", (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.deepEqual(
+      (filter._id?.$in || []).map(String),
+      [String(individualBarberId)]
+    );
+    return qc([individualBarberDoc]);
+  });
+  mockMethod(PaymentRecord, "find", (filter) => {
+    if (filter.status === "paid" && filter.ownerId === undefined) {
+      paidLookupSeen = true;
+      return qc([{ ownerId: individualBarberId }, { ownerId: individualBarberId }]);
+    }
+    assert.equal(filter.ownerType, "barber");
+    assert.deepEqual(
+      (filter.ownerId?.$in || []).map(String),
+      [String(individualBarberId)]
+    );
+    return qc([individualPaymentRecordDoc]);
+  });
+  mockQuery(Subscription, "find", [individualSubscriptionDoc]);
+  mockQuery(SubscriptionPaymentAttempt, "find", [individualPaymentDoc]);
+
+  const result = await getAllIndividualBillingSummaries();
+
+  assert.equal(paidLookupSeen, true);
+  assert.equal(result.individuals.length, 1);
+  assert.equal(String(result.individuals[0].barberId), String(individualBarberId));
+});
+
+test("individual billing summaries search without explicit status can find unpaid barbers", async () => {
+  let paidLookupSeen = false;
+
+  mockMethod(User, "countDocuments", async (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.equal(filter._id, undefined);
+    assert.equal(filter.$or.length, 2);
+    return 1;
+  });
+  mockMethod(User, "find", (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.equal(filter._id, undefined);
+    assert.equal(filter.$or.length, 2);
+    return qc([unpaidBarberDoc]);
+  });
+  mockQuery(Subscription, "find", []);
+  mockQuery(SubscriptionPaymentAttempt, "find", []);
+  mockMethod(PaymentRecord, "find", (filter) => {
+    if (filter.status === "paid" && filter.ownerId === undefined) {
+      paidLookupSeen = true;
+    }
+    return qc([]);
+  });
+
+  const result = await getAllIndividualBillingSummaries({ search: "unpaid@example.com" });
+
+  assert.equal(paidLookupSeen, false);
+  assert.equal(result.individuals.length, 1);
+  assert.equal(String(result.individuals[0].barberId), String(unpaidBarberId));
+  assert.equal(result.individuals[0].subscription, null);
+});
+
+test("individual billing summaries subscriptionStatus=paid applies with search", async () => {
+  mockMethod(User, "countDocuments", async (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.equal(filter.$or.length, 2);
+    assert.deepEqual(
+      (filter._id?.$in || []).map(String),
+      [String(individualBarberId)]
+    );
+    return 1;
+  });
+  mockMethod(User, "find", (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.equal(filter.$or.length, 2);
+    assert.deepEqual(
+      (filter._id?.$in || []).map(String),
+      [String(individualBarberId)]
+    );
+    return qc([individualBarberDoc]);
+  });
+  mockMethod(PaymentRecord, "find", (filter) => {
+    if (filter.status === "paid" && filter.ownerId === undefined) {
+      return qc([{ ownerId: individualBarberId }]);
+    }
+    return qc([individualPaymentRecordDoc]);
+  });
+  mockQuery(Subscription, "find", [individualSubscriptionDoc]);
+  mockQuery(SubscriptionPaymentAttempt, "find", []);
+
+  const result = await getAllIndividualBillingSummaries({
+    search: "individual",
+    subscriptionStatus: "paid",
+  });
+
+  assert.equal(result.individuals.length, 1);
+  assert.equal(String(result.individuals[0].barberId), String(individualBarberId));
+});
+
+test("individual billing summaries subscriptionStatus=none returns no-subscription barbers", async () => {
+  mockMethod(Subscription, "find", (filter) => {
+    if (filter.ownerId === undefined) {
+      return qc([individualSubscriptionDoc, trialIndividualSubscriptionDoc]);
+    }
+    return qc([]);
+  });
+  mockMethod(User, "countDocuments", async (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.deepEqual(
+      (filter._id?.$nin || []).map(String),
+      [String(individualBarberId), String(trialBarberId)]
+    );
+    return 1;
+  });
+  mockMethod(User, "find", (filter) => {
+    assert.equal(filter.role, "barber");
+    assert.deepEqual(
+      (filter._id?.$nin || []).map(String),
+      [String(individualBarberId), String(trialBarberId)]
+    );
+    return qc([unpaidBarberDoc]);
+  });
+  mockQuery(SubscriptionPaymentAttempt, "find", []);
+  mockQuery(PaymentRecord, "find", []);
+
+  const result = await getAllIndividualBillingSummaries({ subscriptionStatus: "none" });
+
+  assert.equal(result.individuals.length, 1);
+  assert.equal(String(result.individuals[0].barberId), String(unpaidBarberId));
+  assert.equal(result.individuals[0].subscription, null);
+});
+
+test("individual billing summaries supports active, expired, and trial filters", async () => {
+  const subscriptions = [
+    { ...individualSubscriptionDoc, currentPeriodEnd: new Date("2099-07-01") },
+    trialIndividualSubscriptionDoc,
+    expiredIndividualSubscriptionDoc,
+  ];
+
+  const runStatus = async (status, expectedIds, docs) => {
+    mockMethod(Subscription, "find", (filter) => {
+      if (filter.ownerId === undefined) return qc(subscriptions);
+      return qc(subscriptions.filter((sub) =>
+        (filter.ownerId?.$in || []).map(String).includes(String(sub.ownerId))
+      ));
+    });
+    mockMethod(User, "countDocuments", async (filter) => {
+      assert.equal(filter.role, "barber");
+      assert.deepEqual((filter._id?.$in || []).map(String), expectedIds.map(String));
+      return docs.length;
+    });
+    mockMethod(User, "find", (filter) => {
+      assert.equal(filter.role, "barber");
+      assert.deepEqual((filter._id?.$in || []).map(String), expectedIds.map(String));
+      return qc(docs);
+    });
+    mockQuery(SubscriptionPaymentAttempt, "find", []);
+    mockQuery(PaymentRecord, "find", []);
+
+    const result = await getAllIndividualBillingSummaries({ subscriptionStatus: status });
+    assert.deepEqual(
+      result.individuals.map((item) => String(item.barberId)),
+      expectedIds.map(String)
+    );
+    restoreOriginals();
+  };
+
+  await runStatus("active", [individualBarberId], [individualBarberDoc]);
+  await runStatus("expired", [expiredIndividualBarberId], [expiredIndividualBarberDoc]);
+  await runStatus("trial", [trialBarberId], [trialBarberDoc]);
 });
 
 test("individual billing summaries support safe name or email search", async () => {

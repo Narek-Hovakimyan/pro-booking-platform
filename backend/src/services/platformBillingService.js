@@ -26,6 +26,9 @@ const getIdString = (value) => {
 const escapeRegex = (text) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const normalizeSearchTerm = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
 const paginateQuery = (query, { page = 1, limit = 20 } = {}) => {
   const safePage = Math.max(1, Number(page) || 1);
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -360,6 +363,24 @@ const toObjectIdOrNull = (value) => {
   const id = getIdString(value);
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
   return new mongoose.Types.ObjectId(id);
+};
+
+const getPaidIndividualBarberIds = async () => {
+  const paidRecords = await PaymentRecord.find({
+    ownerType: "barber",
+    status: "paid",
+  })
+    .select("ownerId")
+    .lean();
+
+  return [
+    ...new Map(
+      paidRecords
+        .map((record) => record.ownerId)
+        .filter(Boolean)
+        .map((ownerId) => [getIdString(ownerId), ownerId])
+    ).values(),
+  ];
 };
 
 /* ── Audit log helper ─────────────────────────────────── */
@@ -706,35 +727,53 @@ export const getAllIndividualBillingSummaries = async ({
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
   const now = new Date();
   const filter = { role: "barber" };
+  const searchTerm = normalizeSearchTerm(search);
+  const hasSearch = Boolean(searchTerm);
+  const requestedSubscriptionStatus =
+    typeof subscriptionStatus === "string" ? subscriptionStatus.trim() : "";
+  const effectiveSubscriptionStatus =
+    requestedSubscriptionStatus || (hasSearch ? undefined : "paid");
 
-  if (search) {
-    const escaped = escapeRegex(search);
+  if (hasSearch) {
+    const escaped = escapeRegex(searchTerm);
     filter.$or = [
       { name: { $regex: escaped, $options: "i" } },
       { email: { $regex: escaped, $options: "i" } },
     ];
   }
 
-  if (subscriptionStatus) {
-    const subscriptions = await Subscription.find({ ownerType: "barber" }).lean();
-    const barberIdsWithSubscriptions = subscriptions
-      .map((sub) => sub.ownerId)
-      .filter(Boolean);
-
-    if (subscriptionStatus === "none") {
-      filter._id = { $nin: barberIdsWithSubscriptions };
-    } else if (subscriptionStatus === "active" || subscriptionStatus === "expired") {
-      const matchingBarberIds = subscriptions
-        .filter((sub) => {
-          const serialized = serializeSubscriptionForPlatform(sub, now);
-          return subscriptionStatus === "active"
-            ? !serialized.isExpired
-            : serialized.isExpired;
-        })
+  if (effectiveSubscriptionStatus) {
+    if (effectiveSubscriptionStatus === "paid") {
+      filter._id = { $in: await getPaidIndividualBarberIds() };
+    } else {
+      const subscriptions = await Subscription.find({ ownerType: "barber" }).lean();
+      const barberIdsWithSubscriptions = subscriptions
         .map((sub) => sub.ownerId)
         .filter(Boolean);
 
-      filter._id = { $in: matchingBarberIds };
+      if (effectiveSubscriptionStatus === "none") {
+        filter._id = { $nin: barberIdsWithSubscriptions };
+      } else if (
+        effectiveSubscriptionStatus === "active" ||
+        effectiveSubscriptionStatus === "expired" ||
+        effectiveSubscriptionStatus === "trial"
+      ) {
+        const matchingBarberIds = subscriptions
+          .filter((sub) => {
+            const serialized = serializeSubscriptionForPlatform(sub, now);
+            if (effectiveSubscriptionStatus === "active") {
+              return sub.status === "active" && !serialized.isExpired;
+            }
+            if (effectiveSubscriptionStatus === "trial") {
+              return sub.status === "trialing" && !serialized.isExpired;
+            }
+            return serialized.isExpired;
+          })
+          .map((sub) => sub.ownerId)
+          .filter(Boolean);
+
+        filter._id = { $in: matchingBarberIds };
+      }
     }
   }
 

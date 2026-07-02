@@ -43,7 +43,7 @@ export async function getPlatformBillingSalonPayments(salonId, params = {}) {
  * @param {number} params.page
  * @param {number} params.limit
  * @param {string} [params.search] – barber name/email search
- * @param {string} [params.subscriptionStatus] – 'active' | 'expired' | 'none'
+ * @param {string} [params.subscriptionStatus] – 'paid' | 'active' | 'trial' | 'expired' | 'none'
  * @returns {Promise<object>} { individuals, total }
  */
 export async function getPlatformBillingIndividuals(params = {}) {
