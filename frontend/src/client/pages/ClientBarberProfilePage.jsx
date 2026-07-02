@@ -15,6 +15,7 @@ import BarberServicesSection from "@/client/components/barber-profile/BarberServ
 import BarberWorkHistorySection from "@/client/components/barber-profile/BarberWorkHistorySection";
 import PortfolioSection from "@/client/components/barber-profile/PortfolioSection";
 import api from "@/shared/api/axios";
+import { Container } from "@/shared/components/ui/Container";
 import {
   addFavorite,
   removeFavorite,
@@ -272,13 +273,14 @@ export default function ClientBarberProfilePage() {
   };
 
   if (!isLoading && !barber) {
-    return <BarberProfileNotFound />;
+    return <Container size="wide"><BarberProfileNotFound /></Container>;
   }
 
   const totalCerts = certifications.length + eventCertifications.length;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 pb-10">
+    <Container size="wide">
+      <div className="space-y-8 pb-12">
       <BarberProfileError error={error} />
 
       {isLoading && <BarberProfileLoading />}
@@ -338,6 +340,7 @@ export default function ClientBarberProfilePage() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </Container>
   );
 }
