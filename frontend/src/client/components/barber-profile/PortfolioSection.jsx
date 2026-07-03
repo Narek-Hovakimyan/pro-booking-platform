@@ -49,13 +49,13 @@ export default function PortfolioSection({ barberId }) {
   // ── Loading state ──
   if (isLoading) {
     return (
-      <Card className="rounded-2xl sm:rounded-3xl">
+      <Card className="rounded-2xl shadow-card sm:rounded-3xl">
         <CardContent className="space-y-4 p-5 sm:p-7">
           <h2 className="flex items-center gap-2 text-xl font-bold">
             <Images className="h-5 w-5" />
             Before / After
           </h2>
-          <div className="flex items-center justify-center py-8 text-neutral-400">
+          <div className="flex items-center justify-center py-8 text-neutral-500">
             <Loader className="mr-2 h-5 w-5 animate-spin" />
             <span className="text-sm">Loading portfolio...</span>
           </div>
@@ -67,13 +67,13 @@ export default function PortfolioSection({ barberId }) {
   // ── Error state ──
   if (error) {
     return (
-      <Card className="rounded-2xl sm:rounded-3xl">
+      <Card className="rounded-2xl shadow-card sm:rounded-3xl">
         <CardContent className="space-y-4 p-5 sm:p-7">
           <h2 className="flex items-center gap-2 text-xl font-bold">
             <Images className="h-5 w-5" />
             Before / After
           </h2>
-          <p className="text-sm text-red-500">{error}</p>
+          <p className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>
         </CardContent>
       </Card>
     );
@@ -95,7 +95,7 @@ export default function PortfolioSection({ barberId }) {
 
   // ── Render portfolio cards ──
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="space-y-4 p-5 sm:p-7">
         <h2 className="flex items-center gap-2 text-xl font-bold">
           <Images className="h-5 w-5" />
@@ -114,7 +114,7 @@ export default function PortfolioSection({ barberId }) {
               {/* Side-by-side images */}
               <div className="grid grid-cols-2">
                 <div className="relative border-r border-neutral-200">
-                  <p className="absolute left-2 top-2 z-10 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  <p className="absolute left-2 top-2 z-10 rounded-full bg-brand-600/80 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm">
                     Before
                   </p>
                   <div className="aspect-square overflow-hidden bg-neutral-100">
@@ -133,7 +133,7 @@ export default function PortfolioSection({ barberId }) {
                   </div>
                 </div>
                 <div className="relative">
-                  <p className="absolute left-2 top-2 z-10 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  <p className="absolute left-2 top-2 z-10 rounded-full bg-brand-600/80 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm">
                     After
                   </p>
                   <div className="aspect-square overflow-hidden bg-neutral-100">

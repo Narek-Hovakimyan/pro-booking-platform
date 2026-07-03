@@ -5,7 +5,7 @@ import { getMediaUrl } from "@/shared/utils/media";
 
 export default function BarberGallerySection({ barber, galleryImages }) {
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="space-y-4 p-5 sm:p-7">
         <h2 className="flex items-center gap-2 text-xl font-bold">
           <Images className="h-5 w-5" />
