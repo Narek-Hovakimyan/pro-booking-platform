@@ -3,11 +3,10 @@ import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
-import BarberCard from "@/client/components/BarberCard";
 import SalonProfileHero from "@/client/components/salons/SalonProfileHero";
+import SalonSpecialistsSection from "@/client/components/salons/SalonSpecialistsSection";
 import SalonOpenJobs from "@/features/jobs/components/SalonOpenJobs";
 import SalonReviewSection from "@/shared/components/SalonReviewSection";
-import EmptyState from "@/shared/components/common/EmptyState";
 import {
   addFavorite,
   removeFavorite,
@@ -15,7 +14,6 @@ import {
 } from "@/store/slices/favoritesSlice";
 import { setReviews } from "@/store/slices/reviewsSlice";
 import { setServices } from "@/store/slices/servicesSlice";
-import { serviceCategories } from "@/shared/data/serviceCategories";
 
 function getIdString(value) {
   if (!value) return "";
@@ -326,58 +324,17 @@ export default function SalonProfilePage() {
 
           <SalonOpenJobs jobs={salonJobs} isLoading={jobsLoading} salonId={salonId} />
 
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-xl font-bold">Specialists at {salon?.name}</h2>
-                <p className="mt-1 text-sm text-neutral-500">
-                  Select a specialist to view their profile or book an appointment.
-                </p>
-              </div>
-              <label className="grid gap-1.5 text-sm font-semibold sm:w-56">
-                Service category
-                <select
-                  className="rounded-xl border border-neutral-200 bg-white px-3 py-2 font-normal"
-                  value={selectedStaffCategory}
-                  onChange={(event) => setSelectedStaffCategory(event.target.value)}
-                >
-                  <option value="">All categories</option>
-                  {serviceCategories.map((category) => (
-                    <option key={category.value} value={category.value}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            {!visibleBarbersList.length ? (
-              <EmptyState
-                description={
-                  selectedStaffCategory
-                    ? "No approved specialists in this salon have active services in this category."
-                    : "This salon does not have approved specialists yet."
-                }
-                title={selectedStaffCategory ? "No matching specialists" : "No specialists in this salon"}
-              />
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleBarbersList.map((barber) => (
-                  <BarberCard
-                    barber={barber}
-                    bookingSalon={salon}
-                    key={barber.id || barber._id}
-                    currentUser={currentUser}
-                    favorites={favorites}
-                    onToggleFavorite={toggleFavorite}
-                    reviews={reviews}
-                    services={services}
-                    showAvailability={false}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+          <SalonSpecialistsSection
+            currentUser={currentUser}
+            favorites={favorites}
+            onToggleFavorite={toggleFavorite}
+            reviews={reviews}
+            salon={salon}
+            selectedCategory={selectedStaffCategory}
+            services={services}
+            setSelectedCategory={setSelectedStaffCategory}
+            specialists={visibleBarbersList}
+          />
         </>
       )}
     </div>
