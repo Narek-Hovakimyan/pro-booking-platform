@@ -1,8 +1,48 @@
-import { Award, BadgeCheck, Calendar, MapPin, Star } from "lucide-react";
+import { AtSign, Award, BadgeCheck, Calendar, MapPin, Star } from "lucide-react";
 
 import ReviewReplyBlock from "@/features/reviews/components/ReviewReplyBlock";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
+
+const INSTAGRAM_USERNAME_PATTERN = /^[A-Za-z0-9._]{1,30}$/;
+
+function getInstagramProfileLink(value) {
+  const rawValue = value?.trim();
+  if (!rawValue) return null;
+
+  if (/^https?:\/\//i.test(rawValue)) {
+    try {
+      const url = new URL(rawValue);
+      const host = url.hostname.toLowerCase().replace(/^www\./, "");
+      const username = url.pathname.split("/").filter(Boolean)[0] || "";
+
+      if (host !== "instagram.com" || !INSTAGRAM_USERNAME_PATTERN.test(username)) {
+        return null;
+      }
+
+      return {
+        href: `https://instagram.com/${username}`,
+        label: `@${username}`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  let username = rawValue.replace(/^@/, "");
+  username = username
+    .replace(/^(www\.)?instagram\.com\//i, "")
+    .replace(/\/+$/, "");
+
+  if (username.includes("/") || !INSTAGRAM_USERNAME_PATTERN.test(username)) {
+    return null;
+  }
+
+  return {
+    href: `https://instagram.com/${username}`,
+    label: `@${username}`,
+  };
+}
 
 export default function BarberProfileSidebar({
   barber,
@@ -11,6 +51,8 @@ export default function BarberProfileSidebar({
   startingPrice,
   totalCerts,
 }) {
+  const instagramProfile = getInstagramProfileLink(barber?.instagram);
+
   return (
     <div className="space-y-6">
       <Card className="rounded-2xl shadow-card sm:rounded-3xl">
@@ -155,6 +197,17 @@ export default function BarberProfileSidebar({
                 <MapPin className="h-4 w-4 shrink-0 text-neutral-400" />
                 <span className="text-neutral-700">{barber.city}</span>
               </div>
+            )}
+            {instagramProfile && (
+              <a
+                className="flex min-w-0 items-center gap-3 text-sm font-medium text-brand-700 transition-colors hover:text-brand-800"
+                href={instagramProfile.href}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <AtSign className="h-4 w-4 shrink-0 text-brand-600" />
+                <span className="truncate">{instagramProfile.label}</span>
+              </a>
             )}
           </div>
         </CardContent>
