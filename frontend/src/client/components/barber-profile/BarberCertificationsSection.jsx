@@ -16,7 +16,7 @@ export default function BarberCertificationsSection({
   }
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="space-y-4 p-5 sm:p-7">
         <h2 className="flex items-center gap-2 text-xl font-bold">
           <Award className="h-5 w-5" />
@@ -42,8 +42,8 @@ export default function BarberCertificationsSection({
                 key={cert._id}
               >
                 <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50">
-                    <Award className="h-5 w-5 text-amber-600" />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50">
+                    <Award className="h-5 w-5 text-brand-600" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-neutral-900">
@@ -72,7 +72,7 @@ export default function BarberCertificationsSection({
                     )}
                     {cert.imageUrl && (
                       <a
-                        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
                         href={getMediaUrl(cert.imageUrl)}
                         rel="noopener noreferrer"
                         target="_blank"
@@ -120,8 +120,8 @@ export default function BarberCertificationsSection({
                     <ShieldCheck className="h-3 w-3" />
                     Verified event certificate
                   </span>
-                  <Link
-                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                    <Link
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
                     to={`/certificates/${cert.certificateId}`}
                   >
                     <Award className="h-3 w-3" />

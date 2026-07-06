@@ -9,7 +9,7 @@ export default function BarberWorkHistorySection({
   if (workHistory.length === 0) return null;
 
   return (
-    <Card className="rounded-2xl sm:rounded-3xl">
+    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="space-y-4 p-5 sm:p-7">
         <h2 className="flex items-center gap-2 text-xl font-bold">
           <Briefcase className="h-5 w-5" />
@@ -37,8 +37,8 @@ export default function BarberWorkHistorySection({
                 className="flex items-start gap-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
                 key={`${history?.salon || label}-${history?.startDate || index}`}
               >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-                  <Briefcase className="h-5 w-5 text-neutral-500" />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50">
+                  <Briefcase className="h-5 w-5 text-brand-600" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-neutral-900">
