@@ -17,7 +17,7 @@ export default function NotificationsList({
   onView,
 }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-7 sm:space-y-8">
       {GROUPS.map((title) => (
         groupedNotifications[title].length > 0 && (
           <NotificationGroup

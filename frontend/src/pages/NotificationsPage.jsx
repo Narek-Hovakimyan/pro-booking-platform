@@ -8,6 +8,7 @@ import NotificationsHeader from "@/client/components/notifications/Notifications
 import NotificationsList from "@/client/components/notifications/NotificationsList";
 import NotificationsStatus from "@/client/components/notifications/NotificationsStatus";
 import api from "@/shared/api/axios";
+import { Container } from "@/shared/components/ui/Container";
 import { useEventRegistrationNotificationActions } from "@/shared/hooks/useEventRegistrationNotificationActions";
 import { useJobApplicationNotificationActions } from "@/shared/hooks/useJobApplicationNotificationActions";
 import {
@@ -407,63 +408,65 @@ export default function NotificationsPage() {
   // ---- Render ----
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-5 sm:space-y-6">
-      <NotificationsHeader
-        hasNotifications={notifications.length > 0}
-        onClearAll={clearAll}
-        onMarkAllRead={markAllRead}
-        unreadCount={unreadCount}
-      />
-
-      <NotificationsStatus
-        error={error}
-        initialLoading={initialLoading}
-        onRetry={() => loadNotifications({ showLoading: true })}
-        refreshing={refreshing}
-      />
-
-      {!initialLoading && notifications.length === 0 && !isLoading && (
-        <NotificationsEmptyState />
-      )}
-
-      {!initialLoading && notifications.length > 0 && (
-        <NotificationsList
-          activeAction={activeAction}
-          bookingById={bookingById}
-          currentUser={currentUser}
-          eventRegistrationById={eventRegistrationById}
-          groupedNotifications={groupedNotifications}
-          jobApplicationById={jobApplicationById}
-          onBookingAction={handleBookingAction}
-          onDelete={deleteOne}
-          onEventAction={handleEventAction}
-          onJobAction={handleJobAction}
-          onMarkRead={markOneRead}
-          onView={handleView}
+    <Container className="pb-12" size="tight">
+      <div className="space-y-5 sm:space-y-6">
+        <NotificationsHeader
+          hasNotifications={notifications.length > 0}
+          onClearAll={clearAll}
+          onMarkAllRead={markAllRead}
+          unreadCount={unreadCount}
         />
-      )}
 
-      {rejectingAction && (
-        <RejectBookingModal
-          booking={{
-            ...rejectingAction.booking,
-            clientName:
-              rejectingAction.booking?.client?.name ||
-              rejectingAction.booking?.clientName,
-          }}
-          error={rejectionError}
-          isSubmitting={
-            activeAction?.notificationId === rejectingAction.notification.id &&
-            activeAction?.action === "reject-booking"
-          }
-          onClose={() => {
-            if (activeAction) return;
-            setRejectingAction(null);
-            setRejectionError("");
-          }}
-          onSubmit={rejectBookingFromNotification}
+        <NotificationsStatus
+          error={error}
+          initialLoading={initialLoading}
+          onRetry={() => loadNotifications({ showLoading: true })}
+          refreshing={refreshing}
         />
-      )}
-    </div>
+
+        {!initialLoading && notifications.length === 0 && !isLoading && (
+          <NotificationsEmptyState />
+        )}
+
+        {!initialLoading && notifications.length > 0 && (
+          <NotificationsList
+            activeAction={activeAction}
+            bookingById={bookingById}
+            currentUser={currentUser}
+            eventRegistrationById={eventRegistrationById}
+            groupedNotifications={groupedNotifications}
+            jobApplicationById={jobApplicationById}
+            onBookingAction={handleBookingAction}
+            onDelete={deleteOne}
+            onEventAction={handleEventAction}
+            onJobAction={handleJobAction}
+            onMarkRead={markOneRead}
+            onView={handleView}
+          />
+        )}
+
+        {rejectingAction && (
+          <RejectBookingModal
+            booking={{
+              ...rejectingAction.booking,
+              clientName:
+                rejectingAction.booking?.client?.name ||
+                rejectingAction.booking?.clientName,
+            }}
+            error={rejectionError}
+            isSubmitting={
+              activeAction?.notificationId === rejectingAction.notification.id &&
+              activeAction?.action === "reject-booking"
+            }
+            onClose={() => {
+              if (activeAction) return;
+              setRejectingAction(null);
+              setRejectionError("");
+            }}
+            onSubmit={rejectBookingFromNotification}
+          />
+        )}
+      </div>
+    </Container>
   );
 }
