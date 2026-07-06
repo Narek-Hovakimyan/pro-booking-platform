@@ -1,14 +1,13 @@
-import { Bell, CheckCheck, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
+import NotificationsEmptyState from "@/client/components/notifications/NotificationsEmptyState";
+import NotificationsHeader from "@/client/components/notifications/NotificationsHeader";
+import NotificationsList from "@/client/components/notifications/NotificationsList";
+import NotificationsStatus from "@/client/components/notifications/NotificationsStatus";
 import api from "@/shared/api/axios";
-import { NotificationSkeleton } from "@/shared/components/LoadingSkeletons";
-import NotificationGroup from "@/shared/components/NotificationGroup";
-import EmptyState from "@/shared/components/common/EmptyState";
-import { Button } from "@/shared/components/ui/button";
 import { useEventRegistrationNotificationActions } from "@/shared/hooks/useEventRegistrationNotificationActions";
 import { useJobApplicationNotificationActions } from "@/shared/hooks/useJobApplicationNotificationActions";
 import {
@@ -409,161 +408,39 @@ export default function NotificationsPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl">
-            <Bell className="h-6 w-6" />
-            Notifications
-          </h1>
-          <p className="mt-1.5 text-sm text-neutral-500">
-            Booking updates, messages, event invites, and system alerts.
-          </p>
-        </div>
+      <NotificationsHeader
+        hasNotifications={notifications.length > 0}
+        onClearAll={clearAll}
+        onMarkAllRead={markAllRead}
+        unreadCount={unreadCount}
+      />
 
-        <div className="flex flex-wrap items-center gap-2">
-          {unreadCount > 0 && (
-            <Button
-              className="text-xs sm:text-sm"
-              onClick={markAllRead}
-              variant="outline"
-            >
-              <CheckCheck className="mr-1.5 h-4 w-4" />
-              Mark all read
-            </Button>
-          )}
+      <NotificationsStatus
+        error={error}
+        initialLoading={initialLoading}
+        onRetry={() => loadNotifications({ showLoading: true })}
+        refreshing={refreshing}
+      />
 
-          {notifications.length > 0 && (
-            <Button
-              className="text-xs sm:text-sm"
-              onClick={clearAll}
-              variant="ghost"
-            >
-              <Trash2 className="mr-1.5 h-4 w-4 text-neutral-400" />
-              Clear all
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <span>{error}</span>
-          <Button
-            aria-label="Retry loading notifications"
-            className="shrink-0"
-            onClick={() => loadNotifications({ showLoading: true })}
-            size="icon"
-            variant="ghost"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        </div>
+      {!initialLoading && notifications.length === 0 && !isLoading && (
+        <NotificationsEmptyState />
       )}
 
-      {/* Refreshing indicator */}
-      {refreshing && (
-        <p className="rounded-xl bg-neutral-50 px-3 py-2 text-center text-sm text-neutral-500">
-          Refreshing notifications…
-        </p>
-      )}
-
-      {/* Loading */}
-      {initialLoading ? (
-        <div className="space-y-3">
-          {[0, 1, 2].map((item) => (
-            <NotificationSkeleton key={item} />
-          ))}
-        </div>
-      ) : // Empty
-      notifications.length === 0 ? (
-        !isLoading && (
-          <EmptyState
-            description="Booking updates, messages, event invites, and system alerts will appear here."
-            title={
-              <span className="flex items-center justify-center gap-2">
-                <Bell className="h-5 w-5 text-neutral-400" />
-                No notifications yet
-              </span>
-            }
-          />
-        )
-      ) : (
-        // List with groups
-        <div className="space-y-6">
-          {groupedNotifications.Today.length > 0 && (
-            <NotificationGroup
-              currentUser={currentUser}
-              activeAction={activeAction}
-              bookingById={bookingById}
-              eventRegistrationById={eventRegistrationById}
-              jobApplicationById={jobApplicationById}
-              notifications={groupedNotifications.Today}
-              onBookingAction={handleBookingAction}
-              onEventAction={handleEventAction}
-              onJobAction={handleJobAction}
-              onDelete={deleteOne}
-              onMarkRead={markOneRead}
-              onView={handleView}
-              title="Today"
-            />
-          )}
-
-          {groupedNotifications.Yesterday.length > 0 && (
-            <NotificationGroup
-              currentUser={currentUser}
-              activeAction={activeAction}
-              bookingById={bookingById}
-              eventRegistrationById={eventRegistrationById}
-              jobApplicationById={jobApplicationById}
-              notifications={groupedNotifications.Yesterday}
-              onBookingAction={handleBookingAction}
-              onEventAction={handleEventAction}
-              onJobAction={handleJobAction}
-              onDelete={deleteOne}
-              onMarkRead={markOneRead}
-              onView={handleView}
-              title="Yesterday"
-            />
-          )}
-
-          {groupedNotifications["This Week"].length > 0 && (
-            <NotificationGroup
-              currentUser={currentUser}
-              activeAction={activeAction}
-              bookingById={bookingById}
-              eventRegistrationById={eventRegistrationById}
-              jobApplicationById={jobApplicationById}
-              notifications={groupedNotifications["This Week"]}
-              onBookingAction={handleBookingAction}
-              onEventAction={handleEventAction}
-              onJobAction={handleJobAction}
-              onDelete={deleteOne}
-              onMarkRead={markOneRead}
-              onView={handleView}
-              title="This Week"
-            />
-          )}
-
-          {groupedNotifications.Earlier.length > 0 && (
-            <NotificationGroup
-              currentUser={currentUser}
-              activeAction={activeAction}
-              bookingById={bookingById}
-              eventRegistrationById={eventRegistrationById}
-              jobApplicationById={jobApplicationById}
-              notifications={groupedNotifications.Earlier}
-              onBookingAction={handleBookingAction}
-              onEventAction={handleEventAction}
-              onJobAction={handleJobAction}
-              onDelete={deleteOne}
-              onMarkRead={markOneRead}
-              onView={handleView}
-              title="Earlier"
-            />
-          )}
-        </div>
+      {!initialLoading && notifications.length > 0 && (
+        <NotificationsList
+          activeAction={activeAction}
+          bookingById={bookingById}
+          currentUser={currentUser}
+          eventRegistrationById={eventRegistrationById}
+          groupedNotifications={groupedNotifications}
+          jobApplicationById={jobApplicationById}
+          onBookingAction={handleBookingAction}
+          onDelete={deleteOne}
+          onEventAction={handleEventAction}
+          onJobAction={handleJobAction}
+          onMarkRead={markOneRead}
+          onView={handleView}
+        />
       )}
 
       {rejectingAction && (
