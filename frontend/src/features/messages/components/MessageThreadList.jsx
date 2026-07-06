@@ -25,22 +25,24 @@ export default function MessageThreadList({
 }) {
   return (
     <Card
-      className={`rounded-2xl shadow-sm sm:rounded-3xl ${
+      className={`rounded-2xl border-neutral-100 shadow-card sm:rounded-3xl ${
         isCollapsed ? "hidden lg:block" : "block"
       }`}
     >
-      <CardContent className="flex h-full min-h-[520px] flex-col gap-3 p-4 sm:min-h-[620px]">
+      <CardContent className="flex h-full min-h-[520px] flex-col gap-4 p-4 sm:min-h-[620px] sm:p-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-xl font-bold">
-            <MessageCircle className="h-5 w-5" />
+          <h2 className="flex items-center gap-2 text-xl font-bold text-neutral-950">
+            <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+              <MessageCircle className="h-4 w-4" />
+            </span>
             Conversations
           </h2>
         </div>
         <ConnectionStatus socketConnected={socketConnected} isRefreshing={isRefreshing} />
         <label className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
           <input
-            className="w-full rounded-lg border border-neutral-200 py-3 pl-10 pr-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 py-3 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
             placeholder="Search conversations..."
             value={searchQuery}
             onChange={(event) => onSearchChange?.(event.target.value)}
@@ -48,20 +50,20 @@ export default function MessageThreadList({
         </label>
 
         {isLoading && conversations.length === 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-2 rounded-2xl border border-neutral-100 bg-neutral-50 p-3">
             {[0, 1, 2].map((item) => (
               <ListRowSkeleton key={item} />
             ))}
           </div>
         ) : searchQuery && conversations.length === 0 ? (
           <EmptyState
-            className="text-center"
+            className="border-brand-100 bg-brand-50/40 text-center"
             description="Try a different name or phone number."
             title="No conversations found"
           />
         ) : conversations.length === 0 ? (
           <EmptyState
-            className="flex flex-1 flex-col items-center justify-center text-center"
+            className="flex flex-1 flex-col items-center justify-center border-brand-100 bg-brand-50/40 text-center"
             title="No messages yet"
             description="Start from a specialist profile or an existing booking."
             action={
@@ -87,7 +89,7 @@ export default function MessageThreadList({
         ) : (
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
             {isLoading && (
-              <p className="rounded-xl bg-neutral-50 px-3 py-2 text-sm text-neutral-500">
+              <p className="rounded-2xl border border-brand-100 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">
                 Refreshing conversations...
               </p>
             )}

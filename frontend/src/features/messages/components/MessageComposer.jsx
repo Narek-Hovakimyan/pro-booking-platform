@@ -11,7 +11,7 @@ export default function MessageComposer({
   return (
     <form className="flex items-end gap-2" onSubmit={onSendMessage}>
       <textarea
-        className="min-h-11 flex-1 resize-none rounded-full border border-neutral-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        className="min-h-11 flex-1 resize-none rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:opacity-70"
         disabled={isSending}
         placeholder="Type a message..."
         rows={1}
@@ -20,7 +20,7 @@ export default function MessageComposer({
         onChange={(event) => onTextChange?.(event.target.value)}
       />
       <Button
-        className="rounded-full bg-blue-600 px-5 text-white hover:bg-blue-700"
+        className="rounded-2xl bg-brand-600 px-5 text-white hover:bg-brand-700 disabled:opacity-60"
         disabled={isSending || !text.trim()}
         type="submit"
       >

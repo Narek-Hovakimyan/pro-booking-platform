@@ -43,8 +43,10 @@ export default function MessageBubble({ message, isMine, currentUser, previousMe
   return (
     <div key={getMessageId(message)}>
       {shouldShowDate && (
-        <div className="my-3 text-center text-xs font-medium text-neutral-500">
-          {formatDateSeparator(message?.createdAt)}
+        <div className="my-4 text-center text-xs font-medium text-neutral-500">
+          <span className="rounded-full border border-neutral-200 bg-white px-3 py-1 shadow-sm">
+            {formatDateSeparator(message?.createdAt)}
+          </span>
         </div>
       )}
       <div
@@ -66,19 +68,19 @@ export default function MessageBubble({ message, isMine, currentUser, previousMe
           }
         />
         <div
-          className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
+          className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
             isMine
-              ? "bg-blue-500 text-white"
-              : "bg-gray-100 text-gray-900"
+              ? "rounded-br-md bg-brand-600 text-white"
+              : "rounded-bl-md border border-neutral-200 bg-white text-neutral-900"
           }`}
         >
-          <p className="whitespace-pre-wrap break-words">
+          <p className="whitespace-pre-wrap break-words leading-6">
             {message?.text || ""}
           </p>
           {messageTime && (
             <p
               className={`mt-1 text-[11px] ${
-                isMine ? "text-blue-100" : "text-gray-500"
+                isMine ? "text-brand-100" : "text-neutral-500"
               }`}
             >
               {messageTime}

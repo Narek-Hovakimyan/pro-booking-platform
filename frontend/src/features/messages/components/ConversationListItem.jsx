@@ -42,35 +42,52 @@ export default function ConversationListItem({
   const lastMessageTime = formatConversationTime(
     lastMessage?.createdAt || conversation?.lastMessageAt
   );
+  const hasUnread = conversation.unreadCount > 0;
+  let itemToneClass = "border-neutral-200 bg-white shadow-sm hover:bg-neutral-50";
+
+  if (hasUnread) {
+    itemToneClass =
+      "border-brand-100 bg-white shadow-sm hover:border-brand-200 hover:bg-brand-50/50";
+  }
+
+  if (isSelected) {
+    itemToneClass = "border-brand-200 bg-brand-50 shadow-card ring-2 ring-brand-100";
+  }
 
   return (
     <button
-      className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left shadow-sm transition ${
-        isSelected
-          ? "border-neutral-900 bg-neutral-100 ring-2 ring-neutral-900/10"
-          : "border-neutral-200 bg-white hover:bg-neutral-50"
-      }`}
+      className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition ${itemToneClass}`}
       key={conversation.id}
       onClick={() => onSelect?.(conversation)}
       type="button"
     >
-      <AvatarCircle name={participantName} src={conversation?.avatarUrl} />
+      <AvatarCircle
+        className={hasUnread ? "ring-2 ring-brand-100" : ""}
+        name={participantName}
+        src={conversation?.avatarUrl}
+      />
 
       <span className="min-w-0 flex-1">
         <span className="flex items-start justify-between gap-2">
-          <span className="truncate font-semibold">{participantName}</span>
+          <span className="truncate font-semibold text-neutral-950">
+            {participantName}
+          </span>
           {lastMessageTime && (
             <span className="shrink-0 text-[11px] text-neutral-400">
               {lastMessageTime}
             </span>
           )}
         </span>
-        <span className="mt-1 block truncate text-xs text-neutral-500">
+        <span
+          className={`mt-1 block truncate text-xs ${
+            hasUnread ? "font-medium text-neutral-700" : "text-neutral-500"
+          }`}
+        >
           {lastMessageText}
         </span>
       </span>
-      {conversation.unreadCount > 0 && (
-        <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-red-500 px-2 text-xs font-semibold text-white">
+      {hasUnread && (
+        <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 px-2 text-xs font-semibold text-white">
           {conversation.unreadCount}
         </span>
       )}

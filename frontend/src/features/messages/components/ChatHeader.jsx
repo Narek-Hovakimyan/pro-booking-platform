@@ -32,7 +32,7 @@ function AvatarCircle({ src, name, size = "md", className = "" }) {
 
 export default function ChatHeader({ selectedUser, onBackToList }) {
   return (
-    <div className="flex items-center gap-3 border-b border-neutral-100 pb-3">
+    <div className="flex items-center gap-3 border-b border-neutral-100 pb-4">
       <Button
         className="lg:hidden"
         onClick={onBackToList}
@@ -43,12 +43,13 @@ export default function ChatHeader({ selectedUser, onBackToList }) {
         <ArrowLeft className="h-5 w-5" />
       </Button>
       <AvatarCircle
+        className="ring-2 ring-brand-100"
         name={selectedUser?.name || "User"}
         src={selectedUser?.avatarUrl}
       />
 
       <div className="min-w-0">
-        <h2 className="truncate text-xl font-bold">
+        <h2 className="truncate text-xl font-bold text-neutral-950">
           {selectedUser?.name || "User"}
         </h2>
         <p className="truncate text-sm text-neutral-500">

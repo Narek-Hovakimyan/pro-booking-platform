@@ -26,16 +26,16 @@ export default function MessageChatPanel({
 }) {
   return (
     <Card
-      className={`rounded-2xl bg-white shadow-sm sm:rounded-3xl ${
+      className={`rounded-2xl border-neutral-100 bg-white shadow-card sm:rounded-3xl ${
         showChatOnMobile && selectedUser ? "block" : "hidden lg:block"
       }`}
     >
-      <CardContent className="flex h-[min(620px,calc(100vh-12rem))] min-h-[520px] flex-col gap-4 p-3 sm:p-4">
+      <CardContent className="flex h-[min(620px,calc(100vh-12rem))] min-h-[520px] flex-col gap-4 p-3 sm:p-5">
         {selectedUser ? (
           <>
             <ChatHeader selectedUser={selectedUser} onBackToList={onBackToList} />
 
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-neutral-100 bg-neutral-50 p-3 sm:p-4">
               {isMessagesLoading && messages.length === 0 ? (
                 <>
                   <MessageBubbleSkeleton />
@@ -44,14 +44,14 @@ export default function MessageChatPanel({
                 </>
               ) : messages.length === 0 ? (
                 <EmptyState
-                  className="flex h-full flex-col items-center justify-center text-center"
+                  className="flex h-full flex-col items-center justify-center border-brand-100 bg-white text-center"
                   description="Send the first message when you are ready."
                   title="No messages"
                 />
               ) : (
                 <>
                   {(isMessagesLoading || isMessagesRefreshing) && (
-                    <p className="text-xs text-neutral-500">
+                    <p className="inline-flex rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
                       Refreshing messages...
                     </p>
                   )}
