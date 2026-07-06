@@ -2,21 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 
-import MessageChatPanel from "@/features/messages/components/MessageChatPanel";
-import MessageThreadList from "@/features/messages/components/MessageThreadList";
-import MessagesPageHeader from "@/features/messages/components/MessagesPageHeader";
-import ErrorBanner from "@/features/messages/components/ErrorBanner";
-import {
-  getMessageId,
-  normalizeMessage,
-  contactsCacheByUserId,
-  messagesCacheByConversationKey,
-  getConversationKey,
-  getConversationContacts,
-  countUnreadFrom,
-  mergeMessages,
-  getDirectContact,
-} from "@/features/messages/utils/messageHelpers";
+import MessagesPageLayout from "@/features/messages/components/MessagesPageLayout";
+import { getMessageId, normalizeMessage, contactsCacheByUserId, messagesCacheByConversationKey, getConversationKey, getConversationContacts, countUnreadFrom, mergeMessages, getDirectContact } from "@/features/messages/utils/messageHelpers";
 import api from "@/shared/api/axios";
 import { getSocket } from "@/shared/lib/socket";
 
@@ -35,11 +22,7 @@ export default function MessagesPage() {
   const [messages, setMessages] = useState(() => {
     if (!currentUserId || !userId) return [];
 
-    return (
-      messagesCacheByConversationKey.get(
-        getConversationKey(currentUserId, userId)
-      ) || []
-    );
+    return messagesCacheByConversationKey.get(getConversationKey(currentUserId, userId)) || [];
   });
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -51,13 +34,6 @@ export default function MessagesPage() {
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [showChatOnMobile, setShowChatOnMobile] = useState(Boolean(userId));
-  const safeContacts = contacts || [];
-  const safeMessages = messages || [];
-  const searchedContacts = safeContacts.filter((conversation) =>
-    (conversation?.name || "User")
-      .toLowerCase()
-      .includes(searchQuery.trim().toLowerCase())
-  );
 
   useEffect(() => {
     selectedUserRef.current = selectedUser;
@@ -73,7 +49,7 @@ export default function MessagesPage() {
     if (selectedUser) {
       scrollToBottom();
     }
-  }, [safeMessages.length, scrollToBottom, selectedUser]);
+  }, [messages.length, scrollToBottom, selectedUser]);
 
   const fetchMessages = useCallback(async (
     contactId,
@@ -232,7 +208,6 @@ export default function MessagesPage() {
     [currentUserId]
   );
 
-  // Socket event handler for new messages
   const handleNewMessage = useCallback((rawMessage) => {
     const message = normalizeMessage(rawMessage);
     const otherUserId =
@@ -515,45 +490,8 @@ export default function MessagesPage() {
     }
   };
 
-  return (
-    <div className="space-y-5 sm:space-y-6">
-      <MessagesPageHeader />
+  const conversationListProps = { conversations: (contacts || []).filter((conversation) => (conversation?.name || "User").toLowerCase().includes(searchQuery.trim().toLowerCase())), selectedConversationId: selectedUser?.id, onSelectConversation: selectUser, searchQuery, onSearchChange: setSearchQuery, isLoading: isContactsLoading, isRefreshing: isContactsRefreshing, socketConnected, userRole: currentUser?.role, onFindBarber: () => navigate("/specialists"), onCheckBookings: () => navigate("/admin/bookings"), isCollapsed: showChatOnMobile && Boolean(selectedUser) };
+  const chatPanelProps = { selectedUser, messages: messages || [], currentUser, currentUserId, text, isSending, isMessagesLoading, isMessagesRefreshing, showChatOnMobile, onBackToList: () => setShowChatOnMobile(false), onTextChange: (value) => setText(value), onMessageKeyDown: handleMessageKeyDown, onSendMessage: sendMessage, messagesEndRef };
 
-      <ErrorBanner error={error} />
-
-      <div className="grid min-h-[min(620px,calc(100vh-12rem))] gap-4 sm:gap-5 lg:grid-cols-[320px_1fr]">
-        <MessageThreadList
-          conversations={searchedContacts}
-          selectedConversationId={selectedUser?.id}
-          onSelectConversation={selectUser}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          isLoading={isContactsLoading}
-          isRefreshing={isContactsRefreshing}
-          socketConnected={socketConnected}
-          userRole={currentUser?.role}
-          onFindBarber={() => navigate("/specialists")}
-          onCheckBookings={() => navigate("/admin/bookings")}
-          isCollapsed={showChatOnMobile && Boolean(selectedUser)}
-        />
-
-        <MessageChatPanel
-          selectedUser={selectedUser}
-          messages={safeMessages}
-          currentUser={currentUser}
-          currentUserId={currentUserId}
-          text={text}
-          isSending={isSending}
-          isMessagesLoading={isMessagesLoading}
-          isMessagesRefreshing={isMessagesRefreshing}
-          showChatOnMobile={showChatOnMobile}
-          onBackToList={() => setShowChatOnMobile(false)}
-          onTextChange={(value) => setText(value)}
-          onMessageKeyDown={handleMessageKeyDown}
-          onSendMessage={sendMessage}
-          messagesEndRef={messagesEndRef}
-        />
-      </div>
-    </div>
-  );
+  return <MessagesPageLayout chatPanelProps={chatPanelProps} conversationListProps={conversationListProps} error={error} />;
 }
