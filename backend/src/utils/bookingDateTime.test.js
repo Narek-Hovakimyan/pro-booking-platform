@@ -77,8 +77,19 @@ test("isBeyondBookingHorizon returns false for non-string or non-matching format
 });
 
 test("isBeyondBookingHorizon does not validate month/day integrity (caller's job)", () => {
+  const fixedNow = new RealDate("2026-01-31T20:30:00.000Z"); // Armenia = 2026-02-01
+
+  global.Date = class extends RealDate {
+    constructor(value) {
+      super(value ?? fixedNow);
+    }
+    static now() {
+      return fixedNow.getTime();
+    }
+  };
+
   // This only does regex matching, not date validation.
-  // "2026-13-01" lexicographically > any realistic horizon → returns true.
+  // "2026-13-01" lexicographically > the fixed test horizon → returns true.
   assert.equal(isBeyondBookingHorizon("2026-13-01"), true);
 });
 
