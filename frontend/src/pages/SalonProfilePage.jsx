@@ -1,14 +1,12 @@
-import { Heart, MapPin, Phone, Star, Store } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useParams } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import BarberCard from "@/client/components/BarberCard";
+import SalonProfileHero from "@/client/components/salons/SalonProfileHero";
 import SalonOpenJobs from "@/features/jobs/components/SalonOpenJobs";
 import SalonReviewSection from "@/shared/components/SalonReviewSection";
-import { Button } from "@/shared/components/ui/button";
-import { Card, CardContent } from "@/shared/components/ui/card";
 import EmptyState from "@/shared/components/common/EmptyState";
 import {
   addFavorite,
@@ -18,7 +16,6 @@ import {
 import { setReviews } from "@/store/slices/reviewsSlice";
 import { setServices } from "@/store/slices/servicesSlice";
 import { serviceCategories } from "@/shared/data/serviceCategories";
-import { getMediaUrl } from "@/shared/utils/media";
 
 function getIdString(value) {
   if (!value) return "";
@@ -309,81 +306,15 @@ export default function SalonProfilePage() {
 
       {salon && (
         <>
-          <Card className="rounded-2xl sm:rounded-3xl">
-            <CardContent className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[320px_1fr]">
-              <div className="relative">
-                {salon?.imageUrl ? (
-                  <img
-                    alt={salon?.name || "Salon image"}
-                    className="aspect-[4/3] w-full rounded-2xl object-cover"
-                    src={getMediaUrl(salon?.imageUrl)}
-                  />
-                ) : (
-                  <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-neutral-100">
-                    <Store className="h-16 w-16 text-neutral-400" />
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                      {salon?.name}
-                    </h1>
-                    <div className="mt-2 space-y-1 text-sm text-neutral-500">
-                      {salon?.city && (
-                        <p className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4" />
-                          {salon?.city}
-                        </p>
-                      )}
-                      {salon?.address && <p className="ml-6">{salon?.address}</p>}
-                      {salon?.phone && (
-                        <p className="flex items-center gap-2">
-                          <Phone className="h-4 w-4" />
-                          {salon?.phone}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {currentUser?.role === "client" && salon && (
-                    <Button
-                      aria-label={
-                        isSalonFavorited
-                          ? "Remove salon from favorites"
-                          : "Add salon to favorites"
-                      }
-                      onClick={handleSalonFavorite}
-                      variant={isSalonFavorited ? "default" : "outline"}
-                    >
-                      <Heart
-                        className={`mr-2 h-4 w-4 ${
-                          isSalonFavorited ? "fill-white" : ""
-                        }`}
-                      />
-                      {isSalonFavorited ? "Favorited" : "Add to favorites"}
-                    </Button>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
-                    <Store className="h-4 w-4 text-neutral-500" />
-                    {barbersList.length}{" "}
-                    {barbersList.length === 1 ? "specialist" : "specialists"}
-                  </p>
-                  <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
-                    <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
-                    {averageRating
-                      ? `${averageRating.toFixed(1)} (${reviewsCount} reviews)`
-                      : "No reviews yet"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <SalonProfileHero
+            averageRating={averageRating}
+            barbersCount={barbersList.length}
+            currentUser={currentUser}
+            isSalonFavorited={isSalonFavorited}
+            onToggleFavorite={handleSalonFavorite}
+            reviewsCount={reviewsCount}
+            salon={salon}
+          />
 
           <SalonReviewSection
             salonReviews={salonReviews}
