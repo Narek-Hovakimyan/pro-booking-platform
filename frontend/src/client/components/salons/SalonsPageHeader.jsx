@@ -10,9 +10,9 @@ export default function SalonsPageHeader({
   selectedSalon,
 }) {
   return (
-    <div className="grid gap-3 sm:flex sm:items-end sm:justify-between">
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-card sm:flex sm:items-end sm:justify-between sm:rounded-3xl sm:p-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+        <h1 className="text-3xl font-bold tracking-tight text-neutral-950 sm:text-4xl">
           Salons
         </h1>
         <p className="mt-2 text-neutral-500">
@@ -21,16 +21,16 @@ export default function SalonsPageHeader({
       </div>
 
       {!selectedSalon && (
-        <div className="grid gap-2 sm:flex">
+        <div className="mt-4 grid gap-2 sm:mt-0 sm:flex">
           <Button
-            className="relative w-full sm:w-auto"
+            className="relative w-full border-brand-100 text-brand-700 hover:bg-brand-50 sm:w-auto"
             onClick={onOpenFilters}
             variant="outline"
           >
             <SlidersHorizontal className="mr-2 h-4 w-4" />
             Filters
             {activeFiltersCount > 0 && (
-              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">
+              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-xs font-semibold text-white">
                 {activeFiltersCount}
               </span>
             )}
