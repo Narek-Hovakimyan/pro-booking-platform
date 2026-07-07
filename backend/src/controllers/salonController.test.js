@@ -843,7 +843,15 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
   });
 
   Salon.find = () => ({
-    sort: async () => [{ _id: salonId, name: "Test Salon", city: "Yerevan" }],
+    sort: async () => [
+      {
+        _id: salonId,
+        name: "Test Salon",
+        city: "Yerevan",
+        ownerId,
+        admins: [adminId],
+      },
+    ],
   });
   SalonJoinRequest.find = () => ({ distinct: async () => [] });
 
@@ -852,10 +860,19 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
     name,
     role: "barber",
     platformRole: "superuser",
+    email: `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+    phone: "555-PRIVATE",
     avatarUrl: "",
     specialty: "unisex",
     city: "Yerevan",
-    salons: [{ salon: salonId, status: "approved" }],
+    salons: [
+      {
+        salon: salonId,
+        status: "approved",
+        relationshipType: "chair_renter",
+        staffPayment: { type: "fixed", fixedAmount: 1000 },
+      },
+    ],
     salon: salonId,
     salonStatus: "approved",
     toObject() {
@@ -883,7 +900,14 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
   assert.equal(Array.isArray(salonResult.barbers), true);
   assert.equal(salonResult.barbers.length, 1, "only paid barber included");
   assert.equal(salonResult.barbers[0].id || salonResult.barbers[0]._id, paidBarberId);
+  assert.equal(salonResult.ownerId, undefined);
+  assert.equal(salonResult.admins, undefined);
   assert.equal(salonResult.barbers[0].platformRole, undefined);
+  assert.equal(salonResult.barbers[0].email, undefined);
+  assert.equal(salonResult.barbers[0].phone, undefined);
+  assert.equal(salonResult.barbers[0].salons, undefined);
+  assert.equal(salonResult.barbers[0].approvedSalons, undefined);
+  assert.equal(salonResult.barbers[0].staffPayment, undefined);
 
   __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
   __salonControllerTestHooks.resetGetSalonReviewStats();

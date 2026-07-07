@@ -53,7 +53,6 @@ test("getClientFavorites populates favorite barber profession fields", async () 
     barberId: {
       _id: "barber-a",
       name: "Lash Artist",
-      phone: "555",
       role: "barber",
       city: "Yerevan",
       salonName: "",
@@ -118,7 +117,7 @@ test("getClientFavorites populates favorite barber profession fields", async () 
   assert.equal(populatePath, "barberId");
   assert.equal(
     populateFields,
-    "name phone role city salonName imageUrl profession barberType specialty"
+    "name role city salonName imageUrl profession barberType specialty"
   );
   assert.deepEqual(sortQuery, { createdAt: -1 });
   assert.deepEqual(res.body, [favorite]);
@@ -351,6 +350,8 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
             address: "",
             phone: "",
             imageUrl: "",
+            ownerId: "owner-private",
+            admins: ["admin-private"],
           },
           toObject() {
             return {
@@ -363,6 +364,8 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
                 address: "",
                 phone: "",
                 imageUrl: "",
+                ownerId: "owner-private",
+                admins: ["admin-private"],
               },
             };
           },
@@ -379,11 +382,21 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
           _id: paidBarberId,
           name: "Paid Barber",
           role: "barber",
+          email: "paid@example.com",
+          phone: "555-private",
+          platformRole: "superuser",
           city: "",
           avatarUrl: "",
           salon: salonAId,
           salonStatus: "approved",
-          salons: [{ salon: salonAId, status: "approved" }],
+          salons: [
+            {
+              salon: salonAId,
+              status: "approved",
+              relationshipType: "chair_renter",
+              staffPayment: { type: "fixed", fixedAmount: 1000 },
+            },
+          ],
           toObject() {
             return this;
           },
@@ -471,6 +484,8 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.length, 1, "should return one salon favorite");
+  assert.equal(res.body[0].salonId.ownerId, undefined);
+  assert.equal(res.body[0].salonId.admins, undefined);
   assert.equal(res.body[0].salonId.barbers.length, 1, "should exclude unpaid barber");
   assert.equal(
     String(res.body[0].salonId.barbers[0]._id),
@@ -482,4 +497,9 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
     "Paid Barber",
     "paid barber name should match"
   );
+  assert.equal(res.body[0].salonId.barbers[0].email, undefined);
+  assert.equal(res.body[0].salonId.barbers[0].phone, undefined);
+  assert.equal(res.body[0].salonId.barbers[0].platformRole, undefined);
+  assert.equal(res.body[0].salonId.barbers[0].salons, undefined);
+  assert.equal(res.body[0].salonId.barbers[0].staffPayment, undefined);
 });

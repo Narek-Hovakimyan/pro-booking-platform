@@ -23,11 +23,53 @@ const stripStaffPaymentFromSalons = (salons = []) =>
     return safeEntry;
   });
 
+const toPlainObject = (value) => (value?.toObject ? value.toObject() : value);
+
+export const serializePublicSalon = (salon) => {
+  if (!salon) return null;
+
+  const rawSalon = toPlainObject(salon);
+
+  return {
+    _id: rawSalon._id,
+    id: rawSalon.id || rawSalon._id,
+    name: rawSalon.name || "",
+    city: rawSalon.city || "",
+    address: rawSalon.address || "",
+    phone: rawSalon.phone || "",
+    imageUrl: rawSalon.imageUrl || rawSalon.image || "",
+    image: rawSalon.image || rawSalon.imageUrl || "",
+  };
+};
+
+export const serializePublicBarber = ({ barber, profile = null, salon = null }) => {
+  if (!barber) return null;
+
+  const rawBarber = toPlainObject(barber);
+
+  return {
+    _id: rawBarber._id,
+    id: rawBarber.id || rawBarber._id,
+    name: rawBarber.name || "",
+    role: rawBarber.role || "barber",
+    city: profile?.city || rawBarber.city || "",
+    avatarUrl: rawBarber.avatarUrl || "",
+    imageUrl: profile?.imageUrl || rawBarber.avatarUrl || rawBarber.imageUrl || "",
+    profession: rawBarber.profession || "barber",
+    barberType: rawBarber.barberType || "",
+    specialty: rawBarber.specialty || "unisex",
+    bio: profile?.bio || "",
+    galleryImages: profile?.galleryImages || [],
+    defaultSchedule: profile?.defaultSchedule,
+    salon: serializePublicSalon(salon),
+  };
+};
+
 // ─── Serializers ───
 export const serializeSalon = (salon) => {
   if (!salon) return null;
 
-  const rawSalon = salon.toObject ? salon.toObject() : salon;
+  const rawSalon = toPlainObject(salon);
 
   return {
     ...rawSalon,
@@ -38,7 +80,7 @@ export const serializeSalon = (salon) => {
 export const serializeRequest = (request) => {
   if (!request) return null;
 
-  const rawRequest = request.toObject ? request.toObject() : request;
+  const rawRequest = toPlainObject(request);
 
   return {
     ...rawRequest,
@@ -50,7 +92,7 @@ export const serializeRequest = (request) => {
 export const serializeUser = (user) => {
   if (!user) return null;
 
-  const rawUser = user.toObject ? user.toObject() : user;
+  const rawUser = toPlainObject(user);
 
   delete rawUser.password;
   delete rawUser.platformRole;
@@ -70,32 +112,7 @@ export const buildPublicBarbers = (barbers, profiles, salon) => {
 
   return barbers.map((barber) => {
     const profile = profilesByBarberId.get(String(barber._id));
-    const publicBarber = barber.toObject();
-
-    delete publicBarber.workHistory;
-    delete publicBarber.platformRole;
-    publicBarber.salons = stripStaffPaymentFromSalons(publicBarber.salons);
-
-    // Include approved salons info
-    const approvedSalons = (barber.salons || [])
-      .filter((s) => s.status === "approved")
-      .map((s) => ({
-        salon: s.salon,
-        isPrimary: s.isPrimary,
-        joinedAt: s.joinedAt,
-      }));
-
-    return {
-      ...publicBarber,
-      id: barber._id,
-      city: profile?.city || barber.city || "",
-      imageUrl: profile?.imageUrl || barber.avatarUrl || "",
-      bio: profile?.bio || "",
-      galleryImages: profile?.galleryImages || [],
-      defaultSchedule: profile?.defaultSchedule,
-      salon: serializeSalon(salon),
-      approvedSalons,
-    };
+    return serializePublicBarber({ barber, profile, salon });
   });
 };
 
@@ -113,7 +130,7 @@ export const buildPublicSalonResponse = ({
   };
 
   return {
-    ...serializeSalon(salon),
+    ...serializePublicSalon(salon),
     averageRating: safeReviewStats.averageRating,
     totalReviews: safeReviewStats.totalReviews ?? safeReviewStats.reviewsCount,
     reviewsCount: safeReviewStats.reviewsCount,

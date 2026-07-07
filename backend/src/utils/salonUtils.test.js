@@ -7,6 +7,8 @@ const createSalon = (overrides = {}) => ({
   _id: "salon-1",
   name: "Downtown Salon",
   city: "Yerevan",
+  ownerId: "owner-private",
+  admins: ["admin-private"],
   ...overrides,
 });
 
@@ -15,6 +17,9 @@ const createBarber = (overrides = {}) => ({
   name: "Barber",
   city: "Gyumri",
   avatarUrl: "https://example.com/avatar.jpg",
+  email: "barber@example.com",
+  phone: "555-private",
+  platformRole: "superuser",
   workHistory: [{ salonName: "Private" }],
   salons: [{ salon: "salon-1", status: "approved", isPrimary: true }],
   toObject() {
@@ -23,6 +28,9 @@ const createBarber = (overrides = {}) => ({
       name: this.name,
       city: this.city,
       avatarUrl: this.avatarUrl,
+      email: this.email,
+      phone: this.phone,
+      platformRole: this.platformRole,
       workHistory: this.workHistory,
       salons: this.salons,
       ...overrides,
@@ -47,6 +55,8 @@ test("formats public salon response with review stats", () => {
 
   assert.equal(response._id, "salon-1");
   assert.equal(response.id, "salon-1");
+  assert.equal(response.ownerId, undefined);
+  assert.equal(response.admins, undefined);
   assert.equal(response.averageRating, 4.5);
   assert.equal(response.totalReviews, 7);
   assert.equal(response.reviewsCount, 6);
@@ -112,14 +122,21 @@ test("includes public barber formatting in public salon response", () => {
   assert.deepEqual(response.barbers[0].defaultSchedule, { startTime: "10:00" });
   assert.deepEqual(response.barbers[0].salon, {
     _id: "salon-1",
+    id: "salon-1",
     name: "Downtown Salon",
     city: "Yerevan",
-    id: "salon-1",
+    address: "",
+    phone: "",
+    imageUrl: "",
+    image: "",
   });
   assert.equal(Object.hasOwn(response.barbers[0], "workHistory"), false);
+  assert.equal(Object.hasOwn(response.barbers[0], "email"), false);
+  assert.equal(Object.hasOwn(response.barbers[0], "phone"), false);
+  assert.equal(Object.hasOwn(response.barbers[0], "platformRole"), false);
 });
 
-test("strips staff payment from public barber membership data", () => {
+test("omits public barber membership data", () => {
   const salon = createSalon();
   const barber = createBarber({
     salons: [
@@ -142,6 +159,7 @@ test("strips staff payment from public barber membership data", () => {
     profiles: [],
   });
 
-  assert.equal(response.barbers[0].salons[0].staffPayment, undefined);
-  assert.equal(response.barbers[0].approvedSalons[0].staffPayment, undefined);
+  assert.equal(response.barbers[0].salons, undefined);
+  assert.equal(response.barbers[0].approvedSalons, undefined);
+  assert.equal(response.barbers[0].staffPayment, undefined);
 });

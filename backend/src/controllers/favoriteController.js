@@ -4,9 +4,20 @@ import User from "../models/User.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { sendControllerError } from "../utils/controllerError.js";
+import {
+  serializePublicBarber,
+  serializePublicSalon,
+} from "../utils/salonUtils.js";
 
-const userFields = "name phone role city salonName imageUrl profession barberType specialty";
+const userFields = "name role city salonName imageUrl profession barberType specialty";
 const salonFields = "name city address phone imageUrl";
+
+const getIdString = (value) => {
+  if (!value) return "";
+  if (value._id) return String(value._id);
+  if (value.id) return String(value.id);
+  return String(value);
+};
 
 const requireClient = (req, res) => {
   if (req.user?.role !== "client") {
@@ -124,7 +135,7 @@ export const getFavoriteSalons = async (req, res) => {
           { salon: { $in: salonIds }, salonStatus: "approved" },
           { "salons.salon": { $in: salonIds }, "salons.status": "approved" },
         ],
-      }).select("name phone role city avatarUrl salon salonStatus salons"),
+      }).select("name role city avatarUrl profession barberType specialty salon salonStatus salons"),
       getSalonReviewStats(salonIds),
     ]);
 
@@ -134,15 +145,27 @@ export const getFavoriteSalons = async (req, res) => {
     const paidBarbers = allBarbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
 
     const barbersBySalonId = new Map();
+    const favoriteSalonIds = new Set(salonIds.map((salonId) => getIdString(salonId)));
 
     paidBarbers.forEach((barber) => {
-      // Check both legacy salon field and new salons array
-      const salonFromArray = (barber.salons || []).find(
-        (s) => s.salon && s.status === "approved"
+      const approvedSalonIds = new Set(
+        (barber.salons || [])
+          .filter((entry) => entry?.salon && entry.status === "approved")
+          .map((entry) => getIdString(entry.salon))
       );
-      const key = String(salonFromArray?.salon || barber.salon);
-      if (key) {
-        barbersBySalonId.set(key, [...(barbersBySalonId.get(key) || []), barber]);
+
+      if (barber.salon && barber.salonStatus === "approved") {
+        approvedSalonIds.add(getIdString(barber.salon));
+      }
+
+      for (const salonId of approvedSalonIds) {
+        if (!favoriteSalonIds.has(salonId)) continue;
+
+        const safeBarber = serializePublicBarber({ barber });
+        barbersBySalonId.set(salonId, [
+          ...(barbersBySalonId.get(salonId) || []),
+          safeBarber,
+        ]);
       }
     });
 
@@ -152,13 +175,13 @@ export const getFavoriteSalons = async (req, res) => {
         const salon = favoriteObject.salonId;
         const salonId = salon?._id || salon;
         const reviewStats = reviewStatsBySalonId.get(String(salonId));
+        const publicSalon = salon ? serializePublicSalon(salon) : salon;
 
         return {
           ...favoriteObject,
-          salonId: salon
+          salonId: publicSalon
             ? {
-                ...salon,
-                id: salon._id,
+                ...publicSalon,
                 averageRating: reviewStats?.averageRating || 0,
                 totalReviews: reviewStats?.totalReviews || 0,
                 reviewsCount: reviewStats?.reviewsCount || 0,
