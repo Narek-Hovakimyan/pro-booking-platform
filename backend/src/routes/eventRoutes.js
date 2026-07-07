@@ -24,7 +24,7 @@ import {
   createEventReview,
   getEventReviews,
 } from "../controllers/eventReviewController.js";
-import { protect } from "../middleware/authMiddleware.js";
+import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { publicBookingLimiter, uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { handleEventImageUpload, handleCertificateFileUpload } from "../middleware/uploadMiddleware.js";
 
@@ -35,7 +35,7 @@ router.get("/", getEvents);
 router.get("/mine", protect, getMyEvents);
 router.get("/my-registrations", protect, getMyRegistrations);
 router.get("/:id/reviews", getEventReviews);
-router.get("/:id", getEventById);
+router.get("/:id", optionalAuth, getEventById);
 
 // Protected routes
 router.post("/", protect, uploadLimiter, handleEventImageUpload, createEvent);

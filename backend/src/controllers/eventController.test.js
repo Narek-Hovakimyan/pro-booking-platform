@@ -197,11 +197,12 @@ const createControllerMocks = ({
 
     return approvedCount > 0 ? [{ _id: event._id, count: approvedCount }] : [];
   };
-  EventRegistration.find = () => createQuery([...registrations]);
+  EventRegistration.find = (query = {}) =>
+    createQuery(
+      registrations.filter((registration) => matchesQuery(registration, query))
+    );
   EventCertificate.find = () => createQuery(certificates);
-  EventReview.find = () => ({
-    lean: async () => [],
-  });
+  EventReview.find = () => createQuery([]);
   EventRegistration.findOneAndUpdate = async (query, update) => {
     const reg = registrations.find((r) => {
       if (String(r._id) !== String(query._id)) return false;
@@ -517,6 +518,127 @@ test("getEventById unexpected error returns 500 generic without leaking raw mess
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not fetch event");
+});
+
+test("public event detail remains accessible without auth and hides participant names", async () => {
+  const res = createResponse();
+  createControllerMocks({
+    registrations: [
+      createRegistration({
+        userId: {
+          _id: attendeeId,
+          name: "Attendee",
+          email: "attendee@example.com",
+          phone: "+374000000",
+          platformRole: "internal",
+        },
+        status: "approved",
+      }),
+    ],
+  });
+
+  await getEventById({ params: { id: eventId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body._id, eventId);
+  assert.equal(res.body.registrationCount, 1);
+  assert.equal("registeredBarbers" in res.body, false);
+});
+
+test("private event detail returns 404 without auth", async () => {
+  const res = createResponse();
+  createControllerMocks({
+    event: { ...baseEvent, visibility: "private" },
+  });
+
+  await getEventById({ params: { id: eventId } }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Event not found");
+});
+
+test("private event detail returns 404 for unrelated authenticated user", async () => {
+  const res = createResponse();
+  createControllerMocks({
+    event: { ...baseEvent, visibility: "private" },
+  });
+
+  await getEventById(
+    { params: { id: eventId }, user: { _id: otherUserId, role: "client" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Event not found");
+});
+
+for (const status of ["pending", "waitlisted", "rejected"]) {
+  test(`private event detail returns 404 for ${status} participant`, async () => {
+    const res = createResponse();
+    createControllerMocks({
+      event: { ...baseEvent, visibility: "private" },
+      registrations: [createRegistration({ userId: attendeeId, status })],
+    });
+
+    await getEventById(
+      { params: { id: eventId }, user: { _id: attendeeId, role: "client" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 404);
+    assert.equal(res.body.message, "Event not found");
+  });
+}
+
+test("private event detail returns approved participant view without participant list", async () => {
+  const res = createResponse();
+  createControllerMocks({
+    event: { ...baseEvent, visibility: "private" },
+    registrations: [createRegistration({ userId: attendeeId, status: "approved" })],
+  });
+
+  await getEventById(
+    { params: { id: eventId }, user: { _id: attendeeId, role: "client" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body._id, eventId);
+  assert.equal(res.body.registrationCount, 1);
+  assert.equal("registeredBarbers" in res.body, false);
+});
+
+test("private event detail returns manager participant names without private fields", async () => {
+  const res = createResponse();
+  createControllerMocks({
+    event: { ...baseEvent, visibility: "private" },
+    registrations: [
+      createRegistration({
+        userId: {
+          _id: attendeeId,
+          name: "Attendee",
+          email: "attendee@example.com",
+          phone: "+374000000",
+          platformRole: "internal",
+        },
+        status: "approved",
+      }),
+    ],
+  });
+
+  await getEventById(
+    { params: { id: eventId }, user: { _id: organizerId, role: "barber" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.registeredBarbers.length, 1);
+  assert.deepEqual(Object.keys(res.body.registeredBarbers[0]).sort(), [
+    "_id",
+    "name",
+    "registeredAt",
+  ]);
+  assert.equal(res.body.registeredBarbers[0].name, "Attendee");
 });
 
 test("updateAttendance unexpected error returns 500 generic without leaking raw message", async () => {

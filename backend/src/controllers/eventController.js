@@ -5,7 +5,10 @@ import EventReview from "../models/EventReview.js";
 import Salon from "../models/Salon.js";
 import { createCertificateForRegistration } from "./certificateController.js";
 import { createNotification } from "./notificationController.js";
-import { getEventAuthorization } from "../utils/eventAuthorization.js";
+import {
+  getEventAuthorization,
+  getEventDetailAuthorization,
+} from "../utils/eventAuthorization.js";
 import { getEventNotificationData } from "../utils/eventNotificationData.js";
 import {
   canUserCreateEventForSalon,
@@ -226,14 +229,27 @@ export const getEventById = async (req, res) => {
       return res.status(404).json({ message: "Event not found" });
     }
 
+    const { canView, canViewParticipants } =
+      await getEventDetailAuthorization(event, req.user);
+
+    if (!canView) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
     // Get registered barbers
+    let registrationsQuery = EventRegistration.find({
+      eventId: event._id,
+      status: APPROVED_REGISTRATION_STATUS,
+    });
+
+    if (canViewParticipants) {
+      registrationsQuery = registrationsQuery
+        .populate("userId", "name")
+        .populate("barberId", "name");
+    }
+
     const [registrations, reviews] = await Promise.all([
-      EventRegistration.find({
-        eventId: event._id,
-        status: APPROVED_REGISTRATION_STATUS,
-      })
-        .populate("userId", "name email")
-        .populate("barberId", "name email"),
+      registrationsQuery,
       EventReview.find({ eventId: event._id })
         .populate("userId", "name avatarUrl")
         .sort({ createdAt: -1 })
@@ -247,22 +263,27 @@ export const getEventById = async (req, res) => {
           reviews.length
         : 0;
 
-    return res.json({
+    const response = {
       ...event,
       registrationCount,
       averageRating,
       reviewsCount: reviews.length,
-      registeredBarbers: registrations.map((r) => ({
-        _id: getRegistrationUserId(r),
-        name: (r.userId || r.barberId)?.name || "User",
-        registeredAt: r.createdAt || r.registeredAt,
-      })),
       reviews: reviews.map((review) => ({
         ...review,
         userName: review?.userId?.name || "User",
         userAvatarUrl: review?.userId?.avatarUrl || "",
       })),
-    });
+    };
+
+    if (canViewParticipants) {
+      response.registeredBarbers = registrations.map((r) => ({
+        _id: getRegistrationUserId(r),
+        name: (r.userId || r.barberId)?.name || "User",
+        registeredAt: r.createdAt || r.registeredAt,
+      }));
+    }
+
+    return res.json(response);
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch event");
   }
