@@ -2,9 +2,10 @@ import mongoose from "mongoose";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
 import { createNotification } from "./notificationController.js";
+import { getMessageAccessDecision } from "../services/messageAccessService.js";
 import { getIO } from "../socket.js";
 
-const userFields = "name phone role avatarUrl";
+const userFields = "_id name role avatarUrl";
 const MAX_MESSAGE_TEXT_LENGTH = 5000;
 
 const isValidObjectId = (value) =>
@@ -121,9 +122,18 @@ export const createMessage = async (req, res) => {
       return res.status(400).json({ message: "Invalid receiver ID" });
     }
 
-    const receiverExists = await User.exists({ _id: receiverId });
+    const receiver = await User.findById(receiverId).select("_id role");
 
-    if (!receiverExists) {
+    if (!receiver) {
+      return res.status(404).json({ message: "Receiver not found" });
+    }
+
+    const accessDecision = await getMessageAccessDecision({
+      sender: req.user,
+      receiver,
+    });
+
+    if (!accessDecision.allowed) {
       return res.status(404).json({ message: "Receiver not found" });
     }
 
