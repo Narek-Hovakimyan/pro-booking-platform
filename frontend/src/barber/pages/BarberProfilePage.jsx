@@ -611,9 +611,7 @@ export default function BarberProfilePage() {
               saved={saved}
               profileError={profileError}
               currentUser={currentUser}
-              onUpdateField={updateField}
-              onSaveProfile={saveProfile}
-              onAvatarUploaded={handleAvatarUploaded}
+              editable={false}
             />
 
             {/* About */}
@@ -756,6 +754,7 @@ export default function BarberProfilePage() {
           onUpdateField={updateField}
           onSaveProfile={saveProfile}
           onAvatarUploaded={handleAvatarUploaded}
+          editable={true}
         />
 
         <Card className="rounded-2xl">

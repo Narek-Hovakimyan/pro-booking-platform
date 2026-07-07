@@ -3,6 +3,38 @@ import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { getMediaUrl } from "@/shared/utils/media";
 
+const professionLabels = {
+  barber: "Barber / Վարսահարդար",
+  hair_stylist: "Hair stylist / Սանրվածքների վարպետ",
+  nail_master: "Nail master / Մատնահարդար",
+  makeup_artist: "Makeup artist / Դիմահարդար",
+  cosmetologist: "Cosmetologist / Կոսմետոլոգ",
+  lash_brow: "Lash & Brow / Թարթիչ-Հոնքերի վարպետ",
+  massage: "Massage therapist / Մասաժիստ",
+  other: "Other / Այլ",
+};
+
+const barberTypeLabels = {
+  men: "Men's barber (Տղամարդու վարսահարդար)",
+  women: "Women's hairdresser (Կանացի վարսահարդար)",
+  unisex: "Unisex / Both (Ունիվերսալ)",
+};
+
+function DisplayField({ label, value, className = "" }) {
+  const displayValue = value?.trim?.() || value || "Not set";
+
+  return (
+    <div className={`rounded-2xl border border-neutral-100 bg-neutral-50 p-3 ${className}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        {label}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-neutral-900">
+        {displayValue}
+      </p>
+    </div>
+  );
+}
+
 export default function ProfileFormCard({
   profile,
   isProfileSaving,
@@ -12,18 +44,63 @@ export default function ProfileFormCard({
   onUpdateField,
   onSaveProfile,
   onAvatarUploaded,
+  editable = true,
 }) {
+  const headerDescription = editable
+    ? "Update the information clients see before booking."
+    : "Review the information clients see before booking.";
+  const professionLabel =
+    professionLabels[profile.profession || "barber"] || professionLabels.barber;
+  const barberTypeLabel =
+    profile.profession === "barber"
+      ? barberTypeLabels[profile.barberType || "unisex"] || "Not set"
+      : "";
+
   return (
     <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
       {/* Gradient header */}
       <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-5">
         <h1 className="text-xl font-bold text-white">Profile</h1>
         <p className="mt-1 text-sm text-purple-100">
-          Update the information clients see before booking.
+          {headerDescription}
         </p>
       </div>
 
       <CardContent className="space-y-5 p-5">
+        {!editable && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-[112px_1fr] sm:items-center">
+              {profile.imageUrl ? (
+                <img
+                  alt={profile.name || "Profile photo"}
+                  className="aspect-square w-28 rounded-2xl object-cover ring-2 ring-purple-200"
+                  src={getMediaUrl(profile.imageUrl)}
+                />
+              ) : (
+                <div className="flex aspect-square w-28 items-center justify-center rounded-2xl bg-neutral-50 text-sm text-neutral-400 ring-2 ring-purple-100">
+                  No photo
+                </div>
+              )}
+              <div className="space-y-2">
+                <DisplayField label="Name" value={profile.name} />
+                <DisplayField label="Phone" value={profile.phone} />
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <DisplayField label="Profession / Մասնագիտություն" value={professionLabel} />
+              {profile.profession === "barber" && (
+                <DisplayField label="Barber type / Վարսահարդարի տեսակ" value={barberTypeLabel} />
+              )}
+              <DisplayField label="City" value={profile.city} />
+              <DisplayField label="Address" value={profile.address} />
+              <DisplayField label="Instagram" value={profile.instagram} />
+              <DisplayField label="Bio" value={profile.bio} className="sm:col-span-2" />
+            </div>
+          </div>
+        )}
+
+        {editable && (
         <form className="space-y-4" onSubmit={onSaveProfile}>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-semibold">
@@ -189,6 +266,7 @@ export default function ProfileFormCard({
             </Button>
           </div>
         </form>
+        )}
       </CardContent>
     </Card>
   );
