@@ -31,6 +31,7 @@ import revenueRoutes from "./routes/revenueRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import platformRoutes from "./routes/platformRoutes.js";
+import { servePublicPortfolioImage } from "./controllers/portfolioPhotoMediaController.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
@@ -123,10 +124,7 @@ app.use(
   "/uploads/certificate-files",
   express.static(path.join(uploadsRoot, "certificate-files"), uploadStaticOptions)
 );
-app.use(
-  "/uploads/portfolio",
-  express.static(path.join(uploadsRoot, "portfolio"), uploadStaticOptions)
-);
+app.get("/uploads/portfolio/:filename", servePublicPortfolioImage);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);

@@ -6,6 +6,7 @@ import {
   updatePortfolioPhoto,
   deletePortfolioPhoto,
 } from "../controllers/portfolioPhotoController.js";
+import { serveOwnerPortfolioImage } from "../controllers/portfolioPhotoMediaController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
@@ -18,6 +19,7 @@ router.get("/barber/:barberId", getPortfolioByBarber);
 
 // Protected
 router.get("/me", protect, getMyPortfolio);
+router.get("/:id/images/:kind", protect, serveOwnerPortfolioImage);
 router.post("/", protect, requireBarberSubscription, uploadLimiter, handlePortfolioImageUpload, addPortfolioPhoto);
 router.put("/:id", protect, requireBarberSubscription, updatePortfolioPhoto);
 router.delete("/:id", protect, requireBarberSubscription, deletePortfolioPhoto);

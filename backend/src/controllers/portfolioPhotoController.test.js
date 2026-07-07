@@ -8,6 +8,10 @@ import {
   updatePortfolioPhoto,
   deletePortfolioPhoto,
 } from "./portfolioPhotoController.js";
+import {
+  serveOwnerPortfolioImage,
+  servePublicPortfolioImage,
+} from "./portfolioPhotoMediaController.js";
 import PortfolioPhoto from "../models/PortfolioPhoto.js";
 import Service from "../models/Service.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
@@ -89,6 +93,19 @@ const createResponse = () => ({
   },
 });
 
+const createSendFileResponse = ({ sendFileError } = {}) => ({
+  ...createResponse(),
+  sentFile: "",
+  headersSent: false,
+  sendFile(filePath, callback) {
+    this.sentFile = filePath;
+    if (typeof callback === "function") {
+      callback(sendFileError);
+    }
+    return this;
+  },
+});
+
 const createFindChain = (result) => ({
   select: () => createFindChain(result),
   populate: () => createFindChain(result),
@@ -127,6 +144,151 @@ test("GET /api/portfolio/barber/:barberId returns empty array when no public pho
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, []);
+});
+
+/* ── Public media GET /uploads/portfolio/:filename ─── */
+
+test("GET /uploads/portfolio/:filename serves active public consented image", async () => {
+  const photo = createPortfolioFixture({
+    beforeUrl: "/uploads/portfolio/portfolio-public.webp",
+  });
+  PortfolioPhoto.findOne = (query) => {
+    assert.equal(query.active, true);
+    assert.equal(query.isPublic, true);
+    assert.equal(query.consentConfirmed, true);
+    assert.deepEqual(query.$or, [
+      { beforeUrl: "/uploads/portfolio/portfolio-public.webp" },
+      { afterUrl: "/uploads/portfolio/portfolio-public.webp" },
+    ]);
+    return createFindChain(photo);
+  };
+
+  const res = createSendFileResponse();
+  await servePublicPortfolioImage(
+    { params: { filename: "portfolio-public.webp" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.sentFile.endsWith("uploads/portfolio/portfolio-public.webp"));
+});
+
+for (const [name, overrides] of [
+  ["private", { isPublic: false }],
+  ["unconsented", { consentConfirmed: false }],
+  ["inactive", { active: false }],
+]) {
+  test(`GET /uploads/portfolio/:filename returns 404 for ${name} image`, async () => {
+    PortfolioPhoto.findOne = (query) => {
+      const photo = createPortfolioFixture({
+        beforeUrl: query.$or[0].beforeUrl,
+        ...overrides,
+      });
+      const isPubliclyServable =
+        photo.active && photo.isPublic && photo.consentConfirmed;
+      return createFindChain(isPubliclyServable ? photo : null);
+    };
+
+    const res = createSendFileResponse();
+    await servePublicPortfolioImage(
+      { params: { filename: `portfolio-${name}.jpg` } },
+      res
+    );
+
+    assert.equal(res.statusCode, 404);
+    assert.equal(res.sentFile, "");
+  });
+}
+
+test("GET /uploads/portfolio/:filename returns 404 for traversal filename", async () => {
+  PortfolioPhoto.findOne = () => {
+    throw new Error("should not query invalid filename");
+  };
+
+  const res = createSendFileResponse();
+  await servePublicPortfolioImage(
+    { params: { filename: "../portfolio-secret.jpg" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.sentFile, "");
+});
+
+test("GET /uploads/portfolio/:filename returns 404 when file is missing", async () => {
+  PortfolioPhoto.findOne = () => createFindChain(createPortfolioFixture());
+
+  const res = createSendFileResponse({
+    sendFileError: Object.assign(new Error("missing"), { code: "ENOENT" }),
+  });
+  await servePublicPortfolioImage(
+    { params: { filename: "portfolio-missing.jpg" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+});
+
+/* ── Protected owner media GET /api/portfolio/:id/images/:kind ─── */
+
+test("GET /api/portfolio/:id/images/:kind serves owner private image", async () => {
+  PortfolioPhoto.findById = async () =>
+    createPortfolioFixture({
+      isPublic: false,
+      consentConfirmed: false,
+      beforeUrl: "/uploads/portfolio/portfolio-private.jpg",
+    });
+
+  const res = createSendFileResponse();
+  await serveOwnerPortfolioImage(
+    {
+      user: barber,
+      params: { id: portfolioPhotoId, kind: "before" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.sentFile.endsWith("uploads/portfolio/portfolio-private.jpg"));
+});
+
+test("GET /api/portfolio/:id/images/:kind denies unrelated authenticated user", async () => {
+  PortfolioPhoto.findById = async () =>
+    createPortfolioFixture({
+      beforeUrl: "/uploads/portfolio/portfolio-private.jpg",
+    });
+
+  const res = createSendFileResponse();
+  await serveOwnerPortfolioImage(
+    {
+      user: otherBarber,
+      params: { id: portfolioPhotoId, kind: "before" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.sentFile, "");
+});
+
+test("GET /api/portfolio/:id/images/:kind returns 404 for soft-deleted image", async () => {
+  PortfolioPhoto.findById = async () =>
+    createPortfolioFixture({
+      active: false,
+      beforeUrl: "/uploads/portfolio/portfolio-deleted.jpg",
+    });
+
+  const res = createSendFileResponse();
+  await serveOwnerPortfolioImage(
+    {
+      user: barber,
+      params: { id: portfolioPhotoId, kind: "before" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.sentFile, "");
 });
 
 test("GET /api/portfolio/barber/:barberId requires barberId param", async () => {

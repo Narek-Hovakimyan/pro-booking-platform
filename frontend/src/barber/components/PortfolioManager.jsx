@@ -12,19 +12,22 @@ import {
 
 import {
   getMyPortfolio,
+  getPortfolioImageBlob,
   deletePortfolioPhoto,
 } from "@/shared/api/portfolio";
 import ConfirmModal from "@/shared/components/common/ConfirmModal";
 import { Button } from "@/shared/components/ui/button";
-import { getMediaUrl } from "@/shared/utils/media";
 import PortfolioPhotoFormModal from "./PortfolioPhotoFormModal";
 
 const getPortfolioId = (item) => item?._id || item?.id;
+
+const getPreviewKey = (item, kind) => `${getPortfolioId(item)}:${kind}`;
 
 export default function PortfolioManager() {
   const { currentUser } = useSelector((state) => state.auth);
   const currentUserId = currentUser?.id || currentUser?._id;
   const [items, setItems] = useState([]);
+  const [previewUrls, setPreviewUrls] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -68,6 +71,52 @@ export default function PortfolioManager() {
       mounted = false;
     };
   }, [currentUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const nextUrls = {};
+
+    async function loadPreviews() {
+      const entries = await Promise.all(
+        items.flatMap((item) => {
+          const itemId = getPortfolioId(item);
+          if (!itemId || item.active === false) return [];
+
+          return ["before", "after"].map(async (kind) => {
+            try {
+              const blob = await getPortfolioImageBlob(itemId, kind);
+              return [getPreviewKey(item, kind), URL.createObjectURL(blob)];
+            } catch {
+              return null;
+            }
+          });
+        })
+      );
+
+      if (cancelled) {
+        entries.forEach((entry) => {
+          if (entry?.[1]) URL.revokeObjectURL(entry[1]);
+        });
+        return;
+      }
+
+      for (const entry of entries) {
+        if (entry) nextUrls[entry[0]] = entry[1];
+      }
+
+      setPreviewUrls((current) => {
+        Object.values(current).forEach((url) => URL.revokeObjectURL(url));
+        return nextUrls;
+      });
+    }
+
+    loadPreviews();
+
+    return () => {
+      cancelled = true;
+      Object.values(nextUrls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [items]);
 
   /* ── Modal open/close ── */
   const openAddModal = () => {
@@ -207,6 +256,8 @@ export default function PortfolioManager() {
           {items.map((item) => {
             const itemId = getPortfolioId(item);
             const isActive = item.active !== false;
+            const beforePreviewUrl = previewUrls[getPreviewKey(item, "before")];
+            const afterPreviewUrl = previewUrls[getPreviewKey(item, "after")];
 
             return (
               <div
@@ -255,9 +306,9 @@ export default function PortfolioManager() {
                         Before
                       </p>
                       <div className="aspect-square overflow-hidden rounded-xl bg-neutral-100">
-                        {item.beforeUrl ? (
+                        {beforePreviewUrl ? (
                           <img
-                            src={getMediaUrl(item.beforeUrl)}
+                            src={beforePreviewUrl}
                             alt="Before"
                             className="h-full w-full object-cover"
                           />
@@ -273,9 +324,9 @@ export default function PortfolioManager() {
                         After
                       </p>
                       <div className="aspect-square overflow-hidden rounded-xl bg-neutral-100">
-                        {item.afterUrl ? (
+                        {afterPreviewUrl ? (
                           <img
-                            src={getMediaUrl(item.afterUrl)}
+                            src={afterPreviewUrl}
                             alt="After"
                             className="h-full w-full object-cover"
                           />

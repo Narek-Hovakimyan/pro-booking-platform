@@ -20,6 +20,13 @@ export async function getMyPortfolio() {
   return data;
 }
 
+export async function getPortfolioImageBlob(id, kind) {
+  const { data } = await api.get(`/portfolio/${id}/images/${kind}`, {
+    responseType: "blob",
+  });
+  return data;
+}
+
 /**
  * Create a new portfolio before/after photo pair.
  * @param {FormData} formData - Must include beforeImage and afterImage files.
