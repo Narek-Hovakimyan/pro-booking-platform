@@ -5,6 +5,7 @@ import User, { MAX_PHONE_LENGTH } from "../models/User.js";
 import { sendPasswordResetEmail } from "../services/emailService.js";
 import { verifyGoogleIdToken } from "../services/googleAuthService.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
+import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
 import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
@@ -29,6 +30,7 @@ const getUserData = (user) => {
     workHistory: user.workHistory || [],
     favoriteBarbers: user.favoriteBarbers || [],
     favoriteSalons: user.favoriteSalons || [],
+    canAccessPlatform: isPlatformSuperuser(user),
     createdAt: user.createdAt,
   };
 

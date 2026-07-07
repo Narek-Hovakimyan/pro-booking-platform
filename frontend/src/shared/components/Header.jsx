@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import { connectSocket, getSocket } from "@/shared/lib/socket";
+import { canAccessPlatform } from "@/shared/utils/platformAccess";
 import { logoutUser } from "@/store/slices/authSlice";
 import { addNotification } from "@/store/slices/notificationsSlice";
 import NestedHeaderMenu from "@/shared/components/NestedHeaderMenu";
@@ -63,7 +64,7 @@ export default function Header() {
   const moreMenuRef = useRef(null);
   const isClient = currentUser?.role === "client";
   const isBarber = currentUser?.role === "barber";
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
+  const isPlatformAdmin = canAccessPlatform(currentUser);
   const currentUserId = currentUser?.id || currentUser?._id;
   const canShowManageHiring =
     isAuthenticated && isBarber && Boolean(currentUserId) && Boolean(token) && canManageSalon;

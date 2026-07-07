@@ -16,6 +16,7 @@ import { Link } from "react-router-dom";
 import { getPlatformDashboardSummary } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
+import { canAccessPlatform } from "@/shared/utils/platformAccess";
 
 /* ─── Helpers ─── */
 
@@ -114,7 +115,7 @@ export default function PlatformDashboardPage() {
     ...(alertGroups.pastDue || []),
   ];
 
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
+  const isPlatformAdmin = canAccessPlatform(currentUser);
 
   if (!isPlatformAdmin) {
     return (

@@ -29,6 +29,7 @@ import {
   confirmPlatformSalonPayment,
 } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { canAccessPlatform } from "@/shared/utils/platformAccess";
 import { Button } from "@/shared/components/ui/button";
 
 /* ─── Helpers ─────────────────────────────────────────── */
@@ -260,7 +261,7 @@ export default function PlatformSalonBillingDetailPage() {
   const [payments, setPayments] = useState([]);
   const [paymentsTotal, setPaymentsTotal] = useState(0);
   const [paymentsPage, setPaymentsPage] = useState(1);
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
+  const isPlatformAdmin = canAccessPlatform(currentUser);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");

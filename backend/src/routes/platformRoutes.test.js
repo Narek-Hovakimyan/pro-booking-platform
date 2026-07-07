@@ -254,6 +254,7 @@ test("user with platformRole superuser allowed and returns identity info", async
   const body = await callAccessCheck(req, res);
   assert.ok(body, "Body should be defined");
   assert.deepEqual(Object.keys(body).sort(), [
+    "canAccessPlatform",
     "email",
     "id",
     "name",
@@ -262,6 +263,7 @@ test("user with platformRole superuser allowed and returns identity info", async
   assert.equal(body.id, "64b000000000000000000003");
   assert.equal(body.name, "Platform Superuser");
   assert.equal(body.email, "superuser@example.com");
+  assert.equal(body.canAccessPlatform, true);
   assert.equal(body.platformRole, "superuser");
   assert.equal(body.token, undefined);
   assert.equal(body.password, undefined);
@@ -285,6 +287,7 @@ test("env allowlisted email allowed and returns identity info", async () => {
   const body = await callAccessCheck(req, res);
   assert.ok(body, "Body should be defined");
   assert.equal(body.id, "64b000000000000000000004");
+  assert.equal(body.canAccessPlatform, true);
   assert.equal(body.platformRole, null); // DB field is null, but access granted by allowlist
 });
 

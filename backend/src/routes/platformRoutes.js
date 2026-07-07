@@ -29,6 +29,7 @@ router.get("/access-check", protect, requirePlatformSuperuser, (req, res) => {
     id: req.user._id,
     email: req.user.email || "",
     name: req.user.name,
+    canAccessPlatform: true,
     platformRole: req.user.platformRole === "superuser" ? "superuser" : null,
   });
 });

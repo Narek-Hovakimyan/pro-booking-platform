@@ -14,6 +14,7 @@ import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 
 import { getPlatformBillingSalons } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { canAccessPlatform } from "@/shared/utils/platformAccess";
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -85,7 +86,7 @@ export default function PlatformBillingPage() {
   const [error, setError] = useState("");
 
   // Determine if user can view this page
-  const isPlatformAdmin = Boolean(currentUser?.platformRole === "superuser");
+  const isPlatformAdmin = canAccessPlatform(currentUser);
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 

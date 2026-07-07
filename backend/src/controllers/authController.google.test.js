@@ -24,6 +24,8 @@ const originalSubscriptionPlanMethods = {
 };
 const originalJwtSecret = process.env.JWT_SECRET;
 const originalGoogleClientId = process.env.GOOGLE_CLIENT_ID;
+const originalPlatformAdminEmails = process.env.PLATFORM_ADMIN_EMAILS;
+const originalPlatformAdminIds = process.env.PLATFORM_ADMIN_IDS;
 const originalConsoleLog = console.log;
 const originalConsoleWarn = console.warn;
 const originalConsoleError = console.error;
@@ -48,6 +50,10 @@ afterEach(() => {
   else process.env.JWT_SECRET = originalJwtSecret;
   if (originalGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID;
   else process.env.GOOGLE_CLIENT_ID = originalGoogleClientId;
+  if (originalPlatformAdminEmails === undefined) delete process.env.PLATFORM_ADMIN_EMAILS;
+  else process.env.PLATFORM_ADMIN_EMAILS = originalPlatformAdminEmails;
+  if (originalPlatformAdminIds === undefined) delete process.env.PLATFORM_ADMIN_IDS;
+  else process.env.PLATFORM_ADMIN_IDS = originalPlatformAdminIds;
 });
 
 const createResponse = () => ({
@@ -191,6 +197,7 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
   assert.equal(res.body.user.role, "barber");
   assert.equal(res.body.user.platformRole, "superuser");
+  assert.equal(res.body.user.canAccessPlatform, true);
   assert.equal(existingUser.phone, "+37400111222");
   assert.deepEqual(existingUser.salons, [{ salon: "salon-1", status: "approved" }]);
   assert.equal(existingUser.authProviders.includes("google"), true);
@@ -473,6 +480,29 @@ test("Google-only user cannot login with phone/password, while password user sti
   assert.equal(res.statusCode, 200);
   assert.ok(res.body.token);
   assert.equal(res.body.user.phone, "+37400111222");
+  assert.equal(res.body.user.canAccessPlatform, false);
+});
+
+test("env allowlisted verified user login includes platform access flag", async () => {
+  const password = "password123";
+  const passwordHash = await bcrypt.hash(password, 10);
+  process.env.JWT_SECRET = "test-secret";
+  process.env.PLATFORM_ADMIN_EMAILS = "google@example.com";
+
+  User.findOne = () => createUser({
+    authProviders: ["password"],
+    password: passwordHash,
+    email: "google@example.com",
+    emailVerified: true,
+    platformRole: null,
+  });
+
+  const res = createResponse();
+  await loginUser({ body: { phone: "+37400111222", password } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.user.canAccessPlatform, true);
+  assert.equal(res.body.user.platformRole, undefined);
 });
 
 test("normal registration still requires password", async () => {
@@ -526,6 +556,7 @@ test("normal registration creates clean client user fields", async () => {
   assert.equal(createPayload.role, "client");
   assert.equal(createPayload.platformRole, undefined);
   assert.equal(res.body.user.platformRole, undefined);
+  assert.equal(res.body.user.canAccessPlatform, false);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
   const rawUser = createdUser.toObject();
   assert.deepEqual(rawUser.favoriteBarbers, []);
@@ -569,6 +600,7 @@ test("normal registration ignores malicious admin platformRole", async () => {
   assert.equal(res.statusCode, 201);
   assert.equal(createPayload.platformRole, undefined);
   assert.equal(res.body.user.platformRole, undefined);
+  assert.equal(res.body.user.canAccessPlatform, false);
 });
 
 test("normal registration creates barber fields and trial subscription", async () => {
