@@ -378,6 +378,72 @@ test("card summary filters specialists by active service category and tags", asy
   assert.deepEqual(res.body.services.map((service) => service._id), ["service-nails"]);
 });
 
+test("card summary service query only returns active services publicly", async () => {
+  const res = createResponse();
+  const barberId = "64b000000000000000000021";
+  const salonId = "64b000000000000000000022";
+  const barber = {
+    _id: barberId,
+    name: "Active Specialist",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+  };
+  const salon = {
+    _id: salonId,
+    name: "Salon",
+    toObject() {
+      return { _id: salonId, name: "Salon" };
+    },
+  };
+  const allServices = [
+    {
+      _id: "service-active",
+      barberId,
+      name: "Haircut",
+      category: "haircut",
+      price: 100,
+      duration: 20,
+      active: true,
+    },
+    {
+      _id: "service-inactive",
+      barberId,
+      name: "Hidden Color",
+      category: "hair-color",
+      price: 100,
+      duration: 20,
+      active: false,
+    },
+  ];
+  let capturedServiceQuery;
+
+  User.find = () => createFindChain([barber]);
+  BarberProfile.find = () => createFindChain([]);
+  Salon.find = () => createFindChain([salon]);
+  Service.find = (query) => {
+    capturedServiceQuery = query;
+    return createFindChain(
+      query.active === true
+        ? allServices.filter((service) => service.active)
+        : allServices
+    );
+  };
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([]);
+  mockPaidAccessForAllBarbers([barberId]);
+
+  await getBarberCardSummary({}, res);
+
+  assert.deepEqual(capturedServiceQuery, {
+    barberId: { $in: [barberId] },
+    active: true,
+  });
+  assert.deepEqual(res.body.services.map((service) => service._id), [
+    "service-active",
+  ]);
+});
+
 test("card summary rejects invalid service category query", async () => {
   const res = createResponse();
 
@@ -535,12 +601,16 @@ test("card summary populate uses active-only match for customCategoryId", async 
   mockPaidAccessForAllBarbers([barberId]);
 
   let capturedPopulate;
-  Service.find = () => ({
-    populate(opts) {
-      capturedPopulate = opts;
-      return { lean: async () => [] };
-    },
-  });
+  let capturedServiceQuery;
+  Service.find = (query) => {
+    capturedServiceQuery = query;
+    return {
+      populate(opts) {
+        capturedPopulate = opts;
+        return { lean: async () => [] };
+      },
+    };
+  };
 
   await getBarberCardSummary({}, res);
 
@@ -550,4 +620,5 @@ test("card summary populate uses active-only match for customCategoryId", async 
   assert.equal(capturedPopulate.match?.active, true);
   // active is excluded from select
   assert.equal(capturedPopulate.select?.includes("active"), false);
+  assert.equal(capturedServiceQuery.active, true);
 });

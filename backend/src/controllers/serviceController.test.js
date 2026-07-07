@@ -659,10 +659,12 @@ test("client cannot create, update, or delete services", async () => {
   }
 });
 
-test("fetching services by barber still works", async () => {
+test("anonymous getServicesByBarber filters to active services", async () => {
   __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
-  const services = [{ _id: "service-a", barberId: barberA._id, name: "Cut" }];
+  const services = [
+    { _id: "service-a", barberId: barberA._id, name: "Cut", active: true },
+  ];
   let findQuery;
 
   Service.find = (query) => {
@@ -677,6 +679,89 @@ test("fetching services by barber still works", async () => {
   await getServicesByBarber(
     {
       params: { barberId: barberA._id },
+    },
+    res
+  );
+
+  assert.deepEqual(findQuery, { barberId: barberA._id, active: true });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, services);
+});
+
+test("client getServicesByBarber filters to active services", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
+  const res = createResponse();
+  let findQuery;
+
+  Service.find = (query) => {
+    findQuery = query;
+    return {
+      populate() {
+        return [];
+      },
+    };
+  };
+
+  await getServicesByBarber(
+    {
+      params: { barberId: barberA._id },
+      user: client,
+    },
+    res
+  );
+
+  assert.deepEqual(findQuery, { barberId: barberA._id, active: true });
+  assert.equal(res.statusCode, 200);
+});
+
+test("non-owner barber getServicesByBarber filters to active services", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
+  const res = createResponse();
+  let findQuery;
+
+  Service.find = (query) => {
+    findQuery = query;
+    return {
+      populate() {
+        return [];
+      },
+    };
+  };
+
+  await getServicesByBarber(
+    {
+      params: { barberId: barberA._id },
+      user: barberB,
+    },
+    res
+  );
+
+  assert.deepEqual(findQuery, { barberId: barberA._id, active: true });
+  assert.equal(res.statusCode, 200);
+});
+
+test("owner barber getServicesByBarber can see active and inactive services", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
+  const res = createResponse();
+  const services = [
+    { _id: "service-a", barberId: barberA._id, name: "Cut", active: true },
+    { _id: "service-b", barberId: barberA._id, name: "Color", active: false },
+  ];
+  let findQuery;
+
+  Service.find = (query) => {
+    findQuery = query;
+    return {
+      populate() {
+        return services;
+      },
+    };
+  };
+
+  await getServicesByBarber(
+    {
+      params: { barberId: barberA._id },
+      user: barberA,
     },
     res
   );

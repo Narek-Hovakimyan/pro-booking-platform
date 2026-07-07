@@ -248,7 +248,7 @@ export const getBarberCardSummary = async (req, res) => {
     ] = await Promise.all([
       chainToArray(BarberProfile.find({ barberId: { $in: barberIds } })),
       chainToArray(Salon.find({ _id: { $in: [...allSalonIds] } })),
-      Service.find({ barberId: { $in: barberIds } })
+      Service.find({ barberId: { $in: barberIds }, active: true })
         .populate({
           path: "customCategoryId",
           match: { active: true },

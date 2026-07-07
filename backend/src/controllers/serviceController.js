@@ -321,7 +321,16 @@ export const getServicesByBarber = async (req, res) => {
       return res.status(404).json({ message: "Barber not found" });
     }
 
-    const services = await Service.find({ barberId: req.params.barberId })
+    const requesterId = req.user?._id || req.user?.id;
+    const isOwnerBarber =
+      req.user?.role === "barber" &&
+      requesterId &&
+      String(requesterId) === String(req.params.barberId);
+    const query = isOwnerBarber
+      ? { barberId: req.params.barberId }
+      : { barberId: req.params.barberId, active: true };
+
+    const services = await Service.find(query)
       .populate({
         path: "customCategoryId",
         match: { active: true },
