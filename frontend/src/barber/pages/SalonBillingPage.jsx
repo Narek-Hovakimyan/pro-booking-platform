@@ -354,7 +354,7 @@ export default function SalonBillingPage() {
     setAttemptActionError("");
 
     try {
-      const isSeatUpdate = pendingAttempt?.metadata?.action === "update_seats";
+      const isSeatUpdate = pendingAttempt?.action === "update_seats";
       const result = isSeatUpdate
         ? await devConfirmSubscriptionSeatUpdate(attemptId)
         : await devConfirmSubscriptionPaymentAttempt(attemptId);
@@ -430,7 +430,7 @@ export default function SalonBillingPage() {
     }
   };
 
-  const attemptIsSeatUpdate = pendingAttempt?.metadata?.action === "update_seats";
+  const attemptIsSeatUpdate = pendingAttempt?.action === "update_seats";
   const expiryDate =
     subscription?.renewalRequiredAt || subscription?.currentPeriodEnd;
   const activeCapacity = subscriptionIsActive ? paidSeatCount : 0;
@@ -1214,10 +1214,14 @@ export default function SalonBillingPage() {
                         </div>
                       ) : (
                         <div className="divide-y divide-neutral-100 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-                          {payments.map((payment) => (
+                          {payments.map((payment, index) => (
                             <div
                               className="space-y-3 p-4 text-sm"
-                              key={payment._id || payment.id}
+                              key={[
+                                payment.paidAt || payment.createdAt || "payment",
+                                payment.amount || 0,
+                                index,
+                              ].join("-")}
                             >
                               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <span className="font-semibold text-neutral-950">

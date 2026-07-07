@@ -15,6 +15,10 @@ import {
   getConfiguredPaymentProviderName,
   getPaymentProvider,
 } from "./payment/paymentProviderFactory.js";
+import {
+  serializeUserPaymentAttempt,
+  serializeUserPaymentRecord,
+} from "./payment/subscriptionPaymentSerializers.js";
 import { isWorkingSpecialist } from "./salon/salonRelationshipService.js";
 
 const DEFAULT_PLAN_CODE = "barber_monthly";
@@ -598,39 +602,6 @@ const normalizePaymentHistoryLimit = (limit) => {
 const buildPaymentAttemptExpiry = (now = new Date()) =>
   new Date(now.getTime() + PAYMENT_ATTEMPT_EXPIRY_HOURS * 60 * 60 * 1000);
 
-const serializePaymentAttempt = (attempt) => {
-  if (!attempt) return null;
-  const raw = attempt.toObject ? attempt.toObject() : attempt;
-
-  return {
-    id: raw.id || raw._id,
-    _id: raw._id,
-    ownerType: raw.ownerType,
-    ownerId: raw.ownerId,
-    payerId: raw.payerId,
-    purpose: raw.purpose || "subscription",
-    subscriptionId: raw.subscriptionId || null,
-    bookingId: raw.bookingId || null,
-    provider: raw.provider,
-    providerPaymentId: raw.providerPaymentId || raw.providerIntentId || null,
-    providerIntentId: raw.providerIntentId || null,
-    checkoutUrl: raw.checkoutUrl || null,
-    amount: raw.amount,
-    currency: raw.currency,
-    seatCount: raw.seatCount,
-    months: raw.months,
-    status: raw.status,
-    metadata: raw.metadata || {},
-    paidAt: raw.paidAt || null,
-    confirmedAt: raw.confirmedAt || null,
-    failedAt: raw.failedAt || null,
-    refundedAt: raw.refundedAt || null,
-    expiresAt: raw.expiresAt || null,
-    createdAt: raw.createdAt || null,
-    updatedAt: raw.updatedAt || null,
-  };
-};
-
 const getLatestRecoverableSalonPaymentAttempt = async (salonId) => {
   const attempts = await SubscriptionPaymentAttempt.find({
     purpose: "subscription",
@@ -642,7 +613,7 @@ const getLatestRecoverableSalonPaymentAttempt = async (salonId) => {
     .limit(1)
     .lean();
 
-  return serializePaymentAttempt(attempts?.[0]);
+  return serializeUserPaymentAttempt(attempts?.[0]);
 };
 
 const validateSubscriptionRequester = async ({
@@ -734,7 +705,7 @@ export const getMySubscriptionPaymentHistory = async ({
     throw error;
   }
 
-  return PaymentRecord.find({
+  const payments = await PaymentRecord.find({
     $or: [
       { ownerType: "barber", ownerId: requester._id },
       { payerId: requester._id },
@@ -743,6 +714,8 @@ export const getMySubscriptionPaymentHistory = async ({
     .sort({ paidAt: -1, createdAt: -1 })
     .limit(normalizePaymentHistoryLimit(limit))
     .lean();
+
+  return payments.map(serializeUserPaymentRecord);
 };
 
 export const getSalonSubscriptionPaymentHistory = async ({
@@ -752,13 +725,15 @@ export const getSalonSubscriptionPaymentHistory = async ({
 }) => {
   await requireSalonOwnerOrAdmin(salonId, requester?._id);
 
-  return PaymentRecord.find({
+  const payments = await PaymentRecord.find({
     ownerType: "salon",
     ownerId: salonId,
   })
     .sort({ paidAt: -1, createdAt: -1 })
     .limit(normalizePaymentHistoryLimit(limit))
     .lean();
+
+  return payments.map(serializeUserPaymentRecord);
 };
 
 /**
@@ -1119,11 +1094,11 @@ export const createSubscriptionPaymentIntent = async ({
   });
 
   return {
-    ...paymentIntent,
-    paymentAttemptId: getIdString(attempt._id),
-    paymentAttempt: serializePaymentAttempt(attempt),
-    ownerType,
-    ownerId: String(ownerId),
+    checkoutUrl: paymentIntent.checkoutUrl || null,
+    requiresManualActivation: Boolean(paymentIntent.requiresManualActivation),
+    paymentDisabled: Boolean(paymentIntent.paymentDisabled),
+    message: paymentIntent.message || null,
+    paymentAttempt: serializeUserPaymentAttempt(attempt),
     seatCount: normalizedSeatCount,
     months: normalizedMonths,
     pricePerSeat: plan.pricePerSeat,
@@ -1144,7 +1119,7 @@ export const getSubscriptionPaymentAttempt = async ({
     action: "view",
   });
 
-  return serializePaymentAttempt(attempt);
+  return serializeUserPaymentAttempt(attempt);
 };
 
 export const cancelSubscriptionPaymentAttempt = async ({
@@ -1166,7 +1141,7 @@ export const cancelSubscriptionPaymentAttempt = async ({
   applyPaymentAttemptTransition(attempt, "cancelled");
   await attempt.save();
 
-  return serializePaymentAttempt(attempt);
+  return serializeUserPaymentAttempt(attempt);
 };
 
 export const confirmSubscriptionPaymentAttempt = async ({
@@ -1195,7 +1170,7 @@ export const confirmSubscriptionPaymentAttempt = async ({
 
   if (attempt.status === "paid") {
     return {
-      paymentAttempt: serializePaymentAttempt(attempt),
+      paymentAttempt: serializeUserPaymentAttempt(attempt),
       subscription: attempt.subscriptionId
         ? serializeSubscriptionStatus(
             await Subscription.findById(attempt.subscriptionId),
@@ -1239,7 +1214,7 @@ export const confirmSubscriptionPaymentAttempt = async ({
   await attempt.save();
 
   return {
-    paymentAttempt: serializePaymentAttempt(attempt),
+    paymentAttempt: serializeUserPaymentAttempt(attempt),
     subscription: serializeSubscriptionStatus(subscription, null, now),
     idempotent: false,
   };
@@ -1745,7 +1720,7 @@ export const confirmSubscriptionSeatUpdate = async ({
   }
 
   if (attempt.status === "paid") {
-    return { paymentAttempt: serializePaymentAttempt(attempt), idempotent: true };
+    return { paymentAttempt: serializeUserPaymentAttempt(attempt), idempotent: true };
   }
 
   if (!["pending", "requires_action"].includes(attempt.status)) {
@@ -1815,7 +1790,7 @@ export const confirmSubscriptionSeatUpdate = async ({
   await attempt.save();
 
   return {
-    paymentAttempt: serializePaymentAttempt(attempt),
+    paymentAttempt: serializeUserPaymentAttempt(attempt),
     subscription: serializeSubscriptionStatus(subscription, null, now),
     idempotent: false,
   };

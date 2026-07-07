@@ -428,9 +428,6 @@ export default function BillingPage() {
                 <div className="font-semibold">
                   Payment prepared but not active yet
                 </div>
-                <p className="mt-1">
-                  Attempt: {pendingAttempt.id || pendingAttempt._id}
-                </p>
                 <p className="mt-1 capitalize">Status: {pendingAttempt.status}</p>
                 <p className="mt-1">
                   {pendingAttempt.seatCount || 1} seat(s),{" "}
@@ -569,13 +566,17 @@ export default function BillingPage() {
                 <span>Seats</span>
                 <span>Period</span>
                 <span>Status</span>
-                <span>Paid/provider</span>
+                <span>Paid</span>
               </div>
               <div className="divide-y divide-neutral-100">
-                {payments.map((payment) => (
+                {payments.map((payment, index) => (
                   <div
                     className="grid gap-2 p-3 text-sm sm:grid-cols-5 sm:gap-3"
-                    key={payment._id || payment.id}
+                    key={[
+                      payment.paidAt || payment.createdAt || "payment",
+                      payment.amount || 0,
+                      index,
+                    ].join("-")}
                   >
                     <span className="font-semibold text-neutral-950">
                       {formatCurrency(payment.amount, payment.currency)}
@@ -583,9 +584,7 @@ export default function BillingPage() {
                     <span>{payment.seatCount || 1}</span>
                     <span>{formatPaymentPeriod(payment)}</span>
                     <span className="capitalize">{payment.status}</span>
-                    <span>
-                      {formatDate(payment.paidAt)} / {payment.provider || "manual"}
-                    </span>
+                    <span>{formatDate(payment.paidAt)}</span>
                   </div>
                 ))}
               </div>

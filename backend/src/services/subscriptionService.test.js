@@ -285,6 +285,40 @@ const makePaymentAttempt = (overrides = {}) => ({
   ...overrides,
 });
 
+const sensitiveAttemptResponseFields = [
+  "_id",
+  "ownerType",
+  "ownerId",
+  "payerId",
+  "purpose",
+  "subscriptionId",
+  "bookingId",
+  "provider",
+  "providerPaymentId",
+  "providerIntentId",
+  "metadata",
+  "createdBy",
+  "processedWebhookEventIds",
+];
+
+const sensitivePaymentRecordResponseFields = [
+  "_id",
+  "id",
+  "ownerType",
+  "ownerId",
+  "payerId",
+  "subscriptionId",
+  "provider",
+  "providerPaymentId",
+  "metadata",
+];
+
+const assertFieldsAbsent = (value, fields) => {
+  for (const field of fields) {
+    assert.equal(value[field], undefined, `${field} should not be exposed`);
+  }
+};
+
 const stubPaymentAttemptCreate = () => {
   let createdAttempt = null;
 
@@ -1363,6 +1397,7 @@ test("salon subscription details recover latest pending subscription payment att
     seatCount: 2,
     months: 1,
     provider: "manual",
+    metadata: { action: "update_seats", private: "secret" },
     paidAt: null,
     createdAt: new Date("2026-06-12T12:00:00.000Z"),
   });
@@ -1404,10 +1439,11 @@ test("salon subscription details recover latest pending subscription payment att
   });
   assert.deepEqual(calls.sort, { createdAt: -1 });
   assert.equal(calls.limit, 1);
-  assert.equal(result.pendingPaymentAttempt.id, pendingAttempt._id);
+  assert.equal(result.pendingPaymentAttempt.id, String(pendingAttempt._id));
   assert.equal(result.pendingPaymentAttempt.status, "pending");
   assert.equal(result.pendingPaymentAttempt.paidAt, null);
-  assert.equal(result.pendingPaymentAttempt.purpose, "subscription");
+  assert.equal(result.pendingPaymentAttempt.action, "update_seats");
+  assertFieldsAbsent(result.pendingPaymentAttempt, sensitiveAttemptResponseFields);
 });
 
 test("salon pending payment recovery excludes booking deposit attempts by query", async () => {
@@ -2067,24 +2103,20 @@ test("payment intent for barber calculates default plan amount and does not acti
     seatCount: 1,
   });
 
-  assert.equal(result.provider, "manual");
   assert.equal(result.requiresManualActivation, true);
-  assert.ok(result.paymentAttemptId);
   assert.equal(result.status, "pending");
   assert.equal(result.amount, defaultPlanDoc.pricePerSeat);
   assert.equal(result.currency, defaultPlanDoc.currency);
-  assert.deepEqual(result.metadata, {
-    ownerType: "barber",
-    ownerId: String(barberId),
-    seatCount: 1,
-    months: 1,
-    planCode: defaultPlanDoc.code,
-    action: "renew",
-  });
+  assert.equal(result.provider, undefined);
+  assert.equal(result.paymentAttemptId, undefined);
+  assert.equal(result.metadata, undefined);
+  assert.equal(result.ownerId, undefined);
   assert.equal(result.paymentAttempt.status, "pending");
   assert.equal(result.paymentAttempt.amount, defaultPlanDoc.pricePerSeat);
   assert.equal(result.paymentAttempt.months, 1);
-  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.paymentAttempt.id, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.paymentAttempt.action, "renew");
+  assertFieldsAbsent(result.paymentAttempt, sensitiveAttemptResponseFields);
   assert.deepEqual(attemptStub.getCreatedAttempt().metadata, {
     ownerType: "barber",
     ownerId: String(barberId),
@@ -2111,10 +2143,10 @@ test("salon owner can create payment intent for 4 seats", async () => {
     seatCount: 4,
   });
 
-  assert.equal(result.provider, "manual");
   assert.equal(result.requiresManualActivation, true);
-  assert.equal(result.ownerType, "salon");
-  assert.equal(result.ownerId, String(salonId));
+  assert.equal(result.provider, undefined);
+  assert.equal(result.ownerType, undefined);
+  assert.equal(result.ownerId, undefined);
   assert.equal(result.seatCount, 4);
   assert.equal(result.months, 1);
   assert.equal(result.pricePerSeat, defaultPlanDoc.pricePerSeat);
@@ -2122,16 +2154,11 @@ test("salon owner can create payment intent for 4 seats", async () => {
   assert.equal(result.monthlyTotal, defaultPlanDoc.pricePerSeat * 4);
   assert.equal(result.currency, defaultPlanDoc.currency);
   assert.equal(result.message, "Manual payment activation is required.");
-  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
   assert.equal(result.paymentAttempt.status, "pending");
-  assert.deepEqual(result.metadata, {
-    ownerType: "salon",
-    ownerId: String(salonId),
-    seatCount: 4,
-    months: 1,
-    planCode: defaultPlanDoc.code,
-    action: "renew",
-  });
+  assert.equal(result.paymentAttempt.id, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.paymentAttempt.action, "renew");
+  assert.equal(result.metadata, undefined);
+  assertFieldsAbsent(result.paymentAttempt, sensitiveAttemptResponseFields);
   assert.deepEqual(attemptStub.getCreatedAttempt().metadata, {
     ownerType: "salon",
     ownerId: String(salonId),
@@ -2166,7 +2193,7 @@ test("cancelled salon subscription can still prepare renewal payment", async () 
     action: "renew",
   });
 
-  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.paymentAttempt.id, String(attemptStub.getCreatedAttempt()._id));
   assert.equal(result.status, "pending");
   assert.equal(result.paymentAttempt.status, "pending");
 });
@@ -2216,10 +2243,11 @@ test("payment intent supports months and creates pending attempt for total amoun
     months: 3,
   });
 
-  assert.equal(result.paymentAttemptId, String(attemptStub.getCreatedAttempt()._id));
+  assert.equal(result.paymentAttempt.id, String(attemptStub.getCreatedAttempt()._id));
   assert.equal(result.status, "pending");
   assert.equal(result.months, 3);
   assert.equal(result.amount, defaultPlanDoc.pricePerSeat * 3);
+  assert.equal(result.paymentAttemptId, undefined);
   assert.equal(attemptStub.getCreatedAttempt().status, "pending");
   assert.equal(attemptStub.getCreatedAttempt().amount, defaultPlanDoc.pricePerSeat * 3);
 });
@@ -2278,7 +2306,8 @@ test("dev-confirm activates subscription and creates one paid payment record", a
   assert.equal(result.idempotent, false);
   assert.equal(result.paymentAttempt.status, "paid");
   assert.equal(result.paymentAttempt.paidAt.getTime(), now.getTime());
-  assert.ok(result.paymentAttempt.subscriptionId);
+  assert.equal(result.paymentAttempt.subscriptionId, undefined);
+  assertFieldsAbsent(result.paymentAttempt, sensitiveAttemptResponseFields);
   assert.equal(result.subscription.status, "active");
   assert.equal(result.subscription.totalPrice, defaultPlanDoc.pricePerSeat);
   assert.equal(stubs.getSubscriptionCreateCount(), 1);
@@ -2345,6 +2374,7 @@ test("cancel pending payment attempt works and does not activate subscription", 
   });
 
   assert.equal(result.status, "cancelled");
+  assertFieldsAbsent(result, sensitiveAttemptResponseFields);
   assert.equal(attempt.status, "cancelled");
   assert.equal(attemptSaveCount, 1);
   assert.equal(subscriptionCreated, false);
@@ -2447,7 +2477,9 @@ test("current salon admin can view salon payment attempt", async () => {
     requester: { _id: adminId, role: "barber" },
   });
 
-  assert.equal(String(result.ownerId), String(salonId));
+  assert.equal(result.id, String(attempt._id));
+  assert.equal(result.status, "pending");
+  assertFieldsAbsent(result, sensitiveAttemptResponseFields);
 });
 
 test("removed salon admin cannot access old salon payment attempt as payer", async () => {
@@ -2524,7 +2556,11 @@ test("individual payment history returns own records newest first", async () => 
     ownerType: "barber",
     ownerId: barberId,
     payerId: barberId,
+    subscriptionId: new mongoose.Types.ObjectId(),
     amount: 5000,
+    currency: "AMD",
+    provider: "manual",
+    providerPaymentId: "private-provider-reference",
     paidAt: new Date("2026-05-01T00:00:00.000Z"),
   };
   const newPayment = {
@@ -2532,7 +2568,11 @@ test("individual payment history returns own records newest first", async () => 
     ownerType: "barber",
     ownerId: barberId,
     payerId: barberId,
+    subscriptionId: new mongoose.Types.ObjectId(),
     amount: 5000,
+    currency: "AMD",
+    provider: "manual",
+    providerPaymentId: "private-provider-reference-new",
     paidAt: new Date("2026-06-01T00:00:00.000Z"),
   };
   let paymentQuery = null;
@@ -2553,8 +2593,11 @@ test("individual payment history returns own records newest first", async () => 
     ],
   });
   assert.deepEqual(
-    result.map((payment) => payment._id),
-    [newPayment._id, oldPayment._id]
+    result.map((payment) => payment.paidAt),
+    [newPayment.paidAt, oldPayment.paidAt]
+  );
+  result.forEach((payment) =>
+    assertFieldsAbsent(payment, sensitivePaymentRecordResponseFields)
   );
 });
 
@@ -2589,14 +2632,24 @@ test("salon payment history returns records newest first", async () => {
     _id: new mongoose.Types.ObjectId(),
     ownerType: "salon",
     ownerId: salonId,
+    payerId: ownerId,
+    subscriptionId: new mongoose.Types.ObjectId(),
     amount: 10000,
+    currency: "AMD",
+    provider: "manual",
+    providerPaymentId: "private-provider-reference",
     paidAt: new Date("2026-04-01T00:00:00.000Z"),
   };
   const newPayment = {
     _id: new mongoose.Types.ObjectId(),
     ownerType: "salon",
     ownerId: salonId,
+    payerId: ownerId,
+    subscriptionId: new mongoose.Types.ObjectId(),
     amount: 20000,
+    currency: "AMD",
+    provider: "manual",
+    providerPaymentId: "private-provider-reference-new",
     paidAt: new Date("2026-06-01T00:00:00.000Z"),
   };
   let paymentQuery = null;
@@ -2620,8 +2673,11 @@ test("salon payment history returns records newest first", async () => {
   assert.deepEqual(calls.sort, { paidAt: -1, createdAt: -1 });
   assert.equal(calls.limit, 10);
   assert.deepEqual(
-    result.map((payment) => payment._id),
-    [newPayment._id, oldPayment._id]
+    result.map((payment) => payment.paidAt),
+    [newPayment.paidAt, oldPayment.paidAt]
+  );
+  result.forEach((payment) =>
+    assertFieldsAbsent(payment, sensitivePaymentRecordResponseFields)
   );
 });
 
