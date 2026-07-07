@@ -980,7 +980,7 @@ export default function App() {
             <Route
               path="/admin/platform/dashboard"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredPlatformRole="superuser">
                   <PlatformDashboardPage />
                 </ProtectedRoute>
               }
@@ -992,7 +992,7 @@ export default function App() {
             <Route
               path="/admin/platform/billing/salons"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredPlatformRole="superuser">
                   <PlatformBillingPage />
                 </ProtectedRoute>
               }
@@ -1000,7 +1000,7 @@ export default function App() {
             <Route
               path="/admin/platform/billing/salons/:salonId"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredPlatformRole="superuser">
                   <PlatformSalonBillingDetailPage />
                 </ProtectedRoute>
               }
@@ -1008,7 +1008,7 @@ export default function App() {
             <Route
               path="/admin/platform/billing/individuals"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredPlatformRole="superuser">
                   <PlatformIndividualBillingPage />
                 </ProtectedRoute>
               }
