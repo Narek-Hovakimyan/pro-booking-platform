@@ -34,12 +34,11 @@ import initialSchedule, { defaultPersonalSchedule } from "./shared/data/schedule
 import { getDayKeyFromDate, parseDateKey } from "./shared/utils/dates";
 
 const AdminPage = lazy(() => import("./barber/pages/AdminPage"));
-const BookingPage = lazy(() => import("./client/pages/BookingPage"));
 const HomePage = lazy(() => import("./client/pages/HomePage"));
-const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
 
 import { clientDiscoveryRoutes } from "./routes/ClientDiscoveryRoutes";
 import { accountRoutes } from "./routes/AccountRoutes";
+import { getBookingRoutes } from "./routes/BookingRoutes";
 import { getBarberAdminRoutes } from "./routes/BarberAdminRoutes";
 import { publicRoutes } from "./routes/PublicRoutes";
 import { eventRoutes } from "./routes/EventRoutes";
@@ -618,37 +617,25 @@ export default function App() {
             />
             {publicRoutes}
             {clientDiscoveryRoutes}
-            <Route
-              path="/booking/:barberId"
-              element={
-                <ProtectedRoute role="client">
-                  <BookingPage
-                    step={step}
-                    setStep={setStep}
-                    services={services}
-                    selectedServiceId={selectedServiceId}
-                    setSelectedServiceId={setSelectedServiceId}
-                    selectedDayKey={selectedDayKey}
-                    setSelectedDayKey={setSelectedDayKey}
-                    selectedTime={selectedTime}
-                    setSelectedTime={setSelectedTime}
-                    client={bookingClient}
-                    currentUser={currentUser}
-                    bookings={bookings}
-                    schedule={schedule}
-                    setClient={setClient}
-                  />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/success"
-              element={
-                <ProtectedRoute role="client">
-                  <SuccessPage client={bookingClient} resetBooking={resetBooking} />
-                </ProtectedRoute>
-              }
-            />
+            {getBookingRoutes({
+              bookingFlow: {
+                step,
+                setStep,
+                selectedServiceId,
+                setSelectedServiceId,
+                selectedDayKey,
+                setSelectedDayKey,
+                selectedTime,
+                setSelectedTime,
+                bookingClient,
+                setClient,
+                resetBooking,
+              },
+              services,
+              bookings,
+              schedule,
+              currentUser,
+            })}
             {accountRoutes}
             {getBarberAdminRoutes({ renderAdminPage })}
             {eventRoutes}
