@@ -20,61 +20,28 @@ import {
   serializeUserPaymentRecord,
 } from "./payment/subscriptionPaymentSerializers.js";
 import { isWorkingSpecialist } from "./salon/salonRelationshipService.js";
+import {
+  DEFAULT_PLAN_CODE,
+  TRIAL_DAYS,
+  GRACE_DAYS,
+  PAID_SUBSCRIPTION_STATUSES,
+  RECOVERABLE_PAYMENT_ATTEMPT_STATUSES,
+  MANUAL_PROVIDER,
+  PAYMENT_ATTEMPT_EXPIRY_HOURS,
+  SUBSCRIPTION_SEAT_BARBER_FIELDS,
+  getIdString,
+  getIdsForQuery,
+  getOwnerIdForQuery,
+  isSubscriptionStatusActive,
+  hasUnexpiredPeriod,
+  subscriptionHasPaidAccess,
+  resolveQuery,
+  addDays,
+  addMonths,
+  normalizePaymentHistoryLimit,
+  buildPaymentAttemptExpiry,
+} from "./subscription/subscriptionHelpers.js";
 
-const DEFAULT_PLAN_CODE = "barber_monthly";
-const TRIAL_DAYS = 14;
-const GRACE_DAYS = 30;
-const PAID_SUBSCRIPTION_STATUSES = ["trialing", "active"];
-const RECOVERABLE_PAYMENT_ATTEMPT_STATUSES = ["pending", "requires_action"];
-const MANUAL_PROVIDER = "manual";
-const PAYMENT_ATTEMPT_EXPIRY_HOURS = 24;
-const SUBSCRIPTION_SEAT_BARBER_FIELDS =
-  "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist";
-
-const getIdString = (value) => {
-  if (!value) return "";
-  if (value._id) return String(value._id);
-  if (typeof value.id === "string") return value.id;
-  return String(value);
-};
-
-const getIdsForQuery = (ids) =>
-  ids.map((id) =>
-    mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id
-  );
-
-const isSubscriptionStatusActive = (status) =>
-  PAID_SUBSCRIPTION_STATUSES.includes(status);
-
-const hasUnexpiredPeriod = (subscription, now = new Date()) => {
-  if (!subscription?.currentPeriodEnd) return true;
-
-  const periodEnd = new Date(subscription.currentPeriodEnd);
-  return !Number.isNaN(periodEnd.getTime()) && periodEnd.getTime() >= now.getTime();
-};
-
-const subscriptionHasPaidAccess = (
-  subscription,
-  now = new Date(),
-  { statusAlreadyFiltered = false } = {}
-) =>
-  Boolean(subscription) &&
-  (isSubscriptionStatusActive(subscription.status) ||
-    (statusAlreadyFiltered && !subscription.status)) &&
-  hasUnexpiredPeriod(subscription, now);
-
-const getOwnerIdForQuery = (ownerId) =>
-  mongoose.Types.ObjectId.isValid(ownerId)
-    ? new mongoose.Types.ObjectId(ownerId)
-    : ownerId;
-
-const resolveQuery = async (query) => {
-  if (query && typeof query.lean === "function") {
-    return query.lean();
-  }
-
-  return query;
-};
 
 const fetchBarberMembership = async (barberId) => {
   const query = User.findById(barberId);
@@ -282,15 +249,6 @@ export const createSalonTrialSubscription = async ({
     payerId,
     seatCount,
   });
-
-const addDays = (date, days) =>
-  new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
-
-const addMonths = (date, months) => {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
-};
 
 export const isManualActivationAvailable = () =>
   process.env.NODE_ENV !== "production";
@@ -592,15 +550,6 @@ export const extendManualSubscription = async ({
 };
 
 export const grantManualSubscription = extendManualSubscription;
-
-const normalizePaymentHistoryLimit = (limit) => {
-  const parsed = Number(limit);
-  if (!Number.isInteger(parsed) || parsed < 1) return 20;
-  return Math.min(parsed, 100);
-};
-
-const buildPaymentAttemptExpiry = (now = new Date()) =>
-  new Date(now.getTime() + PAYMENT_ATTEMPT_EXPIRY_HOURS * 60 * 60 * 1000);
 
 const getLatestRecoverableSalonPaymentAttempt = async (salonId) => {
   const attempts = await SubscriptionPaymentAttempt.find({
