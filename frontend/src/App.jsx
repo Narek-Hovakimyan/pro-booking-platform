@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, Route, Routes } from "react-router-dom";
@@ -15,7 +15,6 @@ import { connectSocket, disconnectSocket } from "./shared/lib/socket";
 import {
   addService as addServiceAction,
   removeService,
-  setServices,
   updateService as updateServiceAction,
 } from "./store/slices/servicesSlice";
 import {
@@ -30,7 +29,7 @@ import {
   loadSubscriptionSuccess,
 } from "./store/slices/subscriptionSlice";
 import { useBookingFlow } from "./shared/hooks/useBookingFlow";
-import initialSchedule, { defaultPersonalSchedule } from "./shared/data/schedule";
+import { useBarberData } from "./shared/hooks/useBarberData";
 import { getDayKeyFromDate, parseDateKey } from "./shared/utils/dates";
 
 const AdminPage = lazy(() => import("./barber/pages/AdminPage"));
@@ -53,7 +52,6 @@ export default function App() {
   const currentUserId = currentUser?.id;
   const currentUserRole = currentUser?.role;
   const [dataError, setDataError] = useState("");
-  const [isDataLoading, setIsDataLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const {
     step,
@@ -70,131 +68,32 @@ export default function App() {
     resetBooking,
   } = useBookingFlow({ currentUser, currentUserRole });
 
+  const {
+    barberBookings,
+    barberServices,
+    barberScheduleEntry,
+    barberSchedule,
+    barberDateSchedules,
+    barberScheduleOverrides,
+    barberDefaultSchedule,
+    barberNonWorkingDays,
+    isDataLoading,
+  } = useBarberData({
+    currentUser,
+    currentUserId,
+    currentUserRole,
+    dispatch,
+    bookings,
+    services,
+    schedule,
+    setDataError,
+  });
+
   const [newService, setNewService] = useState({
     name: "",
     price: "",
     duration: "",
   });
-
-  const barberBookings = useMemo(
-    () =>
-      bookings.filter(
-        (booking) => String(booking.barberId) === String(currentUserId)
-      ),
-    [bookings, currentUserId]
-  );
-  const barberServices = useMemo(
-    () =>
-      services.filter(
-        (service) => String(service.barberId) === String(currentUserId)
-      ),
-    [currentUserId, services]
-  );
-  const barberScheduleEntry = useMemo(
-    () =>
-      schedule[currentUserId] || {
-        weeklySchedule: initialSchedule,
-        dateSchedules: {},
-        scheduleOverrides: {},
-        defaultSchedule: currentUser?.defaultSchedule || defaultPersonalSchedule,
-        nonWorkingDays: [],
-      },
-    [currentUser?.defaultSchedule, currentUserId, schedule]
-  );
-  const barberSchedule = useMemo(
-    () => barberScheduleEntry.weeklySchedule || initialSchedule,
-    [barberScheduleEntry]
-  );
-  const barberDateSchedules = useMemo(
-    () => barberScheduleEntry.dateSchedules || {},
-    [barberScheduleEntry]
-  );
-  const barberScheduleOverrides = useMemo(
-    () => barberScheduleEntry.scheduleOverrides || {},
-    [barberScheduleEntry]
-  );
-  const barberDefaultSchedule = useMemo(
-    () =>
-      barberScheduleEntry.defaultSchedule ||
-      currentUser?.defaultSchedule ||
-      defaultPersonalSchedule,
-    [barberScheduleEntry, currentUser?.defaultSchedule]
-  );
-  const barberNonWorkingDays = useMemo(
-    () => barberScheduleEntry.nonWorkingDays || [],
-    [barberScheduleEntry]
-  );
-
-  useEffect(() => {
-    if (!currentUserId) return;
-
-    let isMounted = true;
-
-    async function fetchUserData() {
-      setIsDataLoading(true);
-      setDataError("");
-
-      try {
-        if (currentUserRole === "barber") {
-          const servicesResponse = await api.get(`/services/${currentUserId}`);
-
-          if (!isMounted) return;
-
-          dispatch(
-            setServices({
-              barberId: currentUserId,
-              services: servicesResponse.data,
-            })
-          );
-        }
-      } catch (requestError) {
-        if (isMounted) {
-          setDataError(
-            requestError.response?.data?.message ||
-            "Could not load services. Please refresh and try again."
-          );
-        }
-      }
-
-      try {
-        if (currentUserRole === "barber") {
-          const scheduleResponse = await api.get(`/schedules/${currentUserId}`);
-
-          if (!isMounted) return;
-
-          dispatch(
-            setSchedule({
-              barberId: currentUserId,
-              weeklySchedule:
-                scheduleResponse.data?.weeklySchedule || initialSchedule,
-              dateSchedules: scheduleResponse.data?.dateSchedules || {},
-              scheduleOverrides: scheduleResponse.data?.scheduleOverrides || {},
-              defaultSchedule:
-                scheduleResponse.data?.defaultSchedule || defaultPersonalSchedule,
-              nonWorkingDays: scheduleResponse.data?.nonWorkingDays || [],
-            })
-          );
-        }
-      } catch (requestError) {
-        if (isMounted) {
-          setDataError(
-            requestError.response?.data?.message ||
-            "Could not load schedule. Please refresh and try again."
-          );
-        }
-      }
-
-      if (isMounted) {
-        setIsDataLoading(false);
-      }
-    }
-
-    fetchUserData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUserId, currentUserRole, dispatch]);
 
   useEffect(() => {
     if (!currentUserId || !token || currentUserRole !== "barber") {
