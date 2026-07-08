@@ -3,27 +3,18 @@ import { useSelector } from "react-redux";
 import {
   Plus,
   Pencil,
-  Settings,
-  Trash2,
   X,
-  Clock,
-  Wallet,
   AlertCircle,
-  Scissors,
-  Eye,
-  EyeOff,
-  CheckCircle2,
-  Tag,
 } from "lucide-react";
-import { Card, CardContent } from "@/shared/components/ui/card";
+
 import { Button } from "@/shared/components/ui/button";
 import {
-  getServicePriceInfo,
-  getServiceCategoryLabel,
   serviceCategories,
 } from "@/shared/data/serviceCategories";
 import { fetchServiceCategories } from "@/shared/api/serviceCategories";
 import ServiceCategoryManager from "./ServiceCategoryManager";
+import ServiceCard from "./ServiceCard";
+import ServiceManagerHeader from "./ServiceManagerHeader";
 
 const emptyForm = {
   name: "",
@@ -50,23 +41,6 @@ function formatPrice(price) {
  * Look up the display name for a custom category from a loaded list.
  * If customCategoryId is a populated object with .name, returns it directly.
  */
-function getCustomCategoryName(customCategories, customCategoryId) {
-  if (!customCategoryId) return null;
-  // Populated object from backend
-  if (typeof customCategoryId === "object" && customCategoryId.name) {
-    return customCategoryId.name;
-  }
-  // Raw string — look up from loaded list
-  if (!Array.isArray(customCategories)) return null;
-  const id =
-    typeof customCategoryId === "object"
-      ? String(customCategoryId._id || customCategoryId.id)
-      : String(customCategoryId);
-  const cat = customCategories.find(
-    (c) => String(c._id || c.id) === id
-  );
-  return cat?.name || null;
-}
 
 export default function ServicesManager({
   services,
@@ -327,382 +301,79 @@ export default function ServicesManager({
     await updateService(service.id, { active: !service.active });
   };
 
-  /* ── Category display helper for cards ── */
-  const renderCategoryLabel = (service) => {
-    if (service.customCategoryId) {
-      // If customCategoryId is a populated object, use name directly
-      if (typeof service.customCategoryId === "object" && service.customCategoryId.name) {
-        return (
-          <span className="mt-1 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-600">
-            {service.customCategoryId.name}
-          </span>
-        );
-      }
-      // Try to resolve from loaded custom categories
-      const customName = getCustomCategoryName(
-        customCategories,
-        service.customCategoryId
-      );
-      if (customName) {
-        return (
-          <span className="mt-1 inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-600">
-            {customName}
-          </span>
-        );
-      }
-      // customCategoryId exists but not yet resolved — show safe placeholder
-      return (
-        <span className="mt-1 inline-flex rounded-full bg-indigo-100/50 px-2 py-0.5 text-xs font-medium text-indigo-400">
-          Custom
-        </span>
-      );
-    }
-    // No custom category — show system label
-    return (
-      <span className="mt-1 inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">
-        {getServiceCategoryLabel(service.category || "other")}
-      </span>
-    );
-  };
 
-  const renderServiceCard = (service) => {
-    const priceInfo = getServicePriceInfo(service);
-
-    return (
-      <div
-        key={service.id}
-        className={`group relative overflow-hidden rounded-3xl border bg-white shadow-sm shadow-purple-100/40 transition-all hover:-translate-y-0.5 hover:shadow-md ${
-          service.active
-            ? "border-purple-100"
-            : "border-dashed border-neutral-200 bg-neutral-50/80"
-        }`}
-      >
-        <div
-          className={`absolute inset-x-0 top-0 h-1 ${
-            service.active
-              ? "bg-gradient-to-r from-purple-500 to-pink-500"
-              : "bg-neutral-200"
-          }`}
-        />
-
-        <div className="flex flex-col gap-4 p-4 pt-5 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 flex-1 space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3
-                    className={`break-words text-base font-bold ${
-                      service.active ? "text-neutral-950" : "text-neutral-500"
-                    }`}
-                  >
-                    {service.name}
-                  </h3>
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      service.active
-                        ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
-                        : "bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200"
-                    }`}
-                  >
-                    {service.active ? (
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                    ) : (
-                      <EyeOff className="h-3.5 w-3.5" />
-                    )}
-                    {service.active ? "Active" : "Inactive"}
-                  </span>
-                  {priceInfo.hasDiscount && (
-                    <span className="inline-flex rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 ring-1 ring-rose-100">
-                      {priceInfo.discountLabel}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {renderCategoryLabel(service)}
-                  {service.type === "package" && (
-                    <span className="mt-1 inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-100">
-                      Package
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-              <div className="flex items-center gap-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-neutral-600">
-                <Clock className="h-4 w-4 text-purple-500" />
-                <span className="font-semibold text-neutral-900">
-                  {service.duration} min
-                </span>
-              </div>
-              <div className="flex items-center gap-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-neutral-600 sm:col-span-1 lg:col-span-2">
-                <Wallet className="h-4 w-4 text-pink-500" />
-                {priceInfo.hasDiscount ? (
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-neutral-400 line-through">
-                      {formatPrice(priceInfo.originalPrice)} դր
-                    </span>
-                    <span className="font-bold text-neutral-950">
-                      {formatPrice(priceInfo.discountedPrice)} դր
-                    </span>
-                  </span>
-                ) : (
-                  <span className="font-bold text-neutral-950">
-                    {formatPrice(priceInfo.originalPrice)} դր
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {service.description && (
-              <p className="line-clamp-2 text-sm leading-relaxed text-neutral-500">
-                {service.description}
-              </p>
-            )}
-            {Array.isArray(service.tags) && service.tags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
-                <Tag className="h-3.5 w-3.5 text-neutral-400" />
-                {service.tags.slice(0, 4).map((tag, index) => (
-                  <span
-                    key={`${tag}-${index}`}
-                    className="rounded-full bg-neutral-100 px-2 py-0.5"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex shrink-0 items-center justify-end gap-1 border-t border-neutral-100 pt-3 sm:border-t-0 sm:pt-0">
-            <Button
-              disabled={isSaving}
-              size="icon"
-              variant="ghost"
-              className="h-10 w-10 rounded-2xl text-neutral-500 hover:bg-amber-50 hover:text-amber-700"
-              title={service.active ? "Deactivate" : "Activate"}
-              onClick={() => handleToggleActive(service)}
-            >
-              {service.active ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              disabled={isSaving}
-              size="icon"
-              variant="ghost"
-              className="h-10 w-10 rounded-2xl text-neutral-500 hover:bg-purple-50 hover:text-purple-700"
-              title="Edit"
-              onClick={() => openEditModal(service)}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-
-            {deleteConfirmId === service.id ? (
-              <div className="flex flex-wrap items-center justify-end gap-1">
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="h-10 rounded-2xl px-3 text-xs"
-                  onClick={() => handleDelete(service.id)}
-                >
-                  Delete
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-10 rounded-2xl px-3 text-xs"
-                  onClick={() => setDeleteConfirmId(null)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                disabled={isSaving}
-                size="icon"
-                variant="ghost"
-                className="h-10 w-10 rounded-2xl text-red-500 hover:bg-red-50 hover:text-red-700"
-                title="Delete"
-                onClick={() => setDeleteConfirmId(service.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderServiceSection = (title, count, sectionServices, tone) => {
-    if (sectionServices.length === 0) return null;
-
-    return (
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-bold text-neutral-800">{title}</h3>
-          <span
-            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-              tone === "active"
-                ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
-                : "bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200"
-            }`}
-          >
-            {count}
-          </span>
-        </div>
-        <div className={`grid gap-3 ${fullPage ? "xl:grid-cols-2" : ""}`}>
-          {sectionServices.map(renderServiceCard)}
-        </div>
-      </section>
-    );
-  };
 
   return (
     <>
-      <Card
-        className={`overflow-hidden rounded-3xl border-purple-100 bg-gradient-to-br from-purple-50/80 via-white to-pink-50/60 shadow-lg shadow-purple-100/40 ${
-          fullPage ? "lg:col-span-3" : ""
-        }`}
+      <ServiceManagerHeader
+        servicesCount={services.length}
+        activeCount={activeServices.length}
+        inactiveCount={inactiveServices.length}
+        error={error}
+        isLoading={isLoading}
+        isSaving={isSaving}
+        isEmpty={services.length === 0}
+        onAdd={openAddModal}
+        fullPage={fullPage}
       >
-        <CardContent className="space-y-6 p-4 sm:p-6">
-          {/* Header */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-purple-700 shadow-sm ring-1 ring-purple-100">
-                  <Settings className="h-5 w-5" />
-                </span>
-                <div>
-                  <h2 className="text-2xl font-bold text-neutral-950 sm:text-3xl">
-                    Services
-                  </h2>
-                  <p className="mt-1 max-w-2xl text-sm text-neutral-600">
-                    Manage service prices, duration, categories, and booking
-                    options clients see when booking.
-                  </p>
+        {/* Service list inside the same gradient card */}
+        {!isLoading && services.length > 0 && (
+          <div className="space-y-6">
+            {activeServices.length > 0 && (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-bold text-neutral-800">Active services</h3>
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                    {activeServices.length}
+                  </span>
                 </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white bg-white/80 p-2 text-center shadow-sm">
-              <div className="px-2">
-                <p className="text-lg font-bold text-neutral-950">
-                  {services.length}
-                </p>
-                <p className="text-[11px] font-semibold uppercase text-neutral-400">
-                  Total
-                </p>
-              </div>
-              <div className="px-2">
-                <p className="text-lg font-bold text-emerald-700">
-                  {activeServices.length}
-                </p>
-                <p className="text-[11px] font-semibold uppercase text-neutral-400">
-                  Active
-                </p>
-              </div>
-              <div className="px-2">
-                <p className="text-lg font-bold text-neutral-500">
-                  {inactiveServices.length}
-                </p>
-                <p className="text-[11px] font-semibold uppercase text-neutral-400">
-                  Inactive
-                </p>
-              </div>
-            </div>
+                <div className={`grid gap-3 ${fullPage ? "xl:grid-cols-2" : ""}`}>
+                  {activeServices.map((service) => (
+                    <ServiceCard
+                      key={service.id}
+                      service={service}
+                      customCategories={customCategories}
+                      isSaving={isSaving}
+                      deleteConfirmId={deleteConfirmId}
+                      onEdit={() => openEditModal(service)}
+                      onToggleActive={() => handleToggleActive(service)}
+                      onDeleteConfirm={() => setDeleteConfirmId(service.id)}
+                      onDeleteCancel={() => setDeleteConfirmId(null)}
+                      onDeleteConfirmExecute={() => handleDelete(service.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            {inactiveServices.length > 0 && (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-bold text-neutral-800">Inactive services</h3>
+                  <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 ring-1 ring-neutral-200">
+                    {inactiveServices.length}
+                  </span>
+                </div>
+                <div className={`grid gap-3 ${fullPage ? "xl:grid-cols-2" : ""}`}>
+                  {inactiveServices.map((service) => (
+                    <ServiceCard
+                      key={service.id}
+                      service={service}
+                      customCategories={customCategories}
+                      isSaving={isSaving}
+                      deleteConfirmId={deleteConfirmId}
+                      onEdit={() => openEditModal(service)}
+                      onToggleActive={() => handleToggleActive(service)}
+                      onDeleteConfirm={() => setDeleteConfirmId(service.id)}
+                      onDeleteCancel={() => setDeleteConfirmId(null)}
+                      onDeleteConfirmExecute={() => handleDelete(service.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
-
-          {/* Global error */}
-          {error && (
-            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Loading state */}
-          {isLoading && (
-            <div className="grid gap-3 xl:grid-cols-2">
-              {[1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  className="animate-pulse rounded-3xl border border-purple-100 bg-white p-5 shadow-sm"
-                >
-                  <div className="mb-4 h-4 w-36 rounded-full bg-purple-100" />
-                  <div className="mb-3 grid grid-cols-2 gap-2">
-                    <div className="h-10 rounded-2xl bg-neutral-100" />
-                    <div className="h-10 rounded-2xl bg-neutral-100" />
-                  </div>
-                  <div className="h-3 w-2/3 rounded-full bg-neutral-100" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {!isLoading && services.length === 0 && (
-            <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-purple-200 bg-white/80 p-8 text-center shadow-sm sm:p-10">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50 text-purple-700">
-                <Scissors className="h-7 w-7" />
-              </div>
-              <div>
-                <p className="text-lg font-bold text-neutral-900">
-                  No services yet
-                </p>
-                <p className="mt-1 max-w-md text-sm text-neutral-500">
-                  Add your first service so clients can choose a price,
-                  duration, and booking option.
-                </p>
-              </div>
-              <Button
-                onClick={openAddModal}
-                className="rounded-2xl bg-gradient-to-r from-purple-600 to-pink-500 px-5 py-2.5 font-semibold text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600"
-              >
-                <Plus className="mr-2 h-5 w-5" />
-                Add your first service
-              </Button>
-            </div>
-          )}
-
-          {/* Service list */}
-          {!isLoading && services.length > 0 && (
-            <>
-              {/* Add button above list */}
-              <div className="flex flex-col gap-3 rounded-3xl border border-white bg-white/80 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-neutral-600">
-                  Services remain visible here whether active or inactive.
-                </p>
-                <Button
-                  onClick={openAddModal}
-                  disabled={isSaving}
-                  className="w-full rounded-2xl bg-gradient-to-r from-purple-600 to-pink-500 px-4 py-2 font-semibold text-white shadow-md shadow-purple-200 hover:from-purple-700 hover:to-pink-600 sm:w-auto"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Service
-                </Button>
-              </div>
-
-              <div className="space-y-6">
-                {renderServiceSection(
-                  "Active services",
-                  activeServices.length,
-                  activeServices,
-                  "active"
-                )}
-                {renderServiceSection(
-                  "Inactive services",
-                  inactiveServices.length,
-                  inactiveServices,
-                  "inactive"
-                )}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </ServiceManagerHeader>
 
       {/* Modal backdrop */}
       {showModal && (
