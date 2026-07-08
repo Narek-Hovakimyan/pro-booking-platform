@@ -66,14 +66,7 @@ const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
 const SalonCalendarPage = lazy(() => import("./barber/pages/SalonCalendarPage"));
 const SalonDashboardPage = lazy(() => import("./barber/pages/SalonDashboardPage"));
 const SalonReportsPage = lazy(() => import("./barber/pages/SalonReportsPage"));
-const PlatformDashboardPage = lazy(() => import("./platform/pages/PlatformDashboardPage"));
-const PlatformBillingPage = lazy(() => import("./platform/pages/PlatformBillingPage"));
-const PlatformSalonBillingDetailPage = lazy(() =>
-  import("./platform/pages/PlatformSalonBillingDetailPage")
-);
-const PlatformIndividualBillingPage = lazy(() =>
-  import("./platform/pages/PlatformIndividualBillingPage")
-);
+import { platformRoutes } from "./routes/PlatformRoutes";
 
 export default function App() {
   const dispatch = useDispatch();
@@ -973,46 +966,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/admin/platform"
-              element={<Navigate to="/admin/platform/dashboard" replace />}
-            />
-            <Route
-              path="/admin/platform/dashboard"
-              element={
-                <ProtectedRoute requiredPlatformRole="superuser">
-                  <PlatformDashboardPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/platform/billing"
-              element={<Navigate to="/admin/platform/billing/salons" replace />}
-            />
-            <Route
-              path="/admin/platform/billing/salons"
-              element={
-                <ProtectedRoute requiredPlatformRole="superuser">
-                  <PlatformBillingPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/platform/billing/salons/:salonId"
-              element={
-                <ProtectedRoute requiredPlatformRole="superuser">
-                  <PlatformSalonBillingDetailPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/platform/billing/individuals"
-              element={
-                <ProtectedRoute requiredPlatformRole="superuser">
-                  <PlatformIndividualBillingPage />
-                </ProtectedRoute>
-              }
-            />
+            {platformRoutes}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
