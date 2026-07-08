@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+  getMyProfile,
   sendEmailVerificationController,
   updateMyProfile,
   verifyEmailController,
@@ -41,6 +42,8 @@ const originalSubscriptionPlanMethods = {
   create: SubscriptionPlan.create,
 };
 const originalJwtSecret = process.env.JWT_SECRET;
+const originalPlatformAdminEmails = process.env.PLATFORM_ADMIN_EMAILS;
+const originalPlatformAdminIds = process.env.PLATFORM_ADMIN_IDS;
 
 const userId = "64c000000000000000000001";
 const otherUserId = "64c000000000000000000002";
@@ -63,6 +66,16 @@ afterEach(() => {
     delete process.env.JWT_SECRET;
   } else {
     process.env.JWT_SECRET = originalJwtSecret;
+  }
+  if (originalPlatformAdminEmails === undefined) {
+    delete process.env.PLATFORM_ADMIN_EMAILS;
+  } else {
+    process.env.PLATFORM_ADMIN_EMAILS = originalPlatformAdminEmails;
+  }
+  if (originalPlatformAdminIds === undefined) {
+    delete process.env.PLATFORM_ADMIN_IDS;
+  } else {
+    process.env.PLATFORM_ADMIN_IDS = originalPlatformAdminIds;
   }
 });
 
@@ -152,6 +165,47 @@ test("User model – email is optional and has sparse unique index", () => {
     User.schema.indexes().find(([fields]) => fields.email === 1),
     [{ email: 1 }, { unique: true, sparse: true }]
   );
+});
+
+test("getMyProfile returns canAccessPlatform true for DB platform superuser", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    user: createBaseUser({ platformRole: "superuser" }),
+  });
+
+  await getMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.canAccessPlatform, true);
+  assert.equal(res.body.platformRole, undefined);
+});
+
+test("getMyProfile returns canAccessPlatform true for env allowlisted verified user", async () => {
+  process.env.PLATFORM_ADMIN_EMAILS = "allowlisted@example.com";
+  const res = createResponse();
+  const req = createRequest({
+    user: createBaseUser({
+      email: "allowlisted@example.com",
+      emailVerified: true,
+    }),
+  });
+
+  await getMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.canAccessPlatform, true);
+  assert.equal(res.body.platformRole, undefined);
+});
+
+test("getMyProfile returns canAccessPlatform false for normal user", async () => {
+  const res = createResponse();
+  const req = createRequest({ user: createBaseUser() });
+
+  await getMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.canAccessPlatform, false);
+  assert.equal(res.body.platformRole, undefined);
 });
 
 test("updateMyProfile – adding email normalizes trim/lowercase and response excludes token hash", async () => {
@@ -346,6 +400,7 @@ test("updateMyProfile – ignores role, platformRole, and auth internals", async
   assert.equal(Object.hasOwn(updatesSeen, "emailVerified"), false);
   assert.equal(Object.hasOwn(updatesSeen, "resetPasswordTokenHash"), false);
   assert.equal(Object.hasOwn(updatesSeen, "emailVerificationTokenHash"), false);
+  assert.equal(res.body.canAccessPlatform, false);
   assert.equal(res.body.platformRole, undefined);
 });
 
@@ -567,6 +622,7 @@ test("verifyEmailController – valid token verifies email and clears token hash
   assert.equal(res.body.message, "Email verified successfully");
   assert.equal(res.body.user.email, "test@example.com");
   assert.equal(res.body.user.emailVerified, true);
+  assert.equal(res.body.user.canAccessPlatform, false);
   assert.ok(res.body.user.emailVerifiedAt);
   // Token fields not exposed
   assert.equal(res.body.user.emailVerificationTokenHash, undefined);

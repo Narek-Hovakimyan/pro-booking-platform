@@ -13,6 +13,7 @@ import {
 import { sendEmailVerification } from "../services/emailService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
+import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -33,6 +34,7 @@ const getUserData = (user) => ({
   workHistory: user.workHistory || [],
   favoriteBarbers: user.favoriteBarbers || [],
   favoriteSalons: user.favoriteSalons || [],
+  canAccessPlatform: isPlatformSuperuser(user),
   createdAt: user.createdAt,
 });
 
