@@ -46,7 +46,6 @@ const FavoritesPage = lazy(() => import("./client/pages/FavoritesPage"));
 const HomePage = lazy(() => import("./client/pages/HomePage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
-const MyEventsPage = lazy(() => import("./barber/pages/MyEventsPage"));
 const MyBookingsPage = lazy(() => import("./client/pages/MyBookingsPage"));
 const MyWaitlistPage = lazy(() => import("./client/pages/MyWaitlistPage"));
 const JobsPage = lazy(() => import("./pages/JobsPage"));
@@ -57,8 +56,6 @@ const SalonProfilePage = lazy(() => import("./pages/SalonProfilePage"));
 const SalonPublicBookingPage = lazy(() => import("./pages/SalonPublicBookingPage"));
 const SalonsPage = lazy(() => import("./client/pages/SalonsPage"));
 const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
-const EventsPage = lazy(() => import("./pages/EventsPage"));
-const CertificatePage = lazy(() => import("./pages/CertificatePage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const RevenuePage = lazy(() => import("./barber/pages/RevenuePage"));
@@ -66,6 +63,8 @@ const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
 const SalonCalendarPage = lazy(() => import("./barber/pages/SalonCalendarPage"));
 const SalonDashboardPage = lazy(() => import("./barber/pages/SalonDashboardPage"));
 const SalonReportsPage = lazy(() => import("./barber/pages/SalonReportsPage"));
+
+import { eventRoutes } from "./routes/EventRoutes";
 import { platformRoutes } from "./routes/PlatformRoutes";
 
 export default function App() {
@@ -949,23 +948,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/events"
-              element={
-                <ProtectedRoute>
-                  <EventsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="/certificates/:certificateId" element={<CertificatePage />} />
-            <Route
-              path="/my-events"
-              element={
-                <ProtectedRoute>
-                  <MyEventsPage />
-                </ProtectedRoute>
-              }
-            />
+            {eventRoutes}
             {platformRoutes}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
