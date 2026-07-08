@@ -29,6 +29,7 @@ import {
   loadSubscriptionStart,
   loadSubscriptionSuccess,
 } from "./store/slices/subscriptionSlice";
+import { useBookingFlow } from "./shared/hooks/useBookingFlow";
 import initialSchedule, { defaultPersonalSchedule } from "./shared/data/schedule";
 import { getDayKeyFromDate, parseDateKey } from "./shared/utils/dates";
 
@@ -55,17 +56,20 @@ export default function App() {
   const [dataError, setDataError] = useState("");
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [step, setStep] = useState(2);
-
-  const [selectedServiceId, setSelectedServiceId] = useState(null);
-  const [selectedDayKey, setSelectedDayKey] = useState("mon");
-  const [selectedTime, setSelectedTime] = useState("");
-
-  const [client, setClient] = useState({
-    name: "",
-    phone: "",
-    note: "",
-  });
+  const {
+    step,
+    setStep,
+    selectedServiceId,
+    setSelectedServiceId,
+    selectedDayKey,
+    setSelectedDayKey,
+    selectedTime,
+    setSelectedTime,
+    setClient,
+    bookingClient,
+    startBooking,
+    resetBooking,
+  } = useBookingFlow({ currentUser, currentUserRole });
 
   const [newService, setNewService] = useState({
     name: "",
@@ -121,14 +125,6 @@ export default function App() {
     () => barberScheduleEntry.nonWorkingDays || [],
     [barberScheduleEntry]
   );
-  const bookingClient =
-    currentUserRole === "client"
-      ? {
-        ...client,
-        name: client.name || currentUser.name,
-        phone: client.phone || currentUser.phone,
-      }
-      : client;
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -246,17 +242,6 @@ export default function App() {
       disconnectSocket();
     };
   }, [currentUserId, token]);
-
-  const startBooking = useCallback(() => {
-    setStep(2);
-  }, []);
-
-  const resetBooking = useCallback(() => {
-    setStep(2);
-    setSelectedServiceId(null);
-    setSelectedTime("");
-    setClient({ name: "", phone: "", note: "" });
-  }, []);
 
   const addService = useCallback(async (serviceData) => {
     const name = serviceData?.name || newService.name;
