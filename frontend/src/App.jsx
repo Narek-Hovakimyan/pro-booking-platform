@@ -8,15 +8,8 @@ import Notifications from "./shared/components/Notifications";
 import ProtectedRoute from "./shared/components/ProtectedRoute";
 import SubscriptionGuard from "./shared/components/SubscriptionGuard";
 
-import api from "./shared/api/axios";
-import { getFriendlyApiError } from "./shared/api/errors";
 import { getMySubscription } from "./shared/api/subscriptions";
 import { connectSocket, disconnectSocket } from "./shared/lib/socket";
-import {
-  setNonWorkingDays,
-  setSchedule,
-  updateScheduleField,
-} from "./store/slices/scheduleSlice";
 import {
   clearSubscription,
   loadSubscriptionFailure,
@@ -26,7 +19,7 @@ import {
 import { useBookingFlow } from "./shared/hooks/useBookingFlow";
 import { useBarberData } from "./shared/hooks/useBarberData";
 import { useServiceManagement } from "./shared/hooks/useServiceManagement";
-import { getDayKeyFromDate, parseDateKey } from "./shared/utils/dates";
+import { useScheduleManagement } from "./shared/hooks/useScheduleManagement";
 
 const AdminPage = lazy(() => import("./barber/pages/AdminPage"));
 const HomePage = lazy(() => import("./client/pages/HomePage"));
@@ -100,6 +93,18 @@ export default function App() {
     setIsSaving,
   });
 
+  const { updateSchedule, updateNonWorkingDay, updateScheduleOverride } =
+    useScheduleManagement({
+      currentUserId,
+      dispatch,
+      barberSchedule,
+      barberDateSchedules,
+      barberScheduleOverrides,
+      barberDefaultSchedule,
+      barberNonWorkingDays,
+      setDataError,
+    });
+
   useEffect(() => {
     if (!currentUserId || !token || currentUserRole !== "barber") {
       dispatch(clearSubscription());
@@ -145,187 +150,6 @@ export default function App() {
       disconnectSocket();
     };
   }, [currentUserId, token]);
-
-  const updateSchedule = useCallback(async (scheduleKey, field, value) => {
-    if (!currentUserId) return;
-
-    const selectedDate = parseDateKey(scheduleKey);
-    const fallbackDayKey = selectedDate ? getDayKeyFromDate(selectedDate) : scheduleKey;
-    const fallbackSchedule = barberSchedule[fallbackDayKey] || {
-      working: false,
-      from: "",
-      to: "",
-      breakFrom: "",
-      breakTo: "",
-    };
-    const nextDateSchedules = selectedDate
-      ? {
-        ...barberDateSchedules,
-        [scheduleKey]: {
-          ...fallbackSchedule,
-          ...barberDateSchedules[scheduleKey],
-          [field]: value,
-        },
-      }
-      : barberDateSchedules;
-    const nextSchedule = selectedDate
-      ? barberSchedule
-      : {
-        ...barberSchedule,
-        [scheduleKey]: {
-          ...barberSchedule[scheduleKey],
-          [field]: value,
-        },
-      };
-
-    dispatch(
-      updateScheduleField({
-        barberId: currentUserId,
-        dateKey: selectedDate ? scheduleKey : undefined,
-        dayKey: selectedDate ? undefined : scheduleKey,
-        field,
-        value,
-      })
-    );
-    setDataError("");
-
-    try {
-      const { data } = await api.put("/schedules", {
-        barberId: currentUserId,
-        weeklySchedule: nextSchedule,
-        dateSchedules: nextDateSchedules,
-        nonWorkingDays: barberNonWorkingDays,
-      });
-
-      dispatch(
-        setSchedule({
-          barberId: currentUserId,
-          weeklySchedule: data.weeklySchedule,
-          dateSchedules: data.dateSchedules || {},
-          scheduleOverrides: data.scheduleOverrides || {},
-          defaultSchedule: data.defaultSchedule || barberDefaultSchedule,
-          nonWorkingDays: data.nonWorkingDays || [],
-        })
-      );
-    } catch (requestError) {
-      setDataError(
-        getFriendlyApiError(
-          requestError,
-          "Could not save schedule. Please try again."
-        )
-      );
-    }
-  }, [
-    barberDateSchedules,
-    barberDefaultSchedule,
-    barberNonWorkingDays,
-    barberSchedule,
-    currentUserId,
-    dispatch,
-  ]);
-
-  const updateNonWorkingDay = useCallback(async (dateKey, isNonWorking) => {
-    if (!currentUserId) return;
-
-    const nextNonWorkingDays = isNonWorking
-      ? Array.from(new Set([...barberNonWorkingDays, dateKey]))
-      : barberNonWorkingDays.filter((day) => day !== dateKey);
-    const payload = {
-      barberId: currentUserId,
-      weeklySchedule: barberSchedule,
-      dateSchedules: barberDateSchedules,
-      scheduleOverrides: barberScheduleOverrides,
-      nonWorkingDays: nextNonWorkingDays,
-    };
-
-    dispatch(
-      setNonWorkingDays({
-        barberId: currentUserId,
-        nonWorkingDays: nextNonWorkingDays,
-      })
-    );
-    setDataError("");
-
-    try {
-      const { data } = await api.put("/schedules", payload);
-
-      dispatch(
-        setSchedule({
-          barberId: currentUserId,
-          weeklySchedule: data.weeklySchedule,
-          dateSchedules: data.dateSchedules || {},
-          scheduleOverrides: data.scheduleOverrides || {},
-          defaultSchedule: data.defaultSchedule || barberDefaultSchedule,
-          nonWorkingDays: data.nonWorkingDays || [],
-        })
-      );
-    } catch (requestError) {
-      setDataError(
-        getFriendlyApiError(
-          requestError,
-          "Could not save day off. Please try again."
-        )
-      );
-    }
-  }, [
-    barberDateSchedules,
-    barberDefaultSchedule,
-    barberNonWorkingDays,
-    barberSchedule,
-    barberScheduleOverrides,
-    currentUserId,
-    dispatch,
-  ]);
-
-  const updateScheduleOverride = useCallback(async (dateKey, override) => {
-    if (!currentUserId) return;
-
-    const nextOverrides = {
-      ...barberScheduleOverrides,
-      [dateKey]: override,
-    };
-    const nextNonWorkingDays = override.isWorking
-      ? barberNonWorkingDays.filter((day) => day !== dateKey)
-      : Array.from(new Set([...barberNonWorkingDays, dateKey]));
-
-    setDataError("");
-
-    try {
-      const { data } = await api.put("/schedules", {
-        barberId: currentUserId,
-        weeklySchedule: barberSchedule,
-        dateSchedules: barberDateSchedules,
-        scheduleOverrides: nextOverrides,
-        nonWorkingDays: nextNonWorkingDays,
-      });
-
-      dispatch(
-        setSchedule({
-          barberId: currentUserId,
-          weeklySchedule: data.weeklySchedule,
-          dateSchedules: data.dateSchedules || {},
-          scheduleOverrides: data.scheduleOverrides || {},
-          defaultSchedule: data.defaultSchedule || barberDefaultSchedule,
-          nonWorkingDays: data.nonWorkingDays || [],
-        })
-      );
-    } catch (requestError) {
-      setDataError(
-        getFriendlyApiError(
-          requestError,
-          "Could not save schedule. Please try again."
-        )
-      );
-    }
-  }, [
-    barberDateSchedules,
-    barberDefaultSchedule,
-    barberNonWorkingDays,
-    barberSchedule,
-    barberScheduleOverrides,
-    currentUserId,
-    dispatch,
-  ]);
 
   const renderAdminPage = useCallback(
     (section, { requireSubscription = false } = {}) => {
