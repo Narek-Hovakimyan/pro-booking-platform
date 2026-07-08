@@ -44,26 +44,23 @@ const ClientBarberProfilePage = lazy(() => import("./client/pages/ClientBarberPr
 const ClientProfilePage = lazy(() => import("./client/pages/ClientProfilePage"));
 const FavoritesPage = lazy(() => import("./client/pages/FavoritesPage"));
 const HomePage = lazy(() => import("./client/pages/HomePage"));
-const LoginPage = lazy(() => import("./pages/LoginPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
 const MyBookingsPage = lazy(() => import("./client/pages/MyBookingsPage"));
 const MyWaitlistPage = lazy(() => import("./client/pages/MyWaitlistPage"));
 const JobsPage = lazy(() => import("./pages/JobsPage"));
 const MyJobApplicationsPage = lazy(() => import("./pages/MyJobApplicationsPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
-const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 const SalonProfilePage = lazy(() => import("./pages/SalonProfilePage"));
 const SalonPublicBookingPage = lazy(() => import("./pages/SalonPublicBookingPage"));
 const SalonsPage = lazy(() => import("./client/pages/SalonsPage"));
 const SuccessPage = lazy(() => import("./client/pages/SuccessPage"));
-const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
-const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const RevenuePage = lazy(() => import("./barber/pages/RevenuePage"));
 const SalonBillingPage = lazy(() => import("./barber/pages/SalonBillingPage"));
 const SalonCalendarPage = lazy(() => import("./barber/pages/SalonCalendarPage"));
 const SalonDashboardPage = lazy(() => import("./barber/pages/SalonDashboardPage"));
 const SalonReportsPage = lazy(() => import("./barber/pages/SalonReportsPage"));
 
+import { publicRoutes } from "./routes/PublicRoutes";
 import { eventRoutes } from "./routes/EventRoutes";
 import { platformRoutes } from "./routes/PlatformRoutes";
 
@@ -654,10 +651,7 @@ export default function App() {
                 )
               }
             />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            {publicRoutes}
             <Route
               path="/barbers"
               element={
