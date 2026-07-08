@@ -15,6 +15,9 @@ import { fetchServiceCategories } from "@/shared/api/serviceCategories";
 import ServiceCategoryManager from "./ServiceCategoryManager";
 import ServiceCard from "./ServiceCard";
 import ServiceManagerHeader from "./ServiceManagerHeader";
+import ServiceBasicDetailsForm from "./ServiceBasicDetailsForm";
+import ServiceSinglePriceForm from "./ServiceSinglePriceForm";
+import ServiceDiscountForm from "./ServiceDiscountForm";
 
 const emptyForm = {
   name: "",
@@ -424,68 +427,11 @@ export default function ServicesManager({
               )}
 
               <div className="space-y-5">
-                <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
-                  <div>
-                    <p className="text-sm font-bold text-neutral-900">
-                      Basic details
-                    </p>
-                    <p className="mt-1 text-xs text-neutral-500">
-                      Name the service and choose whether it is a single service
-                      or package.
-                    </p>
-                  </div>
-
-                  {/* Service name */}
-                  <label className="grid gap-1.5 text-sm font-semibold">
-                    Service name
-                    <input
-                      className="w-full rounded-2xl border border-neutral-300 p-3 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                      placeholder="e.g. Haircut, Beard Trim"
-                      disabled={isSaving}
-                      value={form.name}
-                      onChange={(e) =>
-                        handleFieldChange("name", e.target.value)
-                      }
-                      autoFocus
-                    />
-                  </label>
-
-                  {/* ── Service type toggle ── */}
-                  <label className="grid gap-1.5 text-sm font-semibold">
-                    Service type
-                  </label>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => {
-                        handleFieldChange("type", "single");
-                        handleFieldChange("includedServiceIds", []);
-                        handleFieldChange("packagePriceMode", "manual");
-                        handleFieldChange("packageDurationMode", "manual");
-                      }}
-                      className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                        form.type === "single"
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                          : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                      }`}
-                    >
-                      Single service
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => handleFieldChange("type", "package")}
-                      className={`flex-1 rounded-2xl border-2 p-3 text-sm font-medium transition-colors ${
-                        form.type === "package"
-                          ? "border-violet-500 bg-violet-50 text-violet-700"
-                          : "border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300"
-                      }`}
-                    >
-                      Package
-                    </button>
-                  </div>
-                </section>
+                <ServiceBasicDetailsForm
+                  form={form}
+                  handleFieldChange={handleFieldChange}
+                  isSaving={isSaving}
+                />
 
                 {/* ── Price & Duration ── */}
                 <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
@@ -689,107 +635,21 @@ export default function ServicesManager({
                   </div>
                 ) : (
                   /* ── Single service: price & duration side by side ── */
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="grid gap-1.5 text-sm font-semibold">
-                      Price (դր)
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
-                          դր
-                        </span>
-                        <input
-                          className="w-full rounded-2xl border border-neutral-300 p-3 pl-10 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                          placeholder="0"
-                          type="number"
-                          min="0"
-                          disabled={isSaving}
-                          value={form.price}
-                          onChange={(e) =>
-                            handleFieldChange("price", e.target.value)
-                          }
-                        />
-                      </div>
-                    </label>
-
-                    <label className="grid gap-1.5 text-sm font-semibold">
-                      Duration
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
-                          min
-                        </span>
-                        <input
-                          className="w-full rounded-2xl border border-neutral-300 p-3 pl-12 font-normal transition-colors focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                          placeholder="30"
-                          type="number"
-                          min="1"
-                          disabled={isSaving}
-                          value={form.duration}
-                          onChange={(e) =>
-                            handleFieldChange("duration", e.target.value)
-                          }
-                        />
-                      </div>
-                    </label>
-                  </div>
+                  <ServiceSinglePriceForm
+                    form={form}
+                    handleFieldChange={handleFieldChange}
+                    isSaving={isSaving}
+                  />
                   )}
                 </section>
 
                 {/* ── Service discount ── */}
-                <div className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/40 p-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-rose-600">
-                      Service discount
-                    </p>
-                    <p className="mt-1 text-xs text-neutral-500">
-                      Optional service-level discount shown before promo codes.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-1.5 text-sm font-semibold">
-                      Discount type
-                      <select
-                        className="w-full rounded-2xl border border-rose-200 bg-white p-3 font-normal transition-colors focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-100"
-                        disabled={isSaving}
-                        value={form.discountType}
-                        onChange={(e) =>
-                          handleFieldChange("discountType", e.target.value)
-                        }
-                      >
-                        <option value="none">No discount</option>
-                        <option value="percent">Percent discount</option>
-                        <option value="fixed">Fixed discount</option>
-                      </select>
-                    </label>
-
-                    <label className="grid gap-1.5 text-sm font-semibold">
-                      Discount value
-                      <input
-                        className="w-full rounded-2xl border border-rose-200 bg-white p-3 font-normal transition-colors focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-100 disabled:bg-neutral-100"
-                        disabled={isSaving || form.discountType === "none"}
-                        min={form.discountType === "percent" ? "1" : "0"}
-                        max={
-                          form.discountType === "percent"
-                            ? "100"
-                            : Number.isFinite(formOriginalPrice)
-                              ? String(formOriginalPrice)
-                              : undefined
-                        }
-                        placeholder={
-                          form.discountType === "percent"
-                            ? "1-100"
-                            : form.discountType === "fixed"
-                              ? "Amount in դր"
-                              : "0"
-                        }
-                        type="number"
-                        value={form.discountValue}
-                        onChange={(e) =>
-                          handleFieldChange("discountValue", e.target.value)
-                        }
-                      />
-                    </label>
-                  </div>
-                </div>
+                <ServiceDiscountForm
+                  form={form}
+                  handleFieldChange={handleFieldChange}
+                  isSaving={isSaving}
+                  formOriginalPrice={formOriginalPrice}
+                />
 
                 <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
                   <div>
