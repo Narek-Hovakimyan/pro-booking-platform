@@ -196,7 +196,7 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   assert.ok(res.body.token);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
   assert.equal(res.body.user.role, "barber");
-  assert.equal(res.body.user.platformRole, "superuser");
+  assert.equal(res.body.user.platformRole, undefined);
   assert.equal(res.body.user.canAccessPlatform, true);
   assert.equal(existingUser.phone, "+37400111222");
   assert.deepEqual(existingUser.salons, [{ salon: "salon-1", status: "approved" }]);

@@ -18,14 +18,7 @@ export default function ProtectedRoute({ children, role, requiredPlatformRole })
     );
   }
 
-  if (
-    requiredPlatformRole &&
-    (
-      requiredPlatformRole === "superuser"
-        ? !canAccessPlatform(currentUser)
-        : currentUser?.platformRole !== requiredPlatformRole
-    )
-  ) {
+  if (requiredPlatformRole && !canAccessPlatform(currentUser)) {
     return (
       <Navigate
         to={currentUser?.role === "barber" ? "/admin" : "/"}

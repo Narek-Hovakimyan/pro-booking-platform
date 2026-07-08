@@ -10,36 +10,28 @@ import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 
-const getUserData = (user) => {
-  const data = {
-    id: user._id,
-    name: user.name,
-    phone: user.phone,
-    email: user.email || "",
-    emailVerified: user.emailVerified || false,
-    emailVerifiedAt: user.emailVerifiedAt || null,
-    city: user.city || "",
-    avatarUrl: user.avatarUrl || "",
-    role: user.role,
-    salon: user.salon || null,
-    salonStatus: user.salonStatus || "none",
-    salons: user.salons || [],
-    profession: user.profession || "barber",
-    barberType: user.barberType || "",
-    specialty: user.specialty || "unisex",
-    workHistory: user.workHistory || [],
-    favoriteBarbers: user.favoriteBarbers || [],
-    favoriteSalons: user.favoriteSalons || [],
-    canAccessPlatform: isPlatformSuperuser(user),
-    createdAt: user.createdAt,
-  };
-
-  if (user.platformRole === "superuser") {
-    data.platformRole = "superuser";
-  }
-
-  return data;
-};
+const getUserData = (user) => ({
+  id: user._id,
+  name: user.name,
+  phone: user.phone,
+  email: user.email || "",
+  emailVerified: user.emailVerified || false,
+  emailVerifiedAt: user.emailVerifiedAt || null,
+  city: user.city || "",
+  avatarUrl: user.avatarUrl || "",
+  role: user.role,
+  salon: user.salon || null,
+  salonStatus: user.salonStatus || "none",
+  salons: user.salons || [],
+  profession: user.profession || "barber",
+  barberType: user.barberType || "",
+  specialty: user.specialty || "unisex",
+  workHistory: user.workHistory || [],
+  favoriteBarbers: user.favoriteBarbers || [],
+  favoriteSalons: user.favoriteSalons || [],
+  canAccessPlatform: isPlatformSuperuser(user),
+  createdAt: user.createdAt,
+});
 
 const signToken = (userId) => {
   if (!process.env.JWT_SECRET) {
