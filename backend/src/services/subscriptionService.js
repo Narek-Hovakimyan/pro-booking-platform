@@ -33,19 +33,21 @@ import {
   seatHasActiveParentSubscription,
   seatMatchesSalon,
 } from "./subscription/seatHelpers.js";
+import { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
+import {
+  getLatestRecoverableSalonPaymentAttempt,
+} from "./subscription/paymentAttemptHelpers.js";
 import {
   DEFAULT_PLAN_CODE,
   TRIAL_DAYS,
   GRACE_DAYS,
   PAID_SUBSCRIPTION_STATUSES,
-  RECOVERABLE_PAYMENT_ATTEMPT_STATUSES,
   MANUAL_PROVIDER,
   PAYMENT_ATTEMPT_EXPIRY_HOURS,
   SUBSCRIPTION_SEAT_BARBER_FIELDS,
   getIdString,
   getIdsForQuery,
   getOwnerIdForQuery,
-  isSubscriptionStatusActive,
   hasUnexpiredPeriod,
   subscriptionHasPaidAccess,
   resolveQuery,
@@ -53,7 +55,13 @@ import {
   addMonths,
   normalizePaymentHistoryLimit,
   buildPaymentAttemptExpiry,
+  getDaysRemaining,
 } from "./subscription/subscriptionHelpers.js";
+// Re-exports for modules that import from subscriptionService.js
+export { getDaysRemaining } from "./subscription/subscriptionHelpers.js";
+export { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
+export { getLatestRecoverableSalonPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
+
 
 /* ───────────────────────────────────────────────────────────
  *  Default plan & basic subscription helpers (Phase 1)
@@ -177,53 +185,6 @@ export const isManualActivationAvailable = () =>
 
 export const isDevPaymentConfirmationAvailable = () =>
   process.env.NODE_ENV !== "production";
-
-export const getDaysRemaining = (date, now = new Date()) => {
-  if (!date) return null;
-
-  const target = new Date(date);
-  if (Number.isNaN(target.getTime())) return null;
-
-  const diffMs = target.getTime() - now.getTime();
-  return Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
-};
-
-export const serializeSubscriptionStatus = (
-  subscription,
-  plan = null,
-  now = new Date()
-) => {
-  if (!subscription) return null;
-
-  const raw = subscription.toObject ? subscription.toObject() : subscription;
-  const planData = raw.planId && typeof raw.planId === "object" ? raw.planId : plan;
-  const currentPeriodEnd = raw.currentPeriodEnd || raw.trialEndsAt || null;
-  const rawDaysRemaining = getDaysRemaining(currentPeriodEnd, now);
-  const endDate = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
-  const periodEnded =
-    endDate && !Number.isNaN(endDate.getTime()) && endDate.getTime() <= now.getTime();
-  const isExpired = raw.status === "expired" || Boolean(periodEnded);
-  const isActive = isSubscriptionStatusActive(raw.status) && !isExpired;
-  const daysRemaining = isActive ? rawDaysRemaining : 0;
-  const seatCount = Number(raw.seatCount || 1);
-  const pricePerSeat = Number(raw.pricePerSeat ?? planData?.pricePerSeat ?? 0);
-  const monthlyTotal = Number(raw.totalPrice ?? pricePerSeat * seatCount);
-
-  return {
-    ...raw,
-    id: raw.id || raw._id,
-    daysRemaining,
-    isActive,
-    isExpired,
-    isExpiringSoon:
-      daysRemaining !== null && daysRemaining <= 7 && isActive,
-    renewalRequiredAt: currentPeriodEnd,
-    currentPeriodEnd,
-    monthlyTotal,
-    pricePerSeat,
-    seatCount,
-  };
-};
 
 export const grantSubscriptionGraceToExistingBarbers = async ({
   now = new Date(),
@@ -472,20 +433,6 @@ export const extendManualSubscription = async ({
 };
 
 export const grantManualSubscription = extendManualSubscription;
-
-const getLatestRecoverableSalonPaymentAttempt = async (salonId) => {
-  const attempts = await SubscriptionPaymentAttempt.find({
-    purpose: "subscription",
-    ownerType: "salon",
-    ownerId: salonId,
-    status: { $in: RECOVERABLE_PAYMENT_ATTEMPT_STATUSES },
-  })
-    .sort({ createdAt: -1 })
-    .limit(1)
-    .lean();
-
-  return serializeUserPaymentAttempt(attempts?.[0]);
-};
 
 const validateSubscriptionRequester = async ({
   requester,

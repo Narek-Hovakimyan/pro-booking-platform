@@ -89,3 +89,16 @@ export const normalizePaymentHistoryLimit = (limit) => {
 
 export const buildPaymentAttemptExpiry = (now = new Date()) =>
   new Date(now.getTime() + PAYMENT_ATTEMPT_EXPIRY_HOURS * 60 * 60 * 1000);
+
+/**
+ * Check how many days remain until a given date.
+ */
+export const getDaysRemaining = (date, now = new Date()) => {
+  if (!date) return null;
+
+  const target = new Date(date);
+  if (Number.isNaN(target.getTime())) return null;
+
+  const diffMs = target.getTime() - now.getTime();
+  return Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
+};
