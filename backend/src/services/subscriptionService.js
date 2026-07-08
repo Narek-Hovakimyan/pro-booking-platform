@@ -19,7 +19,20 @@ import {
   serializeUserPaymentAttempt,
   serializeUserPaymentRecord,
 } from "./payment/subscriptionPaymentSerializers.js";
-import { isWorkingSpecialist } from "./salon/salonRelationshipService.js";
+import {
+  fetchBarberMembership,
+  fetchBarberMemberships,
+  getSeatSalonId,
+  isAcceptedSalonStaffMember,
+  sanitizeApprovedMember,
+  isAcceptedStaffSeat,
+  sanitizeBillingSeat,
+  filterAcceptedStaffSeats,
+  countActiveAcceptedStaffSeats,
+  getActiveSeatsForBarber,
+  seatHasActiveParentSubscription,
+  seatMatchesSalon,
+} from "./subscription/seatHelpers.js";
 import {
   DEFAULT_PLAN_CODE,
   TRIAL_DAYS,
@@ -41,97 +54,6 @@ import {
   normalizePaymentHistoryLimit,
   buildPaymentAttemptExpiry,
 } from "./subscription/subscriptionHelpers.js";
-
-
-const fetchBarberMembership = async (barberId) => {
-  const query = User.findById(barberId);
-  if (query && typeof query.select === "function") {
-    return resolveQuery(query.select("salon salonStatus salons role"));
-  }
-
-  return query;
-};
-
-const fetchBarberMemberships = async (barberIds) => {
-  const query = User.find({ _id: { $in: getIdsForQuery(barberIds) } });
-  if (query && typeof query.select === "function") {
-    return resolveQuery(query.select("_id salon salonStatus salons role"));
-  }
-
-  return query;
-};
-
-const getSeatSalonId = (seat) =>
-  getIdString(seat?.salonId || seat?.subscriptionId?.ownerId);
-
-const isAcceptedSalonStaffMember = (barber, salonId) => {
-  const stringId = getIdString(salonId);
-  if (!barber || !stringId) return false;
-
-  const salonEntry = (barber.salons || []).find(
-    (s) => getIdString(s.salon) === stringId
-  );
-
-  if (salonEntry) {
-    return isWorkingSpecialist(salonEntry);
-  }
-
-  return (
-    getIdString(barber.salon) === stringId && barber.salonStatus === "approved"
-  );
-};
-
-const sanitizeApprovedMember = (member) => {
-  const { salons, salon, salonStatus, ...safeMember } = member || {};
-  return safeMember;
-};
-
-const isAcceptedStaffSeat = (seat, salonId) =>
-  isAcceptedSalonStaffMember(seat?.barberId, salonId);
-
-const sanitizeBillingSeat = (seat) => {
-  if (!seat?.barberId || typeof seat.barberId !== "object") return seat;
-
-  return {
-    ...seat,
-    barberId: sanitizeApprovedMember(seat.barberId),
-  };
-};
-
-const filterAcceptedStaffSeats = (seats = [], salonId) =>
-  seats
-    .filter((seat) => isAcceptedStaffSeat(seat, salonId))
-    .map(sanitizeBillingSeat);
-
-const countActiveAcceptedStaffSeats = async ({ subscriptionId, salonId }) => {
-  const activeSeats = await SubscriptionSeat.find({
-    subscriptionId,
-    status: "active",
-  })
-    .populate("barberId", SUBSCRIPTION_SEAT_BARBER_FIELDS)
-    .lean();
-
-  return filterAcceptedStaffSeats(activeSeats, salonId).length;
-};
-
-const getActiveSeatsForBarber = async (barberId) => {
-  const query = SubscriptionSeat.find({
-    barberId,
-    status: "active",
-  });
-  const populated =
-    query && typeof query.populate === "function"
-      ? query.populate("subscriptionId")
-      : query;
-
-  return resolveQuery(populated);
-};
-
-const seatHasActiveParentSubscription = (seat, now = new Date()) =>
-  subscriptionHasPaidAccess(seat?.subscriptionId, now);
-
-const seatMatchesSalon = (seat, salonId) =>
-  !salonId || getSeatSalonId(seat) === getIdString(salonId);
 
 /* ───────────────────────────────────────────────────────────
  *  Default plan & basic subscription helpers (Phase 1)
