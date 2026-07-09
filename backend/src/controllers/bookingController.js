@@ -14,6 +14,10 @@ import {
   getClientName,
   canManageBookingSalon,
 } from "../services/booking/bookingControllerHelpers.js";
+import {
+  collectReferenceImagePaths,
+  cleanupReferenceImages,
+} from "../services/booking/bookingReferenceImageHelpers.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
@@ -28,7 +32,6 @@ import {
 } from "../services/bookingSideEffectsService.js";
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
-import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import {
   barberHasPaidAccessForSalon,
   barberHasPaidSeatAccessForSalon,
@@ -90,16 +93,6 @@ export const __bookingTestHooks = {
   rollbackVoucherClaim,
   recordVoucherRedemption,
   restoreVoucherOnCancel,
-};
-
-const collectReferenceImagePaths = (req) => {
-  if (!req.files || !Array.isArray(req.files)) return [];
-  return req.files.map((file) => `uploads/booking-references/${file.filename}`);
-};
-
-const cleanupReferenceImages = (paths) => {
-  if (!paths || !paths.length) return;
-  paths.forEach(deleteUploadedFile);
 };
 
 export const createBooking = async (req, res) => {
