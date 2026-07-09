@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import PaymentRecord from "../models/PaymentRecord.js";
@@ -23,19 +22,14 @@ import {
   fetchBarberMemberships,
   getSeatSalonId,
   isAcceptedSalonStaffMember,
-  sanitizeApprovedMember,
   isAcceptedStaffSeat,
   sanitizeBillingSeat,
-  filterAcceptedStaffSeats,
   countActiveAcceptedStaffSeats,
   getActiveSeatsForBarber,
   seatHasActiveParentSubscription,
   seatMatchesSalon,
 } from "./subscription/seatHelpers.js";
 import { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
-import {
-  getLatestRecoverableSalonPaymentAttempt,
-} from "./subscription/paymentAttemptHelpers.js";
 import { requireSalonOwnerOrAdmin } from "./subscription/subscriptionAuthorization.js";
 import {
   DEFAULT_PLAN_CODE,
@@ -44,23 +38,25 @@ import {
   PAID_SUBSCRIPTION_STATUSES,
   MANUAL_PROVIDER,
   PAYMENT_ATTEMPT_EXPIRY_HOURS,
-  SUBSCRIPTION_SEAT_BARBER_FIELDS,
   getIdString,
   getIdsForQuery,
-  getOwnerIdForQuery,
   hasUnexpiredPeriod,
   subscriptionHasPaidAccess,
-  resolveQuery,
   addDays,
   addMonths,
   buildPaymentAttemptExpiry,
   getDaysRemaining,
 } from "./subscription/subscriptionHelpers.js";
+import { getOrCreateDefaultSubscriptionPlan, isManualActivationAvailable, isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
 // Re-exports for modules that import from subscriptionService.js
 export { getDaysRemaining } from "./subscription/subscriptionHelpers.js";
 export { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
 export { getLatestRecoverableSalonPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
+export { getOrCreateDefaultSubscriptionPlan } from "./subscription/subscriptionPlanHelpers.js";
+export { isManualActivationAvailable } from "./subscription/subscriptionPlanHelpers.js";
+export { isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
 export { getMySubscriptionPaymentHistory } from "./subscription/userSubscriptionQueries.js";
+export { getSubscriptionByOwner, salonHasActiveSubscription, getSalonSubscriptionDetails } from "./subscription/salonSubscriptionQueries.js";
 export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
 
 const isApprovedMember = (barber, salonId) => {
@@ -75,61 +71,9 @@ const isApprovedMember = (barber, salonId) => {
  * Get or create the default subscription plan.
  * Idempotent — safe to call repeatedly.
  */
-export const getOrCreateDefaultSubscriptionPlan = async () => {
-  const existing = await SubscriptionPlan.findOne({ code: DEFAULT_PLAN_CODE });
-  if (existing) {
-    return existing;
-  }
-
-  return SubscriptionPlan.create({
-    name: "Barber Monthly",
-    code: DEFAULT_PLAN_CODE,
-    pricePerSeat: 5000,
-    currency: "AMD",
-    interval: "month",
-    features: [
-      "Accept unlimited bookings",
-      "Manage your schedule",
-      "Client management",
-    ],
-    isActive: true,
-  });
-};
-
-export const salonHasActiveSubscription = async (
-  salonId,
-  { now = new Date() } = {}
-) => {
-  if (!salonId) return false;
-
-  const subscription = await resolveQuery(
-    Subscription.findOne({
-      ownerType: "salon",
-      ownerId: getOwnerIdForQuery(salonId),
-      status: { $in: PAID_SUBSCRIPTION_STATUSES },
-    })
-  );
-
-  return subscriptionHasPaidAccess(subscription, now, {
-    statusAlreadyFiltered: true,
-  });
-};
-
 /**
  * Get subscription by owner type and owner ID, populated with plan.
  */
-export const getSubscriptionByOwner = async ({ ownerType, ownerId }) => {
-  if (!ownerType || !ownerId) {
-    return null;
-  }
-
-  const subscription = await Subscription.findOne({ ownerType, ownerId })
-    .populate("planId")
-    .lean();
-
-  return subscription;
-};
-
 /**
  * Create a trial subscription for a barber or salon owner.
  * Idempotent — if a subscription already exists for this owner, returns it.
@@ -183,12 +127,6 @@ export const createSalonTrialSubscription = async ({
     payerId,
     seatCount,
   });
-
-export const isManualActivationAvailable = () =>
-  process.env.NODE_ENV !== "production";
-
-export const isDevPaymentConfirmationAvailable = () =>
-  process.env.NODE_ENV !== "production";
 
 export const grantSubscriptionGraceToExistingBarbers = async ({
   now = new Date(),
@@ -1156,102 +1094,6 @@ export const revokeSalonSeatsForRemovedMember = async ({
  * @param {Object} params.requester - Express req.user (must have _id)
  * @returns {Object} { subscription, activeSeats, revokedSeats, availableSeatCount, approvedMembers }
  */
-export const getSalonSubscriptionDetails = async ({ salonId, requester }) => {
-  const salon = await requireSalonOwnerOrAdmin(salonId, requester?._id);
-  const plan = await getOrCreateDefaultSubscriptionPlan();
-
-  // Fetch the salon's subscription (active/trialing or any)
-  const subscription = await Subscription.findOne({
-    ownerType: "salon",
-    ownerId: salonId,
-  }).lean();
-  const serializedSubscription = serializeSubscriptionStatus(subscription, plan);
-
-  // Fetch active and revoked seats, populated with barber basic info
-  const [rawActiveSeats, rawRevokedSeats, pendingPaymentAttempt] = await Promise.all([
-    SubscriptionSeat.find({
-      subscriptionId: subscription?._id,
-      status: "active",
-    })
-      .populate("barberId", SUBSCRIPTION_SEAT_BARBER_FIELDS)
-      .lean(),
-    SubscriptionSeat.find({
-      subscriptionId: subscription?._id,
-      status: "revoked",
-    })
-      .populate("barberId", SUBSCRIPTION_SEAT_BARBER_FIELDS)
-      .sort({ revokedAt: -1 })
-      .limit(20)
-      .lean(),
-    getLatestRecoverableSalonPaymentAttempt(salon._id),
-  ]);
-  const activeSeats = filterAcceptedStaffSeats(rawActiveSeats, salon._id);
-  const revokedSeats = filterAcceptedStaffSeats(rawRevokedSeats, salon._id);
-
-  // Compute available seat count
-  const activeSeatCount = activeSeats.length;
-  const activeCapacity = serializedSubscription?.isActive
-    ? serializedSubscription.seatCount
-    : 0;
-  const availableSeatCount = Math.max(0, activeCapacity - activeSeatCount);
-
-  // Fetch accepted staff only; chair renters remain independently billed.
-  const approvedMemberDocs = await User.find(
-    {
-      role: "barber",
-      $or: [
-        {
-          salons: {
-            $elemMatch: {
-              salon: salon._id,
-              status: "approved",
-              $and: [
-                {
-                  $or: [
-                    { relationshipType: "staff" },
-                    { relationshipType: { $exists: false } },
-                  ],
-                },
-                {
-                  $or: [
-                    { relationshipStatus: "accepted" },
-                    { relationshipStatus: { $exists: false } },
-                  ],
-                },
-              ],
-            },
-          },
-        },
-        { salon: salon._id, salonStatus: "approved" },
-      ],
-    },
-    "name phone avatarUrl profession salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist"
-  ).lean();
-  const approvedMembers = approvedMemberDocs
-    .filter((member) => isAcceptedSalonStaffMember(member, salon._id))
-    .map(sanitizeApprovedMember);
-
-  return {
-    subscription: serializedSubscription,
-    activeSeats,
-    revokedSeats,
-    availableSeatCount,
-    activeCapacity,
-    approvedMembers,
-    pendingPaymentAttempt,
-    defaultPlan: plan
-      ? {
-          code: plan.code,
-          name: plan.name,
-          pricePerSeat: plan.pricePerSeat,
-          currency: plan.currency,
-          interval: plan.interval,
-        }
-      : null,
-    manualActivationAvailable: isManualActivationAvailable(),
-  };
-};
-
 /**
  * Assign a salon subscription seat to a barber.
  *
