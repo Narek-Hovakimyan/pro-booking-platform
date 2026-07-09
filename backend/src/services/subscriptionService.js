@@ -49,6 +49,7 @@ export { getMySubscriptionPaymentHistory } from "./subscription/userSubscription
 export { getPaidAccessByBarberIds, getPaidAccessByBarberIdsForSalon, getMySubscriptionAccess } from "./subscription/subscriptionAccessQueries.js";
 export { barberHasPaidAccess, barberHasPaidAccessForSalon, barberHasPaidSeatAccessForSalon } from "./subscription/subscriptionPaidAccessQueries.js";
 export { createTrialSubscription, createSalonTrialSubscription } from "./subscription/subscriptionTrialMutations.js";
+export { expireSubscriptions } from "./subscription/subscriptionExpiryMutations.js";
 export { getSubscriptionByOwner, salonHasActiveSubscription, getSalonSubscriptionDetails } from "./subscription/salonSubscriptionQueries.js";
 export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
 export { getSubscriptionPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
@@ -327,38 +328,6 @@ export const grantManualSubscription = extendManualSubscription;
  *   2. The barber has an active SubscriptionSeat whose parent salon subscription
  *      is active or trialing.
  */
-export const expireSubscriptions = async ({ now = new Date() } = {}) => {
-  const subscriptions = await Subscription.find({
-    status: { $in: PAID_SUBSCRIPTION_STATUSES },
-    $or: [
-      { currentPeriodEnd: { $lt: now } },
-      { trialEndsAt: { $lt: now } },
-    ],
-  });
-  const summary = {
-    checkedCount: subscriptions.length,
-    expiredCount: 0,
-    errorsCount: 0,
-    errors: [],
-  };
-
-  for (const subscription of subscriptions) {
-    try {
-      subscription.status = "expired";
-      await subscription.save();
-      summary.expiredCount++;
-    } catch (error) {
-      summary.errorsCount++;
-      summary.errors.push({
-        subscriptionId: String(subscription._id),
-        message: error.message,
-      });
-    }
-  }
-
-  return summary;
-};
-
 export const createSubscriptionPaymentIntent = async ({
   requester,
   ownerType,
