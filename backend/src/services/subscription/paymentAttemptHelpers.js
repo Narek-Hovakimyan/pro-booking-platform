@@ -1,5 +1,6 @@
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import { serializeUserPaymentAttempt } from "../payment/subscriptionPaymentSerializers.js";
+import { getAuthorizedPaymentAttempt } from "./subscriptionAuthorization.js";
 import { RECOVERABLE_PAYMENT_ATTEMPT_STATUSES } from "./subscriptionHelpers.js";
 
 /**
@@ -17,4 +18,17 @@ export const getLatestRecoverableSalonPaymentAttempt = async (salonId) => {
     .lean();
 
   return serializeUserPaymentAttempt(attempts?.[0]);
+};
+
+export const getSubscriptionPaymentAttempt = async ({
+  paymentAttemptId,
+  requester,
+}) => {
+  const attempt = await getAuthorizedPaymentAttempt({
+    paymentAttemptId,
+    requester,
+    action: "view",
+  });
+
+  return serializeUserPaymentAttempt(attempt);
 };

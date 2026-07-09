@@ -24,7 +24,7 @@ import {
   countActiveAcceptedStaffSeats,
 } from "./subscription/seatHelpers.js";
 import { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
-import { requireSalonOwnerOrAdmin } from "./subscription/subscriptionAuthorization.js";
+import { requireSalonOwnerOrAdmin, validateSubscriptionRequester, getAuthorizedPaymentAttempt } from "./subscription/subscriptionAuthorization.js";
 import {
   DEFAULT_PLAN_CODE,
   TRIAL_DAYS,
@@ -51,6 +51,7 @@ export { getPaidAccessByBarberIds, getPaidAccessByBarberIdsForSalon, getMySubscr
 export { barberHasPaidAccess, barberHasPaidAccessForSalon, barberHasPaidSeatAccessForSalon } from "./subscription/subscriptionPaidAccessQueries.js";
 export { getSubscriptionByOwner, salonHasActiveSubscription, getSalonSubscriptionDetails } from "./subscription/salonSubscriptionQueries.js";
 export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
+export { getSubscriptionPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
 
 const isApprovedMember = (barber, salonId) => {
   return isAcceptedSalonStaffMember(barber, salonId);
@@ -369,79 +370,6 @@ export const extendManualSubscription = async ({
 
 export const grantManualSubscription = extendManualSubscription;
 
-const validateSubscriptionRequester = async ({
-  requester,
-  ownerType,
-  ownerId,
-  payerId = null,
-  action = "manage",
-}) => {
-  if (!requester?._id) {
-    const error = new Error("Authentication required");
-    error.statusCode = 401;
-    throw error;
-  }
-
-  if (requester.role !== "barber") {
-    const error = new Error("Only barbers can manage subscription payments");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  if (ownerType === "barber") {
-    if (!sameId(requester._id, ownerId) && !sameId(requester._id, payerId)) {
-      const error = new Error(`You can only ${action} your own payment attempt`);
-      error.statusCode = 403;
-      throw error;
-    }
-    return null;
-  }
-
-  if (ownerType === "salon") {
-    const salon = await Salon.findById(ownerId);
-    if (!salon) {
-      const error = new Error("Salon not found");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    if (!canManageSalonRequest(salon, requester._id)) {
-      const error = new Error(`Only salon owner or admin can ${action} payment attempts`);
-      error.statusCode = 403;
-      throw error;
-    }
-
-    return salon;
-  }
-
-  const error = new Error("ownerType must be 'barber' or 'salon'");
-  error.statusCode = 400;
-  throw error;
-};
-
-const getAuthorizedPaymentAttempt = async ({
-  paymentAttemptId,
-  requester,
-  action,
-}) => {
-  const attempt = await SubscriptionPaymentAttempt.findById(paymentAttemptId);
-  if (!attempt) {
-    const error = new Error("Payment attempt not found");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  await validateSubscriptionRequester({
-    requester,
-    ownerType: attempt.ownerType,
-    ownerId: attempt.ownerId,
-    payerId: attempt.payerId,
-    action,
-  });
-
-  return attempt;
-};
-
 /**
  * Check if a barber has paid access to the platform.
  * Returns true if:
@@ -608,19 +536,6 @@ export const createSubscriptionPaymentIntent = async ({
     currency: plan.currency,
     status: attempt.status,
   };
-};
-
-export const getSubscriptionPaymentAttempt = async ({
-  paymentAttemptId,
-  requester,
-}) => {
-  const attempt = await getAuthorizedPaymentAttempt({
-    paymentAttemptId,
-    requester,
-    action: "view",
-  });
-
-  return serializeUserPaymentAttempt(attempt);
 };
 
 export const cancelSubscriptionPaymentAttempt = async ({
