@@ -1,24 +1,20 @@
-import path from "path";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import {
-  isValidObjectId,
   allowedBookingDelayMinutes,
   minutesToTime,
-  hasOwnBodyField,
   attemptsDateTimeChange,
-  getErrorStatusCode,
   sendControllerError,
-  sameId,
   resolveBookingSalon,
   getClientName,
-  canManageBookingSalon,
 } from "../services/booking/bookingControllerHelpers.js";
 import {
   collectReferenceImagePaths,
   cleanupReferenceImages,
 } from "../services/booking/bookingReferenceImageHelpers.js";
 import { updateBookingTreatmentRecord } from "../services/booking/bookingTreatmentRecordService.js";
+import { executeBookingPriceQuote } from "../services/booking/bookingQuoteService.js";
+import { resolveReferenceImageRequest } from "../services/booking/bookingReferenceImageService.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
@@ -38,8 +34,6 @@ import {
   barberHasPaidSeatAccessForSalon,
 } from "../services/subscriptionService.js";
 import {
-  calculateVoucherDiscount,
-  validateVoucherForBooking,
   claimVoucherForBooking,
   buildBookingPricing,
   rollbackVoucherClaim,
@@ -381,75 +375,12 @@ export const createBooking = async (req, res) => {
 
 export const quoteBookingPrice = async (req, res) => {
   try {
-    const { barberId, serviceId } = req.body || {};
-    const clientId = req.user?._id || req.user?.id;
-    const rawVoucherCode =
-      req.body?.promotionCode || req.body?.voucherCode || req.body?.voucher_code;
-
-    if (req.user?.role !== "client" || !clientId) {
-      return res.status(403).json({
-        message: "Only clients can request booking price quotes",
-      });
-    }
-
-    if (!barberId || !serviceId) {
-      return res.status(400).json({ message: "barberId and serviceId are required" });
-    }
-
-    const salonResolution = await resolveBookingSalon({
-      barberId,
-      salonId: req.body.salonId,
+    const result = await executeBookingPriceQuote({
+      body: req.body,
+      user: req.user,
     });
 
-    if (salonResolution.message) {
-      return res.status(400).json({ message: salonResolution.message });
-    }
-
-    const hasExplicitSalonContext = Boolean(req.body.salonId);
-    const barberPaidAccess = hasExplicitSalonContext
-      ? await barberHasPaidSeatAccessForSalon(barberId, salonResolution.salonId)
-      : await barberHasPaidAccessForSalon(barberId, salonResolution.salonId);
-    if (!barberPaidAccess) {
-      return res.status(403).json({
-        code: "BARBER_UNAVAILABLE",
-        message: "This specialist is not currently accepting bookings.",
-      });
-    }
-
-    const service = await Service.findOne({ _id: serviceId, barberId, active: true });
-
-    if (!service) {
-      return res.status(400).json({
-        message: "Service is not available for this barber",
-      });
-    }
-
-    const pricing = await buildBookingPricing({
-      barber: salonResolution.barber,
-      barberId,
-      clientId,
-      service,
-      serviceId,
-      salonId: salonResolution.salonId,
-      voucherCode: rawVoucherCode,
-      claimVoucher: false,
-    });
-    const loyaltyDiscount = pricing.loyaltyDiscount;
-
-    return res.json({
-      originalPrice: pricing.originalPrice,
-      serviceDiscountAmount: pricing.serviceDiscountAmount,
-      serviceDiscountedPrice: pricing.serviceDiscountedPrice,
-      voucherDiscountAmount: pricing.voucherDiscountAmount,
-      loyaltyDiscountApplied: loyaltyDiscount.applied,
-      loyaltyDiscountPercent: loyaltyDiscount.percent,
-      loyaltyDiscountAmount: loyaltyDiscount.amount,
-      loyaltyEligibleCompletedBookings:
-        loyaltyDiscount.eligibleCompletedBookings,
-      loyaltyTierIndex: loyaltyDiscount.tierIndex,
-      loyaltyRuleSnapshot: loyaltyDiscount.ruleSnapshot,
-      finalPrice: pricing.finalPrice,
-    });
+    return res.status(result.status).json(result.body);
   } catch (error) {
     return sendControllerError(res, error, "Could not quote booking price");
   }
@@ -1023,56 +954,17 @@ export const updateTreatmentRecord = async (req, res) => {
 export const getReferenceImage = async (req, res, next) => {
   try {
     const { bookingId, imageName } = req.params;
+    const result = await resolveReferenceImageRequest({
+      bookingId,
+      imageName,
+      user: req.user,
+    });
 
-    if (!isValidObjectId(bookingId)) {
-      return res.status(400).json({ message: "Invalid booking ID" });
+    if (result.error) {
+      return res.status(result.status).json({ message: result.error });
     }
 
-    // Prevent path traversal
-    if (imageName.includes("..") || imageName.includes("/") || imageName.includes("\\")) {
-      return res.status(400).json({ message: "Invalid image name" });
-    }
-
-    const booking = await Booking.findById(bookingId);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    // Authorize: booking client, assigned barber, or the owner/admin of the
-    // salon tied to this booking.
-    const isBookingClient =
-      booking.clientId &&
-      req.user?._id &&
-      sameId(req.user._id, booking.clientId);
-    const isAssignedBarber =
-      sameId(req.user?._id, booking.barberId);
-    const isSalonManager =
-      !isBookingClient &&
-      !isAssignedBarber &&
-      await canManageBookingSalon(booking, req.user?._id);
-
-    if (!isBookingClient && !isAssignedBarber && !isSalonManager) {
-      return res.status(403).json({ message: "Not authorized to view these images" });
-    }
-
-    // Verify the image is actually listed on this booking
-    const fullPath = `uploads/booking-references/${imageName}`;
-
-    if (!booking.referenceImages || !booking.referenceImages.includes(fullPath)) {
-      return res.status(404).json({ message: "Image not found in booking" });
-    }
-
-    // Resolve path and verify it's still inside uploads/booking-references
-    const absolutePath = path.resolve(process.cwd(), "uploads", "booking-references", imageName);
-    const uploadsDir = path.resolve(process.cwd(), "uploads", "booking-references");
-    const relativeToDir = path.relative(uploadsDir, absolutePath);
-
-    if (relativeToDir.startsWith("..") || path.isAbsolute(relativeToDir)) {
-      return res.status(400).json({ message: "Invalid image path" });
-    }
-
-    return res.sendFile(absolutePath, (error) => {
+    return res.sendFile(result.absolutePath, (error) => {
       if (!error) return;
 
       console.error("Could not serve reference image", error);
