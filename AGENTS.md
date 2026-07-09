@@ -98,3 +98,22 @@ If a command fails, show only:
 - command
 - error summary
 - last 30 relevant lines
+
+## Silent mode enforcement
+
+When the prompt includes `Silent mode: final report only.`:
+
+- Do not send intermediate messages.
+- Do not narrate command usage.
+- Do not say what you are checking.
+- Do not describe planned edits while working.
+- Do not stream progress.
+- Do not output reasoning.
+- Do not output command logs unless a command fails.
+- Only send one final response.
+- The final response must follow the requested final report format.
+- If blocked, still send only the final report with the blocker.
+## Prompt-specific format priority
+
+If the user prompt provides a custom final report format, follow that format instead of the default short report.
+If no custom format is provided, use the default short final report.
