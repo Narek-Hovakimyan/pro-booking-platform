@@ -1,7 +1,16 @@
 import path from "path";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
-import mongoose from "mongoose";
+import {
+  isValidObjectId,
+  allowedBookingDelayMinutes,
+  minutesToTime,
+  hasOwnBodyField,
+  attemptsDateTimeChange,
+  getErrorStatusCode,
+  sendControllerError,
+  sameId,
+} from "../services/booking/bookingControllerHelpers.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
@@ -65,7 +74,6 @@ import {
   slotOverlaps,
 } from "../utils/bookingUtils.js";
 import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
-import { storedDateToDateKey } from "../utils/bookingDateStorage.js";
 import {
   getBookingCreationLockKey,
   validateBookingSlot,
@@ -73,46 +81,6 @@ import {
 } from "../utils/bookingSlotValidation.js";
 
 export const bookingController = createCrudController(Booking, "Booking");
-
-const isValidObjectId = (value) =>
-  Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
-
-const allowedBookingDelayMinutes = new Set([10, 20]);
-const minutesToTime = (minutes) => {
-  const hours = Math.floor(minutes / 60).toString().padStart(2, "0");
-  const mins = (minutes % 60).toString().padStart(2, "0");
-
-  return `${hours}:${mins}`;
-};
-
-const hasOwnBodyField = (body, field) =>
-  Object.prototype.hasOwnProperty.call(body || {}, field);
-
-const attemptsDateTimeChange = (body, booking) => {
-  if (
-    hasOwnBodyField(body, "bookingDate") &&
-    storedDateToDateKey(body.bookingDate) !==
-      storedDateToDateKey(booking.bookingDate)
-  ) {
-    return true;
-  }
-
-  if (
-    hasOwnBodyField(body, "dayKey") &&
-    String(body.dayKey || "") !== String(booking.dayKey || "")
-  ) {
-    return true;
-  }
-
-  if (
-    hasOwnBodyField(body, "time") &&
-    String(body.time || "") !== String(booking.time || "")
-  ) {
-    return true;
-  }
-
-  return false;
-};
 
 const resolveBookingSalon = async ({ barberId, salonId }) => {
   const barber = await User.findById(barberId).select(
@@ -170,26 +138,6 @@ const getClientName = async (booking, fallbackUser) => {
   return client?.name || "Client";
 };
 
-const getErrorStatusCode = (error) => {
-  if (error?.statusCode) return error.statusCode;
-  if (error?.name === "ValidationError" || error?.name === "CastError") {
-    return 400;
-  }
-
-  return 500;
-};
-
-const sendControllerError = (res, error, fallbackMessage) => {
-  console.error(fallbackMessage, error);
-
-  const statusCode = getErrorStatusCode(error);
-  const message = statusCode === 500
-    ? fallbackMessage
-    : error?.message || fallbackMessage;
-
-  return res.status(statusCode).json({ message });
-};
-
 const canManageBookingSalon = async (booking, userId) => {
   if (!booking?.salonId || !userId) return false;
 
@@ -202,10 +150,6 @@ const canManageBookingSalon = async (booking, userId) => {
       salon.admins.some((adminId) => sameId(adminId, userId)))
   );
 };
-
-const sameId = (left, right) =>
-  String(left || "") === String(right || "");
-
 
 export const __bookingTestHooks = {
   allowedBookingDelayMinutes,
