@@ -10,20 +10,17 @@ import {
   getErrorStatusCode,
   sendControllerError,
   sameId,
+  resolveBookingSalon,
+  getClientName,
+  canManageBookingSalon,
 } from "../services/booking/bookingControllerHelpers.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
 import LoyaltyProgress from "../models/LoyaltyProgress.js";
-import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
 import { calculateDeposit } from "./depositSettingsController.js";
 
-import User from "../models/User.js";
-import {
-  getApprovedUserSalonIds,
-  getPrimaryApprovedSalonId,
-} from "../services/salon/salonMembershipService.js";
 import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
@@ -81,75 +78,6 @@ import {
 } from "../utils/bookingSlotValidation.js";
 
 export const bookingController = createCrudController(Booking, "Booking");
-
-const resolveBookingSalon = async ({ barberId, salonId }) => {
-  const barber = await User.findById(barberId).select(
-    "salon salonStatus salons role loyaltyDiscountSettings"
-  );
-
-  if (!barber || barber.role !== "barber") {
-    return { message: "Barber not found" };
-  }
-
-  const requestedSalonId = salonId ? String(salonId) : "";
-  const approvedSalonIds = getApprovedUserSalonIds(barber);
-
-  if (requestedSalonId) {
-    if (!isValidObjectId(requestedSalonId)) {
-      return { message: "Invalid salon" };
-    }
-
-    const salonExists = await Salon.exists({ _id: requestedSalonId });
-
-    if (!salonExists) {
-      return { message: "Salon not found" };
-    }
-
-    if (!approvedSalonIds.includes(requestedSalonId)) {
-      return { message: "Barber does not work in selected salon" };
-    }
-
-    return { barber, salonId: requestedSalonId };
-  }
-
-  if (approvedSalonIds.length > 1) {
-    return { message: "Salon is required for this barber" };
-  }
-
-  const inferredSalonId = getPrimaryApprovedSalonId(barber);
-
-  if (!inferredSalonId) {
-    return { barber, salonId: null };
-  }
-
-  const inferredSalonExists = await Salon.exists({ _id: inferredSalonId });
-
-  return {
-    barber,
-    salonId: inferredSalonExists ? inferredSalonId : null,
-  };
-};
-
-const getClientName = async (booking, fallbackUser) => {
-  if (booking.clientName) return booking.clientName;
-  if (fallbackUser?.name) return fallbackUser.name;
-
-  const client = await User.findById(booking.clientId).select("name");
-  return client?.name || "Client";
-};
-
-const canManageBookingSalon = async (booking, userId) => {
-  if (!booking?.salonId || !userId) return false;
-
-  const salon = await Salon.findById(booking.salonId).select("ownerId admins").lean();
-  if (!salon) return false;
-
-  return (
-    sameId(salon.ownerId, userId) ||
-    (Array.isArray(salon.admins) &&
-      salon.admins.some((adminId) => sameId(adminId, userId)))
-  );
-};
 
 export const __bookingTestHooks = {
   allowedBookingDelayMinutes,

@@ -1,5 +1,11 @@
 import mongoose from "mongoose";
+import User from "../../models/User.js";
+import Salon from "../../models/Salon.js";
 import { storedDateToDateKey } from "../../utils/bookingDateStorage.js";
+import {
+  getApprovedUserSalonIds,
+  getPrimaryApprovedSalonId,
+} from "../salon/salonMembershipService.js";
 
 /**
  * Check if a value is a valid MongoDB ObjectId.
@@ -82,5 +88,85 @@ export const sendControllerError = (res, error, fallbackMessage) => {
 /**
  * Compare two IDs (supports ObjectId, string, and object with _id).
  */
+
+/**
+ * Resolve the salon for a booking based on barber and optional salonId.
+ */
+export const resolveBookingSalon = async ({ barberId, salonId }) => {
+  const barber = await User.findById(barberId).select(
+    "salon salonStatus salons role loyaltyDiscountSettings"
+  );
+
+  if (!barber || barber.role !== "barber") {
+    return { message: "Barber not found" };
+  }
+
+  const requestedSalonId = salonId ? String(salonId) : "";
+  const approvedSalonIds = getApprovedUserSalonIds(barber);
+
+  if (requestedSalonId) {
+    if (!isValidObjectId(requestedSalonId)) {
+      return { message: "Invalid salon" };
+    }
+
+    const salonExists = await Salon.exists({ _id: requestedSalonId });
+
+    if (!salonExists) {
+      return { message: "Salon not found" };
+    }
+
+    if (!approvedSalonIds.includes(requestedSalonId)) {
+      return { message: "Barber does not work in selected salon" };
+    }
+
+    return { barber, salonId: requestedSalonId };
+  }
+
+  if (approvedSalonIds.length > 1) {
+    return { message: "Salon is required for this barber" };
+  }
+
+  const inferredSalonId = getPrimaryApprovedSalonId(barber);
+
+  if (!inferredSalonId) {
+    return { barber, salonId: null };
+  }
+
+  const inferredSalonExists = await Salon.exists({ _id: inferredSalonId });
+
+  return {
+    barber,
+    salonId: inferredSalonExists ? inferredSalonId : null,
+  };
+};
+
+/**
+ * Get the client name from a booking, with fallback.
+ */
+export const getClientName = async (booking, fallbackUser) => {
+  if (booking.clientName) return booking.clientName;
+  if (fallbackUser?.name) return fallbackUser.name;
+
+  const client = await User.findById(booking.clientId).select("name");
+  return client?.name || "Client";
+};
+
+/**
+ * Check if the user can manage the booking's salon.
+ */
+export const canManageBookingSalon = async (booking, userId) => {
+  if (!booking?.salonId || !userId) return false;
+
+  const salon = await Salon.findById(booking.salonId).select("ownerId admins").lean();
+  if (!salon) return false;
+
+  return (
+    sameId(salon.ownerId, userId) ||
+    (Array.isArray(salon.admins) &&
+      salon.admins.some((adminId) => sameId(adminId, userId)))
+  );
+};
+
+
 export const sameId = (left, right) =>
   String(left || "") === String(right || "");
