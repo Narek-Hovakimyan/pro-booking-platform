@@ -2,7 +2,6 @@ import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import {
   allowedBookingDelayMinutes,
-  minutesToTime,
   attemptsDateTimeChange,
   sendControllerError,
   resolveBookingSalon,
@@ -13,6 +12,7 @@ import {
   cleanupReferenceImages,
 } from "../services/booking/bookingReferenceImageHelpers.js";
 import { updateBookingTreatmentRecord } from "../services/booking/bookingTreatmentRecordService.js";
+import { delayBookingService } from "../services/booking/bookingDelayService.js";
 import { executeBookingPriceQuote } from "../services/booking/bookingQuoteService.js";
 import { resolveReferenceImageRequest } from "../services/booking/bookingReferenceImageService.js";
 import Notification from "../models/Notification.js";
@@ -50,10 +50,7 @@ import {
   createBookingDepositPaymentAttempt,
 } from "../services/payment/paymentAttemptService.js";
 import {
-  getBookingDateTime,
   getDayKeyFromDate,
-  isDateKey,
-  timeToMinutes,
 } from "../utils/bookingDateTime.js";
 import {
   blockingBookingStatuses,
@@ -784,148 +781,11 @@ export const updateBooking = async (req, res) => {
 
 export const delayBooking = async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    const isBookingClient =
-      req.user?.role === "client" &&
-      String(req.user._id) === String(booking.clientId);
-
-    if (!isBookingClient) {
-      return res.status(403).json({ message: "Only the booking owner can delay this booking" });
-    }
-
-    if (booking.status !== "accepted") {
-      return res.status(400).json({ message: "Only accepted bookings can be delayed" });
-    }
-
-    // Policy: one delay per booking
-    if (booking.delayMinutesTotal > 0 || booking.delayedAt) {
-      return res.status(400).json({ message: "This booking has already been delayed." });
-    }
-
-    // Policy: max 20 minutes total delay
-    const delayMinutes = req.body?.delayMinutes;
-
-    if (!allowedBookingDelayMinutes.has(delayMinutes)) {
-      return res.status(400).json({ message: "delayMinutes must be 10 or 20" });
-    }
-
-    // Policy: delay only until appointment start + 5 minute grace window (Armenia time)
-    const bookingStart = getBookingDateTime(booking);
-    if (!bookingStart) {
-      const message = isDateKey(booking.bookingDate)
-        ? "Booking time is invalid"
-        : "bookingDate must be YYYY-MM-DD";
-      return res.status(400).json({ message });
-    }
-
-    const graceEnd = new Date(bookingStart.getTime() + 5 * 60 * 1000);
-    const now = new Date();
-    if (now > graceEnd) {
-      return res.status(400).json({ message: "This booking can no longer be delayed." });
-    }
-
-    const oldStartMinutes = timeToMinutes(booking.time);
-
-    if (oldStartMinutes === null) {
-      return res.status(400).json({ message: "Booking time is invalid" });
-    }
-
-    const newStartMinutes = oldStartMinutes + delayMinutes;
-
-    if (newStartMinutes >= 24 * 60) {
-      return res.status(400).json({ message: "Cannot delay booking past the end of the day" });
-    }
-
-    const newTime = minutesToTime(newStartMinutes);
-    const nextDayKey = getDayKeyFromDate(booking.bookingDate) || booking.dayKey;
-    const delayResult = await withBookingCreationLock(
-      getBookingCreationLockKey({
-        barberId: booking.barberId,
-        bookingDate: booking.bookingDate,
-      }),
-      async () => {
-        const slotValidation = await validateBookingSlot({
-          barberId: booking.barberId,
-          salonId: booking?.salonId || null,
-          bookingDate: booking.bookingDate,
-          dayKey: nextDayKey,
-          time: newTime,
-          duration: booking.duration,
-          ignoreBookingId: booking._id,
-        });
-
-        if (slotValidation.message) {
-          return { message: slotValidation.message };
-        }
-
-        const updatedBooking = await Booking.findOneAndUpdate(
-          {
-            _id: booking._id,
-            clientId: booking.clientId,
-            status: "accepted",
-            bookingDate: booking.bookingDate,
-            time: booking.time,
-            // Concurrency guard: only succeed if delay hasn't been applied yet
-            $or: [
-              { delayMinutesTotal: { $lte: 0 } },
-              { delayMinutesTotal: { $exists: false } },
-            ],
-            delayedAt: null,
-          },
-          {
-            $set: {
-              time: newTime,
-              dayKey: slotValidation.effectiveDayKey,
-              reminderSentAt: null,
-              delayMinutesTotal: delayMinutes,
-              delayedAt: new Date(),
-            },
-          },
-          { returnDocument: "after" }
-        );
-
-        if (!updatedBooking) {
-          return { message: "Booking could not be delayed" };
-        }
-
-        return { booking: updatedBooking };
-      }
-    );
-
-    if (delayResult.message) {
-      return res.status(400).json({ message: delayResult.message });
-    }
-
-    const updatedBooking = delayResult.booking;
-
-    const notificationTasks = [
-      createNotification({
-        userId: updatedBooking.barberId,
-        type: "booking_delayed",
-        message: `Client is running late. Booking moved to ${newTime}.`,
-        data: getBookingNotificationData(updatedBooking),
-      }),
-    ];
-
-    if (updatedBooking.clientId) {
-      notificationTasks.push(
-        createNotification({
-          userId: updatedBooking.clientId,
-          type: "booking_delayed",
-          message: `Your booking was delayed to ${newTime}.`,
-          data: getBookingNotificationData(updatedBooking),
-        })
-      );
-    }
-
-    await Promise.allSettled(notificationTasks);
-
-    emitBookingUpdated(updatedBooking, "updated");
+    const { booking: updatedBooking, newTime } = await delayBookingService({
+      bookingId: req.params.id,
+      delayMinutes: req.body?.delayMinutes,
+      user: req.user,
+    });
 
     return res.json(serializeBookingForResponse(updatedBooking));
   } catch (error) {
