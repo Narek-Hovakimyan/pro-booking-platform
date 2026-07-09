@@ -17,7 +17,6 @@ import {
 } from "./payment/paymentProviderFactory.js";
 import {
   serializeUserPaymentAttempt,
-  serializeUserPaymentRecord,
 } from "./payment/subscriptionPaymentSerializers.js";
 import {
   fetchBarberMembership,
@@ -37,6 +36,7 @@ import { serializeSubscriptionStatus } from "./subscription/subscriptionSerializ
 import {
   getLatestRecoverableSalonPaymentAttempt,
 } from "./subscription/paymentAttemptHelpers.js";
+import { requireSalonOwnerOrAdmin } from "./subscription/subscriptionAuthorization.js";
 import {
   DEFAULT_PLAN_CODE,
   TRIAL_DAYS,
@@ -53,7 +53,6 @@ import {
   resolveQuery,
   addDays,
   addMonths,
-  normalizePaymentHistoryLimit,
   buildPaymentAttemptExpiry,
   getDaysRemaining,
 } from "./subscription/subscriptionHelpers.js";
@@ -62,6 +61,11 @@ export { getDaysRemaining } from "./subscription/subscriptionHelpers.js";
 export { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
 export { getLatestRecoverableSalonPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
 export { getMySubscriptionPaymentHistory } from "./subscription/userSubscriptionQueries.js";
+export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
+
+const isApprovedMember = (barber, salonId) => {
+  return isAcceptedSalonStaffMember(barber, salonId);
+};
 
 /* ───────────────────────────────────────────────────────────
  *  Default plan & basic subscription helpers (Phase 1)
@@ -505,24 +509,6 @@ const getAuthorizedPaymentAttempt = async ({
   });
 
   return attempt;
-};
-
-export const getSalonSubscriptionPaymentHistory = async ({
-  salonId,
-  requester,
-  limit = 20,
-}) => {
-  await requireSalonOwnerOrAdmin(salonId, requester?._id);
-
-  const payments = await PaymentRecord.find({
-    ownerType: "salon",
-    ownerId: salonId,
-  })
-    .sort({ paidAt: -1, createdAt: -1 })
-    .limit(normalizePaymentHistoryLimit(limit))
-    .lean();
-
-  return payments.map(serializeUserPaymentRecord);
 };
 
 /**
@@ -1121,36 +1107,9 @@ export const getMySubscriptionAccess = async (user) => {
  * On success returns the salon document.
  * Throws an error with a statusCode property on failure.
  */
-const requireSalonOwnerOrAdmin = async (salonId, requesterId) => {
-  if (!requesterId) {
-    const err = new Error("Authentication required");
-    err.statusCode = 401;
-    throw err;
-  }
-
-  const salon = await Salon.findById(salonId);
-  if (!salon) {
-    const err = new Error("Salon not found");
-    err.statusCode = 404;
-    throw err;
-  }
-
-  if (!canManageSalonRequest(salon, requesterId)) {
-    const err = new Error("Only salon owner or admin can perform this action");
-    err.statusCode = 403;
-    throw err;
-  }
-
-  return salon;
-};
-
 /**
  * Check if a barber user is accepted staff for the given salon.
  */
-const isApprovedMember = (barber, salonId) => {
-  return isAcceptedSalonStaffMember(barber, salonId);
-};
-
 /* ── Public service functions ───────────────────────────── */
 
 export const revokeSalonSeatsForRemovedMember = async ({
