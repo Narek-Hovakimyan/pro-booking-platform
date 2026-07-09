@@ -17,15 +17,11 @@ import {
   serializeUserPaymentAttempt,
 } from "./payment/subscriptionPaymentSerializers.js";
 import {
-  fetchBarberMembership,
   getSeatSalonId,
   isAcceptedSalonStaffMember,
   isAcceptedStaffSeat,
   sanitizeBillingSeat,
   countActiveAcceptedStaffSeats,
-  getActiveSeatsForBarber,
-  seatHasActiveParentSubscription,
-  seatMatchesSalon,
 } from "./subscription/seatHelpers.js";
 import { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
 import { requireSalonOwnerOrAdmin } from "./subscription/subscriptionAuthorization.js";
@@ -52,6 +48,7 @@ export { getLatestRecoverableSalonPaymentAttempt } from "./subscription/paymentA
 export { getOrCreateDefaultSubscriptionPlan, isManualActivationAvailable, isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
 export { getMySubscriptionPaymentHistory } from "./subscription/userSubscriptionQueries.js";
 export { getPaidAccessByBarberIds, getPaidAccessByBarberIdsForSalon, getMySubscriptionAccess } from "./subscription/subscriptionAccessQueries.js";
+export { barberHasPaidAccess, barberHasPaidAccessForSalon, barberHasPaidSeatAccessForSalon } from "./subscription/subscriptionPaidAccessQueries.js";
 export { getSubscriptionByOwner, salonHasActiveSubscription, getSalonSubscriptionDetails } from "./subscription/salonSubscriptionQueries.js";
 export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
 
@@ -452,89 +449,6 @@ const getAuthorizedPaymentAttempt = async ({
  *   2. The barber has an active SubscriptionSeat whose parent salon subscription
  *      is active or trialing.
  */
-export const barberHasPaidAccess = async (barberId) => {
-  // Check individual subscription
-  const individualSub = await Subscription.findOne({
-    ownerType: "barber",
-    ownerId: barberId,
-    status: { $in: PAID_SUBSCRIPTION_STATUSES },
-  });
-
-  if (subscriptionHasPaidAccess(individualSub, new Date(), {
-    statusAlreadyFiltered: true,
-  })) {
-    return true;
-  }
-
-  // Check salon seat coverage
-  const activeSeat = await SubscriptionSeat.findOne({
-    barberId,
-    status: "active",
-  }).populate("subscriptionId");
-
-  if (!activeSeat || !activeSeat.subscriptionId) {
-    return false;
-  }
-
-  if (!seatHasActiveParentSubscription(activeSeat)) {
-    return false;
-  }
-
-  const seatSalonId = getSeatSalonId(activeSeat);
-  const barber = await fetchBarberMembership(barberId);
-
-  return isAcceptedSalonStaffMember(barber, seatSalonId);
-};
-
-export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
-  // Individual barber subscriptions preserve existing global access behavior.
-  const individualSub = await Subscription.findOne({
-    ownerType: "barber",
-    ownerId: barberId,
-    status: { $in: PAID_SUBSCRIPTION_STATUSES },
-  });
-
-  if (subscriptionHasPaidAccess(individualSub, new Date(), {
-    statusAlreadyFiltered: true,
-  })) {
-    return true;
-  }
-
-  const activeSeats = await getActiveSeatsForBarber(barberId);
-  const matchingSeat = (activeSeats || []).find(
-    (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
-  );
-
-  if (!matchingSeat) {
-    return false;
-  }
-
-  const seatSalonId = getSeatSalonId(matchingSeat);
-  const barber = await fetchBarberMembership(barberId);
-
-  return isAcceptedSalonStaffMember(barber, seatSalonId);
-};
-
-export const barberHasPaidSeatAccessForSalon = async (barberId, salonId) => {
-  if (!salonId) {
-    return barberHasPaidAccess(barberId);
-  }
-
-  const activeSeats = await getActiveSeatsForBarber(barberId);
-  const matchingSeat = (activeSeats || []).find(
-    (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
-  );
-
-  if (!matchingSeat) {
-    return false;
-  }
-
-  const seatSalonId = getSeatSalonId(matchingSeat);
-  const barber = await fetchBarberMembership(barberId);
-
-  return isAcceptedSalonStaffMember(barber, seatSalonId);
-};
-
 export const expireSubscriptions = async ({ now = new Date() } = {}) => {
   const subscriptions = await Subscription.find({
     status: { $in: PAID_SUBSCRIPTION_STATUSES },
