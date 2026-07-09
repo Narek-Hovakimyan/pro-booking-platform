@@ -1,11 +1,8 @@
-import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import {
   allowedBookingDelayMinutes,
   attemptsDateTimeChange,
   sendControllerError,
-  resolveBookingSalon,
-  getClientName,
 } from "../services/booking/bookingControllerHelpers.js";
 import {
   collectReferenceImagePaths,
@@ -13,14 +10,13 @@ import {
 } from "../services/booking/bookingReferenceImageHelpers.js";
 import { updateBookingTreatmentRecord } from "../services/booking/bookingTreatmentRecordService.js";
 import { delayBookingService } from "../services/booking/bookingDelayService.js";
+import { createBookingService } from "../services/booking/bookingCreateService.js";
 import { executeBookingPriceQuote } from "../services/booking/bookingQuoteService.js";
 import { resolveReferenceImageRequest } from "../services/booking/bookingReferenceImageService.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
 import LoyaltyProgress from "../models/LoyaltyProgress.js";
-import Service from "../models/Service.js";
-import { calculateDeposit } from "./depositSettingsController.js";
 
 import {
   emitBookingUpdated,
@@ -31,24 +27,14 @@ import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import {
   barberHasPaidAccessForSalon,
-  barberHasPaidSeatAccessForSalon,
 } from "../services/subscriptionService.js";
 import {
   claimVoucherForBooking,
-  buildBookingPricing,
   rollbackVoucherClaim,
   recordVoucherRedemption,
   restoreVoucherOnCancel,
 } from "../services/bookingPricingService.js";
-import {
-  parseConsultationAndConsent,
-  buildBookingCreatePayload,
-} from "../services/bookingCreatePayloadService.js";
 import { buildBookingStatusUpdate } from "../services/bookingStatusService.js";
-import {
-  buildSafePaymentMetadata,
-  createBookingDepositPaymentAttempt,
-} from "../services/payment/paymentAttemptService.js";
 import {
   getDayKeyFromDate,
 } from "../utils/bookingDateTime.js";
@@ -57,7 +43,6 @@ import {
   defaultPersonalSchedule,
   defaultWeeklySchedule,
   defaultWorkingDaySchedule,
-  formatBookedMessage,
   getDayScheduleFromDefaultSchedule,
   maxCancellationReasonLength,
   maxRejectionReasonLength,
@@ -65,7 +50,6 @@ import {
   serializeBookingForResponse,
   slotOverlaps,
 } from "../utils/bookingUtils.js";
-import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
 import {
   getBookingCreationLockKey,
   validateBookingSlot,
@@ -94,268 +78,18 @@ export const createBooking = async (req, res) => {
   const cleanup = () => cleanupReferenceImages(referenceImages);
 
   try {
-    const {
-      barberId,
-      clientId,
-      serviceId,
-      dayKey,
-      bookingDate,
-      time,
-      createdBy = "client",
-    } = req.body;
-    const isManualBooking = createdBy === "barber";
-    const clientName = (req.body.clientName || "").trim();
-    const clientPhone = (req.body.clientPhone || req.body.phone || "").trim();
-    const status = isManualBooking ? "accepted" : "pending";
-
-    // ── Consultation / Consent ──
-    // JSON-stringified values arrive from multipart/FormData (when referenceImages included)
-    let consultation, consent;
-    try {
-      const parsed = parseConsultationAndConsent(req.body);
-      consultation = parsed.consultation;
-      consent = parsed.consent;
-    } catch (parseError) {
-      cleanup();
-      return res.status(parseError.statusCode || 400).json({
-        message: parseError.message,
-      });
-    }
-
-    if (!barberId || !serviceId || (!isManualBooking && !clientId)) {
-      cleanup();
-      return res.status(400).json({
-        message: "Select service first",
-      });
-    }
-
-    if (!barberId || !bookingDate || !time) {
-      cleanup();
-      return res.status(400).json({
-        message: "barberId, bookingDate, and time are required",
-      });
-    }
-
-    if (isManualBooking && !clientName) {
-      cleanup();
-      return res.status(400).json({ message: "Client name is required" });
-    }
-
-    if (
-      !isManualBooking &&
-      (req.user?.role !== "client" || String(req.user._id) !== String(clientId))
-    ) {
-      cleanup();
-      return res.status(403).json({
-        message: "You can create bookings only for yourself",
-      });
-    }
-
-    if (
-      isManualBooking &&
-      (req.user?.role !== "barber" || String(req.user.id) !== String(barberId))
-    ) {
-      cleanup();
-      return res.status(403).json({
-        message: "You can create bookings only for your own barber calendar",
-      });
-    }
-
-    const salonResolution = await resolveBookingSalon({
-      barberId,
-      salonId: req.body.salonId,
+    const createResult = await createBookingService({
+      body: req.body,
+      user: req.user,
+      referenceImages,
+      cleanupReferenceImagesOnError: cleanup,
     });
 
-    if (salonResolution.message) {
-      cleanup();
-      return res.status(400).json({
-        message: salonResolution.message,
-      });
-    }
-
-    // Block booking creation for unpaid barbers in the selected salon context.
-    const hasExplicitSalonContext = Boolean(req.body.salonId);
-    const barberPaidAccess = hasExplicitSalonContext
-      ? await barberHasPaidSeatAccessForSalon(barberId, salonResolution.salonId)
-      : await barberHasPaidAccessForSalon(barberId, salonResolution.salonId);
-    if (!barberPaidAccess) {
-      cleanup();
-      return res.status(403).json({
-        code: "BARBER_UNAVAILABLE",
-        message: "This specialist is not currently accepting bookings.",
-      });
-    }
-
-    const service = await Service.findOne({ _id: serviceId, barberId, active: true });
-
-    if (!service) {
-      cleanup();
-      return res.status(400).json({
-        message: "Service is not available for this barber",
-      });
-    }
-
-    const bookingDuration = Number(service.duration);
-
-    const slotValidation = await validateBookingSlot({
-      barberId,
-      salonId: salonResolution.salonId,
-      barber: salonResolution.barber,
-      bookingDate,
-      dayKey,
-      time,
-      duration: bookingDuration,
-    });
-
-    if (slotValidation.message) {
-      cleanup();
-      return res.status(400).json({
-        message: slotValidation.message,
-      });
-    }
-
-    const lockKey = getBookingCreationLockKey({ barberId, bookingDate });
-    const createResult = await withBookingCreationLock(lockKey, async () => {
-      const latestSlotValidation = await validateBookingSlot({
-        barberId,
-        salonId: salonResolution.salonId,
-        barber: salonResolution.barber,
-        bookingDate,
-        dayKey,
-        time,
-        duration: bookingDuration,
-      });
-
-      if (latestSlotValidation.message) {
-        return { message: latestSlotValidation.message };
-      }
-
-      // ── Voucher claim ──
-      const rawVoucherCode =
-        req.body.promotionCode || req.body.voucherCode || req.body.voucher_code;
-      let pricing;
-      try {
-        pricing = await buildBookingPricing({
-          barber: salonResolution.barber,
-          barberId,
-          clientId: isManualBooking ? null : clientId,
-          service,
-          serviceId,
-          salonId: salonResolution.salonId,
-          voucherCode: rawVoucherCode,
-          claimVoucher: Boolean(rawVoucherCode),
-        });
-      } catch (pricingError) {
-        return { message: pricingError.message, cleanup: true };
-      }
-      const voucherClaim = pricing.voucherClaim;
-      const loyaltyDiscount = pricing.loyaltyDiscount;
-      const bookingPrice = pricing.serviceDiscountedPrice;
-      const effectivePrice = pricing.finalPrice;
-
-      // ── Deposit calculation ──
-      // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
-      let depositSettings = { enabled: false };
-      try {
-        const barberProfile = await BarberProfile.findOne({ barberId }).lean();
-        if (barberProfile?.depositSettings) {
-          depositSettings = barberProfile.depositSettings;
-        }
-      } catch {
-        // BarberProfile not available — deposit not required
-      }
-      const { depositRequired, depositAmount } = calculateDeposit(depositSettings, effectivePrice);
-      const depositStatus = depositRequired ? "pending" : "not_required";
-
-      let booking;
-      try {
-        const payload = buildBookingCreatePayload({
-          barberId,
-          serviceId,
-          depositRequired,
-          depositAmount,
-          depositStatus,
-          depositSettings,
-          clientId,
-          clientName: isManualBooking ? clientName : req.body.clientName,
-          clientPhone,
-          phone: req.body.phone,
-          createdBy,
-          isManualBooking,
-          note: req.body.note,
-          referenceImages,
-          salonId: salonResolution.salonId,
-          bookingDate,
-          time,
-          dayKey: latestSlotValidation.effectiveDayKey,
-          serviceName: service.name,
-          duration: bookingDuration,
-          price: effectivePrice,
-          status,
-          consultation,
-          consent,
-          loyaltyDiscount,
-          bookingPrice,
-          voucherClaim,
-          rawVoucherCode,
-          pricing,
-        });
-        booking = await Booking.create(payload);
-      } catch (createErr) {
-        // If voucher was claimed but Booking.create failed, roll back the claim
-        if (voucherClaim) {
-          await rollbackVoucherClaim(voucherClaim.voucher._id).catch(() => {});
-        }
-        throw createErr; // rethrow so outer catch handles it
-      }
-
-      // Record redemption after successful booking creation
-      if (voucherClaim) {
-        await recordVoucherRedemption(voucherClaim.voucher._id, booking._id);
-      }
-
-      let payment = null;
-      if (booking.depositRequired) {
-        try {
-          payment = await createBookingDepositPaymentAttempt({
-            booking,
-            createdBy: req.user?._id,
-          });
-        } catch (paymentError) {
-          payment = buildSafePaymentMetadata({
-            providerName: "manual",
-            message:
-              paymentError.message ||
-              "Deposit is required, but online payment is not enabled yet.",
-          });
-        }
-      }
-
-      return { booking, payment };
-    });
-
-    if (createResult.message) {
-      // Lock-level failure — cleanup uploaded files
-      cleanup();
-      return res.status(400).json({
-        message: createResult.message,
-      });
+    if (createResult.body) {
+      return res.status(createResult.status).json(createResult.body);
     }
 
     const { booking, payment } = createResult;
-    const notificationClientName = await getClientName(booking, req.user);
-
-    if (!isManualBooking) {
-      await createNotification({
-        userId: barberId,
-        type: "booking_created",
-        message: formatBookedMessage(notificationClientName, booking),
-        data: getBookingNotificationData(booking),
-      });
-    }
-
-    emitBookingUpdated(booking, "created");
-
     const responseBooking = serializeBookingForResponse(booking);
     if (payment) {
       responseBooking.payment = payment;
