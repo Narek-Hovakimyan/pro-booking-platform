@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import PaymentRecord from "../models/PaymentRecord.js";
@@ -19,7 +18,6 @@ import {
 } from "./payment/subscriptionPaymentSerializers.js";
 import {
   fetchBarberMembership,
-  fetchBarberMemberships,
   getSeatSalonId,
   isAcceptedSalonStaffMember,
   isAcceptedStaffSeat,
@@ -39,7 +37,6 @@ import {
   MANUAL_PROVIDER,
   PAYMENT_ATTEMPT_EXPIRY_HOURS,
   getIdString,
-  getIdsForQuery,
   hasUnexpiredPeriod,
   subscriptionHasPaidAccess,
   addDays,
@@ -47,15 +44,14 @@ import {
   buildPaymentAttemptExpiry,
   getDaysRemaining,
 } from "./subscription/subscriptionHelpers.js";
-import { getOrCreateDefaultSubscriptionPlan, isManualActivationAvailable, isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
+import { getOrCreateDefaultSubscriptionPlan, isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
 // Re-exports for modules that import from subscriptionService.js
 export { getDaysRemaining } from "./subscription/subscriptionHelpers.js";
 export { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
 export { getLatestRecoverableSalonPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
-export { getOrCreateDefaultSubscriptionPlan } from "./subscription/subscriptionPlanHelpers.js";
-export { isManualActivationAvailable } from "./subscription/subscriptionPlanHelpers.js";
-export { isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
+export { getOrCreateDefaultSubscriptionPlan, isManualActivationAvailable, isDevPaymentConfirmationAvailable } from "./subscription/subscriptionPlanHelpers.js";
 export { getMySubscriptionPaymentHistory } from "./subscription/userSubscriptionQueries.js";
+export { getPaidAccessByBarberIds, getPaidAccessByBarberIdsForSalon, getMySubscriptionAccess } from "./subscription/subscriptionAccessQueries.js";
 export { getSubscriptionByOwner, salonHasActiveSubscription, getSalonSubscriptionDetails } from "./subscription/salonSubscriptionQueries.js";
 export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
 
@@ -539,128 +535,6 @@ export const barberHasPaidSeatAccessForSalon = async (barberId, salonId) => {
   return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
 
-export const getPaidAccessByBarberIds = async (barberIds = []) => {
-  const ids = [
-    ...new Set(barberIds.map((id) => getIdString(id)).filter(Boolean)),
-  ];
-  const accessByBarberId = new Map(ids.map((id) => [id, false]));
-
-  if (ids.length === 0) {
-    return accessByBarberId;
-  }
-
-  const queryIds = getIdsForQuery(ids);
-
-  const [individualSubscriptions, activeSeats, barbers] = await Promise.all([
-    Subscription.find({
-      ownerType: "barber",
-      ownerId: { $in: queryIds },
-      status: { $in: PAID_SUBSCRIPTION_STATUSES },
-    })
-      .select("ownerId status currentPeriodEnd")
-      .lean(),
-    SubscriptionSeat.find({
-      barberId: { $in: queryIds },
-      status: "active",
-    })
-      .populate("subscriptionId")
-      .lean(),
-    fetchBarberMemberships(ids),
-  ]);
-  const barbersById = new Map(
-    (barbers || []).map((barber) => [getIdString(barber._id), barber])
-  );
-
-  for (const subscription of individualSubscriptions || []) {
-    if (
-      !subscriptionHasPaidAccess(subscription, new Date(), {
-        statusAlreadyFiltered: true,
-      })
-    ) {
-      continue;
-    }
-    const ownerId = getIdString(subscription.ownerId);
-    if (ownerId) accessByBarberId.set(ownerId, true);
-  }
-
-  for (const seat of activeSeats || []) {
-    if (!seatHasActiveParentSubscription(seat)) continue;
-
-    const barberId = getIdString(seat.barberId);
-    const seatSalonId = getSeatSalonId(seat);
-    const barber = barbersById.get(barberId);
-
-    if (barberId && isAcceptedSalonStaffMember(barber, seatSalonId)) {
-      accessByBarberId.set(barberId, true);
-    }
-  }
-
-  return accessByBarberId;
-};
-
-export const getPaidAccessByBarberIdsForSalon = async (
-  barberIds = [],
-  salonId = null
-) => {
-  const ids = [
-    ...new Set(barberIds.map((id) => getIdString(id)).filter(Boolean)),
-  ];
-  const accessByBarberId = new Map(ids.map((id) => [id, false]));
-
-  if (ids.length === 0) {
-    return accessByBarberId;
-  }
-
-  const queryIds = getIdsForQuery(ids);
-
-  const [individualSubscriptions, activeSeats, barbers] = await Promise.all([
-    Subscription.find({
-      ownerType: "barber",
-      ownerId: { $in: queryIds },
-      status: { $in: PAID_SUBSCRIPTION_STATUSES },
-    })
-      .select("ownerId status currentPeriodEnd")
-      .lean(),
-    SubscriptionSeat.find({
-      barberId: { $in: queryIds },
-      status: "active",
-    })
-      .populate("subscriptionId")
-      .lean(),
-    fetchBarberMemberships(ids),
-  ]);
-  const barbersById = new Map(
-    (barbers || []).map((barber) => [getIdString(barber._id), barber])
-  );
-
-  for (const subscription of individualSubscriptions || []) {
-    if (
-      !subscriptionHasPaidAccess(subscription, new Date(), {
-        statusAlreadyFiltered: true,
-      })
-    ) {
-      continue;
-    }
-    const ownerId = getIdString(subscription.ownerId);
-    if (ownerId) accessByBarberId.set(ownerId, true);
-  }
-
-  for (const seat of activeSeats || []) {
-    if (!seatHasActiveParentSubscription(seat)) continue;
-    if (!seatMatchesSalon(seat, salonId)) continue;
-
-    const barberId = getIdString(seat.barberId);
-    const seatSalonId = getSeatSalonId(seat);
-    const barber = barbersById.get(barberId);
-
-    if (barberId && isAcceptedSalonStaffMember(barber, seatSalonId)) {
-      accessByBarberId.set(barberId, true);
-    }
-  }
-
-  return accessByBarberId;
-};
-
 export const expireSubscriptions = async ({ now = new Date() } = {}) => {
   const subscriptions = await Subscription.find({
     status: { $in: PAID_SUBSCRIPTION_STATUSES },
@@ -938,102 +812,6 @@ export const confirmSubscriptionPaymentAttempt = async ({
  * For barbers: returns individual subscription and salon seat coverage.
  * For clients: returns a clear "not applicable" indicator.
  */
-export const getMySubscriptionAccess = async (user) => {
-  if (user.role === "client") {
-    return {
-      hasAccess: false,
-      role: "client",
-      applicability: "not-applicable",
-      message:
-        "Clients use the platform free of charge. Subscriptions are for barbers and salon owners.",
-      individualSubscription: null,
-      salonSeatCoverage: null,
-      coveredBy: null,
-      defaultPlan: null,
-      manualActivationAvailable: isManualActivationAvailable(),
-    };
-  }
-
-  // role is "barber"
-  const barberId = user._id;
-  const [individualSubscription, plan] = await Promise.all([
-    Subscription.findOne({
-      ownerType: "barber",
-      ownerId: barberId,
-    })
-      .populate("planId")
-      .lean(),
-    getOrCreateDefaultSubscriptionPlan(),
-  ]);
-  const serializedIndividualSubscription = serializeSubscriptionStatus(
-    individualSubscription,
-    plan
-  );
-
-  // Check salon seat coverage
-  const activeSeat = await SubscriptionSeat.findOne({
-    barberId,
-    status: "active",
-  })
-    .populate({
-      path: "subscriptionId",
-      populate: { path: "planId" },
-    })
-    .lean();
-
-  let hasAccess = false;
-  let salonSeatCoverage = null;
-  let coveredBy = null;
-
-  if (
-    serializedIndividualSubscription &&
-    ["trialing", "active"].includes(serializedIndividualSubscription.status) &&
-    !serializedIndividualSubscription.isExpired
-  ) {
-    hasAccess = true;
-    coveredBy = "individual";
-  }
-
-  if (activeSeat && activeSeat.subscriptionId) {
-    const seatSalonId = getSeatSalonId(activeSeat);
-    const barber = await fetchBarberMembership(barberId);
-
-    if (
-      subscriptionHasPaidAccess(activeSeat.subscriptionId) &&
-      isAcceptedSalonStaffMember(barber, seatSalonId)
-    ) {
-      hasAccess = true;
-      salonSeatCoverage = {
-        ...activeSeat,
-        subscriptionId: serializeSubscriptionStatus(
-          activeSeat.subscriptionId,
-          activeSeat.subscriptionId?.planId || plan
-        ),
-      };
-      coveredBy = coveredBy ? "both" : "salon";
-    }
-  }
-
-  return {
-    hasAccess,
-    role: "barber",
-    applicability: "applicable",
-    individualSubscription: serializedIndividualSubscription,
-    salonSeatCoverage,
-    coveredBy,
-    defaultPlan: plan
-      ? {
-          code: plan.code,
-          name: plan.name,
-          pricePerSeat: plan.pricePerSeat,
-          currency: plan.currency,
-          interval: plan.interval,
-        }
-      : null,
-    manualActivationAvailable: isManualActivationAvailable(),
-  };
-};
-
 /* ══════════════════════════════════════════════════════════
  *  Phase 2 — Salon seat assignment
  * ══════════════════════════════════════════════════════════ */
