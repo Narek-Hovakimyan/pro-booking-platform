@@ -18,6 +18,7 @@ import {
   collectReferenceImagePaths,
   cleanupReferenceImages,
 } from "../services/booking/bookingReferenceImageHelpers.js";
+import { updateBookingTreatmentRecord } from "../services/booking/bookingTreatmentRecordService.js";
 import Notification from "../models/Notification.js";
 import Review from "../models/Review.js";
 import LoyaltyProgram from "../models/LoyaltyProgram.js";
@@ -1001,74 +1002,19 @@ export const delayBooking = async (req, res) => {
   }
 };
 
-const treatmentRecordAllowedFields = [
-  "colorFormula",
-  "tonerFormula",
-  "developer",
-  "processingTime",
-  "productsUsed",
-  "techniqueNotes",
-  "outcomeNotes",
-  "reactionNotes",
-];
-
 export const updateTreatmentRecord = async (req, res) => {
   try {
-    if (!isValidObjectId(req.params.id)) {
-      return res.status(400).json({ message: "Invalid booking ID" });
+    const result = await updateBookingTreatmentRecord({
+      bookingId: req.params.id,
+      body: req.body,
+      user: req.user,
+    });
+
+    if (result.error) {
+      return res.status(result.status).json({ message: result.error });
     }
 
-    const booking = await Booking.findById(req.params.id);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    // Authorization: assigned barber OR salon owner/admin
-    const isAssignedBarber =
-      req.user?.role === "barber" && sameId(req.user._id, booking.barberId);
-    const isSalonManager =
-      !isAssignedBarber && (await canManageBookingSalon(booking, req.user._id));
-
-    if (!isAssignedBarber && !isSalonManager) {
-      return res.status(403).json({ message: "Not authorized to modify treatment record" });
-    }
-
-    // Status restriction: only accepted or completed
-    if (booking.status !== "accepted" && booking.status !== "completed") {
-      return res.status(400).json({
-        message: `Treatment record can only be added to accepted or completed bookings, not ${booking.status}`,
-      });
-    }
-
-    // Build treatment record from whitelisted fields only
-    const treatmentRecord = {};
-
-    for (const field of treatmentRecordAllowedFields) {
-      if (req.body[field] !== undefined) {
-        treatmentRecord[field] = String(req.body[field]).trim();
-      } else if (booking.treatmentRecord?.[field]) {
-        treatmentRecord[field] = booking.treatmentRecord[field];
-      } else {
-        treatmentRecord[field] = "";
-      }
-    }
-
-    // Server-side timestamps and recordedBy
-    if (booking.treatmentRecord?.recordedAt) {
-      treatmentRecord.recordedAt = booking.treatmentRecord.recordedAt;
-      treatmentRecord.recordedBy = booking.treatmentRecord.recordedBy;
-    } else {
-      treatmentRecord.recordedAt = new Date();
-      treatmentRecord.recordedBy = req.user._id;
-    }
-
-    treatmentRecord.updatedAt = new Date();
-
-    booking.treatmentRecord = treatmentRecord;
-    await booking.save();
-
-    return res.json(serializeBookingForResponse(booking));
+    return res.json(serializeBookingForResponse(result.booking));
   } catch (error) {
     return sendControllerError(res, error, "Could not update treatment record");
   }
