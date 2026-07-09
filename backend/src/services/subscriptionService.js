@@ -27,7 +27,6 @@ import { serializeSubscriptionStatus } from "./subscription/subscriptionSerializ
 import { requireSalonOwnerOrAdmin, validateSubscriptionRequester, getAuthorizedPaymentAttempt } from "./subscription/subscriptionAuthorization.js";
 import {
   DEFAULT_PLAN_CODE,
-  TRIAL_DAYS,
   GRACE_DAYS,
   PAID_SUBSCRIPTION_STATUSES,
   MANUAL_PROVIDER,
@@ -49,6 +48,7 @@ export { getOrCreateDefaultSubscriptionPlan, isManualActivationAvailable, isDevP
 export { getMySubscriptionPaymentHistory } from "./subscription/userSubscriptionQueries.js";
 export { getPaidAccessByBarberIds, getPaidAccessByBarberIdsForSalon, getMySubscriptionAccess } from "./subscription/subscriptionAccessQueries.js";
 export { barberHasPaidAccess, barberHasPaidAccessForSalon, barberHasPaidSeatAccessForSalon } from "./subscription/subscriptionPaidAccessQueries.js";
+export { createTrialSubscription, createSalonTrialSubscription } from "./subscription/subscriptionTrialMutations.js";
 export { getSubscriptionByOwner, salonHasActiveSubscription, getSalonSubscriptionDetails } from "./subscription/salonSubscriptionQueries.js";
 export { getSalonSubscriptionPaymentHistory } from "./subscription/salonSubscriptionQueries.js";
 export { getSubscriptionPaymentAttempt } from "./subscription/paymentAttemptHelpers.js";
@@ -72,56 +72,6 @@ const isApprovedMember = (barber, salonId) => {
  * Create a trial subscription for a barber or salon owner.
  * Idempotent — if a subscription already exists for this owner, returns it.
  */
-export const createTrialSubscription = async ({
-  ownerType,
-  ownerId,
-  payerId,
-  seatCount = 1,
-}) => {
-  // Idempotent: return existing if found
-  const existing = await Subscription.findOne({ ownerType, ownerId });
-  if (existing) {
-    return existing;
-  }
-
-  const plan = await getOrCreateDefaultSubscriptionPlan();
-
-  const now = new Date();
-  const trialEnd = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-
-  const totalPrice = plan.pricePerSeat * seatCount;
-
-  const subscription = await Subscription.create({
-    ownerType,
-    ownerId,
-    ownerRefModel: ownerType === "barber" ? "User" : "Salon",
-    payerId,
-    planId: plan._id,
-    status: "trialing",
-    seatCount,
-    pricePerSeat: plan.pricePerSeat,
-    totalPrice,
-    currentPeriodStart: now,
-    currentPeriodEnd: trialEnd,
-    trialEndsAt: trialEnd,
-    provider: "manual",
-  });
-
-  return subscription;
-};
-
-export const createSalonTrialSubscription = async ({
-  salonId,
-  payerId,
-  seatCount = 1,
-}) =>
-  createTrialSubscription({
-    ownerType: "salon",
-    ownerId: salonId,
-    payerId,
-    seatCount,
-  });
-
 export const grantSubscriptionGraceToExistingBarbers = async ({
   now = new Date(),
   graceDays = GRACE_DAYS,
