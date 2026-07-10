@@ -10,7 +10,7 @@ import {
   isValidEmail,
   normalizeEmail,
 } from "../utils/emailVerification.js";
-import { sendEmailVerification } from "../services/emailService.js";
+import { sendEmailVerification } from "../services/auth/emailService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";

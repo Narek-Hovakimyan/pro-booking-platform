@@ -1,5 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
-import { normalizeEmail } from "../utils/emailVerification.js";
+import { normalizeEmail } from "../../utils/emailVerification.js";
 
 let createGoogleClient = () => new OAuth2Client();
 

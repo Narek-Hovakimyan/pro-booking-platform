@@ -6,7 +6,7 @@ import { afterEach, test } from "node:test";
 import User from "../models/User.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
-import { setGoogleAuthClientFactoryForTesting } from "../services/googleAuthService.js";
+import { setGoogleAuthClientFactoryForTesting } from "../services/auth/googleAuthService.js";
 import { googleAuth, loginUser, registerUser } from "./authController.js";
 
 const originalUserMethods = {

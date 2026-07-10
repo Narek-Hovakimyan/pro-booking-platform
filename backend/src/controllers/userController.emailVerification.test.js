@@ -17,7 +17,7 @@ import { hashEmailVerificationToken } from "../utils/emailVerification.js";
 import {
   sendEmailVerification,
   setResendClientFactoryForTesting,
-} from "../services/emailService.js";
+} from "../services/auth/emailService.js";
 
 const originalUserMethods = {
   findById: User.findById,

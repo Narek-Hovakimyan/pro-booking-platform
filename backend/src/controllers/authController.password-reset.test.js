@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { afterEach, test } from "node:test";
 
 import User from "../models/User.js";
-import { setEmailTransportFactoryForTesting } from "../services/emailService.js";
+import { setEmailTransportFactoryForTesting } from "../services/auth/emailService.js";
 import { forgotPassword, resetPassword } from "./authController.js";
 
 const genericResetMessage =
