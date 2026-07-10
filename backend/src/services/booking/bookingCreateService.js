@@ -11,11 +11,11 @@ import {
   buildBookingPricing,
   rollbackVoucherClaim,
   recordVoucherRedemption,
-} from "../bookingPricingService.js";
+} from "./bookingPricingService.js";
 import {
   parseConsultationAndConsent,
   buildBookingCreatePayload,
-} from "../bookingCreatePayloadService.js";
+} from "./bookingCreatePayloadService.js";
 import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,

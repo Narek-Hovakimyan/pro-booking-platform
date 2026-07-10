@@ -33,7 +33,7 @@ import {
   rollbackVoucherClaim,
   recordVoucherRedemption,
   restoreVoucherOnCancel,
-} from "../services/bookingPricingService.js";
+} from "../services/booking/bookingPricingService.js";
 import { buildBookingStatusUpdate } from "../services/booking/bookingStatusService.js";
 import {
   getDayKeyFromDate,

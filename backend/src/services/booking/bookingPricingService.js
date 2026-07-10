@@ -1,6 +1,6 @@
-import Voucher from "../models/Voucher.js";
-import { calculateServiceDiscountedPrice } from "../controllers/serviceController.js";
-import { calculateLoyaltyDiscountForBooking } from "./barberClientService.js";
+import Voucher from "../../models/Voucher.js";
+import { calculateServiceDiscountedPrice } from "../../controllers/serviceController.js";
+import { calculateLoyaltyDiscountForBooking } from "../barberClientService.js";
 
 const sameId = (left, right) =>
   String(left || "") === String(right || "");

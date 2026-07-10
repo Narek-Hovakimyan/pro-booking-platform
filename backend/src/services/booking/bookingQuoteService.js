@@ -3,7 +3,7 @@ import {
   barberHasPaidAccessForSalon,
   barberHasPaidSeatAccessForSalon,
 } from "../subscriptionService.js";
-import { buildBookingPricing } from "../bookingPricingService.js";
+import { buildBookingPricing } from "./bookingPricingService.js";
 import { resolveBookingSalon } from "./bookingControllerHelpers.js";
 
 export const executeBookingPriceQuote = async ({ body, user }) => {
