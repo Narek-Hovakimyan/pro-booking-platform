@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link } from "react-router-dom";
 import {
   BriefcaseBusiness,
-  Camera,
   Image,
-  AtSign,
-  MapPin,
-  Pencil,
   Scissors,
   Star,
 } from "lucide-react";
@@ -28,6 +23,10 @@ import CertificationsSection from "@/barber/components/profile/CertificationsSec
 import ReviewsSection from "@/barber/components/profile/ReviewsSection";
 import ProfileWorkHistorySection from "@/barber/components/profile/ProfileWorkHistorySection";
 import GallerySection from "@/barber/components/profile/GallerySection";
+import ProfilePageHeader from "@/barber/components/profile/ProfilePageHeader";
+import ProfileAboutCard from "@/barber/components/profile/ProfileAboutCard";
+import ProfilePortfolioCard from "@/barber/components/profile/ProfilePortfolioCard";
+import ProfileSalonCard from "@/barber/components/profile/ProfileSalonCard";
 
 function getPrimarySalonId(user) {
   const approvedSalons = (user?.approvedSalons || user?.salons || []).filter(
@@ -90,10 +89,6 @@ function StatCard({ icon: Icon, label, value, helper }) {
       {helper && <p className="mt-2 text-xs text-neutral-400">{helper}</p>}
     </div>
   );
-}
-
-function EmptyText({ children }) {
-  return <p className="text-sm text-neutral-500">{children}</p>;
 }
 
 export default function BarberProfilePage() {
@@ -538,27 +533,11 @@ export default function BarberProfilePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-purple-50/80 to-neutral-50">
-      {/* Sticky page header */}
-      <div className="sticky top-0 z-30 border-b border-purple-100/50 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div>
-            <h1 className="text-lg font-bold text-neutral-950">Profile</h1>
-            <p className="text-xs text-neutral-500">{headline || "Manage your public profile"}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden text-xs text-neutral-400 sm:inline">
-              {saved ? "Saved" : ""}
-            </span>
-            <Button
-              className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-sm hover:from-purple-700 hover:to-pink-600"
-              onClick={() => setIsEditDrawerOpen(true)}
-            >
-              <Pencil className="mr-1.5 h-3.5 w-3.5" />
-              Edit profile
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ProfilePageHeader
+        headline={headline}
+        onEditClick={() => setIsEditDrawerOpen(true)}
+        saved={saved}
+      />
 
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
         {/* Stat cards row */}
@@ -614,62 +593,15 @@ export default function BarberProfilePage() {
               editable={false}
             />
 
-            {/* About */}
-            <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
-              <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-4">
-                <h2 className="font-bold text-white">About</h2>
-              </div>
-              <CardContent className="space-y-4 p-5">
-                {profile.bio ? (
-                  <p className="text-sm leading-6 text-neutral-600">{profile.bio}</p>
-                ) : (
-                  <EmptyText>No bio added yet.</EmptyText>
-                )}
-                <div className="grid gap-3 border-t border-neutral-100 pt-4 text-sm text-neutral-600 sm:grid-cols-2">
-                  {profile.city && (
-                    <p className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-neutral-400" />
-                      {profile.city}
-                    </p>
-                  )}
-                  {profile.address && (
-                    <p className="flex items-center gap-2">
-                      <BriefcaseBusiness className="h-4 w-4 text-neutral-400" />
-                      {profile.address}
-                    </p>
-                  )}
-                  {instagramHref && (
-                    <a
-                      className="flex items-center gap-2 font-medium text-neutral-800 hover:text-neutral-950"
-                      href={instagramHref}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <AtSign className="h-4 w-4 text-neutral-400" />
-                      {instagramHandle}
-                    </a>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <ProfileAboutCard
+              bio={profile.bio}
+              city={profile.city}
+              address={profile.address}
+              instagramHref={instagramHref}
+              instagramHandle={instagramHandle}
+            />
 
-            {/* Portfolio / Gallery */}
-            <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
-              <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-4">
-                <h2 className="font-bold text-white">Portfolio</h2>
-              </div>
-              <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-neutral-500">
-                  {portfolioCount && portfolioCount > 0
-                    ? `${portfolioCount} portfolio item${portfolioCount === 1 ? "" : "s"} ready for clients.`
-                    : "No portfolio items yet."}
-                </p>
-                <Button as={Link} to="/admin/portfolio" variant="outline">
-                  <Camera className="mr-2 h-4 w-4" />
-                  Manage portfolio
-                </Button>
-              </CardContent>
-            </Card>
+            <ProfilePortfolioCard portfolioCount={portfolioCount} />
 
             <GallerySection images={profile.galleryImages} />
 
@@ -709,33 +641,13 @@ export default function BarberProfilePage() {
           </div>
         </div>
 
-        {/* Salon & work card at bottom */}
-        <Card className="overflow-hidden rounded-3xl border-0 bg-white shadow-lg">
-          <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-4">
-            <h2 className="font-bold text-white">Salon & work</h2>
-          </div>
-          <CardContent className="p-5">
-            {showSalonLink ? (
-              <div className="rounded-2xl border border-purple-100 bg-purple-50 p-4">
-                <Link
-                  className="font-semibold text-purple-700 hover:text-purple-900"
-                  to={`/salons/${salonId}`}
-                >
-                  {salonName}
-                </Link>
-                {salonRating !== null && (
-                  <p className="mt-1 text-sm text-purple-500">
-                    <Star className="mr-0.5 inline-block h-3 w-3 fill-amber-400 text-amber-500" />
-                    {salonRating ? salonRating.toFixed(1) : "0.0"} ·{" "}
-                    {salonReviewsCount} {salonReviewsCount === 1 ? "review" : "reviews"}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <EmptyText>No salon connected yet.</EmptyText>
-            )}
-          </CardContent>
-        </Card>
+        <ProfileSalonCard
+          showSalonLink={showSalonLink}
+          salonName={salonName}
+          salonId={salonId}
+          salonRating={salonRating}
+          salonReviewsCount={salonReviewsCount}
+        />
       </div>
 
       {/* Drawer for full edit mode */}
