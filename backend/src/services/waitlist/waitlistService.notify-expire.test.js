@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import WaitlistEntry from "../models/WaitlistEntry.js";
-import Notification from "../models/Notification.js";
-import User from "../models/User.js";
+import WaitlistEntry from "../../models/WaitlistEntry.js";
+import Notification from "../../models/Notification.js";
+import User from "../../models/User.js";
 import {
   barberId,
   clientId,

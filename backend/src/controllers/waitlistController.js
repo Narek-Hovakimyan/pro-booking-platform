@@ -9,7 +9,7 @@ import {
   offerWaitlistEntry,
   acceptWaitlistOffer,
   declineWaitlistOffer,
-} from "../services/waitlistService.js";
+} from "../services/waitlist/waitlistService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 
 const getWaitlistActionStatus = (error) => {

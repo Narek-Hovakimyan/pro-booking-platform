@@ -3,7 +3,7 @@ import {
   isBeyondBookingHorizon,
   isDateKey,
   timeToMinutes,
-} from "../utils/bookingDateTime.js";
+} from "../../utils/bookingDateTime.js";
 
 export const OPEN_WAITLIST_STATUSES = ["active", "notified", "offered"];
 export const CANCELLABLE_WAITLIST_STATUSES = ["active", "notified"];

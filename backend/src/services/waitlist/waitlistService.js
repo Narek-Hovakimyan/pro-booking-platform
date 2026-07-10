@@ -1,9 +1,9 @@
-import WaitlistEntry from "../models/WaitlistEntry.js";
-import Booking from "../models/Booking.js";
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
-import { createNotification } from "./notificationService.js";
+import WaitlistEntry from "../../models/WaitlistEntry.js";
+import Booking from "../../models/Booking.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
+import { createNotification } from "../notificationService.js";
 
 import {
   getArmeniaDateKey,
@@ -12,12 +12,12 @@ import {
   isDateKey,
   isTimeKey,
   timeToMinutes,
-} from "../utils/bookingDateTime.js";
-import { blockingBookingStatuses, slotOverlaps } from "../utils/bookingUtils.js";
+} from "../../utils/bookingDateTime.js";
+import { blockingBookingStatuses, slotOverlaps } from "../../utils/bookingUtils.js";
 import {
   canUserManageSalon,
   getApprovedUserSalonIds,
-} from "./salon/salonMembershipService.js";
+} from "../salon/salonMembershipService.js";
 import {
   OPEN_WAITLIST_STATUSES,
   CANCELLABLE_WAITLIST_STATUSES,
@@ -28,7 +28,7 @@ import {
   throwDuplicateWaitlistEntryError,
   createWaitlistActionError,
 } from "./waitlistValidation.js";
-import { barberHasPaidAccessForSalon } from "./subscriptionService.js";
+import { barberHasPaidAccessForSalon } from "../subscriptionService.js";
 
 const waitlistCreationLocks = new Map();
 const waitlistDisplayPopulate = [

@@ -1,7 +1,7 @@
 import Booking from "../models/Booking.js";
 import { createNotification } from "./notificationService.js";
 
-import { notifyMatchingWaitlistEntries } from "./waitlistService.js";
+import { notifyMatchingWaitlistEntries } from "./waitlist/waitlistService.js";
 import {
   getArmeniaDateKey,
   getArmeniaMinutesOfDay,

@@ -283,7 +283,7 @@ test("expirePastWaitlistEntries is called on tick", async () => {
 });
 
 test("server still starts the booking reminder scheduler and has no legacy waitlist cron", async () => {
-  const serverSource = await readFile(new URL("../server.js", import.meta.url), "utf8");
+  const serverSource = await readFile(new URL("../../server.js", import.meta.url), "utf8");
 
   assert.equal(serverSource.includes("startBookingReminderScheduler"), true);
   assert.equal(serverSource.includes("startWaitlistExpirationScheduler"), true);

@@ -35,7 +35,7 @@ import { servePublicPortfolioImage } from "./controllers/portfolioPhotoMediaCont
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
-import { startWaitlistExpirationScheduler } from "./services/waitlistExpirationScheduler.js";
+import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
 import { startExpirePendingBookingsCron } from "../cron/expirePendingBookings.js";
 import { startEventRemindersCron } from "../cron/eventReminders.js";

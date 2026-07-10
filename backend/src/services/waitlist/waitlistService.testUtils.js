@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import WaitlistEntry from "../models/WaitlistEntry.js";
-import Booking from "../models/Booking.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import WaitlistEntry from "../../models/WaitlistEntry.js";
+import Booking from "../../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
 
 export const clientId = "64b000000000000000000001";
 export const otherClientId = "64b000000000000000000002";
