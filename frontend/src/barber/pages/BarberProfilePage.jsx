@@ -3,22 +3,20 @@ import { useDispatch, useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
 import { getMyPortfolio } from "@/shared/api/portfolio";
-import AccountEmailSection from "@/shared/components/AccountEmailSection";
-import Drawer from "@/shared/components/common/Drawer";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { setReviews } from "@/store/slices/reviewsSlice";
 import { updateBarberProfile } from "@/store/slices/usersSlice";
 import { defaultPersonalSchedule } from "@/shared/data/schedule";
-import { Card, CardContent } from "@/shared/components/ui/card";
-import { Button } from "@/shared/components/ui/button";
 import ProfileSidebarCard from "@/barber/components/profile/ProfileSidebarCard";
-import ProfileFormCard from "@/barber/components/profile/ProfileFormCard";
 import CertificationsSection from "@/barber/components/profile/CertificationsSection";
 import ReviewsSection from "@/barber/components/profile/ReviewsSection";
 import ProfileWorkHistorySection from "@/barber/components/profile/ProfileWorkHistorySection";
 import GallerySection from "@/barber/components/profile/GallerySection";
 import ProfilePageHeader from "@/barber/components/profile/ProfilePageHeader";
 import ProfileStatsGrid from "@/barber/components/profile/ProfileStatsGrid";
+import { Card, CardContent } from "@/shared/components/ui/card";
+import ProfileFormCard from "@/barber/components/profile/ProfileFormCard";
+import ProfileEditDrawer from "@/barber/components/profile/ProfileEditDrawer";
 import ProfileAboutCard from "@/barber/components/profile/ProfileAboutCard";
 import ProfilePortfolioCard from "@/barber/components/profile/ProfilePortfolioCard";
 import ProfileSalonCard from "@/barber/components/profile/ProfileSalonCard";
@@ -611,50 +609,29 @@ export default function BarberProfilePage() {
         />
       </div>
 
-      {/* Drawer for full edit mode */}
-      <Drawer
-        description="Update the details clients see before booking."
+      <ProfileEditDrawer
         isOpen={isEditDrawerOpen}
         onClose={() => setIsEditDrawerOpen(false)}
-        title="Edit profile"
-      >
-        <ProfileFormCard
-          profile={profile}
-          isProfileSaving={isProfileSaving}
-          saved={saved}
-          profileError={profileError}
-          currentUser={currentUser}
-          onUpdateField={updateField}
-          onSaveProfile={saveProfile}
-          onAvatarUploaded={handleAvatarUploaded}
-          editable={true}
-        />
-
-        <Card className="rounded-2xl">
-          <CardContent className="space-y-5 p-4">
-            <AccountEmailSection
-              email={email}
-              emailVerified={emailVerified}
-              emailVerifiedAt={emailVerifiedAt}
-              isSaving={isEmailSaving}
-              isSending={isSending}
-              message={emailMessage}
-              error={emailError}
-              onEmailChange={onEmailChange}
-              onResend={resendVerification}
-            />
-
-            <Button
-              className="w-full"
-              disabled={!hasEmailChanges || isEmailSaving}
-              variant="outline"
-              onClick={saveEmail}
-            >
-              {isEmailSaving ? "Saving..." : "Save email"}
-            </Button>
-          </CardContent>
-        </Card>
-      </Drawer>
+        profile={profile}
+        updateField={updateField}
+        saveProfile={saveProfile}
+        isProfileSaving={isProfileSaving}
+        profileError={profileError}
+        currentUser={currentUser}
+        saved={saved}
+        email={email}
+        emailVerified={emailVerified}
+        emailVerifiedAt={emailVerifiedAt}
+        isEmailSaving={isEmailSaving}
+        isSending={isSending}
+        emailMessage={emailMessage}
+        emailError={emailError}
+        onEmailChange={onEmailChange}
+        saveEmail={saveEmail}
+        resendVerification={resendVerification}
+        hasEmailChanges={hasEmailChanges}
+        handleAvatarUploaded={handleAvatarUploaded}
+      />
     </div>
   );
 }
