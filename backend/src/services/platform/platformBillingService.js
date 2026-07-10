@@ -14,13 +14,7 @@ import {
   SAFE_OWNER_FIELDS,
   SAFE_PAYMENT_FIELDS,
 } from "./platformBillingConstants.js";
-
-const getIdString = (value) => {
-  if (!value) return "";
-  if (value._id) return String(value._id);
-  if (typeof value.id === "string") return value.id;
-  return String(value);
-};
+import { getIdString } from "./platformBillingCalculations.js";
 
 /* ── Query helpers ───────────────────────────────────── */
 
