@@ -12,7 +12,7 @@ import {
   revokeSalonSeat,
   cancelSalonSubscription,
   confirmSalonPayment,
-} from "../services/platformBillingService.js";
+} from "../services/platform/platformBillingService.js";
 
 const getRequestIp = (req) => req.ip || req.socket?.remoteAddress || "";
 

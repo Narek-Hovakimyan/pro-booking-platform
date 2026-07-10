@@ -1,8 +1,8 @@
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
-import Subscription from "../models/Subscription.js";
-import PaymentRecord from "../models/PaymentRecord.js";
-import { getDaysRemaining } from "./subscriptionService.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
+import Subscription from "../../models/Subscription.js";
+import PaymentRecord from "../../models/PaymentRecord.js";
+import { getDaysRemaining } from "../subscriptionService.js";
 
 const DEFAULT_CURRENCY = "AMD";
 const RECENT_PAYMENT_LIMIT = 10;

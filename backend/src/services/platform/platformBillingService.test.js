@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionPlan from "../models/SubscriptionPlan.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
-import PaymentRecord from "../models/PaymentRecord.js";
-import PlatformAuditLog from "../models/PlatformAuditLog.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import PaymentRecord from "../../models/PaymentRecord.js";
+import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 import {
   activateSalonSubscription,
   updateSalonSeatCount,

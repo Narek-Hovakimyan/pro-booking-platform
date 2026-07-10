@@ -1,13 +1,13 @@
 import mongoose from "mongoose";
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
-import PaymentRecord from "../models/PaymentRecord.js";
-import PlatformAuditLog from "../models/PlatformAuditLog.js";
-import { isWorkingSpecialist } from "./salon/salonRelationshipService.js";
-import { getDaysRemaining, getOrCreateDefaultSubscriptionPlan } from "./subscriptionService.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import PaymentRecord from "../../models/PaymentRecord.js";
+import PlatformAuditLog from "../../models/PlatformAuditLog.js";
+import { isWorkingSpecialist } from "../salon/salonRelationshipService.js";
+import { getDaysRemaining, getOrCreateDefaultSubscriptionPlan } from "../subscriptionService.js";
 
 const SAFE_OWNER_FIELDS = "name email avatarUrl city emailVerified profession barberType";
 const SAFE_BARBER_SEAT_FIELDS =

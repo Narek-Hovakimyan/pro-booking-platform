@@ -1,4 +1,4 @@
-import { getPlatformDashboardSummary } from "../services/platformDashboardService.js";
+import { getPlatformDashboardSummary } from "../services/platform/platformDashboardService.js";
 
 /**
  * GET /api/platform/dashboard/summary
