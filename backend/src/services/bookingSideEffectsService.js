@@ -5,7 +5,7 @@ import {
   formatRejectedMessage,
   formatStatusMessage,
 } from "../utils/bookingUtils.js";
-import { createNotification } from "./notificationService.js";
+import { createNotification } from "./notification/notificationService.js";
 import { notifyMatchingWaitlistEntries } from "./waitlist/waitlistService.js";
 
 let getIOForBookingSideEffects = getIO;

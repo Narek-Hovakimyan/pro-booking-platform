@@ -3,7 +3,7 @@ import Booking from "../../models/Booking.js";
 import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
 import User from "../../models/User.js";
-import { createNotification } from "../notificationService.js";
+import { createNotification } from "../notification/notificationService.js";
 
 import {
   getArmeniaDateKey,

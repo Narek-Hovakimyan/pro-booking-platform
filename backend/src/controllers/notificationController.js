@@ -1,5 +1,5 @@
 import Notification from "../models/Notification.js";
-import { createNotification } from "../services/notificationService.js";
+import { createNotification } from "../services/notification/notificationService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 
 export { createNotification };

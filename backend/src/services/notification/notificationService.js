@@ -1,5 +1,5 @@
-import Notification from "../models/Notification.js";
-import { getIO } from "../socket.js";
+import Notification from "../../models/Notification.js";
+import { getIO } from "../../socket.js";
 
 let getIOForNotifications = getIO;
 

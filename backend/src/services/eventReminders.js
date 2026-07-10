@@ -1,5 +1,5 @@
 import EventRegistration from "../models/EventRegistration.js";
-import { createNotification } from "./notificationService.js";
+import { createNotification } from "./notification/notificationService.js";
 
 
 export const REMINDER_LEAD_MINUTES = 24 * 60;
