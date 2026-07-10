@@ -1,4 +1,4 @@
-import Booking from "../models/Booking.js";
+import Booking from "../../models/Booking.js";
 import mongoose from "mongoose";
 
 export class RevenueError extends Error {
