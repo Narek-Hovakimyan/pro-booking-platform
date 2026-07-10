@@ -14,23 +14,14 @@ import {
   SAFE_OWNER_FIELDS,
   SAFE_PAYMENT_FIELDS,
 } from "./platformBillingConstants.js";
-import { getIdString } from "./platformBillingCalculations.js";
+import {
+  escapeRegex,
+  getIdString,
+  normalizeSearchTerm,
+  paginateQuery,
+} from "./platformBillingCalculations.js";
 
 /* ── Query helpers ───────────────────────────────────── */
-
-const escapeRegex = (text) =>
-  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const normalizeSearchTerm = (value) =>
-  typeof value === "string" ? value.trim() : "";
-
-const paginateQuery = (query, { page = 1, limit = 20 } = {}) => {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
-  const skip = (safePage - 1) * safeLimit;
-
-  return query.skip(skip).limit(safeLimit).lean();
-};
 
 /* ── Owner lookup helper ─────────────────────────────── */
 
