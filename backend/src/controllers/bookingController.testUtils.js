@@ -1,7 +1,7 @@
 
 import {
   __bookingSideEffectsTestHooks,
-} from "../services/bookingSideEffectsService.js";
+} from "../services/booking/bookingSideEffectsService.js";
 import Booking from "../models/Booking.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Notification from "../models/Notification.js";

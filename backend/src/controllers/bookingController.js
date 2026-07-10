@@ -22,7 +22,7 @@ import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
   notifyWaitlistForReleasedBookingSlot,
-} from "../services/bookingSideEffectsService.js";
+} from "../services/booking/bookingSideEffectsService.js";
 import { createNotification } from "./notificationController.js";
 import { createCrudController } from "./crudController.js";
 import {

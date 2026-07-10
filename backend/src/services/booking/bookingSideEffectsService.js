@@ -1,12 +1,12 @@
-import { getIO } from "../socket.js";
-import User from "../models/User.js";
+import { getIO } from "../../socket.js";
+import User from "../../models/User.js";
 import {
   formatCancelledMessage,
   formatRejectedMessage,
   formatStatusMessage,
-} from "../utils/bookingUtils.js";
-import { createNotification } from "./notification/notificationService.js";
-import { notifyMatchingWaitlistEntries } from "./waitlist/waitlistService.js";
+} from "../../utils/bookingUtils.js";
+import { createNotification } from "../notification/notificationService.js";
+import { notifyMatchingWaitlistEntries } from "../waitlist/waitlistService.js";
 
 let getIOForBookingSideEffects = getIO;
 let notifyMatchingWaitlistEntriesForBookingSideEffects = notifyMatchingWaitlistEntries;

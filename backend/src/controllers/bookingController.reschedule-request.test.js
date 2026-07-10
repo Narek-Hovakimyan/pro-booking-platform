@@ -8,7 +8,7 @@ import {
 } from "./bookingRescheduleController.js";
 import {
   __bookingSideEffectsTestHooks,
-} from "../services/bookingSideEffectsService.js";
+} from "../services/booking/bookingSideEffectsService.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Schedule from "../models/Schedule.js";

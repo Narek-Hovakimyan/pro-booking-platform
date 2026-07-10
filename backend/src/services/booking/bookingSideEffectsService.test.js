@@ -7,7 +7,7 @@ import {
   notifyUsersForBookingStatusChange,
   notifyWaitlistForReleasedBookingSlot,
 } from "./bookingSideEffectsService.js";
-import User from "../models/User.js";
+import User from "../../models/User.js";
 
 const barberId = "64b000000000000000000001";
 const clientId = "64b000000000000000000003";

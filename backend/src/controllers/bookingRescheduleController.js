@@ -3,7 +3,7 @@ import Booking from "../models/Booking.js";
 import {
   emitBookingUpdated,
   notifyWaitlistForReleasedBookingSlot,
-} from "../services/bookingSideEffectsService.js";
+} from "../services/booking/bookingSideEffectsService.js";
 import { getDayKeyFromDate, isDateKey } from "../utils/bookingDateTime.js";
 import { storedDateToDateKey } from "../utils/bookingDateStorage.js";
 import { getBookingNotificationData } from "../utils/bookingNotificationData.js";

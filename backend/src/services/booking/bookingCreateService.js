@@ -27,7 +27,7 @@ import {
   validateBookingSlot,
   withBookingCreationLock,
 } from "../../utils/bookingSlotValidation.js";
-import { emitBookingUpdated } from "../bookingSideEffectsService.js";
+import { emitBookingUpdated } from "./bookingSideEffectsService.js";
 import {
   resolveBookingSalon,
   getClientName,

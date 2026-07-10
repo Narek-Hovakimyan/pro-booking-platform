@@ -7,7 +7,7 @@ import {
 import {
   emitBookingUpdated,
   notifyWaitlistForReleasedBookingSlot,
-} from "../services/bookingSideEffectsService.js";
+} from "../services/booking/bookingSideEffectsService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import { serializeBookingForResponse } from "../utils/bookingUtils.js";
 
