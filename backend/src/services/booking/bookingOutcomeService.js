@@ -1,5 +1,5 @@
-import Booking from "../models/Booking.js";
-import { getBookingEndDateTime } from "../utils/bookingDateTime.js";
+import Booking from "../../models/Booking.js";
+import { getBookingEndDateTime } from "../../utils/bookingDateTime.js";
 
 export class BookingOutcomeError extends Error {
   constructor(statusCode, message) {

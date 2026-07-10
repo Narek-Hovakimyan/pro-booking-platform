@@ -1,4 +1,4 @@
-import { getBarberMonthlyIncomeSummary } from "../services/bookingAnalyticsService.js";
+import { getBarberMonthlyIncomeSummary } from "../services/booking/bookingAnalyticsService.js";
 import {
   getAccessibleClientReliabilitySummary,
 } from "../services/clientReliabilityService.js";
@@ -6,7 +6,7 @@ import {
   authorizeDebugAccess,
   debugAvailability,
   validateDebugRequest,
-} from "../services/availabilityDebugService.js";
+} from "../services/booking/availabilityDebugService.js";
 
 export const getBarberMonthlyIncome = async (req, res) => {
   try {

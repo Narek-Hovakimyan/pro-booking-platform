@@ -3,7 +3,7 @@ import { getBookingNotificationData } from "../utils/bookingNotificationData.js"
 import {
   markBookingLateCancel,
   markBookingNoShow,
-} from "../services/bookingOutcomeService.js";
+} from "../services/booking/bookingOutcomeService.js";
 import {
   emitBookingUpdated,
   notifyWaitlistForReleasedBookingSlot,

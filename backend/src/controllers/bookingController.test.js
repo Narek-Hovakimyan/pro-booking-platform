@@ -1067,7 +1067,7 @@ test("booking not found returns 404 for treatmentRecord", async () => {
 });
 
 test("client booking read excludes treatmentRecord", async () => {
-  const { getClientBookingsForRequester } = await import("../services/bookingReadService.js");
+  const { getClientBookingsForRequester } = await import("../services/booking/bookingReadService.js");
 
   const booking = createMutableBooking({
     treatmentRecord: { colorFormula: "secret", recordedBy: barberId, recordedAt: new Date() },

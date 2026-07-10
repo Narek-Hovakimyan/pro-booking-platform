@@ -1,7 +1,7 @@
 import {
   getBarberBookingsForRequester,
   getClientBookingsForRequester,
-} from "../services/bookingReadService.js";
+} from "../services/booking/bookingReadService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 
 export const getClientBookings = async (req, res) => {

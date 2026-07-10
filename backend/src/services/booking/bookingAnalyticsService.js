@@ -1,13 +1,13 @@
-import Booking from "../models/Booking.js";
+import Booking from "../../models/Booking.js";
 import {
   getCurrentMonthKey,
   getMonthBounds,
-} from "../utils/bookingDateTime.js";
+} from "../../utils/bookingDateTime.js";
 import {
   getBookingMonthKey,
   incomeBookingStatuses,
   monthKeyPattern,
-} from "../utils/bookingUtils.js";
+} from "../../utils/bookingUtils.js";
 
 export class BookingAnalyticsError extends Error {
   constructor(statusCode, message) {

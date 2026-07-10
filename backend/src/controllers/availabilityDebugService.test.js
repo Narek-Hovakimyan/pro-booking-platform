@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 
-import { debugAvailability, authorizeDebugAccess } from "../services/availabilityDebugService.js";
+import { debugAvailability, authorizeDebugAccess } from "../services/booking/availabilityDebugService.js";
 import Booking from "../models/Booking.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";

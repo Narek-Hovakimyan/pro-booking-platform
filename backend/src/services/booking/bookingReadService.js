@@ -1,8 +1,8 @@
-import Booking from "../models/Booking.js";
+import Booking from "../../models/Booking.js";
 import {
   serializeAvailabilityBooking,
   serializeBookingForResponse,
-} from "../utils/bookingUtils.js";
+} from "../../utils/bookingUtils.js";
 
 export class BookingReadError extends Error {
   constructor(statusCode, message) {

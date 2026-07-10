@@ -1,15 +1,15 @@
-import Booking from "../models/Booking.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
+import Booking from "../../models/Booking.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
 import {
   getApprovedUserSalonIds,
-} from "./salon/salonMembershipService.js";
+} from "../salon/salonMembershipService.js";
 import {
   normalizeScheduleForAvailability,
   serializeDefaultSchedule,
-} from "../utils/scheduleUtils.js";
+} from "../../utils/scheduleUtils.js";
 import {
   blockingBookingStatuses,
   getDayScheduleFromDefaultSchedule,
@@ -18,16 +18,16 @@ import {
   isPastBookingTime,
   normalizeBookingStatus,
   slotOverlaps,
-} from "../utils/bookingUtils.js";
+} from "../../utils/bookingUtils.js";
 import {
   getDayKeyFromDate,
   isDateKey,
   isTimeKey,
-} from "../utils/bookingDateTime.js";
+} from "../../utils/bookingDateTime.js";
 import {
   canUserManageSalon,
   isUserApprovedForSalon,
-} from "./salon/salonMembershipService.js";
+} from "../salon/salonMembershipService.js";
 
 const getIdString = (value) => {
   if (!value) return "";
