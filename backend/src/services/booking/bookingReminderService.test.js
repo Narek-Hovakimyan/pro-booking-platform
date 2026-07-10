@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { afterEach, test } from "node:test";
 
-import Notification from "../models/Notification.js";
-import Booking from "../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Booking from "../../models/Booking.js";
 
 import { runBookingReminders } from "./bookingReminderService.js";
 
@@ -62,7 +62,7 @@ const createBooking = (overrides = {}) => ({
 });
 
 test("server does not auto-start the legacy booking reminder cron", async () => {
-  const serverSource = await readFile(new URL("../server.js", import.meta.url), "utf8");
+  const serverSource = await readFile(new URL("../../server.js", import.meta.url), "utf8");
 
   assert.equal(serverSource.includes('import("../cron/bookingReminders.js")'), false);
   assert.equal(serverSource.includes("cron/bookingReminders"), false);

@@ -33,7 +33,7 @@ import paymentRoutes from "./routes/paymentRoutes.js";
 import platformRoutes from "./routes/platformRoutes.js";
 import { servePublicPortfolioImage } from "./controllers/portfolioPhotoMediaController.js";
 import { initSocket } from "./socket.js";
-import { startBookingReminderScheduler } from "./services/bookingReminderScheduler.js";
+import { startBookingReminderScheduler } from "./services/booking/bookingReminderScheduler.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";

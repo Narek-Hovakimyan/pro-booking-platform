@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import Notification from "../models/Notification.js";
-import Booking from "../models/Booking.js";
-import WaitlistEntry from "../models/WaitlistEntry.js";
+import Notification from "../../models/Notification.js";
+import Booking from "../../models/Booking.js";
+import WaitlistEntry from "../../models/WaitlistEntry.js";
 import {
   __bookingExpirationTestHooks,
   EXPIRED_REASON,

@@ -229,7 +229,7 @@ test("stop while run is in flight does not allow overlapping run after restart",
 });
 
 test("server still does not import the legacy booking reminder cron", async () => {
-  const serverSource = await readFile(new URL("../server.js", import.meta.url), "utf8");
+  const serverSource = await readFile(new URL("../../server.js", import.meta.url), "utf8");
 
   assert.equal(serverSource.includes('import("../cron/bookingReminders.js")'), false);
   assert.equal(serverSource.includes("cron/bookingReminders"), false);

@@ -1,7 +1,7 @@
-import Booking from "../models/Booking.js";
-import { createNotification } from "./notification/notificationService.js";
+import Booking from "../../models/Booking.js";
+import { createNotification } from "../notification/notificationService.js";
 
-import { notifyMatchingWaitlistEntries } from "./waitlist/waitlistService.js";
+import { notifyMatchingWaitlistEntries } from "../waitlist/waitlistService.js";
 import {
   getArmeniaDateKey,
   getArmeniaMinutesOfDay,
@@ -9,7 +9,7 @@ import {
   isDateKey,
   isTimeKey,
   timeToMinutes,
-} from "../utils/bookingDateTime.js";
+} from "../../utils/bookingDateTime.js";
 
 export const EXPIRED_REASON = "Barber did not confirm before appointment time";
 const EXPIRATION_BATCH_SIZE = 1000;

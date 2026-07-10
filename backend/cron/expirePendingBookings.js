@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { expirePendingBookings } from "../src/services/bookingExpiration.js";
+import { expirePendingBookings } from "../src/services/booking/bookingExpiration.js";
 
 export const EXPIRATION_CRON = "*/5 * * * *";
 

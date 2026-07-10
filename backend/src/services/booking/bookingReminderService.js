@@ -1,6 +1,6 @@
-import Booking from "../models/Booking.js";
-import { createNotification } from "./notification/notificationService.js";
-import { getBookingDateTime } from "../utils/bookingDateTime.js";
+import Booking from "../../models/Booking.js";
+import { createNotification } from "../notification/notificationService.js";
+import { getBookingDateTime } from "../../utils/bookingDateTime.js";
 
 const claimReminder = async (booking, field, now, extraQuery = {}) => {
   const claimedBooking = await Booking.findOneAndUpdate(
