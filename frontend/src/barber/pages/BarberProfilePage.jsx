@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import useProfileEmail from "@/barber/hooks/useProfileEmail";
 
 import api from "@/shared/api/axios";
 import { getMyPortfolio } from "@/shared/api/portfolio";
@@ -101,24 +102,20 @@ export default function BarberProfilePage() {
   const [portfolioCount, setPortfolioCount] = useState(null);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
 
-  // Email state (separate from public profile state)
-  const [email, setEmail] = useState(
-    currentUser?.email ?? ""
-  );
-  const [savedEmail, setSavedEmail] = useState(
-    currentUser?.email ?? ""
-  );
-
-  const [emailVerified, setEmailVerified] = useState(
-    Boolean(currentUser?.emailVerified)
-  );
-  const [emailVerifiedAt, setEmailVerifiedAt] = useState(
-    currentUser?.emailVerifiedAt ?? null
-  );
-  const [emailMessage, setEmailMessage] = useState("");
-  const [emailError, setEmailError] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [isEmailSaving, setIsEmailSaving] = useState(false);
+  const {
+    email,
+    emailVerified,
+    emailVerifiedAt,
+    isEmailSaving,
+    isSending,
+    emailMessage,
+    emailError,
+    onEmailChange,
+    saveEmail,
+    resendVerification,
+    loadFromUsersMe,
+    hasEmailChanges,
+  } = useProfileEmail({ currentUser, dispatch });
 
   const [profile, setProfile] = useState({
     name: currentUserName,
@@ -305,12 +302,7 @@ export default function BarberProfilePage() {
     api.get("/users/me")
       .then(({ data }) => {
         if (isMounted) {
-          const fetchedEmail = data.email ?? "";
-          setEmail(fetchedEmail);
-          setSavedEmail(fetchedEmail);
-          setEmailVerified(Boolean(data.emailVerified));
-          setEmailVerifiedAt(data.emailVerifiedAt ?? null);
-          dispatch(updateCurrentUser(data));
+          loadFromUsersMe(data);
         }
       })
 
@@ -321,7 +313,7 @@ export default function BarberProfilePage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUserId, currentUserName, currentUserPhone, currentUserSalonId, dispatch]);
+  }, [currentUserId, currentUserName, currentUserPhone, currentUserSalonId, dispatch, loadFromUsersMe]);
 
   const updateField = (field, value) => {
     setSaved(false);
@@ -426,64 +418,6 @@ export default function BarberProfilePage() {
 
   //── Email handlers (use /users/me, not /barbers/profile/:id) ──────
 
-  const saveEmail = useCallback(async () => {
-    setIsEmailSaving(true);
-    setEmailError("");
-    setEmailMessage("");
-
-    try {
-      const { data } = await api.put("/users/me", { email });
-      const savedFromResponse = data.email ?? "";
-      dispatch(updateCurrentUser(data));
-      setEmail(savedFromResponse);
-      setSavedEmail(savedFromResponse);
-      setEmailVerified(Boolean(data.emailVerified));
-      setEmailVerifiedAt(data.emailVerifiedAt ?? null);
-
-      if (data.email && !data.emailVerified) {
-        setEmailMessage("Verification email sent. Check your inbox.");
-      } else if (data.email && data.emailVerified) {
-        setEmailMessage("Email saved and verified.");
-      } else {
-        setEmailMessage("Email saved.");
-      }
-    } catch (requestError) {
-      setEmailError(
-        requestError.response?.data?.message ||
-          "Could not save email. Please try again."
-      );
-    } finally {
-      setIsEmailSaving(false);
-    }
-  }, [email, dispatch]);
-
-  const resendVerification = useCallback(async () => {
-    setIsSending(true);
-    setEmailError("");
-    setEmailMessage("");
-
-    try {
-      const { data } = await api.post("/users/me/email/verification");
-      setEmailMessage(data.message || "Verification email sent. Check your inbox.");
-    } catch (requestError) {
-      setEmailError(
-        requestError.response?.data?.message ||
-          "Could not send verification email. Please try again."
-      );
-    } finally {
-      setIsSending(false);
-    }
-  }, []);
-
-  const onEmailChange = useCallback((value) => {
-    setEmail(value);
-    setEmailMessage("");
-    setEmailError("");
-  }, []);
-
-  const normalizedInputEmail = (email ?? "").trim().toLowerCase();
-  const normalizedSavedEmail = (savedEmail ?? "").trim().toLowerCase();
-  const hasEmailChanges = normalizedInputEmail !== normalizedSavedEmail;
   const headline = getProfileHeadline(profile);
   const instagramHandle = profile.instagram?.trim() || "";
   const instagramHref = instagramHandle
