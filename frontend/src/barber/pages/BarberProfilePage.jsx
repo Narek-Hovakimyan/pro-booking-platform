@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import {
-  BriefcaseBusiness,
-  Image,
-  Scissors,
-  Star,
-} from "lucide-react";
 
 import api from "@/shared/api/axios";
 import { getMyPortfolio } from "@/shared/api/portfolio";
@@ -24,6 +18,7 @@ import ReviewsSection from "@/barber/components/profile/ReviewsSection";
 import ProfileWorkHistorySection from "@/barber/components/profile/ProfileWorkHistorySection";
 import GallerySection from "@/barber/components/profile/GallerySection";
 import ProfilePageHeader from "@/barber/components/profile/ProfilePageHeader";
+import ProfileStatsGrid from "@/barber/components/profile/ProfileStatsGrid";
 import ProfileAboutCard from "@/barber/components/profile/ProfileAboutCard";
 import ProfilePortfolioCard from "@/barber/components/profile/ProfilePortfolioCard";
 import ProfileSalonCard from "@/barber/components/profile/ProfileSalonCard";
@@ -73,23 +68,6 @@ const getProfileHeadline = (profile) => {
 
   return [profession, barberType].filter(Boolean).join(" · ");
 };
-
-function StatCard({ icon: Icon, label, value, helper }) {
-  return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-      <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-700">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <p className="text-lg font-bold text-neutral-950">{value}</p>
-          <p className="text-xs font-medium text-neutral-500">{label}</p>
-        </div>
-      </div>
-      {helper && <p className="mt-2 text-xs text-neutral-400">{helper}</p>}
-    </div>
-  );
-}
 
 export default function BarberProfilePage() {
   const dispatch = useDispatch();
@@ -540,30 +518,13 @@ export default function BarberProfilePage() {
       />
 
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
-        {/* Stat cards row */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            icon={Star}
-            label="Rating"
-            value={statRating}
-            helper={barberReviews.length > 0 ? "Client average" : "Waiting for first review"}
-          />
-          <StatCard
-            icon={BriefcaseBusiness}
-            label="Reviews"
-            value={statReviews}
-          />
-          <StatCard
-            icon={Scissors}
-            label="Services"
-            value={statServices}
-          />
-          <StatCard
-            icon={Image}
-            label="Portfolio"
-            value={statPortfolio}
-          />
-        </div>
+        <ProfileStatsGrid
+          statRating={statRating}
+          statReviews={statReviews}
+          statServices={statServices}
+          statPortfolio={statPortfolio}
+          barberReviews={barberReviews}
+        />
 
         {/* Two-column desktop layout */}
         <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
