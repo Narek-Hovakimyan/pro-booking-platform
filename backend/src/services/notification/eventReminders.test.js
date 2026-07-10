@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import EventRegistration from "../models/EventRegistration.js";
-import Notification from "../models/Notification.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import Notification from "../../models/Notification.js";
 import {
   REMINDER_LEAD_MINUTES,
   getEventStart,
