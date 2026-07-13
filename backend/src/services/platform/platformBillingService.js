@@ -31,25 +31,9 @@ import {
   serializeSalonSubscriptionForPlatform,
   serializeSubscriptionForPlatform,
 } from "./platformBillingSerializers.js";
+import { getOwnerMap } from "./platformBillingQueryHelpers.js";
 
 /* ── Query helpers ───────────────────────────────────── */
-
-/* ── Owner lookup helper ─────────────────────────────── */
-
-const getOwnerMap = async (ownerIds) => {
-  const uniqueIds = [...new Set(ownerIds.map((id) => getIdString(id)))];
-  if (uniqueIds.length === 0) return {};
-
-  const owners = await User.find({ _id: { $in: uniqueIds } })
-    .select(SAFE_OWNER_FIELDS)
-    .lean();
-
-  const map = {};
-  for (const owner of owners) {
-    map[getIdString(owner._id)] = owner;
-  }
-  return map;
-};
 
 /* ── Seat helpers ─────────────────────────────────────── */
 
