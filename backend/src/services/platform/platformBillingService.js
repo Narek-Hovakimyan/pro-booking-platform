@@ -15,10 +15,13 @@ import {
   SAFE_PAYMENT_FIELDS,
 } from "./platformBillingConstants.js";
 import {
+  computeSeatUsage,
   escapeRegex,
+  getPaymentSortTime,
   getIdString,
   normalizeSearchTerm,
   paginateQuery,
+  toObjectIdOrNull,
 } from "./platformBillingCalculations.js";
 
 /* ── Query helpers ───────────────────────────────────── */
@@ -169,16 +172,6 @@ const getSeatUsageForSalon = async (salonId, subscriptionId) => {
   };
 };
 
-const computeSeatUsage = (seatCount, usedSeats) => {
-  const total = Math.max(0, Number(seatCount) || 0);
-  const used = Math.max(0, usedSeats);
-  return {
-    total,
-    used,
-    available: Math.max(0, total - used),
-  };
-};
-
 /* ── Subscription helper ─────────────────────────────── */
 
 const serializeSubscriptionForPlatform = (subscription, now = new Date()) => {
@@ -291,9 +284,6 @@ const serializePaymentRecord = (record) => {
   return safe;
 };
 
-const getPaymentSortTime = (payment) =>
-  new Date(payment?.paidAt || payment?.confirmedAt || payment?.createdAt || 0).getTime();
-
 const serializeIndividualPaymentAttempt = (attempt) => {
   if (!attempt) return null;
 
@@ -335,12 +325,6 @@ const serializeIndividualPaymentRecord = (record) => {
     periodEnd: record.periodEnd || null,
     source: "payment_record",
   };
-};
-
-const toObjectIdOrNull = (value) => {
-  const id = getIdString(value);
-  if (!mongoose.Types.ObjectId.isValid(id)) return null;
-  return new mongoose.Types.ObjectId(id);
 };
 
 const getPaidIndividualBarberIds = async () => {
