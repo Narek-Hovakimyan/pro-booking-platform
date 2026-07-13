@@ -2,8 +2,8 @@ import Salon from "../../models/Salon.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
-import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 import { getOrCreateDefaultSubscriptionPlan } from "../subscriptionService.js";
+import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
 import {
   computeSeatUsage,
   getIdString,
@@ -30,49 +30,6 @@ import {
 } from "./platformBillingSeatHelpers.js";
 
 /* ── Query helpers ───────────────────────────────────── */
-
-/* ── Audit log helper ─────────────────────────────────── */
-
-const createPlatformAuditLog = async ({
-  actorId,
-  action,
-  salonId,
-  targetUserId,
-  subscriptionId,
-  paymentAttemptId,
-  oldValue,
-  newValue,
-  note,
-  requestIp,
-}) => {
-  return PlatformAuditLog.create({
-    actorId,
-    action,
-    salonId: salonId || null,
-    targetUserId: targetUserId || null,
-    subscriptionId: subscriptionId || null,
-    paymentAttemptId: paymentAttemptId || null,
-    oldValue: oldValue ?? null,
-    newValue: newValue ?? null,
-    note: note || "",
-    requestIp: requestIp || "",
-  });
-};
-
-const createAuditLogOrRollback = async (payload, rollback) => {
-  try {
-    return await createPlatformAuditLog(payload);
-  } catch (error) {
-    if (rollback) {
-      try {
-        await rollback();
-      } catch (rollbackError) {
-        error.rollbackError = rollbackError;
-      }
-    }
-    throw error;
-  }
-};
 
 /* ── Main service methods ─────────────────────────────── */
 
