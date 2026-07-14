@@ -1,127 +1,132 @@
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
-import connectDB from "../src/config/db.js";
+import Salon from "../src/models/Salon.js";
 import User from "../src/models/User.js";
+import {
+  buildLegacySalonAuditReport,
+  collectSalonReferenceIds,
+} from "./auditLegacySalonFieldsHelpers.js";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
-const getIdString = (value) => {
-  if (!value) return "";
-  if (value._id) return String(value._id);
-  if (value.id) return String(value.id);
-  return String(value);
+export const USER_AUDIT_PROJECTION =
+  "_id role salon salonStatus salons.salon salons.status salons.relationshipType salons.isPrimary salons.worksAsSpecialist";
+export const SALON_AUDIT_PROJECTION = "_id";
+
+export const userAuditQuery = {
+  $or: [
+    { salon: { $exists: true, $ne: null } },
+    { salonStatus: { $exists: true, $nin: [null, "", "none"] } },
+    { "salons.0": { $exists: true } },
+  ],
 };
 
-const summarizeSalonEntry = (entry) => ({
-  salon: getIdString(entry?.salon),
-  status: entry?.status || "",
-  relationshipStatus: entry?.relationshipStatus || "",
-  relationshipType: entry?.relationshipType || "",
-  worksAsSpecialist: entry?.worksAsSpecialist,
-});
+export const connectAuditDatabase = async ({
+  environment = process.env,
+  connect = (mongoUri) => mongoose.connect(mongoUri),
+} = {}) => {
+  const mongoUri = environment.MONGO_URI;
+  if (!mongoUri || mongoUri === "your_mongodb_connection_string") {
+    throw createAuditError("configuration", "MONGO_URI must be configured");
+  }
+  if (!mongoUri.startsWith("mongodb://") && !mongoUri.startsWith("mongodb+srv://")) {
+    throw createAuditError("configuration", "MONGO_URI must use a MongoDB connection scheme");
+  }
 
-const hasMatchingApprovedSalonEntry = (user) => {
-  const legacySalonId = getIdString(user?.salon);
-
-  if (!legacySalonId || user?.salonStatus !== "approved") return false;
-
-  return (user.salons || []).some(
-    (entry) =>
-      entry?.status === "approved" && getIdString(entry?.salon) === legacySalonId
-  );
+  await connect(mongoUri);
 };
 
-const auditLegacySalonFields = async () => {
-  const users = await User.find({
-    $or: [
-      { salon: { $exists: true, $ne: null } },
-      { salonStatus: { $exists: true, $ne: null } },
-    ],
-  })
-    .select("_id role salon salonStatus salons")
-    .lean();
+const disconnectAuditDatabase = () => mongoose.connection.close();
+const loadUsers = () => User.find(userAuditQuery).select(USER_AUDIT_PROJECTION).lean();
+const loadSalons = (salonIds) => salonIds.length > 0
+  ? Salon.find({ _id: { $in: salonIds } }).select(SALON_AUDIT_PROJECTION).lean()
+  : [];
 
-  const summary = {
-    totalUsersScanned: users.length,
-    usersWithLegacySalon: 0,
-    usersWithLegacySalonStatus: 0,
-    usersWithLegacyApprovedSalonStatus: 0,
-    usersWithSalonsArrayEntries: 0,
-    legacyApprovedMissingMatchingEntry: 0,
-    legacyApprovedWithMatchingEntry: 0,
-  };
-  const mismatches = [];
+const createAuditError = (phase, message) => {
+  const error = new Error(message);
+  error.auditPhase = phase;
+  return error;
+};
 
-  for (const user of users) {
-    const hasLegacySalon = Boolean(user.salon);
-    const hasLegacySalonStatus = Boolean(user.salonStatus);
-    const hasSalonEntries = Array.isArray(user.salons) && user.salons.length > 0;
-    const isLegacyApproved = user.salonStatus === "approved";
-    const hasMatchingEntry = hasMatchingApprovedSalonEntry(user);
+const getSafeErrorMessage = (error) => {
+  let message;
 
-    if (hasLegacySalon) summary.usersWithLegacySalon += 1;
-    if (hasLegacySalonStatus) summary.usersWithLegacySalonStatus += 1;
-    if (isLegacyApproved) summary.usersWithLegacyApprovedSalonStatus += 1;
-    if (hasSalonEntries) summary.usersWithSalonsArrayEntries += 1;
+  try {
+    message = error instanceof Error ? error.message : String(error);
+  } catch {
+    message = "Unknown error";
+  }
 
-    if (isLegacyApproved && hasMatchingEntry) {
-      summary.legacyApprovedWithMatchingEntry += 1;
-    }
+  const singleLineMessage = String(message).split(/\r?\n/, 1)[0];
+  const redactedMessage = singleLineMessage
+    .replace(/mongodb(?:\+srv)?:\/\/[^\s"']+/gi, "[redacted MongoDB URI]")
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[redacted credentials]@")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted token]")
+    .replace(
+      /\b(password|passwd|pwd|token|accessToken|refreshToken|apiKey|api_key|secret|authorization|credential|mongo_?uri|mongodb_?uri)\b\s*([:=])\s*[^\s,;]+/gi,
+      "$1$2[redacted]"
+    )
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted email]");
 
-    if (isLegacyApproved && !hasMatchingEntry) {
-      summary.legacyApprovedMissingMatchingEntry += 1;
-      mismatches.push({
-        userId: getIdString(user._id),
-        role: user.role || "",
-        legacySalon: getIdString(user.salon),
-        legacySalonStatus: user.salonStatus || "",
-        salons: (user.salons || []).map(summarizeSalonEntry),
-      });
+  return redactedMessage.length > 500
+    ? `${redactedMessage.slice(0, 500)}…[truncated]`
+    : redactedMessage;
+};
+
+export const runAudit = async ({
+  connect = connectAuditDatabase,
+  disconnect = disconnectAuditDatabase,
+  getUsers = loadUsers,
+  getSalons = loadSalons,
+  buildReport = buildLegacySalonAuditReport,
+  writeStdout = (value) => process.stdout.write(value),
+  writeStderr = (value) => process.stderr.write(value),
+  setExitCode = (code) => {
+    process.exitCode = code;
+  },
+} = {}) => {
+  let connected = false;
+  let report;
+  let phase = "configuration";
+
+  try {
+    phase = "connection";
+    await connect();
+    connected = true;
+    phase = "query";
+    const users = await getUsers();
+    const salons = await getSalons(collectSalonReferenceIds(users));
+    phase = "classification";
+    report = buildReport({ users, salons });
+    phase = "serialization";
+    const json = JSON.stringify(report, null, 2);
+    if (typeof json !== "string") throw new Error("Audit report is not JSON-serializable");
+    phase = "output";
+    writeStdout(`${json}\n`);
+  } catch (error) {
+    setExitCode(1);
+    const errorPhase = error?.auditPhase || phase;
+    writeStderr(`Legacy salon field audit ${errorPhase} failed: ${getSafeErrorMessage(error)}\n`);
+  } finally {
+    if (connected) {
+      try {
+        await disconnect();
+      } catch (error) {
+        setExitCode(1);
+        writeStderr(`Legacy salon field audit disconnect failed: ${getSafeErrorMessage(error)}\n`);
+      }
     }
   }
 
-  console.log("Legacy salon field audit");
-  console.log(`Total users scanned: ${summary.totalUsersScanned}`);
-  console.log(`Users with legacy salon: ${summary.usersWithLegacySalon}`);
-  console.log(
-    `Users with legacy salonStatus: ${summary.usersWithLegacySalonStatus}`
-  );
-  console.log(
-    `Users with legacy salonStatus approved: ${summary.usersWithLegacyApprovedSalonStatus}`
-  );
-  console.log(
-    `Users with User.salons entries: ${summary.usersWithSalonsArrayEntries}`
-  );
-  console.log(
-    `Legacy approved with matching User.salons entry: ${summary.legacyApprovedWithMatchingEntry}`
-  );
-  console.log(
-    `Legacy approved missing matching User.salons entry: ${summary.legacyApprovedMissingMatchingEntry}`
-  );
-
-  if (mismatches.length > 0) {
-    console.error("FAIL: legacy approved salon mismatches found");
-    for (const mismatch of mismatches) {
-      console.error(JSON.stringify(mismatch));
-    }
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log("PASS: no legacy approved salon mismatches found");
+  return report;
 };
 
-const run = async () => {
-  await connectDB();
-  await auditLegacySalonFields();
-};
+const isDirectRun =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("auditLegacySalonFields.js");
 
-run()
-  .catch((error) => {
-    console.error("Legacy salon field audit failed:", error);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await mongoose.connection.close().catch(() => {});
-  });
+if (isDirectRun) {
+  runAudit();
+}
