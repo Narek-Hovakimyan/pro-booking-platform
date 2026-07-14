@@ -24,6 +24,10 @@ import {
   getAllIndividualBillingSummaries,
   getIndividualPayments,
 } from "./platformBillingService.js";
+import {
+  getAcceptedStaffBarbersForSalon,
+  isBarberAcceptedStaffForSalon,
+} from "./platformBillingSeatHelpers.js";
 
 /* ── ObjectId helpers ────────────────────────────────── */
 
@@ -135,6 +139,7 @@ const acceptedStaffDoc = {
       status: "approved",
       relationshipType: "staff",
       relationshipStatus: "accepted",
+      worksAsSpecialist: true,
     },
   ],
 };
@@ -149,6 +154,52 @@ const legacyStaffDoc = {
   salons: [],
   salon: salonId,
   salonStatus: "approved",
+};
+
+const canonicalConflictBarber = (overrides = {}) => ({
+  _id: oid("64b000000000000000040011"),
+  name: "Canonical Conflict",
+  email: "canonical-conflict@example.com",
+  avatarUrl: null,
+  profession: "hair",
+  barberType: "staff",
+  role: "barber",
+  salon: salonId,
+  salonStatus: "approved",
+  salons: [
+    canonicalSalonEntry(overrides),
+  ],
+});
+
+const canonicalSalonEntry = (overrides = {}) => ({
+  salon: salonId,
+  status: "approved",
+  relationshipType: "staff",
+  relationshipStatus: "accepted",
+  worksAsSpecialist: true,
+  ...overrides,
+});
+
+const canonicalDuplicateBarber = (salons) => ({
+  ...canonicalConflictBarber(),
+  salons,
+});
+
+const canonicalSalonEntryWithout = (field) => {
+  const entry = canonicalSalonEntry();
+  delete entry[field];
+  return entry;
+};
+
+const assertPlatformSeatEligibility = async (barber, expected, message) => {
+  mockMethod(User, "find", () => qc([barber]));
+  mockMethod(User, "findById", () => qc(barber));
+
+  const acceptedStaff = await getAcceptedStaffBarbersForSalon(salonIdStr);
+  const isSeatEligible = await isBarberAcceptedStaffForSalon(barber._id, salonIdStr);
+
+  assert.equal(acceptedStaff.length, expected ? 1 : 0, `${message}: accepted staff list`);
+  assert.equal(isSeatEligible, expected, `${message}: seat eligibility`);
 };
 
 const chairRenterDoc = {
@@ -215,6 +266,7 @@ const unassignedAcceptedDoc = {
       status: "approved",
       relationshipType: "staff",
       relationshipStatus: "accepted",
+      worksAsSpecialist: true,
     },
   ],
 };
@@ -643,6 +695,235 @@ const mockMethod = (Model, method, impl) => {
 
 afterEach(() => {
   restoreOriginals();
+});
+
+test("platform billing seat eligibility uses worksAsSpecialist:false canonical membership over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ worksAsSpecialist: false }),
+    false,
+    "worksAsSpecialist false canonical member"
+  );
+});
+
+test("platform billing seat eligibility uses chair_renter canonical membership over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ relationshipType: "chair_renter" }),
+    false,
+    "chair renter canonical member"
+  );
+});
+
+test("platform billing seat eligibility uses pending canonical status over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ status: "pending" }),
+    false,
+    "pending canonical member"
+  );
+});
+
+test("platform billing seat eligibility uses rejected canonical status over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ status: "rejected" }),
+    false,
+    "rejected canonical member"
+  );
+});
+
+test("platform billing seat eligibility rejects canonical membership missing relationshipType over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalDuplicateBarber([canonicalSalonEntryWithout("relationshipType")]),
+    false,
+    "canonical member missing relationshipType"
+  );
+});
+
+test("platform billing seat eligibility rejects null or unknown canonical relationshipType over legacy approved", async () => {
+  for (const relationshipType of [null, "unknown"]) {
+    await assertPlatformSeatEligibility(
+      canonicalConflictBarber({ relationshipType }),
+      false,
+      `canonical member with ${relationshipType} relationshipType`
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects canonical membership missing status over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalDuplicateBarber([canonicalSalonEntryWithout("status")]),
+    false,
+    "canonical member missing status"
+  );
+});
+
+test("platform billing seat eligibility rejects null or unknown canonical status over legacy approved", async () => {
+  for (const status of [null, "unknown"]) {
+    await assertPlatformSeatEligibility(
+      canonicalConflictBarber({ status }),
+      false,
+      `canonical member with ${status} status`
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects canonical membership missing worksAsSpecialist over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalDuplicateBarber([canonicalSalonEntryWithout("worksAsSpecialist")]),
+    false,
+    "canonical member missing worksAsSpecialist"
+  );
+});
+
+test("platform billing seat eligibility rejects null or non-boolean canonical worksAsSpecialist over legacy approved", async () => {
+  for (const worksAsSpecialist of [null, "true"]) {
+    await assertPlatformSeatEligibility(
+      canonicalConflictBarber({ worksAsSpecialist }),
+      false,
+      `canonical member with ${String(worksAsSpecialist)} worksAsSpecialist`
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects numeric truthy worksAsSpecialist:1 over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ worksAsSpecialist: 1 }),
+    false,
+    "canonical member with worksAsSpecialist: 1 (numeric truthy)"
+  );
+});
+
+test("platform billing seat eligibility rejects arbitrary truthy worksAsSpecialist:'yes' over legacy approved", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ worksAsSpecialist: "yes" }),
+    false,
+    "canonical member with worksAsSpecialist: 'yes' (arbitrary truthy)"
+  );
+});
+
+test("platform billing seat eligibility preserves current owner and admin canonical semantics over legacy approved", async () => {
+  for (const relationshipType of ["owner", "admin"]) {
+    await assertPlatformSeatEligibility(
+      canonicalConflictBarber({ relationshipType }),
+      false,
+      `${relationshipType} canonical member`
+    );
+  }
+});
+
+test("platform billing seat eligibility keeps valid legacy-only approved barber support", async () => {
+  await assertPlatformSeatEligibility(
+    { ...legacyStaffDoc, role: "barber" },
+    true,
+    "legacy-only approved barber"
+  );
+});
+
+test("platform billing seat eligibility keeps legacy fallback when canonical membership is for another salon", async () => {
+  await assertPlatformSeatEligibility(
+    {
+      ...canonicalConflictBarber(),
+      salons: [canonicalSalonEntry({ salon: otherSalonId })],
+    },
+    true,
+    "legacy-approved barber with unrelated canonical salon membership"
+  );
+});
+
+test("platform billing seat eligibility keeps canonical approved working staff support", async () => {
+  await assertPlatformSeatEligibility(
+    canonicalConflictBarber({ worksAsSpecialist: true }),
+    true,
+    "canonical approved working staff"
+  );
+});
+
+test("platform billing seat eligibility rejects duplicate working staff plus worksAsSpecialist:false in either order", async () => {
+  const entries = [
+    canonicalSalonEntry({ worksAsSpecialist: true }),
+    canonicalSalonEntry({ worksAsSpecialist: false }),
+  ];
+
+  for (const salons of [entries, [...entries].reverse()]) {
+    await assertPlatformSeatEligibility(
+      canonicalDuplicateBarber(salons),
+      false,
+      "duplicate worksAsSpecialist conflict"
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects duplicate working staff plus pending status in either order", async () => {
+  const entries = [
+    canonicalSalonEntry({ worksAsSpecialist: true }),
+    canonicalSalonEntry({ status: "pending" }),
+  ];
+
+  for (const salons of [entries, [...entries].reverse()]) {
+    await assertPlatformSeatEligibility(
+      canonicalDuplicateBarber(salons),
+      false,
+      "duplicate pending status conflict"
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects duplicate working staff plus rejected status in either order", async () => {
+  const entries = [
+    canonicalSalonEntry({ worksAsSpecialist: true }),
+    canonicalSalonEntry({ status: "rejected" }),
+  ];
+
+  for (const salons of [entries, [...entries].reverse()]) {
+    await assertPlatformSeatEligibility(
+      canonicalDuplicateBarber(salons),
+      false,
+      "duplicate rejected status conflict"
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects duplicate working staff plus chair_renter in either order", async () => {
+  const entries = [
+    canonicalSalonEntry({ worksAsSpecialist: true }),
+    canonicalSalonEntry({ relationshipType: "chair_renter" }),
+  ];
+
+  for (const salons of [entries, [...entries].reverse()]) {
+    await assertPlatformSeatEligibility(
+      canonicalDuplicateBarber(salons),
+      false,
+      "duplicate chair renter conflict"
+    );
+  }
+});
+
+test("platform billing seat eligibility rejects duplicate working staff plus incomplete membership in either order", async () => {
+  const entries = [
+    canonicalSalonEntry({ worksAsSpecialist: true }),
+    canonicalSalonEntryWithout("worksAsSpecialist"),
+  ];
+
+  for (const salons of [entries, [...entries].reverse()]) {
+    await assertPlatformSeatEligibility(
+      canonicalDuplicateBarber(salons),
+      false,
+      "duplicate incomplete canonical membership"
+    );
+  }
+});
+
+test("platform billing seat eligibility accepts identical approved working-staff duplicates in either order", async () => {
+  const entries = [
+    canonicalSalonEntry({ joinedAt: new Date("2026-01-01") }),
+    canonicalSalonEntry({ joinedAt: new Date("2026-02-01") }),
+  ];
+
+  for (const salons of [entries, [...entries].reverse()]) {
+    await assertPlatformSeatEligibility(
+      canonicalDuplicateBarber(salons),
+      true,
+      "duplicate accepted working staff"
+    );
+  }
 });
 
 /* ════════════════════════════════════════════════════════ */

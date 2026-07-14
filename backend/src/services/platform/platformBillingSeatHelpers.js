@@ -5,6 +5,24 @@ import { isWorkingSpecialist } from "../salon/salonRelationshipService.js";
 import { SAFE_BARBER_SEAT_FIELDS } from "./platformBillingConstants.js";
 import { getIdString } from "./platformBillingCalculations.js";
 
+const getMatchingSalonEntries = (barber, salonId) =>
+  (barber.salons || []).filter((s) => getIdString(s.salon) === salonId);
+
+const isExplicitAcceptedWorkingSpecialist = (membership) =>
+  membership?.status === "approved" &&
+  membership.relationshipType === "staff" &&
+  membership.worksAsSpecialist === true &&
+  isWorkingSpecialist(membership);
+
+const isAcceptedWorkingSpecialistForSalon = (barber, salonId) => {
+  const salonEntries = getMatchingSalonEntries(barber, salonId);
+  if (salonEntries.length > 0) {
+    return salonEntries.every((entry) => isExplicitAcceptedWorkingSpecialist(entry));
+  }
+
+  return getIdString(barber.salon) === salonId && barber.salonStatus === "approved";
+};
+
 export const getAcceptedStaffBarbersForSalon = async (salonId) => {
   const stringId = getIdString(salonId);
 
@@ -24,18 +42,7 @@ export const getAcceptedStaffBarbersForSalon = async (salonId) => {
     .select(SAFE_BARBER_SEAT_FIELDS)
     .lean();
 
-  return barbers.filter((barber) => {
-    // Check multi-salon entry
-    const salonEntry = (barber.salons || []).find(
-      (s) => getIdString(s.salon) === stringId && s.status === "approved"
-    );
-    if (salonEntry && isWorkingSpecialist(salonEntry)) return true;
-
-    // Check legacy barber field
-    if (getIdString(barber.salon) === stringId && barber.salonStatus === "approved") return true;
-
-    return false;
-  });
+  return barbers.filter((barber) => isAcceptedWorkingSpecialistForSalon(barber, stringId));
 };
 
 export const isBarberAcceptedStaffForSalon = async (barberId, salonId) => {
@@ -46,16 +53,7 @@ export const isBarberAcceptedStaffForSalon = async (barberId, salonId) => {
 
   if (!barber || barber.role !== "barber") return false;
 
-  // Check multi-salon entry
-  const salonEntry = (barber.salons || []).find(
-    (s) => getIdString(s.salon) === stringId && s.status === "approved"
-  );
-  if (salonEntry && isWorkingSpecialist(salonEntry)) return true;
-
-  // Check legacy fields
-  if (getIdString(barber.salon) === stringId && barber.salonStatus === "approved") return true;
-
-  return false;
+  return isAcceptedWorkingSpecialistForSalon(barber, stringId);
 };
 
 export const isBarberChairRenterForSalon = async (barberId, salonId) => {
