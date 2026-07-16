@@ -147,6 +147,36 @@ const loyaltyDiscountSettingsSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const specialistOnboardingSchema = new mongoose.Schema(
+  {
+    version: {
+      type: Number,
+      enum: [1],
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ["not_started", "in_progress", "completed"],
+      required: true,
+    },
+    currentStep: {
+      type: String,
+      enum: ["professional_basics", "workplace", "personal_schedule", "review", null],
+      default: null,
+    },
+    workplace: {
+      type: String,
+      enum: ["independent", "salon", null],
+      default: null,
+    },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false, strict: "throw" }
+);
+
 const hasBarberRole = (doc) => doc?.role === "barber";
 const isLegacyPlatformRoleValue = (doc, value) =>
   !doc?.isNew &&
@@ -339,6 +369,16 @@ const userSchema = new mongoose.Schema({
     ],
     default() {
       return hasBarberRole(this) ? [] : undefined;
+    },
+  },
+  specialistOnboarding: {
+    type: specialistOnboardingSchema,
+    default: undefined,
+    validate: {
+      validator(value) {
+        return value === undefined || this.role === "barber";
+      },
+      message: "specialistOnboarding is only supported for barbers",
     },
   },
   favoriteBarbers: [

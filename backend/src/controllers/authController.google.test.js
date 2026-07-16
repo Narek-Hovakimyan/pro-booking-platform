@@ -203,6 +203,15 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   assert.equal(existingUser.authProviders.includes("google"), true);
   assert.equal(existingUser.googleId, "google-sub");
   assert.equal(existingUser.saved, true);
+  assert.equal("specialistOnboarding" in existingUser, false);
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    version: 0,
+    status: "legacy",
+    currentStep: null,
+    workplace: null,
+    completedAt: null,
+    needsOnboarding: false,
+  });
 });
 
 test("googleAuth does not mark a different stored email as verified for existing googleId", async () => {
@@ -228,6 +237,36 @@ test("googleAuth does not mark a different stored email as verified for existing
   assert.equal(existingUser.emailVerifiedAt, null);
   assert.equal(existingUser.googleId, "google-sub");
   assert.equal(existingUser.authProviders.includes("google"), true);
+});
+
+test("googleAuth preserves an existing explicit barber onboarding state", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  mockGooglePayload(baseGooglePayload);
+  const specialistOnboarding = {
+    version: 1,
+    status: "completed",
+    currentStep: null,
+    workplace: "salon",
+    completedAt: new Date("2026-01-02T03:04:05.000Z"),
+  };
+  const existingUser = createUser({
+    googleId: "google-sub",
+    role: "barber",
+    specialistOnboarding,
+  });
+
+  User.findOne = (filter) =>
+    filter.googleId === "google-sub" ? selectable(existingUser) : selectable(null);
+
+  const res = createResponse();
+  await googleAuth({ body: { credential: "valid-google-token" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(existingUser.specialistOnboarding, specialistOnboarding);
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    ...specialistOnboarding,
+    needsOnboarding: false,
+  });
 });
 
 test("googleAuth links existing verified email without changing role or phone", async () => {
@@ -265,6 +304,14 @@ test("googleAuth links existing verified email without changing role or phone", 
   assert.equal(existingUser.platformRole, "superuser");
   assert.deepEqual(existingUser.salons, [{ salon: "salon-1", status: "approved" }]);
   assert.equal(existingUser.avatarUrl, "https://example.com/avatar.png");
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    version: 0,
+    status: "legacy",
+    currentStep: null,
+    workplace: null,
+    completedAt: null,
+    needsOnboarding: false,
+  });
 });
 
 test("googleAuth rejects existing email linked to different googleId", async () => {
@@ -367,7 +414,9 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   assert.equal(createPayload.phone, "+37400111222");
   assert.equal(createPayload.role, "client");
   assert.equal(createPayload.platformRole, undefined);
+  assert.equal(createPayload.specialistOnboarding, undefined);
   assert.equal(res.body.user.platformRole, undefined);
+  assert.equal("specialistOnboarding" in res.body.user, false);
   assert.deepEqual(createPayload.authProviders, ["google"]);
   const rawUser = createdUser.toObject();
   assert.deepEqual(rawUser.favoriteBarbers, []);
@@ -418,12 +467,14 @@ test("googleAuth creates first-time barber user with trial subscription", async 
   const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
   let subscriptionPayload;
   let createdUser;
+  let createPayload;
 
   User.findOne = (filter) => {
     if (filter.googleId || filter.email) return selectable(null);
     return null;
   };
   User.create = async (payload) => {
+    createPayload = payload;
     createdUser = await createPersistedUser(payload);
     return createdUser;
   };
@@ -435,7 +486,14 @@ test("googleAuth creates first-time barber user with trial subscription", async 
   };
 
   const res = createResponse();
-  await googleAuth({ body: { credential: "valid-google-token", role: "barber", phone: "+37400111222" } }, res);
+  await googleAuth({
+    body: {
+      credential: "valid-google-token",
+      role: "barber",
+      phone: "+37400111222",
+      specialistOnboarding: { status: "completed", needsOnboarding: false },
+    },
+  }, res);
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.user.role, "barber");
@@ -443,6 +501,17 @@ test("googleAuth creates first-time barber user with trial subscription", async 
   assert.equal(String(subscriptionPayload.ownerId), userId);
   assert.equal(subscriptionPayload.ownerRefModel, "User");
   assert.equal(subscriptionPayload.status, "trialing");
+  assert.deepEqual(createPayload.specialistOnboarding, {
+    version: 1,
+    status: "not_started",
+    currentStep: "professional_basics",
+    workplace: null,
+    completedAt: null,
+  });
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    ...createPayload.specialistOnboarding,
+    needsOnboarding: true,
+  });
   const rawUser = createdUser.toObject();
   assert.equal(rawUser.profession, "barber");
   assert.equal(rawUser.barberType, "unisex");
@@ -608,9 +677,11 @@ test("normal registration creates barber fields and trial subscription", async (
   const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
   let createdUser;
   let subscriptionPayload;
+  let createPayload;
 
   User.findOne = () => null;
   User.create = async (payload) => {
+    createPayload = payload;
     createdUser = await createPersistedUser(payload);
     return createdUser;
   };
@@ -630,6 +701,7 @@ test("normal registration creates barber fields and trial subscription", async (
         email: "barber@example.com",
         password: "password123",
         role: "barber",
+        specialistOnboarding: { status: "completed", needsOnboarding: false },
       },
     },
     res
@@ -640,6 +712,17 @@ test("normal registration creates barber fields and trial subscription", async (
   assert.equal(subscriptionPayload.ownerType, "barber");
   assert.equal(String(subscriptionPayload.ownerId), userId);
   assert.equal(subscriptionPayload.status, "trialing");
+  assert.deepEqual(createPayload.specialistOnboarding, {
+    version: 1,
+    status: "not_started",
+    currentStep: "professional_basics",
+    workplace: null,
+    completedAt: null,
+  });
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    ...createPayload.specialistOnboarding,
+    needsOnboarding: true,
+  });
   const rawUser = createdUser.toObject();
   assert.equal(rawUser.profession, "barber");
   assert.equal(rawUser.barberType, "unisex");

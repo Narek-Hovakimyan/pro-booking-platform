@@ -504,3 +504,98 @@ describe("User role-specific defaults", () => {
     });
   });
 });
+
+describe("User specialist onboarding state", () => {
+  const makeBarber = (overrides = {}) =>
+    new User({
+      name: "Onboarding Barber",
+      phone: phone(`onboarding-${overrides.phoneSuffix || "barber"}`),
+      password: "password123",
+      role: "barber",
+      ...overrides,
+    });
+
+  test("is absent by default for new and legacy barber documents", () => {
+    const newBarber = makeBarber();
+    const legacyBarber = User.hydrate({
+      _id: new mongoose.Types.ObjectId(),
+      name: "Legacy Onboarding Barber",
+      phone: phone("legacy-onboarding"),
+      password: "password123",
+      role: "barber",
+    });
+
+    assert.equal(newBarber.specialistOnboarding, undefined);
+    assert.equal("specialistOnboarding" in newBarber.toObject(), false);
+    assert.equal(legacyBarber.specialistOnboarding, undefined);
+    assert.equal("specialistOnboarding" in legacyBarber.toObject(), false);
+    assert.equal(User.schema.path("specialistOnboarding").options.default, undefined);
+  });
+
+  test("accepts a valid explicit v1 state without a subdocument id", () => {
+    const user = makeBarber({
+      specialistOnboarding: {
+        version: 1,
+        status: "in_progress",
+        currentStep: "workplace",
+        workplace: "independent",
+        completedAt: null,
+      },
+    });
+
+    assert.equal(user.validateSync(), undefined);
+    assert.deepEqual(user.specialistOnboarding.toObject(), {
+      version: 1,
+      status: "in_progress",
+      currentStep: "workplace",
+      workplace: "independent",
+      completedAt: null,
+    });
+    assert.equal("_id" in user.specialistOnboarding.toObject(), false);
+  });
+
+  for (const [label, specialistOnboarding, path] of [
+    ["version", { version: 2, status: "not_started" }, "specialistOnboarding.version"],
+    ["status", { version: 1, status: "unknown" }, "specialistOnboarding.status"],
+    ["current step", { version: 1, status: "not_started", currentStep: "unknown" }, "specialistOnboarding.currentStep"],
+    ["workplace", { version: 1, status: "not_started", workplace: "unknown" }, "specialistOnboarding.workplace"],
+    ["completion date", { version: 1, status: "completed", completedAt: "not-a-date" }, "specialistOnboarding.completedAt"],
+  ]) {
+    test(`rejects an invalid onboarding ${label}`, () => {
+      const error = makeBarber({ specialistOnboarding }).validateSync();
+      assert.ok(error?.errors?.[path]);
+    });
+  }
+
+  test("rejects arbitrary nested onboarding fields", () => {
+    const error = makeBarber({
+      specialistOnboarding: {
+        version: 1,
+        status: "not_started",
+        arbitrary: "not allowed",
+      },
+    }).validateSync();
+
+    assert.ok(error?.errors?.specialistOnboarding);
+  });
+
+  test("clients can exist without onboarding but cannot store it", () => {
+    const client = new User({
+      name: "Onboarding Client",
+      phone: phone("onboarding-client"),
+      password: "password123",
+      role: "client",
+    });
+    const clientWithState = new User({
+      name: "Invalid Onboarding Client",
+      phone: phone("onboarding-client-state"),
+      password: "password123",
+      role: "client",
+      specialistOnboarding: { version: 1, status: "not_started" },
+    });
+
+    assert.equal(client.validateSync(), undefined);
+    assert.equal(client.specialistOnboarding, undefined);
+    assert.ok(clientWithState.validateSync()?.errors?.specialistOnboarding);
+  });
+});

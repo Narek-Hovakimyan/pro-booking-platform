@@ -7,6 +7,10 @@ import { verifyGoogleIdToken } from "../services/auth/googleAuthService.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
 import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
 import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
+import {
+  createInitialSpecialistOnboardingState,
+  serializeSpecialistOnboardingState,
+} from "../utils/specialistOnboardingState.js";
 import { getLogger, safeErrorSerializer } from "../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
@@ -20,28 +24,33 @@ const logAuthError = (event, error, metadata = {}) => {
   );
 };
 
-const getUserData = (user) => ({
-  id: user._id,
-  name: user.name,
-  phone: user.phone,
-  email: user.email || "",
-  emailVerified: user.emailVerified || false,
-  emailVerifiedAt: user.emailVerifiedAt || null,
-  city: user.city || "",
-  avatarUrl: user.avatarUrl || "",
-  role: user.role,
-  salon: user.salon || null,
-  salonStatus: user.salonStatus || "none",
-  salons: user.salons || [],
-  profession: user.profession || "barber",
-  barberType: user.barberType || "",
-  specialty: user.specialty || "unisex",
-  workHistory: user.workHistory || [],
-  favoriteBarbers: user.favoriteBarbers || [],
-  favoriteSalons: user.favoriteSalons || [],
-  canAccessPlatform: isPlatformSuperuser(user),
-  createdAt: user.createdAt,
-});
+const getUserData = (user) => {
+  const specialistOnboarding = serializeSpecialistOnboardingState(user);
+
+  return {
+    id: user._id,
+    name: user.name,
+    phone: user.phone,
+    email: user.email || "",
+    emailVerified: user.emailVerified || false,
+    emailVerifiedAt: user.emailVerifiedAt || null,
+    city: user.city || "",
+    avatarUrl: user.avatarUrl || "",
+    role: user.role,
+    salon: user.salon || null,
+    salonStatus: user.salonStatus || "none",
+    salons: user.salons || [],
+    profession: user.profession || "barber",
+    barberType: user.barberType || "",
+    specialty: user.specialty || "unisex",
+    workHistory: user.workHistory || [],
+    favoriteBarbers: user.favoriteBarbers || [],
+    favoriteSalons: user.favoriteSalons || [],
+    canAccessPlatform: isPlatformSuperuser(user),
+    createdAt: user.createdAt,
+    ...(specialistOnboarding ? { specialistOnboarding } : {}),
+  };
+};
 
 const signToken = (userId) => {
   if (!process.env.JWT_SECRET) {
@@ -164,6 +173,9 @@ export const registerUser = async (req, res) => {
       email,
       password: hashedPassword,
       role,
+      ...(role === "barber"
+        ? { specialistOnboarding: createInitialSpecialistOnboardingState() }
+        : {}),
     });
 
     if (role === "barber") {
@@ -331,6 +343,9 @@ export const googleAuth = async (req, res) => {
       authProviders: ["google"],
       role,
       avatarUrl: googlePayload.picture || "",
+      ...(role === "barber"
+        ? { specialistOnboarding: createInitialSpecialistOnboardingState() }
+        : {}),
     });
 
     if (role === "barber") {
