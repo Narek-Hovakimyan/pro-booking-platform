@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=18.19.0"
+  },
   "scripts": {
-    "dev": "NODE_ENV=development nodemon src/server.js",
-    "start": "node src/server.js",
+    "dev": "NODE_ENV=development nodemon --exec \"node --import ./src/instrument.js\" src/server.js",
+    "start": "node --import ./src/instrument.js src/server.js",
     "test": "node --test src/models/User.test.js && node --test --test-concurrency=1 \"src/controllers/**/*.test.js\" \"src/middleware/**/*.test.js\" \"src/models/EventRegistration.test.js\" \"src/models/PlatformAuditLog.test.js\" \"src/routes/**/*.test.js\" \"src/services/**/*.test.js\" \"src/socket.test.js\" \"src/utils/**/*.test.js\"",
     "migrate:salons": "node migrations/migrateToMultipleSalons.js",
     "migrate:fix-work-history": "node migrations/fixWorkHistory.js",
@@ -27,7 +30,8 @@
     "nodemailer": "^9.0.1",
     "pino": "^10.3.1",
     "resend": "^6.12.3",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "@sentry/node": "10.66.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",

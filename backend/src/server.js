@@ -5,6 +5,11 @@ import { createServer } from "http";
 import path from "path";
 import connectDB from "./config/db.js";
 import { createLogger } from "./config/logger.js";
+import {
+  getSentryInitializationStatus,
+  installSentryExpressErrorHandler,
+  sentryRequestContextMiddleware,
+} from "./config/sentry.js";
 import { requestContextMiddleware } from "./middleware/requestContextMiddleware.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -52,6 +57,13 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const logger = createLogger();
 
+if (getSentryInitializationStatus().failed) {
+  logger.warn(
+    { event: "sentry.initialization_failed" },
+    "Sentry initialization failed; continuing without Sentry"
+  );
+}
+
 app.disable("x-powered-by");
 
 if (process.env.TRUST_PROXY === "true") {
@@ -87,6 +99,7 @@ const corsOptions = {
 
 /* ── Request correlation / logging — before routes ──── */
 app.use(requestContextMiddleware(logger));
+app.use(sentryRequestContextMiddleware);
 
 initSocket(server);
 
@@ -163,6 +176,7 @@ app.use("/api/platform", platformRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 
 /* ── Centralized error handling ─────────────────────── */
+installSentryExpressErrorHandler(app);
 app.use(errorMiddleware);
 
 const startServer = async () => {
