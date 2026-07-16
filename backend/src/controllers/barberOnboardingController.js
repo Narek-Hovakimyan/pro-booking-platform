@@ -3,10 +3,12 @@ import {
   getBarberOnboardingStatus,
   updateBarberOnboardingWorkplace,
 } from "../services/onboarding/barberOnboardingStatusService.js";
+import { finalizeBarberOnboarding } from "../services/onboarding/barberOnboardingFinalizationService.js";
 
 const defaultDependencies = {
   getBarberOnboardingStatus,
   updateBarberOnboardingWorkplace,
+  finalizeBarberOnboarding,
 };
 
 const allowedWorkplaces = ["independent", "salon", null];
@@ -58,9 +60,23 @@ const readWorkplaceBody = (body) => {
   return { valid: true, workplace: descriptor.value };
 };
 
+const isEmptyOnboardingBody = (body) => {
+  if (body === undefined) return true;
+  if (!isPlainObject(body)) return false;
+  try {
+    return Reflect.ownKeys(body).length === 0;
+  } catch {
+    return false;
+  }
+};
+
 const handleError = (res, error) => {
   if (error instanceof BarberOnboardingStatusError) {
-    return errorResponse(res, error.statusCode, error.code, error.message);
+    const body = { code: error.code, message: error.message };
+    if (error.code === "ONBOARDING_REQUIREMENTS_INCOMPLETE" && Array.isArray(error.missing)) {
+      body.missing = [...error.missing];
+    }
+    return res.status(error.statusCode).json(body);
   }
 
   return res.status(500).json({ message: "Could not process onboarding status" });
@@ -102,10 +118,28 @@ export const createBarberOnboardingController = (dependencies = defaultDependenc
     }
   };
 
-  return { getMyBarberOnboarding, updateMyBarberOnboardingWorkplace };
+  const finalizeMyBarberOnboarding = async (req, res) => {
+    if (!requireBarber(req, res)) return undefined;
+    if (!isEmptyOnboardingBody(req.body)) {
+      return errorResponse(res, 400, "INVALID_ONBOARDING_REQUEST", "Invalid onboarding request");
+    }
+    try {
+      return res.json(await dependencies.finalizeBarberOnboarding(req.user._id));
+    } catch (error) {
+      if (error instanceof BarberOnboardingStatusError) return handleError(res, error);
+      return res.status(500).json({ message: "Could not finalize onboarding" });
+    }
+  };
+
+  return {
+    getMyBarberOnboarding,
+    updateMyBarberOnboardingWorkplace,
+    finalizeMyBarberOnboarding,
+  };
 };
 
 export const {
   getMyBarberOnboarding,
   updateMyBarberOnboardingWorkplace,
+  finalizeMyBarberOnboarding,
 } = createBarberOnboardingController();

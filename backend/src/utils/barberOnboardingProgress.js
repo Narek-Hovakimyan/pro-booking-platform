@@ -88,6 +88,7 @@ export const buildBarberOnboardingProgress = (facts) => {
   if (workplace === "independent" && !hasIndependentAddress) {
     missing.push("INDEPENDENT_ADDRESS_REQUIRED");
   }
+  const readyForFinalization = missing.length === 0;
 
   let derivedCurrentStep = "review";
   if (!professionalBasicsComplete) {
@@ -106,6 +107,7 @@ export const buildBarberOnboardingProgress = (facts) => {
       personalScheduleExists,
       personalScheduleValid,
       readyForReview,
+      readyForFinalization: false,
       missing: [],
       allowedActions: [],
       needsOnboarding: false,
@@ -119,10 +121,13 @@ export const buildBarberOnboardingProgress = (facts) => {
     personalScheduleExists,
     personalScheduleValid,
     readyForReview,
+    readyForFinalization,
     missing: [...missing],
-    allowedActions: readyForReview
-      ? [...allowedActionsBase, "REVIEW_ONBOARDING"]
-      : [...allowedActionsBase],
+    allowedActions: readyForFinalization
+      ? [...allowedActionsBase, "REVIEW_ONBOARDING", "FINALIZE_ONBOARDING"]
+      : readyForReview
+        ? [...allowedActionsBase, "REVIEW_ONBOARDING"]
+        : [...allowedActionsBase],
     needsOnboarding: true,
   };
 };

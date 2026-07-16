@@ -76,6 +76,7 @@ test("progress handles independent address without blocking review readiness", (
   }));
   assert.equal(independent.derivedCurrentStep, "review");
   assert.equal(independent.readyForReview, true);
+  assert.equal(independent.readyForFinalization, false);
   assert.deepEqual(independent.missing, ["INDEPENDENT_ADDRESS_REQUIRED"]);
 
   const salon = buildBarberOnboardingProgress(completeFacts({
@@ -83,6 +84,7 @@ test("progress handles independent address without blocking review readiness", (
     hasIndependentAddress: false,
   }));
   assert.deepEqual(salon.missing, []);
+  assert.equal(salon.readyForFinalization, true);
 });
 
 test("progress controls allowed actions and completed override", () => {
@@ -92,7 +94,9 @@ test("progress controls allowed actions and completed override", () => {
     "UPDATE_WORKPLACE",
     "EDIT_PERSONAL_SCHEDULE",
     "REVIEW_ONBOARDING",
+    "FINALIZE_ONBOARDING",
   ]);
+  assert.equal(ready.readyForFinalization, true);
 
   const notReady = buildBarberOnboardingProgress(completeFacts({ workplace: null }));
   assert.deepEqual(notReady.allowedActions, [
@@ -100,10 +104,12 @@ test("progress controls allowed actions and completed override", () => {
     "UPDATE_WORKPLACE",
     "EDIT_PERSONAL_SCHEDULE",
   ]);
+  assert.equal(notReady.readyForFinalization, false);
 
   const completed = buildBarberOnboardingProgress(completeFacts({ storedStatus: "completed" }));
   assert.equal(completed.derivedCurrentStep, null);
   assert.equal(completed.needsOnboarding, false);
+  assert.equal(completed.readyForFinalization, false);
   assert.deepEqual(completed.allowedActions, []);
 });
 

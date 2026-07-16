@@ -23,6 +23,7 @@ const responsePayload = {
     personalScheduleExists: true,
     personalScheduleValid: true,
     readyForReview: true,
+    readyForFinalization: true,
   },
   missing: [],
   allowedActions: [
@@ -30,6 +31,7 @@ const responsePayload = {
     "UPDATE_WORKPLACE",
     "EDIT_PERSONAL_SCHEDULE",
     "REVIEW_ONBOARDING",
+    "FINALIZE_ONBOARDING",
   ],
 };
 
@@ -207,4 +209,56 @@ test("PATCH maps client, applicability, completed, and generic failures", async 
   await genericController.updateMyBarberOnboardingWorkplace(req({ body: { workplace: "salon" } }), genericRes);
   assert.equal(genericRes.statusCode, 500);
   assert.deepEqual(genericRes.body, { message: "Could not process onboarding status" });
+});
+
+test("POST finalization accepts only empty safe bodies and uses the authenticated barber id", async () => {
+  for (const body of [undefined, {}, Object.create(null)]) {
+    const calls = [];
+    const controller = createBarberOnboardingController({
+      async finalizeBarberOnboarding(id) { calls.push(id); return { completed: true }; },
+    });
+    const res = createRes();
+    await controller.finalizeMyBarberOnboarding(req({ body }), res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, ["user-1"]);
+  }
+
+  const inherited = Object.create({ ignored: "unsafe" });
+  const accessor = {};
+  Object.defineProperty(accessor, "value", { get() { throw new Error("unsafe"); } });
+  const custom = Object.create({});
+  for (const body of [null, [], "", 1, new Date(), inherited, accessor, custom, { workplace: "salon" }]) {
+    const controller = createBarberOnboardingController({
+      async finalizeBarberOnboarding() { throw new Error("must not be called"); },
+    });
+    const res = createRes();
+    await controller.finalizeMyBarberOnboarding(req({ body }), res);
+    assert.deepEqual(res.body, { code: "INVALID_ONBOARDING_REQUEST", message: "Invalid onboarding request" });
+  }
+});
+
+test("POST finalization maps bounded errors and hides unexpected details", async () => {
+  for (const [code, statusCode, missing] of [
+    ["ONBOARDING_REQUIREMENTS_INCOMPLETE", 400, ["PERSONAL_SCHEDULE_REQUIRED"]],
+    ["LEGACY_ONBOARDING_NOT_APPLICABLE", 409, undefined],
+    ["MALFORMED_ONBOARDING_STATE", 409, undefined],
+    ["ONBOARDING_FINALIZATION_CONFLICT", 409, undefined],
+  ]) {
+    const controller = createBarberOnboardingController({
+      async finalizeBarberOnboarding() {
+        throw new BarberOnboardingStatusError(code, statusCode, "bounded message", missing);
+      },
+    });
+    const res = createRes();
+    await controller.finalizeMyBarberOnboarding(req(), res);
+    assert.equal(res.statusCode, statusCode);
+    assert.equal(res.body.code, code);
+    if (missing) assert.deepEqual(res.body.missing, missing);
+  }
+  const controller = createBarberOnboardingController({
+    async finalizeBarberOnboarding() { throw new Error("mongodb://secret/address"); },
+  });
+  const res = createRes();
+  await controller.finalizeMyBarberOnboarding(req(), res);
+  assert.deepEqual(res.body, { message: "Could not finalize onboarding" });
 });

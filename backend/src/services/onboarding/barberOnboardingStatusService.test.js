@@ -84,11 +84,41 @@ test("GET returns valid v1 status with safe projections and no raw data", async 
   assert.equal(result.applicable, true);
   assert.equal(result.state.currentStep, "review");
   assert.equal(result.progress.readyForReview, true);
+  assert.equal(result.progress.readyForFinalization, true);
+  assert.ok(result.allowedActions.includes("FINALIZE_ONBOARDING"));
   assert.deepEqual(result.missing, []);
   assert.equal(JSON.stringify(result).includes("Mashtots"), false);
   assert.ok(deps.capture.some((entry) => entry.projection === "_id role name phone city profession barberType specialistOnboarding"));
   assert.ok(deps.capture.some((entry) => entry.projection === "address"));
   assert.ok(deps.capture.some((entry) => entry.projection === "weeklySchedule"));
+});
+
+test("status delegates incomplete readiness to the shared readiness service", async () => {
+  const deps = dependencies({ user: validUser() });
+  let call;
+  deps.getBarberOnboardingReadiness = async (id, snapshot, state) => {
+    call = { id, snapshot, state };
+    return {
+      needsOnboarding: true,
+      derivedCurrentStep: "review",
+      professionalBasicsComplete: true,
+      workplaceSelected: true,
+      personalScheduleExists: true,
+      personalScheduleValid: true,
+      readyForReview: true,
+      readyForFinalization: false,
+      missing: ["INDEPENDENT_ADDRESS_REQUIRED"],
+      allowedActions: ["EDIT_PROFILE", "UPDATE_WORKPLACE", "EDIT_PERSONAL_SCHEDULE", "REVIEW_ONBOARDING"],
+    };
+  };
+  const result = await getBarberOnboardingStatus(barberId, deps);
+  assert.equal(call.id, barberId);
+  assert.equal(call.snapshot._id, barberId);
+  assert.equal(call.state.workplace, null);
+  assert.equal(result.progress.readyForFinalization, false);
+  assert.deepEqual(result.missing, ["INDEPENDENT_ADDRESS_REQUIRED"]);
+  assert.equal(deps.capture.some((entry) => entry.kind === "profileFindOne"), false);
+  assert.equal(deps.capture.some((entry) => entry.kind === "scheduleFindOne"), false);
 });
 
 test("GET preserves legacy compatibility without writes or readiness reads", async () => {
