@@ -4,6 +4,7 @@ import { createErrorMiddleware } from "../middleware/errorMiddleware.js";
 import {
   __sentryTestHooks,
   beforeSend,
+  captureSentryStartupFailure,
   getSentryConfig,
   getSentryInitializationStatus,
   initializeSentry,
@@ -109,6 +110,164 @@ test("enabled initialization uses privacy options and failure is generic", () =>
   assert.deepEqual(initializeSentry(enabledEnv), { initialized: false, failed: true });
   assert.equal(JSON.stringify(getSentryInitializationStatus()).includes("private-secret"), false);
   assert.equal(JSON.stringify(getSentryInitializationStatus()).includes("example.ingest"), false);
+});
+
+test("startup failure capture is inactive-safe", async () => {
+  let inactiveCaptureCalls = 0;
+  let inactiveFlushCalls = 0;
+  __sentryTestHooks.setSdk({
+    captureException() { inactiveCaptureCalls += 1; },
+    flush() { inactiveFlushCalls += 1; },
+  });
+  assert.deepEqual(await captureSentryStartupFailure("database"), {
+    captured: false,
+    flushed: false,
+  });
+  assert.equal(inactiveCaptureCalls, 0);
+  assert.equal(inactiveFlushCalls, 0);
+});
+
+test("startup failure capture is generic, private, bounded, and uses flush once", async () => {
+  __sentryTestHooks.setSdk({ init() {} });
+  initializeSentry(enabledEnv);
+  const captures = [];
+  const flushes = [];
+  const timeoutIds = [];
+  let closeCalls = 0;
+  const result = await captureSentryStartupFailure("database", {
+    sdk: {
+      captureException(error, context) { captures.push([error, context]); },
+      flush(timeoutMs) { flushes.push(timeoutMs); return true; },
+      close() { closeCalls += 1; },
+    },
+    setTimeoutFn(_callback, timeoutMs) {
+      timeoutIds.push(timeoutMs);
+      return "startup-flush-timeout";
+    },
+    clearTimeoutFn(timeoutId) {
+      assert.equal(timeoutId, "startup-flush-timeout");
+    },
+  });
+
+  assert.deepEqual(result, { captured: true, flushed: true });
+  assert.equal(captures.length, 1);
+  assert.equal(captures[0][0].message, "Application startup failure");
+  assert.notEqual(captures[0][0].message, "Application startup failed");
+  assert.deepEqual(captures[0][1], { level: "fatal", tags: { component: "database" } });
+  assert.deepEqual(flushes, [1000]);
+  assert.deepEqual(timeoutIds, [1000]);
+  assert.equal(closeCalls, 0);
+  const serialized = JSON.stringify({
+    message: captures[0][0].message,
+    context: captures[0][1],
+  });
+  for (const privateValue of [
+    "mongodb://username:password@example.com/private-db",
+    "mongodb+srv://secret.example.com/private-db",
+    "original Mongo error",
+    "-----BEGIN CERTIFICATE-----",
+    "driverOptionSecret",
+    "/home/narek/private/project/file.js",
+    enabledEnv.SENTRY_DSN,
+    JSON.stringify(enabledEnv),
+  ]) assert.equal(serialized.includes(privateValue), false);
+});
+
+test("startup failure capture handles flush outcomes and missing SDK methods", async () => {
+  __sentryTestHooks.setSdk({ init() {} });
+  initializeSentry(enabledEnv);
+  for (const [flush, expected] of [
+    [() => true, { captured: true, flushed: true }],
+    [() => false, { captured: true, flushed: false }],
+    [() => { throw new Error("flush private-secret"); }, { captured: true, flushed: false }],
+    [() => Promise.reject(new Error("flush private-secret")), { captured: true, flushed: false }],
+  ]) {
+    let captureCalls = 0;
+    let flushCalls = 0;
+    const result = await captureSentryStartupFailure("database", {
+      sdk: {
+        captureException() { captureCalls += 1; },
+        flush(timeoutMs) { flushCalls += 1; assert.equal(timeoutMs, 1000); return flush(); },
+      },
+      setTimeoutFn() { return "timer"; },
+      clearTimeoutFn() { throw new Error("clear private-secret"); },
+    });
+    assert.deepEqual(result, expected);
+    assert.equal(captureCalls, 1);
+    assert.equal(flushCalls, 1);
+  }
+
+  for (const sdk of [
+    { flush() { return true; } },
+    { captureException() {} },
+    {},
+    undefined,
+  ]) {
+    await assert.doesNotReject(() => captureSentryStartupFailure("database", {
+      sdk,
+      setTimeoutFn() { return "timer"; },
+      clearTimeoutFn() {},
+    }));
+  }
+});
+
+test("startup failure capture flushes after capture failure and has no listener side effects", async () => {
+  __sentryTestHooks.setSdk({ init() {} });
+  initializeSentry(enabledEnv);
+  const listenersBefore = Object.fromEntries(
+    ["SIGTERM", "uncaughtException", "unhandledRejection"].map((event) => [
+      event,
+      process.listeners(event).length,
+    ])
+  );
+  let flushCalls = 0;
+  const result = await captureSentryStartupFailure("database", {
+    sdk: {
+      captureException() { throw new Error("capture private-secret"); },
+      flush(timeoutMs) { flushCalls += 1; assert.equal(timeoutMs, 1000); return true; },
+    },
+    setTimeoutFn() { return "timer"; },
+    clearTimeoutFn() {},
+  });
+  assert.deepEqual(result, { captured: false, flushed: true });
+  assert.equal(flushCalls, 1);
+  for (const [event, count] of Object.entries(listenersBefore)) {
+    assert.equal(process.listeners(event).length, count);
+  }
+});
+
+test("startup failure capture permits only the database component and independent calls", async () => {
+  __sentryTestHooks.setSdk({ init() {} });
+  initializeSentry(enabledEnv);
+  const captures = [];
+  let flushCalls = 0;
+  const sdk = {
+    captureException(error, context) { captures.push([error, context]); },
+    flush(timeoutMs) { flushCalls += 1; assert.equal(timeoutMs, 1000); return true; },
+  };
+  const dependencies = {
+    sdk,
+    setTimeoutFn() { return "timer"; },
+    clearTimeoutFn() {},
+  };
+
+  await captureSentryStartupFailure("database", dependencies);
+  await captureSentryStartupFailure("database", dependencies);
+  for (const invalidComponent of [
+    "worker",
+    "https://private.example/component",
+    "private@example.com",
+    { component: "database" },
+    ["database"],
+  ]) await captureSentryStartupFailure(invalidComponent, dependencies);
+
+  assert.equal(captures.length, 7);
+  assert.equal(flushCalls, 7);
+  assert.deepEqual(captures[0][1], { level: "fatal", tags: { component: "database" } });
+  assert.deepEqual(captures[1][1], { level: "fatal", tags: { component: "database" } });
+  for (const [, context] of captures.slice(2)) {
+    assert.deepEqual(context, { level: "fatal" });
+  }
 });
 
 test("beforeSend preserves only a validated method and removes every request path form", () => {

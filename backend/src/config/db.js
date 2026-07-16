@@ -1,37 +1,44 @@
 import mongoose from "mongoose";
-import { getLogger, safeErrorSerializer } from "./logger.js";
+import { getLogger } from "./logger.js";
+import { captureSentryStartupFailure } from "./sentry.js";
+
+const STARTUP_FAILURE_REASONS = new Set([
+  "configuration_missing",
+  "configuration_invalid",
+  "connection_failed",
+]);
 
 const getDatabaseLogger = () =>
   getLogger().child({ component: "database", database: "mongodb" });
 
-const logConnectionFailure = (error) => {
-  const sanitizedError = safeErrorSerializer(error);
-  for (const field of ["message", "stack"]) {
-    if (typeof sanitizedError[field] === "string") {
-      sanitizedError[field] = sanitizedError[field].replace(
-        /mongodb(?:\+srv)?:\/\/[^\s]+/gi,
-        "[REDACTED]"
-      );
-    }
-  }
-
-  getDatabaseLogger().error(
-    { event: "database.connection_failed", err: sanitizedError },
+const logConnectionFailure = (reason) => {
+  getLogger().child({ component: "database" }).error(
+    {
+      event: "database.connection_failed",
+      phase: "startup",
+      reason: STARTUP_FAILURE_REASONS.has(reason) ? reason : "connection_failed",
+    },
     "MongoDB connection failed"
   );
+};
+
+const exitForConnectionFailure = async (reason) => {
+  logConnectionFailure(reason);
+  await captureSentryStartupFailure("database");
+  process.exit(1);
 };
 
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_URI;
 
   if (!mongoUri || mongoUri === "your_mongodb_connection_string") {
-    logConnectionFailure(new Error("MongoDB connection configuration is missing"));
-    process.exit(1);
+    await exitForConnectionFailure("configuration_missing");
+    return;
   }
 
   if (!mongoUri.startsWith("mongodb://") && !mongoUri.startsWith("mongodb+srv://")) {
-    logConnectionFailure(new Error("MongoDB connection URI scheme is invalid"));
-    process.exit(1);
+    await exitForConnectionFailure("configuration_invalid");
+    return;
   }
 
   try {
@@ -40,9 +47,8 @@ const connectDB = async () => {
       { event: "database.connected" },
       "MongoDB connected"
     );
-  } catch (error) {
-    logConnectionFailure(error);
-    process.exit(1);
+  } catch {
+    await exitForConnectionFailure("connection_failed");
   }
 };
 

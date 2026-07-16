@@ -19,6 +19,7 @@ const DISABLED_DEFAULT_INTEGRATIONS = new Set([
   "OnUnhandledRejection",
   "ProcessSession",
 ]);
+const STARTUP_FLUSH_TIMEOUT_MS = 1000;
 
 let sentrySdk = Sentry;
 let installedApps = new WeakSet();
@@ -95,6 +96,78 @@ export const initializeSentry = (env = process.env) => {
 };
 
 export const getSentryInitializationStatus = () => ({ ...initializationStatus });
+
+const flushWithTimeout = async (sdk, timeoutMs, dependencies = {}) => {
+  try {
+    if (typeof sdk?.flush !== "function") return false;
+
+    const setTimeoutFn =
+      typeof dependencies.setTimeoutFn === "function"
+        ? dependencies.setTimeoutFn
+        : setTimeout;
+    const clearTimeoutFn =
+      typeof dependencies.clearTimeoutFn === "function"
+        ? dependencies.clearTimeoutFn
+        : clearTimeout;
+    let timeoutId;
+
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => sdk.flush(timeoutMs)).catch(() => false),
+        new Promise((resolve) => {
+          try {
+            timeoutId = setTimeoutFn(() => resolve(false), timeoutMs);
+          } catch {
+            resolve(false);
+          }
+        }),
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        try {
+          clearTimeoutFn(timeoutId);
+        } catch {
+          // Reporting must not prevent the startup failure exit.
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+};
+
+export const captureSentryStartupFailure = async (component, dependencies = {}) => {
+  if (!initializationStatus.initialized) return { captured: false, flushed: false };
+
+  const testDependencies = dependencies && typeof dependencies === "object" ? dependencies : {};
+  let sdk = sentrySdk;
+  try {
+    if (Object.hasOwn(testDependencies, "sdk")) sdk = testDependencies.sdk;
+  } catch {
+    // Dependency seams must not prevent the required startup failure exit.
+  }
+  const safeComponent = component === "database" ? "database" : "";
+  let captured = false;
+
+  try {
+    if (typeof sdk?.captureException === "function") {
+      sdk.captureException(new Error("Application startup failure"), {
+        level: "fatal",
+        ...(safeComponent ? { tags: { component: safeComponent } } : {}),
+      });
+      captured = true;
+    }
+  } catch {
+    // Startup failure reporting must never delay the required process exit.
+  }
+
+  const flushed = await flushWithTimeout(
+    sdk,
+    STARTUP_FLUSH_TIMEOUT_MS,
+    testDependencies
+  );
+  return { captured, flushed: flushed === true };
+};
 
 const getSafeMethod = (value) => {
   const method = typeof value === "string" ? value.toUpperCase() : "";
