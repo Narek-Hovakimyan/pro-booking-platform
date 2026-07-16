@@ -4,6 +4,9 @@ import express from "express";
 import { createServer } from "http";
 import path from "path";
 import connectDB from "./config/db.js";
+import { createLogger } from "./config/logger.js";
+import { requestContextMiddleware } from "./middleware/requestContextMiddleware.js";
+import { errorMiddleware } from "./middleware/errorMiddleware.js";
 import authRoutes from "./routes/authRoutes.js";
 import barberRoutes from "./routes/barberRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
@@ -47,6 +50,8 @@ const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 
+const logger = createLogger();
+
 app.disable("x-powered-by");
 
 if (process.env.TRUST_PROXY === "true") {
@@ -79,6 +84,9 @@ const corsOptions = {
     callback(new Error("Not allowed by CORS"));
   },
 };
+
+/* ── Request correlation / logging — before routes ──── */
+app.use(requestContextMiddleware(logger));
 
 initSocket(server);
 
@@ -153,54 +161,36 @@ app.use("/api/vouchers", voucherRoutes);
 app.use("/api/revenue", revenueRoutes);
 app.use("/api/platform", platformRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
-app.use((error, _req, res, next) => {
-  if (res.headersSent) {
-    return next(error);
-  }
 
-  if (error?.message === "Not allowed by CORS") {
-    return res.status(403).json({ message: "Origin not allowed by CORS" });
-  }
-
-  console.error("Unhandled server error", error);
-
-  const statusCode = Number.isInteger(error?.statusCode)
-    ? error.statusCode
-    : 500;
-  const message =
-    statusCode >= 500
-      ? "Internal server error"
-      : error?.message || "Request failed";
-
-  return res.status(statusCode).json({ message });
-});
+/* ── Centralized error handling ─────────────────────── */
+app.use(errorMiddleware);
 
 const startServer = async () => {
   await connectDB();
 
   if (process.env.ENABLE_CLEANUP_NON_WORKING_DAYS_CRON === "true") {
-    console.log("Starting non-working days cleanup cron");
+    logger.info("Starting non-working days cleanup cron");
     startCleanupNonWorkingDaysCron();
   } else {
-    console.log("Non-working days cleanup cron skipped (ENABLE_CLEANUP_NON_WORKING_DAYS_CRON !== true)");
+    logger.info("Non-working days cleanup cron skipped (ENABLE_CLEANUP_NON_WORKING_DAYS_CRON !== true)");
   }
 
   if (process.env.ENABLE_EXPIRE_PENDING_BOOKINGS_CRON === "true") {
-    console.log("Starting pending booking expiration cron");
+    logger.info("Starting pending booking expiration cron");
     startExpirePendingBookingsCron();
   } else {
-    console.log("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== true)");
+    logger.info("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== true)");
   }
 
   if (process.env.ENABLE_EVENT_REMINDERS_CRON === "true") {
-    console.log("Starting event reminders cron");
+    logger.info("Starting event reminders cron");
     startEventRemindersCron();
   } else {
-    console.log("Event reminders cron skipped (ENABLE_EVENT_REMINDERS_CRON !== true)");
+    logger.info("Event reminders cron skipped (ENABLE_EVENT_REMINDERS_CRON !== true)");
   }
 
   server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    logger.info(`Server running on port ${PORT}`);
     startBookingReminderScheduler();
     startWaitlistExpirationScheduler();
     startSubscriptionExpirationScheduler();

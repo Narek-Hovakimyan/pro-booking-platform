@@ -14,3 +14,4 @@ coverage/
 logs/
 *.log
 .DS_Store
+task_progress.md

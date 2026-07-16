@@ -23,12 +23,13 @@ import {
   clientId,
   createMutableBooking,
   createResponse,
+  getFutureBookingDateForDay,
   mockBookingFind,
   originalMethods,
   otherClient,
 } from "./bookingController.testUtils.js";
 
-const requestedBookingDate = "2026-07-15";
+const requestedBookingDate = getFutureBookingDateForDay("wed", 14);
 const requestedTime = "11:30";
 
 const dateKeyFromStoredValue = (value) =>
