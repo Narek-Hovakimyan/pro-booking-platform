@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
+import { Writable } from "node:stream";
 
 import {
   getMyProfile,
@@ -14,6 +15,7 @@ import Salon from "../models/Salon.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import { hashEmailVerificationToken } from "../utils/emailVerification.js";
+import { getLogger, resetLogger } from "../config/logger.js";
 import {
   sendEmailVerification,
   setResendClientFactoryForTesting,
@@ -48,6 +50,21 @@ const originalPlatformAdminIds = process.env.PLATFORM_ADMIN_IDS;
 const userId = "64c000000000000000000001";
 const otherUserId = "64c000000000000000000002";
 
+const makeLoggerStream = () => {
+  const lines = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      lines.push(JSON.parse(chunk.toString()));
+      callback();
+    },
+  });
+  return { lines, stream };
+};
+
+beforeEach(() => {
+  getLogger({ level: "silent" });
+});
+
 afterEach(() => {
   User.findById = originalUserMethods.findById;
   User.findByIdAndUpdate = originalUserMethods.findByIdAndUpdate;
@@ -62,6 +79,7 @@ afterEach(() => {
   SubscriptionPlan.findOne = originalSubscriptionPlanMethods.findOne;
   SubscriptionPlan.create = originalSubscriptionPlanMethods.create;
   setResendClientFactoryForTesting();
+  resetLogger();
   if (originalJwtSecret === undefined) {
     delete process.env.JWT_SECRET;
   } else {
@@ -682,19 +700,16 @@ test("sendEmailVerification – does not log raw token or URL in production by d
   const originalProvider = process.env.EMAIL_PROVIDER;
   const originalApiKey = process.env.RESEND_API_KEY;
   const originalFrom = process.env.EMAIL_FROM;
-  const originalLog = console.log;
-  const originalWarn = console.warn;
   const rawToken = "raw-secret-token";
-  const logs = [];
-  const warnings = [];
 
   process.env.NODE_ENV = "production";
   delete process.env.EMAIL_VERIFICATION_LOG_URL;
   delete process.env.EMAIL_PROVIDER;
   delete process.env.RESEND_API_KEY;
   delete process.env.EMAIL_FROM;
-  console.log = (message) => logs.push(message);
-  console.warn = (message) => warnings.push(message);
+  resetLogger();
+  const { lines, stream } = makeLoggerStream();
+  getLogger({ level: "info", stream });
 
   try {
     const result = await sendEmailVerification({
@@ -706,13 +721,15 @@ test("sendEmailVerification – does not log raw token or URL in production by d
     assert.equal(result.delivered, false);
     assert.equal(result.provider, "none");
     assert.equal(result.verificationUrl, "");
-    assert.equal(logs.length, 0);
-    assert.equal(warnings.length, 1);
-    assert.equal(warnings[0].includes(rawToken), false);
-    assert.equal(warnings[0].includes("/email/verify"), false);
-    assert.equal(warnings[0].includes("EMAIL_PROVIDER=resend"), true);
-    assert.equal(warnings[0].includes("RESEND_API_KEY"), true);
-    assert.equal(warnings[0].includes("EMAIL_FROM"), true);
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].event, "email.verification_skipped");
+    const output = JSON.stringify(lines);
+    assert.equal(output.includes(rawToken), false);
+    assert.equal(output.includes("/email/verify"), false);
+    assert.equal(output.includes("test@example.com"), false);
+    assert.equal(output.includes("EMAIL_PROVIDER=resend"), false);
+    assert.equal(output.includes("RESEND_API_KEY"), false);
+    assert.equal(output.includes("EMAIL_FROM"), false);
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;
@@ -739,27 +756,25 @@ test("sendEmailVerification – does not log raw token or URL in production by d
     } else {
       process.env.EMAIL_FROM = originalFrom;
     }
-    console.log = originalLog;
-    console.warn = originalWarn;
   }
 });
 
-test("sendEmailVerification – EMAIL_VERIFICATION_LOG_URL=true logs verification URL", async () => {
+test("sendEmailVerification – EMAIL_VERIFICATION_LOG_URL=true retains fallback without logging verification URL", async () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalLogUrl = process.env.EMAIL_VERIFICATION_LOG_URL;
   const originalProvider = process.env.EMAIL_PROVIDER;
   const originalApiKey = process.env.RESEND_API_KEY;
   const originalFrom = process.env.EMAIL_FROM;
-  const originalLog = console.log;
   const rawToken = "raw-secret-token";
-  const logs = [];
 
   process.env.NODE_ENV = "production";
   process.env.EMAIL_VERIFICATION_LOG_URL = "true";
   delete process.env.EMAIL_PROVIDER;
   delete process.env.RESEND_API_KEY;
   delete process.env.EMAIL_FROM;
-  console.log = (message) => logs.push(message);
+  resetLogger();
+  const { lines, stream } = makeLoggerStream();
+  getLogger({ level: "info", stream });
 
   try {
     const result = await sendEmailVerification({
@@ -771,9 +786,12 @@ test("sendEmailVerification – EMAIL_VERIFICATION_LOG_URL=true logs verificatio
     assert.equal(result.delivered, false);
     assert.equal(result.provider, "log");
     assert.equal(result.verificationUrl.includes(rawToken), true);
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].startsWith("[emailService] Verification URL: "), true);
-    assert.equal(logs[0].includes(rawToken), true);
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].event, "email.verification_skipped");
+    const output = JSON.stringify(lines);
+    assert.equal(output.includes(rawToken), false);
+    assert.equal(output.includes("/email/verify"), false);
+    assert.equal(output.includes("test@example.com"), false);
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;
@@ -800,7 +818,6 @@ test("sendEmailVerification – EMAIL_VERIFICATION_LOG_URL=true logs verificatio
     } else {
       process.env.EMAIL_FROM = originalFrom;
     }
-    console.log = originalLog;
   }
 });
 
@@ -904,16 +921,16 @@ test("sendEmailVerification – Resend failure does not log raw token or URL", a
   const originalProvider = process.env.EMAIL_PROVIDER;
   const originalApiKey = process.env.RESEND_API_KEY;
   const originalFrom = process.env.EMAIL_FROM;
-  const originalWarn = console.warn;
   const rawToken = "raw-secret-token";
-  const warnings = [];
 
   process.env.NODE_ENV = "production";
   process.env.EMAIL_VERIFICATION_LOG_URL = "false";
   process.env.EMAIL_PROVIDER = "resend";
   process.env.RESEND_API_KEY = "re_test_key";
   process.env.EMAIL_FROM = "HairBook <no-reply@example.com>";
-  console.warn = (message) => warnings.push(message);
+  resetLogger();
+  const { lines, stream } = makeLoggerStream();
+  getLogger({ level: "info", stream });
   setResendClientFactoryForTesting(() => ({
     emails: {
       send: async () => {
@@ -930,9 +947,12 @@ test("sendEmailVerification – Resend failure does not log raw token or URL", a
     });
 
     assert.deepEqual(result, { delivered: false, provider: "resend" });
-    assert.equal(warnings.length, 1);
-    assert.equal(warnings[0].includes(rawToken), false);
-    assert.equal(warnings[0].includes("/email/verify"), false);
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].event, "email.verification_failed");
+    const output = JSON.stringify(lines);
+    assert.equal(output.includes(rawToken), false);
+    assert.equal(output.includes("/email/verify"), false);
+    assert.equal(output.includes("test@example.com"), false);
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;
@@ -959,7 +979,6 @@ test("sendEmailVerification – Resend failure does not log raw token or URL", a
     } else {
       process.env.EMAIL_FROM = originalFrom;
     }
-    console.warn = originalWarn;
   }
 });
 

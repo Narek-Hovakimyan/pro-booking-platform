@@ -53,12 +53,33 @@ const SENSITIVE_VALUE_PATTERNS = [
   /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+/g,
   /mongodb(?:\+srv)?:\/\/[^@\s]+@/gi,
   /([?&]|%3[fF]|%26)(token|access_token|refresh_token|resetToken|verificationToken|code)(=|%3[dD])([^&#\s]+)/gi,
+  /\b(token|access_token|refresh_token|resetToken|verificationToken|code)(=|%3[dD])([^&#\s]+)/gi,
+  /\b(password|pass|secret|apiKey|api_key|EMAIL_PASS|RESEND_API_KEY|MONGO_URI)(=|:)([^&#\s,]+)/gi,
+  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
 ];
+
+const LABELLED_PHONE_PATTERN =
+  /\b(phone|phoneNumber|mobile|mobileNumber|recipientPhone|contactPhone)(\s*[=:]\s*)(["']?)([+()0-9][()0-9.\s-]*[0-9])\3(?=$|[\s,;&)])/gi;
+const INTERNATIONAL_PHONE_PATTERN =
+  /(?<![A-Za-z0-9])\+(?=[0-9])(?:[()0-9.\s-]*[0-9])(?![A-Za-z0-9])/g;
 
 export function sanitizeString(value) {
   if (typeof value !== "string") return value;
 
-  let result = value;
+  let result = value.replace(
+    LABELLED_PHONE_PATTERN,
+    (match, label, separator, quote, phoneValue) => {
+      const digitCount = (phoneValue.match(/\d/g) || []).length;
+      if (digitCount < 7 || digitCount > 15) return match;
+      return `${label}${separator}${quote}${CENSOR}${quote}`;
+    }
+  );
+
+  result = result.replace(INTERNATIONAL_PHONE_PATTERN, (match) => {
+    const digitCount = (match.match(/\d/g) || []).length;
+    return digitCount >= 8 && digitCount <= 15 ? CENSOR : match;
+  });
+
   for (const pattern of SENSITIVE_VALUE_PATTERNS) {
     result = result.replace(pattern, (match) => {
       if (/^Bearer\s+/i.test(match)) {
@@ -69,6 +90,12 @@ export function sanitizeString(value) {
       }
       if (/^eyJ[A-Za-z0-9\-_]+\.eyJ/i.test(match)) {
         return "[REDACTED]";
+      }
+      if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(match)) {
+        return CENSOR;
+      }
+      if (/^\+?\d[\d(). -]{6,}\d$/.test(match)) {
+        return CENSOR;
       }
       return match.replace(/(=|%3[dD])([^&#\s]+)/, "$1[REDACTED]");
     });

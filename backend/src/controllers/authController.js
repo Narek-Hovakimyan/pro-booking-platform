@@ -7,8 +7,18 @@ import { verifyGoogleIdToken } from "../services/auth/googleAuthService.js";
 import { createTrialSubscription } from "../services/subscriptionService.js";
 import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
 import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
+import { getLogger, safeErrorSerializer } from "../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+
+const getAuthLogger = () => getLogger().child({ component: "auth" });
+
+const logAuthError = (event, error, metadata = {}) => {
+  getAuthLogger().error(
+    { event, err: safeErrorSerializer(error), ...metadata },
+    "Authentication operation failed"
+  );
+};
 
 const getUserData = (user) => ({
   id: user._id,
@@ -166,7 +176,10 @@ export const registerUser = async (req, res) => {
         });
       } catch (subscriptionError) {
         await User.findByIdAndDelete(user._id).catch(() => {});
-        console.error("Registration trial creation failed:", subscriptionError);
+        logAuthError("auth.registration_failed", subscriptionError, {
+          operation: "trial_subscription",
+          userId: String(user._id),
+        });
         return res.status(500).json({ message: "Registration failed" });
       }
     }
@@ -186,7 +199,7 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "Phone already exists" });
     }
 
-    console.error("Registration failed:", error);
+    logAuthError("auth.registration_failed", error);
     return res.status(500).json({ message: "Registration failed" });
   }
 };
@@ -223,7 +236,7 @@ export const loginUser = async (req, res) => {
       user: getUserData(user),
     });
   } catch (error) {
-    console.error("Login failed:", error);
+    logAuthError("auth.login_failed", error);
     return res.status(500).json({ message: "Login failed" });
   }
 };
@@ -330,7 +343,10 @@ export const googleAuth = async (req, res) => {
         });
       } catch (subscriptionError) {
         await User.findByIdAndDelete(user._id).catch(() => {});
-        console.error("Google registration trial creation failed:", subscriptionError);
+        logAuthError("auth.registration_failed", subscriptionError, {
+          operation: "google_trial_subscription",
+          userId: String(user._id),
+        });
         return res.status(500).json({ message: "Google registration failed" });
       }
     }
@@ -350,7 +366,7 @@ export const googleAuth = async (req, res) => {
       return res.status(400).json({ message: "Phone already exists" });
     }
 
-    console.error("Google authentication failed:", error);
+    logAuthError("auth.registration_failed", error, { operation: "google_auth" });
     return res.status(500).json({ message: "Google authentication failed" });
   }
 };
@@ -359,7 +375,7 @@ export const googleAuth = async (req, res) => {
  * POST /api/auth/forgot-password
  * Accepts phone. Returns generic response always.
  * Stores SHA-256 hashed reset token with 15 min expiry.
- * In production, would send email. In development, logs reset URL.
+ * In production, sends email when configured. Development never exposes reset URLs in logs.
  */
 export const forgotPassword = async (req, res) => {
   try {
@@ -374,6 +390,10 @@ export const forgotPassword = async (req, res) => {
 
     // Find user without exposing existence
     const user = await User.findOne({ phone }).select("+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt");
+    getAuthLogger().info(
+      { event: "auth.password_reset_requested" },
+      "Password reset request processed"
+    );
     if (!user) {
       return res.json({ message: genericMessage });
     }
@@ -389,26 +409,18 @@ export const forgotPassword = async (req, res) => {
 
     const resetClientUrl = getPasswordResetClientUrl();
     const resetUrl = resetClientUrl ? `${resetClientUrl}/reset-password?token=${rawToken}` : "";
-    let emailResult = null;
 
     if (user.email && resetUrl) {
-      emailResult = await sendPasswordResetEmail({
+      await sendPasswordResetEmail({
         to: user.email,
         resetUrl,
         appName: "HairBook",
       });
     }
 
-    // In development, log the reset URL so dev can test when email is unavailable
-    if (process.env.NODE_ENV !== "production" && resetUrl && (!user.email || !emailResult?.delivered)) {
-      console.log(
-        `[DEV] Password reset link (phone: ${phone}): ${resetUrl}`
-      );
-    }
-
     return res.json({ message: genericMessage });
   } catch (error) {
-    console.error("Forgot password failed:", error);
+    logAuthError("auth.password_reset_delivery_failed", error);
     // Always return generic on error too
     return res.json({
       message: "If an account exists, password reset instructions have been sent.",
@@ -457,7 +469,7 @@ export const resetPassword = async (req, res) => {
 
     return res.json({ message: "Password has been reset successfully." });
   } catch (error) {
-    console.error("Reset password failed:", error);
+    logAuthError("auth.password_reset_failed", error);
     return res.status(500).json({ message: "Could not reset password" });
   }
 };

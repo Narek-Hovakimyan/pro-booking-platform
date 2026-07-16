@@ -6,9 +6,45 @@
  */
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
+import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESEND_PROVIDER = "resend";
 const SMTP_PROVIDER = "smtp";
+
+const getEmailLogger = () => getLogger().child({ component: "email" });
+
+const getEmailEventName = (purpose, outcome) => {
+  if (purpose === "password_reset") return `email.password_reset_${outcome}`;
+  if (purpose === "verification") return `email.verification_${outcome}`;
+  return `email.${outcome}`;
+};
+
+const getUrlSecretValues = (url) => {
+  if (typeof url !== "string") return [];
+
+  try {
+    return [url, ...new URL(url).searchParams.values()];
+  } catch {
+    return [url];
+  }
+};
+
+const sanitizeEmailError = (error, sensitiveValues = []) => {
+  const sanitizedError = safeErrorSerializer(error);
+  const values = sensitiveValues.filter(
+    (value) => typeof value === "string" && value.length > 0
+  );
+
+  for (const field of ["message", "stack"]) {
+    if (typeof sanitizedError[field] === "string") {
+      for (const value of values) {
+        sanitizedError[field] = sanitizedError[field].split(value).join("[REDACTED]");
+      }
+    }
+  }
+
+  return sanitizedError;
+};
 
 let createResendClient = (apiKey) => new Resend(apiKey);
 let createSmtpTransport = (config) => nodemailer.createTransport(config);
@@ -62,7 +98,14 @@ const getSmtpConfig = () => {
  * @param {string} options.html
  * @returns {Promise<{ delivered: boolean, provider: string, disabled?: boolean, missing?: string[], id?: string }>}
  */
-export const sendEmail = async ({ to, subject, text, html }) => {
+export const sendEmail = async ({
+  to,
+  subject,
+  text,
+  html,
+  purpose = "transactional",
+  sensitiveValues = [],
+}) => {
   const config = getSmtpConfig();
 
   if (!config.isConfigured) {
@@ -90,13 +133,32 @@ export const sendEmail = async ({ to, subject, text, html }) => {
       html,
     });
 
-    return {
+    const result = {
       delivered: true,
       provider: SMTP_PROVIDER,
       id: response?.messageId,
     };
-  } catch {
-    console.warn("[emailService] SMTP delivery failed. Check provider configuration and logs.");
+
+    getEmailLogger().info(
+      {
+        event: getEmailEventName(purpose, "sent"),
+        purpose,
+        providerConfigured: true,
+      },
+      "Email delivered"
+    );
+
+    return result;
+  } catch (error) {
+    getEmailLogger().warn(
+      {
+        event: getEmailEventName(purpose, "failed"),
+        purpose,
+        providerConfigured: true,
+        err: sanitizeEmailError(error, [to, ...sensitiveValues]),
+      },
+      "Email delivery failed"
+    );
     return { delivered: false, provider: SMTP_PROVIDER };
   }
 };
@@ -143,7 +205,14 @@ export const sendPasswordResetEmail = async ({
   </body>
 </html>`;
 
-  return sendEmail({ to, subject, text, html });
+  return sendEmail({
+    to,
+    subject,
+    text,
+    html,
+    purpose: "password_reset",
+    sensitiveValues: getUrlSecretValues(resetUrl),
+  });
 };
 
 /**
@@ -235,17 +304,11 @@ const getResendConfig = () => {
   };
 };
 
-const shouldLogVerificationUrl = () => {
+const shouldUseVerificationFallback = () => {
   return (
     process.env.EMAIL_VERIFICATION_LOG_URL === "true" ||
     process.env.NODE_ENV === "development" ||
     process.env.NODE_ENV === "test"
-  );
-};
-
-const warnMissingProvider = ({ userId, missing }) => {
-  console.warn(
-    `[emailService] Email provider is not configured; verification email was not sent for user "${userId}". Missing env: ${missing.join(", ")}`
   );
 };
 
@@ -281,29 +344,60 @@ export const sendEmailVerification = async ({ user, token, req: _req }) => {
 
       const response = await resend.emails.send(payload);
 
+      getEmailLogger().info(
+        {
+          event: "email.verification_sent",
+          purpose: "verification",
+          providerConfigured: true,
+        },
+        "Email delivered"
+      );
+
       return {
         delivered: true,
         provider: RESEND_PROVIDER,
         id: response?.data?.id || response?.id,
       };
-    } catch {
-      console.warn(
-        `[emailService] Resend delivery failed for user "${user._id}". Check provider logs for details.`
+    } catch (error) {
+      getEmailLogger().warn(
+        {
+          event: "email.verification_failed",
+          purpose: "verification",
+          providerConfigured: true,
+          err: sanitizeEmailError(error, [
+            user.email,
+            token,
+            ...getUrlSecretValues(verificationUrl),
+          ]),
+        },
+        "Email delivery failed"
       );
       return { delivered: false, provider: RESEND_PROVIDER };
     }
   }
 
-  // ── Development / test: log the URL when delivery is unavailable ──
-  if (shouldLogVerificationUrl()) {
-    console.log(
-      `[emailService] Verification URL: ${verificationUrl}`
+  // ── Development / test: retain the non-delivery fallback without logging the URL ──
+  if (shouldUseVerificationFallback()) {
+    getEmailLogger().info(
+      {
+        event: "email.verification_skipped",
+        purpose: "verification",
+        providerConfigured: false,
+      },
+      "Email delivery skipped"
     );
     return { delivered: false, provider: "log", verificationUrl };
   }
 
   // ── Production: provider not configured ──────────────────────
-  warnMissingProvider({ userId: user._id, missing: resendConfig.missing });
+  getEmailLogger().warn(
+    {
+      event: "email.verification_skipped",
+      purpose: "verification",
+      providerConfigured: false,
+    },
+    "Email delivery skipped"
+  );
 
   return { delivered: false, provider: "none", verificationUrl: "" };
 };

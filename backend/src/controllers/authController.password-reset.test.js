@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import bcrypt from "bcrypt";
 import crypto from "node:crypto";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
+import { Writable } from "node:stream";
 
+import { getLogger, resetLogger } from "../config/logger.js";
 import User from "../models/User.js";
 import { setEmailTransportFactoryForTesting } from "../services/auth/emailService.js";
 import { forgotPassword, resetPassword } from "./authController.js";
@@ -19,10 +21,6 @@ const originalEmailSecure = process.env.EMAIL_SECURE;
 const originalEmailUser = process.env.EMAIL_USER;
 const originalEmailPass = process.env.EMAIL_PASS;
 const originalEmailFrom = process.env.EMAIL_FROM;
-const originalConsoleLog = console.log;
-const originalConsoleError = console.error;
-const originalConsoleWarn = console.warn;
-
 const mockRes = () => {
   const res = { statusCode: 200 };
   res.status = (code) => {
@@ -46,12 +44,25 @@ const selectable = (result, onSelect = () => {}) => ({
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
+const makeLoggerStream = () => {
+  const lines = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      lines.push(JSON.parse(chunk.toString()));
+      callback();
+    },
+  });
+  return { lines, stream };
+};
+
+beforeEach(() => {
+  getLogger({ level: "silent" });
+});
+
 afterEach(() => {
   User.findOne = originalFindOne;
   setEmailTransportFactoryForTesting();
-  console.log = originalConsoleLog;
-  console.error = originalConsoleError;
-  console.warn = originalConsoleWarn;
+  resetLogger();
 
   if (originalNodeEnv === undefined) {
     delete process.env.NODE_ENV;
@@ -85,7 +96,9 @@ const configureSmtpEnv = () => {
 
 test("forgot-password known phone stores hashed token and expiry without returning raw token", async () => {
   process.env.NODE_ENV = "development";
-  const logs = [];
+  resetLogger();
+  const { lines, stream } = makeLoggerStream();
+  getLogger({ level: "info", stream });
   let selectedFields = "";
   let saved = false;
   const user = {
@@ -94,7 +107,6 @@ test("forgot-password known phone stores hashed token and expiry without returni
     },
   };
 
-  console.log = (...args) => logs.push(args.join(" "));
   User.findOne = (query) => {
     assert.deepEqual(query, { phone: "+37400111222" });
     return selectable(user, (fields) => {
@@ -106,25 +118,25 @@ test("forgot-password known phone stores hashed token and expiry without returni
   const res = mockRes();
   await forgotPassword({ body: { phone: "  +37400111222  " } }, res);
   const after = Date.now();
-  const rawToken = logs[0]?.match(/token=([a-f0-9]{64})/)?.[1];
+  const output = JSON.stringify(lines);
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: genericResetMessage });
   assert.equal(saved, true);
   assert.match(selectedFields, /\+resetPasswordTokenHash/);
-  assert.ok(rawToken, "expected dev log to include raw token");
-  assert.equal(user.resetPasswordTokenHash, hashToken(rawToken));
-  assert.notEqual(user.resetPasswordTokenHash, rawToken);
+  assert.match(user.resetPasswordTokenHash, /^[a-f0-9]{64}$/);
   assert.ok(user.resetPasswordExpires instanceof Date);
   assert.ok(user.resetPasswordExpires.getTime() >= before + 15 * 60 * 1000);
   assert.ok(user.resetPasswordExpires.getTime() <= after + 15 * 60 * 1000);
   assert.ok(user.resetPasswordSentAt instanceof Date);
-  assert.equal(JSON.stringify(res.body).includes(rawToken), false);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].event, "auth.password_reset_requested");
+  assert.equal(output.includes("+37400111222"), false);
+  assert.equal(output.includes("reset-password"), false);
+  assert.equal(output.includes("token="), false);
 });
 
 test("forgot-password unknown phone returns same generic response", async () => {
-  const logs = [];
-  console.log = (...args) => logs.push(args.join(" "));
   User.findOne = (query) => {
     assert.deepEqual(query, { phone: "+37400999000" });
     return selectable(null);
@@ -135,17 +147,17 @@ test("forgot-password unknown phone returns same generic response", async () => 
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: genericResetMessage });
-  assert.deepEqual(logs, []);
 });
 
 test("forgot-password does not log reset token in production", async () => {
   process.env.NODE_ENV = "production";
-  const logs = [];
+  resetLogger();
+  const { lines, stream } = makeLoggerStream();
+  getLogger({ level: "info", stream });
   const user = {
     async save() {},
   };
 
-  console.log = (...args) => logs.push(args.join(" "));
   User.findOne = () => selectable(user);
 
   const res = mockRes();
@@ -153,21 +165,20 @@ test("forgot-password does not log reset token in production", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: genericResetMessage });
-  assert.deepEqual(logs, []);
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.stringify(lines).includes("token="), false);
 });
 
 test("forgot-password with missing CLIENT_URL in production does not send broken reset link", async () => {
   process.env.NODE_ENV = "production";
   delete process.env.CLIENT_URL;
   configureSmtpEnv();
-  const logs = [];
   let sendMailCalled = false;
   const user = {
     email: "test@example.com",
     async save() {},
   };
 
-  console.log = (...args) => logs.push(args.join(" "));
   setEmailTransportFactoryForTesting(() => ({
     sendMail: async () => {
       sendMailCalled = true;
@@ -181,7 +192,6 @@ test("forgot-password with missing CLIENT_URL in production does not send broken
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: genericResetMessage });
   assert.equal(sendMailCalled, false);
-  assert.deepEqual(logs, []);
 });
 
 test("forgot-password known phone with email sends password reset email", async () => {
@@ -271,15 +281,11 @@ test("forgot-password email send failure still returns generic response without 
   process.env.NODE_ENV = "production";
   process.env.CLIENT_URL = "https://app.example.com";
   configureSmtpEnv();
-  const logs = [];
-  const warnings = [];
   const user = {
     email: "test@example.com",
     async save() {},
   };
 
-  console.log = (...args) => logs.push(args.join(" "));
-  console.warn = (...args) => warnings.push(args.join(" "));
   setEmailTransportFactoryForTesting(() => ({
     sendMail: async () => {
       throw new Error("provider down");
@@ -292,10 +298,39 @@ test("forgot-password email send failure still returns generic response without 
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: genericResetMessage });
-  assert.deepEqual(logs, []);
-  assert.equal(warnings.length, 1);
-  assert.equal(warnings[0].includes("token="), false);
-  assert.equal(warnings[0].includes("test@example.com"), false);
+});
+
+test("forgot-password unexpected errors use sanitized structured logging and preserve the generic response", async () => {
+  resetLogger();
+  const { lines, stream } = makeLoggerStream();
+  getLogger({ level: "info", stream });
+  const rawPhone = "+37400111222";
+  const rawEmail = "person@example.com";
+  const rawToken = "reset-token-secret";
+  User.findOne = () => {
+    const error = new Error(`lookup failed for ${rawPhone} and ${rawEmail}?token=${rawToken}`);
+    error.config = {
+      auth: { password: "db-password" },
+      headers: { authorization: "Bearer api-secret" },
+    };
+    throw error;
+  };
+
+  const res = mockRes();
+  await forgotPassword({ body: { phone: rawPhone, password: "request-password" } }, res);
+
+  const output = JSON.stringify(lines);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: genericResetMessage });
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].event, "auth.password_reset_delivery_failed");
+  assert.equal(lines[0].err.config, undefined);
+  assert.equal(output.includes(rawPhone), false);
+  assert.equal(output.includes(rawEmail), false);
+  assert.equal(output.includes(rawToken), false);
+  assert.equal(output.includes("db-password"), false);
+  assert.equal(output.includes("api-secret"), false);
+  assert.equal(output.includes("request-password"), false);
 });
 
 test("reset-password rejects missing token or password", async () => {

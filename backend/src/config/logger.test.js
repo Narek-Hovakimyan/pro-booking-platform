@@ -138,6 +138,86 @@ test("sanitizeString redacts multiple sensitive values in one string", () => {
   assert.ok(!result.includes("code=auth-code"));
 });
 
+test("sanitizeString redacts labelled and international phone values", () => {
+  const input = [
+    "phone=+37499123456",
+    "phone: 099123456",
+    'phoneNumber="+374 99 123 456"',
+    "mobile: (099) 123-456",
+    "recipientPhone=+1 (202) 555-0123",
+  ].join(" | ");
+  const result = sanitizeString(input);
+
+  assert.equal(result, [
+    "phone=[REDACTED]",
+    "phone: [REDACTED]",
+    'phoneNumber="[REDACTED]"',
+    "mobile: [REDACTED]",
+    "recipientPhone=[REDACTED]",
+  ].join(" | "));
+});
+
+test("sanitizeString redacts standalone international phones but preserves ordinary numbers", () => {
+  const result = sanitizeString(
+    "+37499123456 duration=12345678 statusCode=500 count=123456789"
+  );
+
+  assert.equal(
+    result,
+    "[REDACTED] duration=12345678 statusCode=500 count=123456789"
+  );
+});
+
+test("sanitizeString preserves harmless dates, IDs, versions, filenames, and prose", () => {
+  const values = [
+    "2026-07-16",
+    "2026-07-16T12:30:45.000Z",
+    "userId=64c9f47a7a04f2d4a0b12345",
+    "64c9f47a7a04f2d4a0b12345",
+    "550e8400-e29b-41d4-a716-446655440000",
+    "release-v2.10.123 build-20260716.log",
+    "request.completed for booking 123456",
+  ];
+
+  for (const value of values) {
+    assert.equal(sanitizeString(value), value);
+  }
+
+  const mixed =
+    "date=2026-07-16 duration=12345678 userId=64c9f47a7a04f2d4a0b12345 count=123456789";
+  assert.equal(sanitizeString(mixed), mixed);
+});
+
+test("sanitizeString is deterministic, does not mutate input, and handles long harmless strings", () => {
+  const input = "ordinary-2026-07-16-" + "a1".repeat(5000);
+  const original = String(input);
+
+  assert.equal(sanitizeString(input), original);
+  assert.equal(sanitizeString(input), sanitizeString(input));
+});
+
+test("serialized errors contain no fake phone, email, token, or credential values", () => {
+  const { stream, lines } = makeStream();
+  const log = createLogger({ level: "info", stream });
+  const secrets = {
+    phone: "+37499123456",
+    email: "person@example.com",
+    token: "standalone-token-secret",
+    password: "password-secret",
+  };
+  const error = new Error(
+    `phone=${secrets.phone} email=${secrets.email} token=${secrets.token} EMAIL_PASS=${secrets.password}`
+  );
+
+  log.error({ err: error }, "sanitized error");
+
+  const output = JSON.stringify(lines);
+  for (const secret of Object.values(secrets)) {
+    assert.equal(output.includes(secret), false);
+  }
+  assert.equal(lines[0].err.config, undefined);
+});
+
 test("sanitizeString returns non-strings unchanged", () => {
   assert.equal(sanitizeString(123), 123);
   assert.equal(sanitizeString(null), null);
