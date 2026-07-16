@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import User from "../models/User.js";
 import {
+  classifySpecialistOnboardingState,
   createInitialSpecialistOnboardingState,
   serializeSpecialistOnboardingState,
 } from "./specialistOnboardingState.js";
@@ -298,5 +300,206 @@ test("serializer accepts valid null-prototype explicit state", () => {
       completedAt: null,
       needsOnboarding: true,
     }
+  );
+});
+
+const validExplicitState = (overrides = {}) => ({
+  version: 1,
+  status: "in_progress",
+  currentStep: "workplace",
+  workplace: null,
+  completedAt: null,
+  ...overrides,
+});
+
+test("classifier distinguishes valid v1 states", () => {
+  for (const state of [
+    validExplicitState({ status: "not_started", currentStep: "professional_basics" }),
+    validExplicitState({ status: "in_progress", currentStep: "review", workplace: "salon" }),
+    validExplicitState({
+      status: "completed",
+      currentStep: null,
+      workplace: "independent",
+      completedAt: new Date("2026-01-02T03:04:05.000Z"),
+    }),
+  ]) {
+    const result = classifySpecialistOnboardingState({ specialistOnboarding: state });
+    assert.equal(result.kind, "valid");
+    assert.deepEqual(result.state, state);
+    if (state.completedAt) assert.notEqual(result.state.completedAt, state.completedAt);
+  }
+});
+
+test("classifier distinguishes true legacy absence from malformed explicit states", () => {
+  assert.deepEqual(classifySpecialistOnboardingState({ role: "barber" }), { kind: "legacy" });
+
+  for (const specialistOnboarding of [
+    null,
+    undefined,
+    {},
+    [],
+    () => {},
+    "invalid",
+    1,
+    validExplicitState({ version: 2 }),
+    validExplicitState({ status: "unknown" }),
+    validExplicitState({ currentStep: "unknown" }),
+    validExplicitState({ workplace: "unknown" }),
+    validExplicitState({ completedAt: new Date("bad") }),
+  ]) {
+    assert.deepEqual(
+      classifySpecialistOnboardingState({ specialistOnboarding }),
+      { kind: "malformed" }
+    );
+  }
+});
+
+test("classifier distinguishes true absence from inherited top-level state without reading it", () => {
+  const inheritedState = validExplicitState();
+  const user = Object.create({ specialistOnboarding: inheritedState });
+  user.role = "barber";
+  const before = Object.keys(user);
+
+  assert.deepEqual(classifySpecialistOnboardingState({ role: "barber" }), { kind: "legacy" });
+  assert.deepEqual(classifySpecialistOnboardingState(user), { kind: "malformed" });
+  assert.equal(Object.hasOwn(user, "specialistOnboarding"), false);
+  assert.deepEqual(Object.keys(user), before);
+
+  let getterCalls = 0;
+  const hostileUser = Object.create({});
+  Object.defineProperty(Object.getPrototypeOf(hostileUser), "specialistOnboarding", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      throw new Error("unsafe");
+    },
+  });
+  assert.deepEqual(classifySpecialistOnboardingState(hostileUser), { kind: "malformed" });
+  assert.equal(getterCalls, 0);
+});
+
+test("classifier rejects custom-prototype states while retaining supported plain states", () => {
+  const customPrototypeState = Object.create({});
+  Object.defineProperties(customPrototypeState, {
+    version: { value: 1, enumerable: true },
+    status: { value: "not_started", enumerable: true },
+    currentStep: { value: "professional_basics", enumerable: true },
+    workplace: { value: null, enumerable: true },
+    completedAt: { value: null, enumerable: true },
+  });
+
+  assert.deepEqual(
+    classifySpecialistOnboardingState({ specialistOnboarding: customPrototypeState }),
+    { kind: "malformed" }
+  );
+  assertInitialFallback(
+    serializeSpecialistOnboardingState({
+      role: "barber",
+      specialistOnboarding: Object.create(validExplicitState()),
+    })
+  );
+});
+
+test("classifier safely normalizes Mongoose documents and rejects failed conversion", () => {
+  const validDocument = new User({
+    role: "barber",
+    specialistOnboarding: validExplicitState(),
+  });
+  const legacyDocument = new User({ role: "barber" });
+
+  assert.deepEqual(classifySpecialistOnboardingState(validDocument), {
+    kind: "valid",
+    state: validExplicitState(),
+  });
+  assert.deepEqual(
+    classifySpecialistOnboardingState({
+      specialistOnboarding: validDocument.specialistOnboarding,
+    }),
+    { kind: "valid", state: validExplicitState() }
+  );
+  assert.deepEqual(classifySpecialistOnboardingState(legacyDocument), { kind: "legacy" });
+
+  const failingDocument = new Proxy(new User({ role: "barber" }), {
+    get(target, property, receiver) {
+      if (property === "$__") throw new Error("unsafe");
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  assert.deepEqual(classifySpecialistOnboardingState(failingDocument), { kind: "malformed" });
+});
+
+test("classifier rejects missing, inherited, accessor, and throwing fields", () => {
+  const inheritedState = Object.create(validExplicitState());
+  assert.deepEqual(
+    classifySpecialistOnboardingState({ specialistOnboarding: inheritedState }),
+    { kind: "malformed" }
+  );
+
+  const partialInherited = Object.create({ status: "in_progress" });
+  Object.assign(partialInherited, validExplicitState());
+  delete partialInherited.status;
+  assert.deepEqual(
+    classifySpecialistOnboardingState({ specialistOnboarding: partialInherited }),
+    { kind: "malformed" }
+  );
+
+  const accessorState = validExplicitState();
+  Object.defineProperty(accessorState, "status", {
+    enumerable: true,
+    get() {
+      throw new Error("unsafe");
+    },
+  });
+  assert.deepEqual(
+    classifySpecialistOnboardingState({ specialistOnboarding: accessorState }),
+    { kind: "malformed" }
+  );
+
+  assert.deepEqual(
+    classifySpecialistOnboardingState({
+      specialistOnboarding: {
+        toObject() {
+          throw new Error("unsafe");
+        },
+      },
+    }),
+    { kind: "malformed" }
+  );
+
+  const missingStatus = validExplicitState();
+  delete missingStatus.status;
+  assert.deepEqual(
+    classifySpecialistOnboardingState({ specialistOnboarding: missingStatus }),
+    { kind: "malformed" }
+  );
+
+  const accessorUser = {};
+  Object.defineProperty(accessorUser, "specialistOnboarding", {
+    enumerable: true,
+    get() {
+      throw new Error("unsafe");
+    },
+  });
+  assert.deepEqual(classifySpecialistOnboardingState(accessorUser), { kind: "malformed" });
+});
+
+test("classifier accepts null-prototype state, avoids mutation, and preserves serializer behavior", () => {
+  const state = Object.create(null);
+  Object.assign(state, validExplicitState({ workplace: "independent" }));
+  const before = JSON.stringify(state);
+
+  assert.deepEqual(classifySpecialistOnboardingState({ specialistOnboarding: state }), {
+    kind: "valid",
+    state: validExplicitState({ workplace: "independent" }),
+  });
+  assert.equal(JSON.stringify(state), before);
+
+  const malformed = { version: 2, status: "bad", currentStep: null, workplace: null, completedAt: null };
+  assert.deepEqual(
+    classifySpecialistOnboardingState({ specialistOnboarding: malformed }),
+    { kind: "malformed" }
+  );
+  assertInitialFallback(
+    serializeSpecialistOnboardingState({ role: "barber", specialistOnboarding: malformed })
   );
 });

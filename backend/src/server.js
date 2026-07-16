@@ -13,6 +13,7 @@ import {
 import { requestContextMiddleware } from "./middleware/requestContextMiddleware.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
 import authRoutes from "./routes/authRoutes.js";
+import barberOnboardingRoutes from "./routes/barberOnboardingRoutes.js";
 import barberRoutes from "./routes/barberRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import certificateRoutes from "./routes/certificateRoutes.js";
@@ -149,6 +150,7 @@ app.get("/uploads/portfolio/:filename", servePublicPortfolioImage);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/barber-onboarding", barberOnboardingRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/barbers", barberRoutes);
 app.use("/api/services", serviceRoutes);
