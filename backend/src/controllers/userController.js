@@ -14,6 +14,7 @@ import { sendEmailVerification } from "../services/auth/emailService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
+import { serializePublicBarberDirectory } from "../utils/publicBarberSerializer.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -184,60 +185,15 @@ export const getBarbers = async (_req, res) => {
           }
         }
 
-        const publicBarber = barber.toObject();
-        delete publicBarber.workHistory;
-        delete publicBarber.email;
-        delete publicBarber.emailVerified;
-        delete publicBarber.emailVerifiedAt;
-        delete publicBarber.emailVerificationTokenHash;
-        delete publicBarber.emailVerificationExpires;
-        delete publicBarber.emailVerificationSentAt;
-        delete publicBarber.platformRole;
-
-        return {
-          ...publicBarber,
+        return serializePublicBarberDirectory({
+          barber,
+          profile,
           salonName: approvedSalon?.name || "",
-          salon: approvedSalon
-            ? {
-                ...approvedSalon.toObject(),
-                id: approvedSalon._id,
-              }
-            : null,
+          salon: approvedSalon,
           salons: approvedSalons,
           approvedSalons,
-          primarySalon: approvedSalon
-            ? {
-                ...approvedSalon.toObject(),
-                id: approvedSalon._id,
-              }
-            : null,
-          profession: barber.profession || "barber",
-          barberType: barber.barberType || "",
-          specialty: barber.specialty || "unisex",
-          bio: profile?.bio || "",
-          city: profile?.city || barber.city || "",
-          address: profile?.address || "",
-          instagram: profile?.instagram || "",
-          avatarUrl: barber.avatarUrl || "",
-          imageUrl: profile?.imageUrl || barber.avatarUrl || "",
-          galleryImages: profile?.galleryImages || [],
-          defaultSchedule: getDefaultSchedule(profile),
-          depositSettings: profile?.depositSettings
-            ? {
-                enabled: profile.depositSettings.enabled || false,
-                mode: profile.depositSettings.mode || "percentage",
-                value: profile.depositSettings.value || 0,
-                minimumBookingPrice: profile.depositSettings.minimumBookingPrice ?? null,
-                noShowPolicyText: String(profile.depositSettings.noShowPolicyText || "").slice(0, 1000),
-              }
-            : {
-                enabled: false,
-                mode: "percentage",
-                value: 0,
-                minimumBookingPrice: null,
-                noShowPolicyText: "",
-              },
-        };
+          primarySalon: approvedSalon,
+        });
       })
     );
 

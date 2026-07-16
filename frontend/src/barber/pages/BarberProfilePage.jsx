@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import useProfileEmail from "@/barber/hooks/useProfileEmail";
 
@@ -74,6 +74,7 @@ export default function BarberProfilePage() {
   const currentUserId = currentUser?.id;
   const currentUserName = currentUser?.name || "";
   const currentUserPhone = currentUser?.phone || "";
+  const currentUserSalonStatus = currentUser?.salonStatus || "none";
   const currentUserSalonId = getPrimarySalonId(currentUser);
   const savedProfile = useSelector((state) =>
     state.users.find((user) => user.id === currentUserId)
@@ -101,6 +102,11 @@ export default function BarberProfilePage() {
   const [servicesCount, setServicesCount] = useState(null);
   const [portfolioCount, setPortfolioCount] = useState(null);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
+  const selfAddressContext = currentUserId ? `barber:${currentUserId}` : "";
+  const selfAddressContextRef = useRef(selfAddressContext);
+  const selfAddressRequestRef = useRef(0);
+  const addressEditedRef = useRef(false);
+  const selfAddressHydratedRef = useRef(false);
 
   const {
     email,
@@ -117,12 +123,12 @@ export default function BarberProfilePage() {
     hasEmailChanges,
   } = useProfileEmail({ currentUser, dispatch });
 
-  const [profile, setProfile] = useState({
+  const [profileState, setProfile] = useState({
     name: currentUserName,
     phone: currentUserPhone,
     bio: savedProfile?.bio || "",
     city: savedProfile?.city || currentUser?.city || "",
-    address: savedProfile?.address || "",
+    address: "",
     instagram: savedProfile?.instagram || "",
     profession: savedProfile?.profession || currentUser?.profession || "barber",
     barberType: savedProfile?.barberType || currentUser?.barberType || "",
@@ -131,12 +137,17 @@ export default function BarberProfilePage() {
     galleryImages: savedProfile?.galleryImages || [],
     defaultSchedule: savedProfile?.defaultSchedule || defaultPersonalSchedule,
     salon: savedProfile?.salon || null,
-    salonStatus: savedProfile?.salonStatus || currentUser?.salonStatus || "none",
+    salonStatus: savedProfile?.salonStatus || currentUserSalonStatus,
     workHistory: savedProfile?.workHistory || currentUser?.workHistory || [],
     approvedSalons: savedProfile?.approvedSalons || savedProfile?.salons || [],
     primarySalon: savedProfile?.primarySalon || null,
     salons: savedProfile?.salons || [],
+    addressContext: selfAddressContext,
   });
+  const profile =
+    profileState.addressContext === selfAddressContext
+      ? profileState
+      : { ...profileState, address: "" };
   const hasCertifications =
     certifications.length > 0 || eventCertifications.length > 0;
 
@@ -168,6 +179,13 @@ export default function BarberProfilePage() {
     showSalonLink = Boolean(salonName && salonId);
   }
 
+  useLayoutEffect(() => {
+    selfAddressContextRef.current = selfAddressContext;
+    selfAddressRequestRef.current += 1;
+    addressEditedRef.current = false;
+    selfAddressHydratedRef.current = false;
+  }, [selfAddressContext]);
+
   useEffect(() => {
     if (!currentUserId) return;
 
@@ -180,12 +198,13 @@ export default function BarberProfilePage() {
         const { data } = await api.get(`/barbers/profile/${currentUserId}`);
 
         if (isMounted && data) {
-          setProfile({
+          setProfile((currentProfile) => ({
             name: data.name || currentUserName,
             phone: data.phone || currentUserPhone,
             bio: data.bio || "",
             city: data.city || "",
-            address: data.address || "",
+            address: currentProfile.address,
+            addressContext: currentProfile.addressContext,
             instagram: data.instagram || "",
             profession: data.profession || "barber",
             barberType: data.barberType || "",
@@ -194,12 +213,12 @@ export default function BarberProfilePage() {
             galleryImages: data.galleryImages || [],
             defaultSchedule: data.defaultSchedule || defaultPersonalSchedule,
             salon: data.salon || null,
-            salonStatus: data.salonStatus || "none",
+            salonStatus: currentUserSalonStatus,
             workHistory: data.workHistory || [],
             approvedSalons: data.approvedSalons || data.salons || [],
             primarySalon: data.primarySalon || null,
             salons: data.salons || [],
-          });
+          }));
         }
       } catch (requestError) {
         if (isMounted) {
@@ -298,11 +317,26 @@ export default function BarberProfilePage() {
         });
     }
 
+    const requestContext = selfAddressContext;
+    const requestId = ++selfAddressRequestRef.current;
+
     // Fetch email state from /users/me (separate from public barber profile)
     api.get("/users/me")
       .then(({ data }) => {
-        if (isMounted) {
+        if (
+          isMounted &&
+          selfAddressContextRef.current === requestContext &&
+          selfAddressRequestRef.current === requestId
+        ) {
           loadFromUsersMe(data);
+          if (!addressEditedRef.current) {
+            selfAddressHydratedRef.current = true;
+            setProfile((currentProfile) => ({
+              ...currentProfile,
+              address: typeof data?.address === "string" ? data.address : currentProfile.address,
+              addressContext: requestContext,
+            }));
+          }
         }
       })
 
@@ -313,11 +347,19 @@ export default function BarberProfilePage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUserId, currentUserName, currentUserPhone, currentUserSalonId, dispatch, loadFromUsersMe]);
+  }, [currentUserId, currentUserName, currentUserPhone, currentUserSalonId, currentUserSalonStatus, dispatch, loadFromUsersMe, selfAddressContext]);
 
   const updateField = (field, value) => {
+    if (field === "address") {
+      addressEditedRef.current = true;
+      selfAddressHydratedRef.current = true;
+    }
     setSaved(false);
-    setProfile((currentProfile) => ({ ...currentProfile, [field]: value }));
+    setProfile((currentProfile) => ({
+      ...currentProfile,
+      [field]: value,
+      ...(field === "address" ? { addressContext: selfAddressContext } : {}),
+    }));
   };
 
   const saveProfile = async (event) => {
@@ -329,7 +371,12 @@ export default function BarberProfilePage() {
     setIsProfileSaving(true);
 
     try {
-      const { data } = await api.put(`/barbers/profile/${currentUser.id}`, profile);
+      const profilePayload = {
+        ...profile,
+        addressContext: undefined,
+      };
+      if (!selfAddressHydratedRef.current) profilePayload.address = undefined;
+      const { data } = await api.put(`/barbers/profile/${currentUser.id}`, profilePayload);
       const nextProfile = {
         name: data.name || profile.name,
         phone: data.phone || profile.phone,
@@ -364,7 +411,7 @@ export default function BarberProfilePage() {
           specialty: nextProfile.specialty,
         })
       );
-      setProfile(nextProfile);
+      setProfile({ ...nextProfile, addressContext: selfAddressContext });
       setSaved(true);
     } catch (requestError) {
       setProfileError(
@@ -411,7 +458,7 @@ export default function BarberProfilePage() {
         specialty: nextProfile.specialty,
       })
     );
-    setProfile(nextProfile);
+    setProfile({ ...nextProfile, addressContext: selfAddressContext });
     setSaved(true);
     setProfileError("");
   };

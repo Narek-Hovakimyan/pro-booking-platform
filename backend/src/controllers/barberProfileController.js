@@ -17,12 +17,38 @@ import {
 } from "../utils/barberProfileUtils.js";
 import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
 import { sendControllerError } from "../utils/controllerError.js";
+import {
+  serializePublicBarberCard,
+  serializePublicBarberProfile,
+  serializePublicBarberProfileRecord,
+} from "../utils/publicBarberSerializer.js";
 
 
-export const barberProfileController = createCrudController(
+const genericBarberProfileController = createCrudController(
   BarberProfile,
   "Barber profile"
 );
+
+export const barberProfileController = {
+  ...genericBarberProfileController,
+  getAll: async (_req, res) => {
+    try {
+      const items = await BarberProfile.find();
+      return res.json(items.map(serializePublicBarberProfileRecord));
+    } catch (error) {
+      return sendControllerError(res, error, "Could not fetch Barber profile");
+    }
+  },
+  getById: async (req, res) => {
+    try {
+      const item = await BarberProfile.findById(req.params.id);
+      if (!item) return res.status(404).json({ message: "Barber profile not found" });
+      return res.json(serializePublicBarberProfileRecord(item));
+    } catch (error) {
+      return sendControllerError(res, error, "Could not fetch Barber profile");
+    }
+  },
+};
 
 const defaultScheduleFallback = {
   startTime: "09:00",
@@ -319,45 +345,20 @@ export const getBarberCardSummary = async (req, res) => {
         services: availabilityServices,
         bookings: barberBookings,
       });
-      const publicBarber = asPlainObject(barber);
       const reviewStats = reviewStatsByBarberId.get(barberId) || {
         total: 0,
         count: 0,
       };
 
-      delete publicBarber.password;
-      delete publicBarber.workHistory;
-      delete publicBarber.email;
-      delete publicBarber.emailVerified;
-      delete publicBarber.emailVerifiedAt;
-      delete publicBarber.emailVerificationTokenHash;
-      delete publicBarber.emailVerificationExpires;
-      delete publicBarber.emailVerificationSentAt;
-      delete publicBarber.platformRole;
-
-      responseBarbers.push({
-        ...publicBarber,
-        id: publicBarber._id,
+      responseBarbers.push(serializePublicBarberCard({
+        barber,
+        profile,
         salonName: primarySalon?.name || "",
         salon: primarySalon,
         salons: approvedSalons,
         approvedSalons,
         primarySalon,
-        profession: barber.profession || "barber",
-        barberType: barber.barberType || "",
-        specialty: barber.specialty || "unisex",
-        bio: profile?.bio || "",
-        city: profile?.city || barber.city || "",
-        address: profile?.address || "",
-        instagram: profile?.instagram || "",
-        avatarUrl: barber.avatarUrl || "",
-        imageUrl: profile?.imageUrl || barber.avatarUrl || "",
-        galleryImages: profile?.galleryImages || [],
-        defaultSchedule: {
-          ...defaultScheduleFallback,
-          ...(profile?.defaultSchedule || {}),
-        },
-      });
+      }));
 
       responseServices.push(...barberServices);
       responseReviewStats.push({
@@ -409,30 +410,12 @@ export const getProfileByBarberId = async (req, res) => {
       }
     }
 
-    return res.json({
-      ...(profile?.toObject() || {}),
+    return res.json(serializePublicBarberProfile({
+      barber,
+      profile,
+      salon: approvedSalon,
       barberId: req.params.barberId,
-      name: barber?.name || "",
-      phone: barber?.phone || "",
-      salon:
-        approvedSalon
-          ? {
-              ...approvedSalon.toObject(),
-              id: approvedSalon._id,
-            }
-          : null,
-      salonStatus: barber?.salonStatus || "none",
-      salonName: approvedSalon?.name || "",
-      workHistory: barber?.workHistory || [],
-      profession: barber?.profession || "barber",
-      barberType: barber?.barberType || "",
-      specialty: barber?.specialty || "unisex",
-      city: profile?.city || barber?.city || "",
-      avatarUrl: barber?.avatarUrl || "",
-      imageUrl: profile?.imageUrl || barber?.avatarUrl || "",
-      galleryImages: profile?.galleryImages || [],
-      defaultSchedule: getDefaultSchedule(profile),
-    });
+    }));
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch barber profile");
   }

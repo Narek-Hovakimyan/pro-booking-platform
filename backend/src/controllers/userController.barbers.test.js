@@ -119,10 +119,19 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
   assert.equal(res.body.some((barber) => barber.name === "Unpaid Barber"), false);
 });
 
-test("getBarbers includes safe deposit settings and hides platformRole", async () => {
+test("getBarbers allowlists public fields and omits private profile data", async () => {
+  const salonId = new mongoose.Types.ObjectId();
   const paidBarber = makeBarber({
     name: "Deposit Barber",
     platformRole: "superuser",
+    salons: [{
+      salon: salonId,
+      status: "approved",
+      isPrimary: true,
+      joinedAt: new Date("2025-01-01"),
+      relationshipType: "chair_renter",
+      staffPayment: { fixedAmount: 5000 },
+    }],
   });
 
   User.find = () => chainableQuery([paidBarber]);
@@ -137,6 +146,9 @@ test("getBarbers includes safe deposit settings and hides platformRole", async (
   BarberProfile.find = async () => [
     {
       barberId: paidBarber._id,
+      address: "Private Street 1",
+      city: "Yerevan",
+      bio: "Public bio",
       depositSettings: {
         enabled: true,
         mode: "percentage",
@@ -146,21 +158,37 @@ test("getBarbers includes safe deposit settings and hides platformRole", async (
       },
     },
   ];
-  Salon.find = async () => [];
+  Salon.find = async () => [{
+    _id: salonId,
+    name: "Public Salon",
+    city: "Yerevan",
+    address: "Salon Street 1",
+    ownerId: "owner-private",
+    admins: ["admin-private"],
+    toObject() {
+      return { ...this };
+    },
+  }];
 
   const res = createResponse();
   await getBarbers({}, res);
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body[0].depositSettings, {
-    enabled: true,
-    mode: "percentage",
-    value: 25,
-    minimumBookingPrice: 5000,
-    noShowPolicyText: "Deposit applies before booking.",
-  });
+  assert.equal(res.body[0].city, "Yerevan");
+  assert.equal(res.body[0].bio, "Public bio");
+  assert.equal(res.body[0].address, undefined);
+  assert.equal(res.body[0].depositSettings, undefined);
+  assert.equal(res.body[0].phone, undefined);
+  assert.equal(res.body[0].favoriteBarbers, undefined);
+  assert.equal(res.body[0].specialistOnboarding, undefined);
   assert.equal(res.body[0].email, undefined);
   assert.equal(res.body[0].platformRole, undefined);
+  assert.equal(res.body[0].approvedSalons[0].isPrimary, true);
+  assert.equal(res.body[0].approvedSalons[0].status, undefined);
+  assert.equal(res.body[0].approvedSalons[0].joinedAt, undefined);
+  assert.equal(res.body[0].approvedSalons[0].relationshipType, undefined);
+  assert.equal(res.body[0].approvedSalons[0].staffPayment, undefined);
+  assert.equal(res.body[0].approvedSalons[0].ownerId, undefined);
 });
 
 test("getBarbers hides barber with stale salon seat", async () => {

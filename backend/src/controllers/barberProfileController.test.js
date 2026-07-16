@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+  barberProfileController,
   getBarberCardSummary,
   getProfileByBarberId,
 } from "./barberProfileController.js";
@@ -26,6 +27,7 @@ const originalMethods = {
   create: BarberProfile.create,
   findOne: BarberProfile.findOne,
   find: BarberProfile.find,
+  findById: BarberProfile.findById,
   bookingFind: Booking.find,
   certificateFind: EventCertificate.find,
   reviewFind: Review.find,
@@ -37,6 +39,7 @@ const originalMethods = {
   subscriptionSeatFind: SubscriptionSeat.find,
   subscriptionSeatFindOne: SubscriptionSeat.findOne,
   userFind: User.find,
+  userFindById: User.findById,
 };
 
 const barber = { _id: "barber-a", role: "barber" };
@@ -46,6 +49,7 @@ afterEach(() => {
   BarberProfile.create = originalMethods.create;
   BarberProfile.findOne = originalMethods.findOne;
   BarberProfile.find = originalMethods.find;
+  BarberProfile.findById = originalMethods.findById;
   Booking.find = originalMethods.bookingFind;
   EventCertificate.find = originalMethods.certificateFind;
   Review.find = originalMethods.reviewFind;
@@ -57,6 +61,7 @@ afterEach(() => {
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.find = originalMethods.userFind;
+  User.findById = originalMethods.userFindById;
 });
 
 const createResponse = () => ({
@@ -248,6 +253,7 @@ test("card summary returns barber card data without per-barber requests", async 
         salon: salonId,
         status: "approved",
         isPrimary: true,
+        joinedAt: new Date("2025-01-01"),
         defaultSchedule: {
           startTime: "00:00",
           endTime: "23:59",
@@ -299,6 +305,11 @@ test("card summary returns barber card data without per-barber requests", async 
   assert.equal(res.body.availability[0].barberId, barberId);
   assert.equal(res.body.availability[0].status, "ready");
   assert.equal(res.body.barbers[0].platformRole, undefined);
+  assert.equal(res.body.barbers[0].address, undefined);
+  assert.equal(res.body.barbers[0].phone, undefined);
+  assert.equal(res.body.barbers[0].approvedSalons[0].isPrimary, true);
+  assert.equal(res.body.barbers[0].approvedSalons[0].status, undefined);
+  assert.equal(res.body.barbers[0].approvedSalons[0].joinedAt, undefined);
 });
 
 test("card summary filters specialists by active service category and tags", async () => {
@@ -585,6 +596,91 @@ test("getProfileByBarberId returns 404 for unpaid barber", async () => {
 
   assert.equal(res.statusCode, 404);
   assert.equal(res.body.message, "Barber not found");
+});
+
+test("getProfileByBarberId omits private User and BarberProfile fields", async () => {
+  const res = createResponse();
+  const barberId = "public-barber";
+  BarberProfile.findOne = async () => ({
+    _id: "profile-1",
+    barberId,
+    city: "Yerevan",
+    bio: "Public bio",
+    instagram: "public_handle",
+    address: "Private Street 1",
+    depositSettings: { enabled: true, value: 25 },
+    certifications: [{ title: "Private" }],
+    toObject() { return { ...this }; },
+  });
+  User.findById = () => ({
+    select: async () => ({
+      _id: barberId,
+      role: "barber",
+      name: "Public Barber",
+      phone: "555-private",
+      city: "Yerevan",
+      profession: "barber",
+      barberType: "men",
+      specialty: "men",
+      salonStatus: "pending",
+      workHistory: [{
+        salon: {
+          _id: "salon-1",
+          name: "Private Salon",
+          address: "Private Salon Street",
+          ownerId: "owner-private",
+          admins: ["admin-private"],
+          staffPayment: { fixedAmount: 5000 },
+          unknownFutureField: "private",
+        },
+        salonName: "Public Salon",
+      }],
+    }),
+  });
+  Subscription.findOne = async () => ({ status: "active", currentPeriodEnd: new Date("2099-01-01") });
+
+  await getProfileByBarberId({ params: { barberId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.city, "Yerevan");
+  assert.equal(res.body.bio, "Public bio");
+  assert.equal(res.body.address, undefined);
+  assert.equal(res.body.phone, undefined);
+  assert.equal(res.body.depositSettings, undefined);
+  assert.equal(res.body.certifications, undefined);
+  assert.equal(res.body.salonStatus, undefined);
+  assert.equal(res.body.workHistory[0].salonName, "Public Salon");
+  assert.equal(res.body.workHistory[0].salon, "salon-1");
+});
+
+test("generic public BarberProfile GET handlers serialize list and detail responses", async () => {
+  const privateProfile = {
+    _id: "profile-1",
+    barberId: "barber-1",
+    city: "Gyumri",
+    bio: "Public bio",
+    address: "Private Street 1",
+    depositSettings: { enabled: true },
+    unknownFutureField: "private",
+    toObject() { return { ...this }; },
+  };
+  BarberProfile.find = async () => [privateProfile];
+  BarberProfile.findById = async () => privateProfile;
+
+  const listRes = createResponse();
+  await barberProfileController.getAll({}, listRes);
+  assert.equal(listRes.statusCode, 200);
+  assert.equal(listRes.body.length, 1);
+  assert.equal(listRes.body[0].city, "Gyumri");
+  assert.equal(listRes.body[0].address, undefined);
+  assert.equal(listRes.body[0].depositSettings, undefined);
+  assert.equal(listRes.body[0].unknownFutureField, undefined);
+
+  const detailRes = createResponse();
+  await barberProfileController.getById({ params: { id: "profile-1" } }, detailRes);
+  assert.equal(detailRes.statusCode, 200);
+  assert.equal(detailRes.body.address, undefined);
+  assert.equal(detailRes.body.bio, "Public bio");
 });
 
 test("card summary populate uses active-only match for customCategoryId", async () => {

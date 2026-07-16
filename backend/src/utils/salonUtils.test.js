@@ -7,6 +7,7 @@ const createSalon = (overrides = {}) => ({
   _id: "salon-1",
   name: "Downtown Salon",
   city: "Yerevan",
+  address: "Salon Street 1",
   ownerId: "owner-private",
   admins: ["admin-private"],
   ...overrides,
@@ -105,6 +106,7 @@ test("includes public barber formatting in public salon response", () => {
       {
         barberId: "barber-1",
         city: "Vanadzor",
+        address: "Private Barber Street",
         imageUrl: "https://example.com/profile.jpg",
         bio: "Sharp cuts",
         galleryImages: ["one.jpg"],
@@ -118,6 +120,7 @@ test("includes public barber formatting in public salon response", () => {
   assert.equal(response.barbers[0].city, "Vanadzor");
   assert.equal(response.barbers[0].imageUrl, "https://example.com/profile.jpg");
   assert.equal(response.barbers[0].bio, "Sharp cuts");
+  assert.equal(response.barbers[0].address, undefined);
   assert.deepEqual(response.barbers[0].galleryImages, ["one.jpg"]);
   assert.deepEqual(response.barbers[0].defaultSchedule, { startTime: "10:00" });
   assert.deepEqual(response.barbers[0].salon, {
@@ -125,7 +128,7 @@ test("includes public barber formatting in public salon response", () => {
     id: "salon-1",
     name: "Downtown Salon",
     city: "Yerevan",
-    address: "",
+    address: "Salon Street 1",
     phone: "",
     imageUrl: "",
     image: "",
