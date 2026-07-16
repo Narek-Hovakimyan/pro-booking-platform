@@ -280,7 +280,13 @@ test("card summary returns barber card data without per-barber requests", async 
   Service.find = () => createFindChain([service]);
   Review.find = () => createFindChain([{ barberId, rating: 5 }]);
   Booking.find = () => createFindChain([]);
-  Schedule.find = () => createFindChain([]);
+  Schedule.find = (query) => {
+    assert.deepEqual(query, {
+      barberId: { $in: [barberId] },
+      salonId: { $ne: null },
+    });
+    return createFindChain([]);
+  };
   mockPaidAccessForAllBarbers([barberId]);
 
   await getBarberCardSummary({}, res);

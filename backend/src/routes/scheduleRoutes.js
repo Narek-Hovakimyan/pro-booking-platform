@@ -5,10 +5,18 @@ import {
   upsertSchedule,
   upsertScheduleByBarberAndSalon,
 } from "../controllers/scheduleController.js";
+import {
+  getPersonalScheduleByBarber,
+  upsertPersonalScheduleByBarber,
+} from "../controllers/personalScheduleController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
+
+// Personal onboarding schedule routes must precede the dynamic salon route.
+router.get("/:barberId/personal", protect, getPersonalScheduleByBarber);
+router.put("/:barberId/personal", protect, upsertPersonalScheduleByBarber);
 
 // Legacy route: get schedule by barber only (kept for backward compatibility)
 router.get("/:barberId", getScheduleByBarber);

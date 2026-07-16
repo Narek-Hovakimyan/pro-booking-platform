@@ -60,7 +60,9 @@ export const validateBookingSlot = async ({
   const effectiveDayKey = getDayKeyFromDate(bookingDate) || dayKey;
 
   // Get per-salon schedule
-  const scheduleQuery = salonId ? { barberId, salonId } : { barberId };
+  const scheduleQuery = salonId
+    ? { barberId, salonId }
+    : { barberId, salonId: { $ne: null } };
   const [schedule, barber] = await Promise.all([
     Schedule.findOne(scheduleQuery),
     providedBarber || User.findById(barberId).select("-password"),

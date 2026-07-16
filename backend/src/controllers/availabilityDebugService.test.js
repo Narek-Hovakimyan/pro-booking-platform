@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 
-import { debugAvailability, authorizeDebugAccess } from "../services/booking/availabilityDebugService.js";
+import {
+  authorizeDebugAccess,
+  buildScheduleContext,
+  debugAvailability,
+} from "../services/booking/availabilityDebugService.js";
 import Booking from "../models/Booking.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
@@ -78,6 +82,19 @@ const restoreOriginals = () => {
 
 afterEach(() => {
   restoreOriginals();
+});
+
+test("availability debug excludes a personal null-salon schedule for legacy lookups", async () => {
+  let query;
+  User.findById = () => ({ select: async () => ({ salons: [] }) });
+  Schedule.findOne = async (nextQuery) => {
+    query = nextQuery;
+    return null;
+  };
+
+  await buildScheduleContext({ barberId, salonId: null, date: bookingDate });
+
+  assert.deepEqual(query, { barberId, salonId: { $ne: null } });
 });
 
 const mockBookingFind = (bookings) => {

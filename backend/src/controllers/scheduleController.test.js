@@ -670,3 +670,20 @@ test("legacy schedule endpoint returns clean defaultSchedule without mongoose in
   assert.equal(JSON.stringify(res.body).includes("_doc"), false);
   assert.equal(JSON.stringify(res.body).includes("$locals"), false);
 });
+
+test("legacy schedule fallback excludes a personal null-salon schedule", async () => {
+  const res = createResponse();
+  let query;
+
+  User.findById = () => createQuery({ salons: [] });
+  BarberProfile.findOne = async () => null;
+  Schedule.findOne = async (nextQuery) => {
+    query = nextQuery;
+    return null;
+  };
+
+  await getScheduleByBarber({ params: { barberId } }, res);
+
+  assert.deepEqual(query, { barberId, salonId: { $ne: null } });
+  assert.equal(res.statusCode, 200);
+});

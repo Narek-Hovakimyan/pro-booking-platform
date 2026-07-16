@@ -10,7 +10,8 @@ const scheduleSchema = new mongoose.Schema(
     salonId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Salon",
-      required: true,
+      required: false,
+      default: null,
     },
     weeklySchedule: {
       type: mongoose.Schema.Types.Mixed,

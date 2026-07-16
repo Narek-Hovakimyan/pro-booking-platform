@@ -74,6 +74,25 @@ afterEach(() => {
   console.error = originalConsoleError;
 });
 
+test("legacy booking schedule lookup excludes a personal null-salon schedule", async () => {
+  let query;
+  Schedule.findOne = async (nextQuery) => {
+    query = nextQuery;
+    return null;
+  };
+  Booking.find = async () => [];
+
+  await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate: "2026-12-15",
+    time: "10:00",
+    duration: 30,
+  });
+
+  assert.deepEqual(query, { barberId, salonId: { $ne: null } });
+});
+
 const bookingReferenceDir = path.resolve(process.cwd(), "uploads", "booking-references");
 
 const createReferenceUploadFile = (filename) => {

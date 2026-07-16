@@ -262,7 +262,7 @@ export const getBarberCardSummary = async (req, res) => {
           $or: [{ bookingDate: todayKey }, { dayKey: todayKey }],
         })
       ),
-      chainToArray(Schedule.find({ barberId: { $in: barberIds } })),
+      chainToArray(Schedule.find({ barberId: { $in: barberIds }, salonId: { $ne: null } })),
     ]);
     const profilesByBarberId = new Map(
       profiles.map((profile) => [getIdString(profile.barberId), profile])

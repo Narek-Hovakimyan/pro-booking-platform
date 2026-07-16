@@ -129,7 +129,7 @@ export const getScheduleByBarber = async (req, res) => {
 
     // Fallback: try to find any schedule for this barber
     if (!schedule) {
-      scheduleQuery = { barberId };
+      scheduleQuery = { barberId, salonId: { $ne: null } };
       schedule = await Schedule.findOne(scheduleQuery);
     }
 

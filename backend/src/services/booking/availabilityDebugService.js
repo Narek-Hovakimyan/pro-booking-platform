@@ -148,7 +148,9 @@ export const loadDebugService = async ({ serviceId, barberId }) => {
  * Build the schedule portion of the debug response.
  */
 export const buildScheduleContext = async ({ barberId, salonId, date }) => {
-  const scheduleQuery = salonId ? { barberId, salonId } : { barberId };
+  const scheduleQuery = salonId
+    ? { barberId, salonId }
+    : { barberId, salonId: { $ne: null } };
   const barber = await User.findById(barberId).select("-password");
   const schedule = await Schedule.findOne(scheduleQuery);
 
