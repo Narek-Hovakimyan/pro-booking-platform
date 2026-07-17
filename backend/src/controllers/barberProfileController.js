@@ -4,25 +4,27 @@ import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
-import User, { MAX_PHONE_LENGTH } from "../models/User.js";
+import User from "../models/User.js";
 import { createCrudController } from "./crudController.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
 import { barberHasPaidAccess, getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
+import { getDefaultSchedule, getUploadedAvatarPath } from "../utils/barberProfileUtils.js";
+import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
 import {
-  sanitizeDefaultSchedule,
-  getDefaultSchedule,
-  parseDefaultSchedulePayload,
-  getUploadedAvatarPath,
-} from "../utils/barberProfileUtils.js";
-import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
+  BarberProfileMutationPayloadError,
+  validateBarberProfileMutationPayload,
+} from "../utils/barberProfileMutationPayload.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import {
   serializePublicBarberCard,
   serializePublicBarberProfile,
   serializePublicBarberProfileRecord,
 } from "../utils/publicBarberSerializer.js";
-
+import {
+  mutateSelfBarberProfile,
+  SelfBarberProfileMutationError,
+} from "../services/barber/selfBarberProfileMutationService.js";
 
 const genericBarberProfileController = createCrudController(
   BarberProfile,
@@ -116,9 +118,6 @@ const getReviewStatsByBarberId = (reviews = []) => {
 
 const normalizeSearchValue = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
-
-const normalizePhone = (phone) =>
-  typeof phone === "string" ? phone.trim() : "";
 
 const serviceMatchesDiscoveryFilters = (service, filters) => {
   if (!service?.active) return false;
@@ -421,118 +420,78 @@ export const getProfileByBarberId = async (req, res) => {
   }
 };
 
-export const upsertProfileByBarberId = async (req, res) => {
+const boundedErrorMessages = {
+  BARBER_PROFILE_FORBIDDEN: "You can edit only your own barber profile",
+  INVALID_BARBER_PROFILE_REQUEST: "Invalid barber profile request",
+  BARBER_PROFILE_FIELDS_INVALID: "Invalid barber profile fields",
+  BARBER_PROFILE_MEDIA_INVALID: "Invalid barber profile media",
+  BARBER_PROFILE_NOT_FOUND: "Barber profile not found",
+  BARBER_PROFILE_MUTATION_FAILED: "Could not save barber profile",
+};
+
+const statusByErrorCode = {
+  BARBER_PROFILE_FORBIDDEN: 403,
+  INVALID_BARBER_PROFILE_REQUEST: 400,
+  BARBER_PROFILE_FIELDS_INVALID: 400,
+  BARBER_PROFILE_MEDIA_INVALID: 400,
+  BARBER_PROFILE_NOT_FOUND: 404,
+  BARBER_PROFILE_MUTATION_FAILED: 500,
+};
+
+const sendBoundedBarberProfileError = (res, code) =>
+  res.status(statusByErrorCode[code] || 500).json({
+    code,
+    message: boundedErrorMessages[code] || boundedErrorMessages.BARBER_PROFILE_MUTATION_FAILED,
+  });
+
+const cleanupUploadedAvatar = (file) => {
+  const uploadedAvatarPath = getUploadedAvatarPath(file);
+  if (!uploadedAvatarPath) return;
+
   try {
-    if (String(req.user._id) !== String(req.params.barberId)) {
-      return res.status(403).json({ message: "You can edit only your profile" });
-    }
-
-    const {
-      name,
-      phone,
-      salonName,
-      bio,
-      city,
-      address,
-      instagram,
-      specialty,
-      profession,
-      barberType,
-      imageUrl: bodyImageUrl,
-      avatarUrl: bodyAvatarUrl,
-      galleryImages,
-      defaultSchedule: defaultSchedulePayload,
-    } = req.body;
-    const uploadedAvatarPath = getUploadedAvatarPath(req.file);
-    const imageUrl = uploadedAvatarPath || sanitizeMediaUrl(bodyImageUrl);
-    const avatarUrl = uploadedAvatarPath || sanitizeMediaUrl(bodyAvatarUrl);
-
-    const defaultSchedule = parseDefaultSchedulePayload(defaultSchedulePayload);
-    const userUpdates = {};
-    const profileUpdates = {
-      barberId: req.params.barberId,
-    };
-
-    if (name !== undefined) userUpdates.name = name;
-    if (phone !== undefined) {
-      const normalizedPhone = normalizePhone(phone);
-
-      if (!normalizedPhone) {
-        return res.status(400).json({ message: "Phone is required" });
-      }
-
-      if (normalizedPhone.length > MAX_PHONE_LENGTH) {
-        return res.status(400).json({
-          message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
-        });
-      }
-
-      userUpdates.phone = normalizedPhone;
-    }
-    if (city !== undefined) {
-      userUpdates.city = city;
-      profileUpdates.city = city;
-    }
-    if (avatarUrl !== undefined || imageUrl !== undefined) {
-      userUpdates.avatarUrl = avatarUrl ?? imageUrl;
-      profileUpdates.imageUrl = imageUrl ?? avatarUrl;
-    }
-    if (salonName !== undefined) profileUpdates.salonName = salonName;
-    if (bio !== undefined) profileUpdates.bio = bio;
-    if (address !== undefined) profileUpdates.address = address;
-    if (instagram !== undefined) profileUpdates.instagram = instagram;
-    if (specialty !== undefined) userUpdates.specialty = specialty;
-    if (profession !== undefined) userUpdates.profession = profession;
-    if (barberType !== undefined) userUpdates.barberType = barberType;
-    if (Array.isArray(galleryImages)) {
-      profileUpdates.galleryImages = galleryImages.filter(Boolean);
-    }
-    if (defaultSchedule !== undefined) {
-      profileUpdates.defaultSchedule = sanitizeDefaultSchedule(defaultSchedule);
-    }
-
-    let user = null;
-
-    if (Object.keys(userUpdates).length > 0) {
-      user = await User.findByIdAndUpdate(req.params.barberId, userUpdates, {
-        returnDocument: "after",
-        runValidators: true,
-      }).select("-password");
-    }
-
-    const profile = await BarberProfile.findOneAndUpdate(
-      { barberId: req.params.barberId },
-      profileUpdates,
-      { returnDocument: "after", runValidators: true, upsert: true }
-    );
-
-    if (!user) {
-      user = await User.findById(req.params.barberId).select("-password");
-    }
-
-    return res.json({
-      ...profile.toObject(),
-      name: user?.name || "",
-      phone: user?.phone || "",
-      salon: user?.salon || null,
-      salonStatus: user?.salonStatus || "none",
-      workHistory: user?.workHistory || [],
-      profession: user?.profession || "barber",
-      barberType: user?.barberType || "",
-      specialty: user?.specialty || "unisex",
-      city: profile.city || user?.city || "",
-      avatarUrl: user?.avatarUrl || "",
-      imageUrl: profile.imageUrl || user?.avatarUrl || "",
-      galleryImages: profile.galleryImages || [],
-      defaultSchedule: getDefaultSchedule(profile),
-    });
-  } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ message: "Phone already exists" });
-    }
-
-    return res.status(400).json({
-      message: error.message || "Could not save barber profile",
-    });
+    deleteUploadedFile(uploadedAvatarPath);
+  } catch {
   }
 };
+
+export const createBarberProfileSelfMutationController = (dependencies = {}) => {
+  const mutateProfile = dependencies.mutateSelfBarberProfile || mutateSelfBarberProfile;
+  const validatePayload =
+    dependencies.validateBarberProfileMutationPayload || validateBarberProfileMutationPayload;
+
+  return async function upsertProfileByBarberId(req, res) {
+    const trustedBarberId = req.user?._id;
+    const uploadedAvatarPath = getUploadedAvatarPath(req.file);
+
+    if (String(trustedBarberId) !== String(req.params.barberId)) {
+      cleanupUploadedAvatar(req.file);
+      return sendBoundedBarberProfileError(res, "BARBER_PROFILE_FORBIDDEN");
+    }
+
+    try {
+      const { userUpdates, profileUpdates } = validatePayload(req.body, {
+        uploadedAvatarPath,
+      });
+      const response = await mutateProfile({
+        trustedBarberId,
+        userUpdates,
+        profileUpdates,
+      });
+
+      return res.json(response);
+    } catch (error) {
+      cleanupUploadedAvatar(req.file);
+
+      if (
+        error instanceof BarberProfileMutationPayloadError ||
+        error instanceof SelfBarberProfileMutationError
+      ) {
+        return sendBoundedBarberProfileError(res, error.code);
+      }
+
+      return sendBoundedBarberProfileError(res, "BARBER_PROFILE_MUTATION_FAILED");
+    }
+  };
+};
+
+export const upsertProfileByBarberId = createBarberProfileSelfMutationController();
