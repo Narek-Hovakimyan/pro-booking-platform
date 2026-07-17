@@ -1,6 +1,10 @@
 import BarberProfile from "../../models/BarberProfile.js";
 import User from "../../models/User.js";
 import { serializePrivateSelfBarberProfile } from "../../utils/privateSelfBarberProfileSerializer.js";
+import {
+  BarberProfileConflictError,
+  retryBarberProfileUpsertOnDuplicate,
+} from "../../utils/barberProfileDuplicateConflict.js";
 
 export class SelfBarberProfileMutationError extends Error {
   constructor(code, message, statusCode = 500) {
@@ -76,21 +80,30 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
     let profile;
     try {
       if (hasProfileUpdates) {
-        profile = await selectQuery(
-          deps.BarberProfileModel.findOneAndUpdate(
-            { barberId: trustedBarberId },
-            {
-              $set: { ...profileUpdates },
-              $setOnInsert: { barberId: trustedBarberId },
-            },
-            { returnDocument: "after", runValidators: true, upsert: true }
-          ),
-          profileProjection
-        );
+        profile = await retryBarberProfileUpsertOnDuplicate({
+          BarberProfileModel: deps.BarberProfileModel,
+          barberId: trustedBarberId,
+          update: {
+            $set: { ...profileUpdates },
+            $setOnInsert: { barberId: trustedBarberId },
+          },
+          options: { returnDocument: "after", runValidators: true, upsert: true },
+          projection: profileProjection,
+        });
+
+        if (!profile) throw new BarberProfileConflictError();
       } else {
         profile = await readSelfProfile(deps.BarberProfileModel, trustedBarberId);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof BarberProfileConflictError) {
+        throw new SelfBarberProfileMutationError(
+          "BARBER_PROFILE_CONFLICT",
+          "Could not save barber profile",
+          409
+        );
+      }
+
       throw new SelfBarberProfileMutationError(
         "BARBER_PROFILE_MUTATION_FAILED",
         "Could not save barber profile"

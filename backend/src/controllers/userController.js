@@ -15,6 +15,11 @@ import { sendControllerError } from "../utils/controllerError.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
 import { serializePublicBarberDirectory } from "../utils/publicBarberSerializer.js";
+import {
+  BarberProfileConflictError,
+  BarberProfileWriteError,
+  retryBarberProfileUpsertOnDuplicate,
+} from "../utils/barberProfileDuplicateConflict.js";
 
 const getUserData = (user) => ({
   id: user._id,
@@ -342,11 +347,14 @@ export const updateMyProfile = async (req, res) => {
           if (avatarUrl !== undefined || imageUrl !== undefined) {
             profileUpdates.imageUrl = imageUrl ?? avatarUrl;
           }
-      profile = await BarberProfile.findOneAndUpdate(
-        { barberId: user._id },
-        { ...profileUpdates, barberId: user._id },
-        { returnDocument: "after", runValidators: true, upsert: true }
-      );
+          profile = await retryBarberProfileUpsertOnDuplicate({
+            BarberProfileModel: BarberProfile,
+            barberId: user._id,
+            update: { ...profileUpdates, barberId: user._id },
+            options: { returnDocument: "after", runValidators: true, upsert: true },
+          });
+
+          if (!profile) throw new BarberProfileConflictError();
         }
 
         const salonsData = await buildSalonsData(user);
@@ -390,11 +398,14 @@ export const updateMyProfile = async (req, res) => {
         profileUpdates.imageUrl = imageUrl ?? avatarUrl;
       }
 
-      profile = await BarberProfile.findOneAndUpdate(
-        { barberId: user._id },
-        { ...profileUpdates, barberId: user._id },
-        { returnDocument: "after", runValidators: true, upsert: true }
-      );
+      profile = await retryBarberProfileUpsertOnDuplicate({
+        BarberProfileModel: BarberProfile,
+        barberId: user._id,
+        update: { ...profileUpdates, barberId: user._id },
+        options: { returnDocument: "after", runValidators: true, upsert: true },
+      });
+
+      if (!profile) throw new BarberProfileConflictError();
     }
 
     const salonsData = await buildSalonsData(user);
@@ -417,6 +428,17 @@ export const updateMyProfile = async (req, res) => {
       defaultSchedule: getDefaultSchedule(profile),
     });
   } catch (error) {
+    if (error instanceof BarberProfileConflictError) {
+      return res.status(409).json({
+        code: "BARBER_PROFILE_CONFLICT",
+        message: "Could not save barber profile",
+      });
+    }
+
+    if (error instanceof BarberProfileWriteError) {
+      return res.status(500).json({ message: "Could not update profile" });
+    }
+
     if (error.code === 11000) {
       // Determine if duplicate email or phone
       const keyPattern = error.keyPattern || {};

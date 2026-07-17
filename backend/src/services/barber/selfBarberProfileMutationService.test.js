@@ -13,7 +13,14 @@ const makeQuery = (result, record) => ({
   },
 });
 
-const createDependencies = ({ userResult, profileResult, userError, profileError } = {}) => {
+const createDependencies = ({
+  userResult,
+  profileResult,
+  profileResults,
+  userError,
+  profileError,
+  profileErrors,
+} = {}) => {
   const calls = {
     userFindOneAndUpdate: [],
     userFindOne: [],
@@ -36,8 +43,10 @@ const createDependencies = ({ userResult, profileResult, userError, profileError
   const BarberProfileModel = {
     findOneAndUpdate(filter, update, options) {
       calls.profileFindOneAndUpdate.push({ filter, update, options });
+      const index = calls.profileFindOneAndUpdate.length - 1;
+      if (profileErrors?.[index]) throw profileErrors[index];
       if (profileError) throw profileError;
-      return makeQuery(profileResult, calls.profileFindOneAndUpdate.at(-1));
+      return makeQuery(profileResults?.[index] ?? profileResult, calls.profileFindOneAndUpdate.at(-1));
     },
     findOne(filter) {
       calls.profileFindOne.push({ filter });
@@ -177,6 +186,53 @@ test("returns bounded failures for missing user and raw write errors", async () 
       !error.message.includes("raw profile")
   );
   assert.equal(profileFailure.calls.userFindOne.length, 1);
+});
+
+test("retries the expected profile duplicate once without upsert", async () => {
+  const duplicate = new Error(
+    "E11000 duplicate key error index: barberprofiles_barberId_unique dup key"
+  );
+  duplicate.code = 11000;
+  duplicate.keyPattern = { barberId: 1 };
+  const profile = { barberId: "trusted", bio: "Bio" };
+  const { service, calls } = createDependencies({
+    userResult: { _id: "trusted", role: "barber" },
+    profileResults: [undefined, profile],
+    profileErrors: [duplicate],
+  });
+
+  const result = await service({ trustedBarberId: "trusted", profileUpdates: { bio: "Bio" } });
+
+  assert.deepEqual(result.payload.profile, profile);
+  assert.equal(calls.profileFindOneAndUpdate.length, 2);
+  assert.equal(calls.profileFindOneAndUpdate[0].options.upsert, true);
+  assert.deepEqual(calls.profileFindOneAndUpdate[1].options, {
+    returnDocument: "after",
+    runValidators: true,
+  });
+});
+
+test("returns bounded 409 when the expected duplicate retry cannot resolve a profile", async () => {
+  const duplicate = new Error(
+    "E11000 duplicate key error index: barberprofiles_barberId_unique dup key"
+  );
+  duplicate.code = 11000;
+  duplicate.keyPattern = { barberId: 1 };
+  const { service, calls } = createDependencies({
+    userResult: { _id: "trusted", role: "barber" },
+    profileResults: [undefined, null],
+    profileErrors: [duplicate],
+  });
+
+  await assert.rejects(
+    () => service({ trustedBarberId: "trusted", profileUpdates: { bio: "Bio" } }),
+    (error) =>
+      error instanceof SelfBarberProfileMutationError &&
+      error.code === "BARBER_PROFILE_CONFLICT" &&
+      error.statusCode === 409 &&
+      !error.message.includes("E11000")
+  );
+  assert.equal(calls.profileFindOneAndUpdate.length, 2);
 });
 
 test("missing trusted user in read-first flows returns bounded failure without profile writes", async () => {

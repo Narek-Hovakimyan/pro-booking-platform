@@ -9,6 +9,10 @@ import {
   parseCertificationDate,
   isFutureDate,
 } from "../utils/barberProfileUtils.js";
+import {
+  BarberProfileConflictError,
+  isBarberProfileDuplicateConflict,
+} from "../utils/barberProfileDuplicateConflict.js";
 
 // --- Certification CRUD ---
 
@@ -96,39 +100,37 @@ export const addCertification = async (req, res) => {
 
     const imageUrl = getUploadedCertImagePath(req.file);
 
-    const profile = await BarberProfile.findOne({ barberId: req.user._id });
-
-    if (!profile) {
-      // If no profile exists, create one
-      const newProfile = await BarberProfile.create({
-        barberId: req.user._id,
-        certifications: [
-          {
-            title: title.trim(),
-            issuedBy: issuedBy.trim(),
-            issueDate: issueDateObj,
-            expiryDate: expiryDateObj,
-            imageUrl,
-            description: description?.trim() || "",
-          },
-        ],
-      });
-
-      return res.status(201).json(
-        newProfile.certifications[newProfile.certifications.length - 1]
-      );
-    }
-
-    normalizeCertifications(profile);
-
-    profile.certifications.push({
+    let profile = await BarberProfile.findOne({ barberId: req.user._id });
+    const certification = {
       title: title.trim(),
       issuedBy: issuedBy.trim(),
       issueDate: issueDateObj,
       expiryDate: expiryDateObj,
       imageUrl,
       description: description?.trim() || "",
-    });
+    };
+
+    if (!profile) {
+      try {
+        const newProfile = await BarberProfile.create({
+          barberId: req.user._id,
+          certifications: [certification],
+        });
+
+        return res.status(201).json(
+          newProfile.certifications[newProfile.certifications.length - 1]
+        );
+      } catch (error) {
+        if (!isBarberProfileDuplicateConflict(error)) throw error;
+
+        profile = await BarberProfile.findOne({ barberId: req.user._id });
+        if (!profile) throw new BarberProfileConflictError();
+      }
+    }
+
+    normalizeCertifications(profile);
+
+    profile.certifications.push(certification);
 
     await profile.save();
 
@@ -136,9 +138,14 @@ export const addCertification = async (req, res) => {
       profile.certifications[profile.certifications.length - 1]
     );
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not add certification",
-    });
+    if (error instanceof BarberProfileConflictError) {
+      return res.status(409).json({
+        code: "BARBER_PROFILE_CONFLICT",
+        message: "Could not save barber profile",
+      });
+    }
+
+    return res.status(500).json({ message: "Could not add certification" });
   }
 };
 

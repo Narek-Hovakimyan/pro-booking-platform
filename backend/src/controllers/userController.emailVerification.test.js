@@ -383,6 +383,68 @@ test("updateMyProfile – uploaded avatar updates user avatar and barber image",
   assert.equal(res.body.imageUrl, "/uploads/avatars/uploaded.png");
 });
 
+test("updateMyProfile retries the expected barber profile duplicate once without upsert", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    user: { _id: userId, role: "barber" },
+    body: { bio: "Fresh bio" },
+  });
+  const calls = [];
+  const duplicate = new Error(
+    "E11000 duplicate key error index: barberprofiles_barberId_unique dup key"
+  );
+  duplicate.code = 11000;
+  duplicate.keyPattern = { barberId: 1 };
+
+  Salon.find = async () => ({ select: async () => [] });
+  Salon.findById = async () => null;
+  User.findByIdAndUpdate = (_id, updates) =>
+    updateAndSelect(applyUpdate(createBaseUser({ role: "barber" }), updates));
+  BarberProfile.findOneAndUpdate = async (filter, update, options) => {
+    calls.push({ filter, update, options });
+    if (calls.length === 1) throw duplicate;
+    return { barberId: userId, bio: "Fresh bio", galleryImages: [], defaultSchedule: {} };
+  };
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.upsert, true);
+  assert.deepEqual(calls[1].options, { returnDocument: "after", runValidators: true });
+});
+
+test("updateMyProfile returns bounded 409 when the expected duplicate retry finds no profile", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    user: { _id: userId, role: "barber" },
+    body: { bio: "Fresh bio" },
+  });
+  const duplicate = new Error(
+    "E11000 duplicate key error index: barberprofiles_barberId_unique dup key"
+  );
+  duplicate.code = 11000;
+  duplicate.keyPattern = { barberId: 1 };
+  let attempts = 0;
+
+  User.findByIdAndUpdate = (_id, updates) =>
+    updateAndSelect(applyUpdate(createBaseUser({ role: "barber" }), updates));
+  BarberProfile.findOneAndUpdate = async () => {
+    attempts += 1;
+    if (attempts === 1) throw duplicate;
+    return null;
+  };
+
+  await updateMyProfile(req, res);
+
+  assert.equal(attempts, 2);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    code: "BARBER_PROFILE_CONFLICT",
+    message: "Could not save barber profile",
+  });
+});
+
 test("updateMyProfile – ignores role, platformRole, and auth internals", async () => {
   const res = createResponse();
   const req = createRequest({

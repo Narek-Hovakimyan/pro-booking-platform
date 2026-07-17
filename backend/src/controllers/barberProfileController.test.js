@@ -234,6 +234,74 @@ test("barber can add certification with valid data", async () => {
   assert.equal(res.body.description, "Trims");
 });
 
+test("addCertification rereads the trusted profile after the expected duplicate create", async () => {
+  const res = createResponse();
+  const profile = createProfileWithCert();
+  profile.certifications.length = 0;
+  const duplicate = new Error(
+    "E11000 duplicate key error index: barberprofiles_barberId_unique dup key"
+  );
+  duplicate.code = 11000;
+  duplicate.keyPattern = { barberId: 1 };
+  let reads = 0;
+  let creates = 0;
+
+  BarberProfile.findOne = async (filter) => {
+    reads += 1;
+    assert.deepEqual(filter, { barberId: barber._id });
+    return reads === 1 ? null : profile;
+  };
+  BarberProfile.create = async () => {
+    creates += 1;
+    throw duplicate;
+  };
+
+  await addCertification(
+    {
+      user: barber,
+      body: { title: "Cutting", issuedBy: "Academy", issueDate: "2024-01-01" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(reads, 2);
+  assert.equal(creates, 1);
+  assert.equal(profile.saveCalled, true);
+  assert.equal(profile.certifications.length, 1);
+});
+
+test("addCertification returns bounded 409 when duplicate create cannot be reread", async () => {
+  const res = createResponse();
+  const duplicate = new Error(
+    "E11000 duplicate key error index: barberprofiles_barberId_unique dup key"
+  );
+  duplicate.code = 11000;
+  duplicate.keyPattern = { barberId: 1 };
+  let creates = 0;
+
+  BarberProfile.findOne = async () => null;
+  BarberProfile.create = async () => {
+    creates += 1;
+    throw duplicate;
+  };
+
+  await addCertification(
+    {
+      user: barber,
+      body: { title: "Cutting", issuedBy: "Academy", issueDate: "2024-01-01" },
+    },
+    res
+  );
+
+  assert.equal(creates, 1);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    code: "BARBER_PROFILE_CONFLICT",
+    message: "Could not save barber profile",
+  });
+});
+
 test("card summary returns barber card data without per-barber requests", async () => {
   const res = createResponse();
   const barberId = "64b000000000000000000001";

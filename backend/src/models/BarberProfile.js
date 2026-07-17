@@ -149,6 +149,11 @@ const barberProfileSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+barberProfileSchema.index(
+  { barberId: 1 },
+  { unique: true, name: "barberprofiles_barberId_unique" }
+);
+
 const BarberProfile = mongoose.model("BarberProfile", barberProfileSchema);
 
 export default BarberProfile;
