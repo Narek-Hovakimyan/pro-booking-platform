@@ -35,10 +35,19 @@ const router = express.Router();
 
 const requireBarberRole = (req, res, next) => {
   if (req.user?.role !== "barber") {
-    return res.status(403).json({ message: "Only barbers can access this resource" });
+    return res.status(403).json({
+      code: "BARBER_ROLE_REQUIRED",
+      message: "Only barbers can access this resource",
+    });
   }
   return next();
 };
+
+const genericBarberProfileMutationTombstone = (_req, res) =>
+  res.status(410).json({
+    code: "BARBER_PROFILE_GENERIC_WRITE_DEPRECATED",
+    message: "This BarberProfile mutation endpoint is no longer supported",
+  });
 
 router.get("/", barberProfileController.getAll);
 router.get("/card-summary", getBarberCardSummary);
@@ -65,14 +74,15 @@ router.get("/profile/:barberId", getProfileByBarberId);
 router.put(
   "/profile/:barberId",
   protect,
+  requireBarberRole,
   uploadLimiter,
   handleAvatarUpload,
   upsertProfileByBarberId
 );
 router.get("/:id", barberProfileController.getById);
-router.post("/", protect, barberProfileController.create);
-router.put("/:id", protect, barberProfileController.update);
-router.delete("/:id", protect, barberProfileController.remove);
+router.post("/", protect, genericBarberProfileMutationTombstone);
+router.put("/:id", protect, genericBarberProfileMutationTombstone);
+router.delete("/:id", protect, genericBarberProfileMutationTombstone);
 
 // Certification routes
 router.get("/:barberId/certifications", getCertifications);
