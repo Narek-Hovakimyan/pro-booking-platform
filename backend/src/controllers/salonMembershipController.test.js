@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import Notification from "../models/Notification.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
@@ -8,8 +9,10 @@ import { __notificationServiceTestHooks } from "../services/notification/notific
 import { decideJoinRequest } from "./salonMembershipController.js";
 
 const originalMethods = {
+  mongooseStartSession: mongoose.startSession,
   notificationCreate: Notification.create,
   joinRequestFindById: SalonJoinRequest.findById,
+  joinRequestFindOneAndUpdate: SalonJoinRequest.findOneAndUpdate,
   userFindById: User.findById,
 };
 
@@ -20,11 +23,22 @@ const salonId = "64b000000000000000000011";
 const requestId = "64b000000000000000000099";
 
 afterEach(() => {
+  mongoose.startSession = originalMethods.mongooseStartSession;
   Notification.create = originalMethods.notificationCreate;
   SalonJoinRequest.findById = originalMethods.joinRequestFindById;
+  SalonJoinRequest.findOneAndUpdate = originalMethods.joinRequestFindOneAndUpdate;
   User.findById = originalMethods.userFindById;
   __notificationServiceTestHooks.resetGetIO();
 });
+
+const mockSession = () => {
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+    },
+    async endSession() {},
+  });
+};
 
 const createResponse = () => ({
   statusCode: 200,
@@ -65,8 +79,22 @@ const createRequestDoc = ({ targetBarberId = barberId, admins = [] } = {}) => {
 };
 
 const mockFindRequest = (request) => {
+  mockSession();
   SalonJoinRequest.findById = (id) => {
     assert.equal(id, requestId);
+    return {
+      populate() {
+        return this;
+      },
+      then(resolve, reject) {
+        return Promise.resolve(request).then(resolve, reject);
+      },
+    };
+  };
+  SalonJoinRequest.findOneAndUpdate = (query, update) => {
+    assert.equal(String(query._id), requestId);
+    assert.equal(query.status, "pending");
+    request.status = update.$set.status;
     return {
       populate() {
         return this;
@@ -186,4 +214,42 @@ test("admin self-rejection is blocked", async () => {
 
   assert.equal(res.statusCode, 403);
   assert.equal(res.body.message, "You cannot manage your own join request");
+});
+
+test("transaction errors are bounded and do not send notifications", async () => {
+  const request = createRequestDoc();
+  const savedBarber = {
+    _id: barberId,
+    salons: [{ salon: salonId, status: "pending", isPrimary: false }],
+    workHistory: [],
+    async save() {
+      return savedBarber;
+    },
+  };
+
+  mockFindRequest(request);
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+      throw new Error("MongoServerError: transaction internals");
+    },
+    async endSession() {},
+  });
+  User.findById = async () => savedBarber;
+  Notification.create = () => {
+    throw new Error("notification must wait for commit");
+  };
+
+  const res = createResponse();
+  await decideJoinRequest(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { requestId },
+      body: { status: "accepted" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Could not update salon request");
 });

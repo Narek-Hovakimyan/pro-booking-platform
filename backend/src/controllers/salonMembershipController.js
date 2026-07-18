@@ -2,7 +2,6 @@ import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import User from "../models/User.js";
 import {
-  canManageSalonRequest,
   isSalonOwner,
   sameId,
 } from "../utils/salonPermissions.js";
@@ -11,7 +10,6 @@ import {
   requireBarber,
   syncLegacySalonFields,
   closeCurrentWorkHistory,
-  openCurrentWorkHistory,
 } from "../utils/salonHelpers.js";
 import {
   serializeRequest,
@@ -21,84 +19,43 @@ import {
 import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
 import { createNotification } from "./notificationController.js";
 import { sendControllerError } from "../utils/controllerError.js";
+import {
+  cancelSalonJoinRequestLifecycle,
+  decideSalonJoinRequestLifecycle,
+  requestSalonJoinLifecycle,
+} from "../services/salon/salonJoinRequestLifecycleService.js";
+
+const sendLifecycleError = (res, error, fallbackMessage) => {
+  if (error?.statusCode) {
+    return res.status(error.statusCode).json({ message: error.message });
+  }
+
+  if (error?.name === "ValidationError" || error?.name === "CastError") {
+    return res.status(400).json({ message: error.message || fallbackMessage });
+  }
+
+  return res.status(400).json({ message: fallbackMessage });
+};
 
 export const requestToJoinSalon = async (req, res) => {
   try {
     if (!requireBarber(req, res)) return undefined;
 
-    const salon = await Salon.findById(req.params.salonId);
-
-    if (!salon) {
-      return res.status(404).json({ message: "Salon not found" });
-    }
-
-    const barber = await User.findById(req.user._id);
-
-    // Check existing entries in salons array
-    const existingEntry = (barber.salons || []).find(
-      (s) => s.salon?.toString() === salon._id.toString()
-    );
-
-    if (existingEntry) {
-      if (existingEntry.status === "pending") {
-        return res.status(400).json({
-          message: "You already have a pending request for this salon",
-        });
-      }
-
-      if (existingEntry.status === "approved") {
-        return res.status(400).json({
-          message: "You already work in this salon",
-        });
-      }
-
-      // If rejected, allow new request - update status back to pending
-      existingEntry.status = "pending";
-      existingEntry.joinedAt = null;
-    } else {
-      // Add new entry to salons array
-      barber.salons = barber.salons || [];
-      barber.salons.push({
-        salon: salon._id,
-        status: "pending",
-        joinedAt: null,
-        isPrimary: false,
-      });
-    }
-
-    // Update legacy fields only if barber has no approved salons
-    const hasApproved = (barber.salons || []).some((s) => s.status === "approved");
-    if (!hasApproved) {
-      barber.salon = salon._id;
-      barber.salonStatus = "pending";
-    }
-
-    const request = await SalonJoinRequest.create({
-      salonId: salon._id,
-      barberId: req.user._id,
-      status: "pending",
+    const result = await requestSalonJoinLifecycle({
+      salonId: req.params.salonId,
+      barber: req.user,
     });
 
-    await barber.save();
+    if (result.notification) {
+      await createNotification(result.notification);
+    }
 
-    await createNotification({
-      userId: salon.ownerId,
-      type: "salon_join_requested",
-      message: `${req.user.name} wants to join ${salon.name}`,
-    });
-
-    return res.status(201).json({
-      request: serializeRequest(await request.populate("salonId")),
-      salonStatus: "pending",
+    return res.status(result.statusCode).json({
+      request: serializeRequest(result.request),
+      salonStatus: result.salonStatus,
     });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ message: "Salon request already pending" });
-    }
-
-    return res.status(400).json({
-      message: error.message || "Could not send salon request",
-    });
+    return sendLifecycleError(res, error, "Could not send salon request");
   }
 };
 
@@ -106,37 +63,17 @@ export const cancelJoinRequest = async (req, res) => {
   try {
     if (!requireBarber(req, res)) return undefined;
 
-    const request = await SalonJoinRequest.findOne({
-      _id: req.params.requestId,
+    const result = await cancelSalonJoinRequestLifecycle({
+      requestId: req.params.requestId,
       barberId: req.user._id,
-      status: "pending",
     });
 
-    if (!request) {
-      return res.status(404).json({ message: "Pending request not found" });
-    }
-
-    request.status = "cancelled";
-    await request.save();
-
-    const barber = await User.findById(req.user._id);
-
-    // Remove this salon from salons array
-    if (Array.isArray(barber.salons)) {
-      barber.salons = barber.salons.filter(
-        (s) => s.salon?.toString() !== request.salonId?.toString()
-      );
-    }
-
-    // Update legacy fields
-    syncLegacySalonFields(barber);
-    await barber.save();
-
-    return res.json({ request: serializeRequest(request), salonStatus: barber.salonStatus || "none" });
+    return res.json({
+      request: serializeRequest(result.request),
+      salonStatus: result.salonStatus,
+    });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not cancel salon request",
-    });
+    return sendLifecycleError(res, error, "Could not cancel salon request");
   }
 };
 
@@ -183,124 +120,22 @@ export const decideJoinRequest = async (req, res) => {
       return res.status(400).json({ message: "Invalid request status" });
     }
 
-    const request = await SalonJoinRequest.findById(req.params.requestId)
-      .populate("salonId")
-      .populate("barberId", barberFields);
+    const result = await decideSalonJoinRequestLifecycle({
+      requestId: req.params.requestId,
+      status,
+      actorId: req.user._id,
+    });
 
-    if (!request || request.status !== "pending") {
-      return res.status(404).json({ message: "Pending request not found" });
-    }
-
-    const salon = request.salonId;
-    const canManage = canManageSalonRequest(salon, req.user._id);
-
-    if (!canManage) {
-      return res.status(403).json({ message: "Only salon owner or admin can manage requests" });
-    }
-
-    if (sameId(req.user._id, request.barberId?._id || request.barberId)) {
-      return res.status(403).json({ message: "You cannot manage your own join request" });
-    }
-
-    if (status === "accepted") {
-      const barber = await User.findById(request.barberId._id);
-
-      if (!barber) {
-        return res.status(404).json({ message: "Barber not found" });
-      }
-
-      // Check if barber already has this salon approved in another entry
-      const existingApproved = (barber.salons || []).some(
-        (s) => s.salon?.toString() === salon._id.toString() && s.status === "approved"
-      );
-
-      if (existingApproved) {
-        return res.status(400).json({
-          message: "Barber already works in this salon",
-        });
-      }
-
-      request.status = status;
-      await request.save();
-
-      // Update salons array
-      const existingEntry = (barber.salons || []).find(
-        (s) => s.salon?.toString() === salon._id.toString()
-      );
-
-      if (existingEntry) {
-        existingEntry.status = "approved";
-        existingEntry.joinedAt = new Date();
-
-        // If this is the barber's FIRST approved salon, set as primary
-        const otherApproved = (barber.salons || []).filter(
-          (s) => s.status === "approved" && s !== existingEntry
-        );
-        if (otherApproved.length === 0) {
-          existingEntry.isPrimary = true;
-        }
-      } else {
-        barber.salons = barber.salons || [];
-        barber.salons.push({
-          salon: salon._id,
-          status: "approved",
-          joinedAt: new Date(),
-          isPrimary: (barber.salons || []).filter((s) => s.status === "approved").length === 0,
-        });
-      }
-
-      // Update legacy fields only if barber has no other approved salons
-      const hasOtherApproved = (barber.salons || []).some(
-        (s) => s.status === "approved" && s.salon?.toString() !== salon._id.toString()
-      );
-      if (!hasOtherApproved) {
-        barber.salon = salon._id;
-        barber.salonStatus = "approved";
-      }
-      openCurrentWorkHistory(barber, salon);
-      await barber.save();
-
-      await createNotification({
-        userId: request.barberId._id,
-        type: "salon_join_accepted",
-        message: `Your request to join ${salon.name} was accepted`,
-      });
-    } else {
-      request.status = status;
-      await request.save();
-
-      const barber = await User.findById(request.barberId._id);
-
-      if (barber) {
-        // Update salons array
-        const existingEntry = (barber.salons || []).find(
-          (s) => s.salon?.toString() === salon._id.toString()
-        );
-
-        if (existingEntry) {
-          existingEntry.status = "rejected";
-        }
-
-        // Update legacy fields
-        syncLegacySalonFields(barber);
-        await barber.save();
-      }
-
-      await createNotification({
-        userId: request.barberId._id,
-        type: "salon_join_rejected",
-        message: `Your request to join ${salon.name} was rejected`,
-      });
+    if (result.notification) {
+      await createNotification(result.notification);
     }
 
     return res.json({
-      request: serializeRequest(request),
+      request: serializeRequest(result.request),
       status,
     });
   } catch (error) {
-    return res.status(400).json({
-      message: error.message || "Could not update salon request",
-    });
+    return sendLifecycleError(res, error, "Could not update salon request");
   }
 };
 
