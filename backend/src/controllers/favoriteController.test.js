@@ -5,28 +5,37 @@ import {
   getClientFavorites,
   getFavoriteSalons,
 } from "./favoriteController.js";
+import BarberProfile from "../models/BarberProfile.js";
 import Favorite from "../models/Favorite.js";
+import Schedule from "../models/Schedule.js";
 import SalonFavorite from "../models/SalonFavorite.js";
 import SalonReview from "../models/SalonReview.js";
+import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 
 const originalMethods = {
+  barberProfileFind: BarberProfile.find,
   favoriteFind: Favorite.find,
+  scheduleFind: Schedule.find,
   salonFavoriteFind: SalonFavorite.find,
   salonReviewAggregate: SalonReview.aggregate,
   salonReviewFind: SalonReview.find,
+  serviceFind: Service.find,
   subscriptionFind: Subscription.find,
   seatFind: SubscriptionSeat.find,
   userFind: User.find,
 };
 
 afterEach(() => {
+  BarberProfile.find = originalMethods.barberProfileFind;
   Favorite.find = originalMethods.favoriteFind;
+  Schedule.find = originalMethods.scheduleFind;
   SalonFavorite.find = originalMethods.salonFavoriteFind;
   SalonReview.aggregate = originalMethods.salonReviewAggregate;
   SalonReview.find = originalMethods.salonReviewFind;
+  Service.find = originalMethods.serviceFind;
   Subscription.find = originalMethods.subscriptionFind;
   SubscriptionSeat.find = originalMethods.seatFind;
   User.find = originalMethods.userFind;
@@ -43,6 +52,12 @@ const createResponse = () => ({
     this.body = payload;
     return this;
   },
+});
+
+const canonicalReadyBarber = (id, salonId = "salon-ready") => ({
+  _id: id,
+  role: "barber",
+  salons: [{ salon: salonId, status: "approved", worksAsSpecialist: true }],
 });
 
 test("getClientFavorites populates favorite barber profession fields", async () => {
@@ -79,12 +94,15 @@ test("getClientFavorites populates favorite barber profession fields", async () 
       return [];
     },
   });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: "barber-a" }];
   User.find = () => ({
     select() {
       return this;
     },
     async lean() {
-      return [];
+      return [canonicalReadyBarber("barber-a")];
     },
   });
 
@@ -191,12 +209,21 @@ test("getClientFavorites hides unpaid barbers from response", async () => {
       return [];
     },
   });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [
+    { barberId: paidBarberId },
+    { barberId: unpaidBarberId },
+  ];
   User.find = () => ({
     select() {
       return this;
     },
     async lean() {
-      return [];
+      return [
+        canonicalReadyBarber(paidBarberId),
+        canonicalReadyBarber(unpaidBarberId),
+      ];
     },
   });
 
@@ -237,12 +264,15 @@ test("getClientFavorites returns empty array when no favorites have paid access"
       return [];
     },
   });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: "b1" }];
   User.find = () => ({
     select() {
       return this;
     },
     async lean() {
-      return [];
+      return [canonicalReadyBarber("b1")];
     },
   });
 
@@ -393,6 +423,7 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
             {
               salon: salonAId,
               status: "approved",
+              worksAsSpecialist: true,
               relationshipType: "chair_renter",
               staffPayment: { type: "fixed", fixedAmount: 1000 },
             },
@@ -409,7 +440,7 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
           avatarUrl: "",
           salon: salonAId,
           salonStatus: "approved",
-          salons: [{ salon: salonAId, status: "approved" }],
+          salons: [{ salon: salonAId, status: "approved", worksAsSpecialist: true }],
           toObject() {
             return this;
           },
@@ -458,6 +489,12 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
       return [];
     },
   });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [
+    { barberId: paidBarberId },
+    { barberId: unpaidBarberId },
+  ];
 
   // Mock getSalonReviewStats internal calls
   SalonReview.aggregate = () =>
@@ -502,4 +539,184 @@ test("getFavoriteSalons hides unpaid barbers from salon barbers list", async () 
   assert.equal(res.body[0].salonId.barbers[0].platformRole, undefined);
   assert.equal(res.body[0].salonId.barbers[0].salons, undefined);
   assert.equal(res.body[0].salonId.barbers[0].staffPayment, undefined);
+});
+
+test("getClientFavorites hides barber without active public-ready services", async () => {
+  const clientId = "client-no-service";
+
+  Subscription.find = () => ({
+    select() {
+      return this;
+    },
+    async lean() {
+      return [{ ownerId: "barber-no-service" }];
+    },
+  });
+  SubscriptionSeat.find = () => ({
+    populate() {
+      return this;
+    },
+    async lean() {
+      return [];
+    },
+  });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [];
+  User.find = () => ({
+    select() {
+      return this;
+    },
+    async lean() {
+      return [canonicalReadyBarber("barber-no-service")];
+    },
+  });
+  Favorite.find = () => ({
+    populate() {
+      return this;
+    },
+    async sort() {
+      return [{
+        _id: "fav-no-service",
+        clientId,
+        barberId: {
+          _id: "barber-no-service",
+          name: "No Service",
+          role: "barber",
+          city: "",
+          salonName: "",
+          imageUrl: "",
+          profession: "barber",
+          barberType: "",
+          specialty: "unisex",
+        },
+      }];
+    },
+  });
+
+  const res = createResponse();
+  await getClientFavorites({ user: { id: clientId, role: "client" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
+});
+
+test("getFavoriteSalons keeps salon-scoped visibility isolated from unrelated ready salon memberships", async () => {
+  const clientId = "client-cross-salon";
+  const favoriteSalonId = "salon-favorite";
+  const unrelatedSalonId = "salon-other";
+
+  SalonFavorite.find = () => ({
+    populate() {
+      return this;
+    },
+    async sort() {
+      return [{
+        _id: "fav-salon-cross",
+        clientId,
+        salonId: {
+          _id: favoriteSalonId,
+          name: "Favorite Salon",
+          city: "",
+          address: "",
+          phone: "",
+          imageUrl: "",
+        },
+        toObject() {
+          return {
+            _id: "fav-salon-cross",
+            clientId,
+            salonId: {
+              _id: favoriteSalonId,
+              name: "Favorite Salon",
+              city: "",
+              address: "",
+              phone: "",
+              imageUrl: "",
+            },
+          };
+        },
+      }];
+    },
+  });
+  User.find = (query) => {
+    if (query.role === "barber") {
+      const result = [{
+        _id: "barber-cross",
+        name: "Cross Salon",
+        role: "barber",
+        city: "",
+        avatarUrl: "",
+        salon: favoriteSalonId,
+        salonStatus: "approved",
+        salons: [
+          { salon: favoriteSalonId, status: "approved", worksAsSpecialist: false },
+          { salon: unrelatedSalonId, status: "approved", worksAsSpecialist: true },
+        ],
+        toObject() {
+          return this;
+        },
+      }];
+
+      return {
+        select() {
+          return {
+            then(resolve) {
+              resolve(result);
+            },
+          };
+        },
+      };
+    }
+
+    return {
+      select() {
+        return this;
+      },
+      async lean() {
+        return [];
+      },
+    };
+  };
+  Subscription.find = () => ({
+    select() {
+      return this;
+    },
+    async lean() {
+      return [{ ownerId: "barber-cross" }];
+    },
+  });
+  SubscriptionSeat.find = () => ({
+    populate() {
+      return this;
+    },
+    async lean() {
+      return [];
+    },
+  });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: "barber-cross" }];
+  SalonReview.aggregate = () => Promise.resolve([]);
+  SalonReview.find = () => {
+    const thenable = Promise.resolve([]);
+    return {
+      populate() {
+        return {
+          sort() {
+            return thenable;
+          },
+        };
+      },
+      sort() {
+        return thenable;
+      },
+    };
+  };
+
+  const res = createResponse();
+  await getFavoriteSalons({ user: { id: clientId, role: "client" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body[0].salonId.barbers, []);
 });

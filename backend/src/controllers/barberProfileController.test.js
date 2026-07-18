@@ -22,6 +22,7 @@ import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
+import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
 
 const originalMethods = {
   create: BarberProfile.create,
@@ -114,6 +115,11 @@ const createFindChain = (result) => ({
   populate: () => createFindChain(result),
   lean: async () => result,
   then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
+});
+
+const workingSchedule = (barberId) => ({
+  barberId,
+  weeklySchedule: createCanonicalPersonalSchedule().weeklySchedule,
 });
 
 const mockPaidAccessForAllBarbers = (barberIds) => {
@@ -320,6 +326,7 @@ test("card summary returns barber card data without per-barber requests", async 
       {
         salon: salonId,
         status: "approved",
+        worksAsSpecialist: true,
         isPrimary: true,
         joinedAt: new Date("2025-01-01"),
         defaultSchedule: {
@@ -355,6 +362,9 @@ test("card summary returns barber card data without per-barber requests", async 
   Review.find = () => createFindChain([{ barberId, rating: 5 }]);
   Booking.find = () => createFindChain([]);
   Schedule.find = (query) => {
+    if (query?.salonId === null) {
+      return createFindChain([]);
+    }
     assert.deepEqual(query, {
       barberId: { $in: [barberId] },
       salonId: { $ne: null },
@@ -380,6 +390,91 @@ test("card summary returns barber card data without per-barber requests", async 
   assert.equal(res.body.barbers[0].approvedSalons[0].joinedAt, undefined);
 });
 
+test("card summary exposes only eligible canonical salon associations", async () => {
+  const res = createResponse();
+  const barberId = "64b000000000000000001001";
+  const eligibleSalonId = "64b000000000000000001002";
+  const rejectedSalonId = "64b000000000000000001003";
+  const nonSpecialistSalonId = "64b000000000000000001004";
+  const staleLegacySalonId = "64b000000000000000001005";
+  const barber = {
+    _id: barberId,
+    name: "Scoped Barber",
+    role: "barber",
+    salonStatus: "approved",
+    salon: staleLegacySalonId,
+    salons: [
+      { salon: eligibleSalonId, status: "approved", worksAsSpecialist: true, isPrimary: true },
+      { salon: rejectedSalonId, status: "approved", relationshipStatus: "rejected", worksAsSpecialist: true },
+      { salon: nonSpecialistSalonId, status: "approved", worksAsSpecialist: false },
+    ],
+  };
+  const salons = [
+    { _id: eligibleSalonId, name: "Eligible Salon" },
+    { _id: rejectedSalonId, name: "Rejected Salon" },
+    { _id: nonSpecialistSalonId, name: "Non Specialist Salon" },
+    { _id: staleLegacySalonId, name: "Stale Legacy Salon" },
+  ].map((salon) => ({ ...salon, toObject() { return { ...this }; } }));
+
+  User.find = () => createFindChain([barber]);
+  BarberProfile.find = () => createFindChain([]);
+  Salon.find = (query) => {
+    assert.deepEqual(query._id.$in, [eligibleSalonId]);
+    return createFindChain(salons.filter((salon) => query._id.$in.includes(salon._id)));
+  };
+  Service.find = () => createFindChain([{ _id: "service-1", barberId, active: true }]);
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([]);
+  mockPaidAccessForAllBarbers([barberId]);
+
+  await getBarberCardSummary({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barbers.length, 1);
+  assert.deepEqual(res.body.barbers[0].approvedSalons.map((salon) => salon.name), ["Eligible Salon"]);
+  assert.equal(res.body.barbers[0].salonName, "Eligible Salon");
+  assert.equal(res.body.barbers[0].salon.name, "Eligible Salon");
+});
+
+test("card summary keeps independent-ready barber visible without salon associations", async () => {
+  const res = createResponse();
+  const barberId = "64b000000000000000001011";
+  const staleLegacySalonId = "64b000000000000000001012";
+
+  User.find = () => createFindChain([
+    {
+      _id: barberId,
+      name: "Independent Barber",
+      role: "barber",
+      salonStatus: "approved",
+      salon: staleLegacySalonId,
+      salons: [],
+    },
+  ]);
+  BarberProfile.find = () => createFindChain([{ barberId, address: "Independent Street 1" }]);
+  Salon.find = (query) => {
+    assert.deepEqual(query._id.$in, []);
+    return createFindChain([]);
+  };
+  Service.find = () => createFindChain([{ _id: "service-1", barberId, active: true }]);
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = (query) => {
+    if (query?.salonId === null) return createFindChain([workingSchedule(barberId)]);
+    return createFindChain([]);
+  };
+  mockPaidAccessForAllBarbers([barberId]);
+
+  await getBarberCardSummary({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barbers.length, 1);
+  assert.deepEqual(res.body.barbers[0].approvedSalons, []);
+  assert.deepEqual(res.body.barbers[0].salons, []);
+  assert.equal(res.body.barbers[0].salon, null);
+});
+
 test("card summary filters specialists by active service category and tags", async () => {
   const res = createResponse();
   const salonId = "64b000000000000000000010";
@@ -396,6 +491,7 @@ test("card summary filters specialists by active service category and tags", asy
       {
         salon: salonId,
         status: "approved",
+        worksAsSpecialist: true,
         isPrimary: true,
         defaultSchedule: {
           startTime: "00:00",
@@ -471,7 +567,7 @@ test("card summary service query only returns active services publicly", async (
     _id: barberId,
     name: "Active Specialist",
     role: "barber",
-    salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+    salons: [{ salon: salonId, status: "approved", isPrimary: true, worksAsSpecialist: true }],
   };
   const salon = {
     _id: salonId,
@@ -669,7 +765,7 @@ test("getProfileByBarberId returns 404 for unpaid barber", async () => {
 test("getProfileByBarberId omits private User and BarberProfile fields", async () => {
   const res = createResponse();
   const barberId = "public-barber";
-  BarberProfile.findOne = async () => ({
+  const privateProfile = {
     _id: "profile-1",
     barberId,
     city: "Yerevan",
@@ -679,7 +775,9 @@ test("getProfileByBarberId omits private User and BarberProfile fields", async (
     depositSettings: { enabled: true, value: 25 },
     certifications: [{ title: "Private" }],
     toObject() { return { ...this }; },
-  });
+  };
+  BarberProfile.findOne = async () => privateProfile;
+  BarberProfile.find = () => createFindChain([privateProfile]);
   User.findById = () => ({
     select: async () => ({
       _id: barberId,
@@ -690,6 +788,7 @@ test("getProfileByBarberId omits private User and BarberProfile fields", async (
       profession: "barber",
       barberType: "men",
       specialty: "men",
+      salons: [{ salon: "salon-1", status: "approved", worksAsSpecialist: true }],
       salonStatus: "pending",
       workHistory: [{
         salon: {
@@ -705,7 +804,19 @@ test("getProfileByBarberId omits private User and BarberProfile fields", async (
       }],
     }),
   });
+  User.find = () => createFindChain([
+    {
+      _id: barberId,
+      role: "barber",
+      salons: [{ salon: "salon-1", status: "approved", worksAsSpecialist: true }],
+    },
+  ]);
+  Service.find = () => createFindChain([{ barberId, active: true }]);
+  Schedule.find = () => createFindChain([]);
   Subscription.findOne = async () => ({ status: "active", currentPeriodEnd: new Date("2099-01-01") });
+  Salon.find = () => createFindChain([
+    { _id: "salon-1", name: "Public Salon", toObject() { return { ...this }; } },
+  ]);
 
   await getProfileByBarberId({ params: { barberId } }, res);
 
@@ -721,6 +832,76 @@ test("getProfileByBarberId omits private User and BarberProfile fields", async (
   assert.equal(res.body.workHistory[0].salon, "salon-1");
 });
 
+test("getProfileByBarberId prefers eligible canonical salon and ignores stale legacy fields", async () => {
+  const res = createResponse();
+  const barberId = "public-scoped-barber";
+  const eligibleSalonId = "eligible-salon";
+  const staleLegacySalonId = "stale-legacy-salon";
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    name: "Scoped Barber",
+    salonStatus: "approved",
+    salon: staleLegacySalonId,
+    salons: [
+      { salon: eligibleSalonId, status: "approved", worksAsSpecialist: true, isPrimary: true },
+      { salon: "pending-salon", status: "pending", worksAsSpecialist: true },
+      { salon: "non-specialist-salon", status: "approved", worksAsSpecialist: false },
+    ],
+  };
+
+  BarberProfile.findOne = async () => ({ barberId, city: "Yerevan", toObject() { return { ...this }; } });
+  BarberProfile.find = () => createFindChain([{ barberId, city: "Yerevan" }]);
+  User.findById = () => ({ select: async () => barber });
+  User.find = () => createFindChain([barber]);
+  Service.find = () => createFindChain([{ barberId, active: true }]);
+  Schedule.find = () => createFindChain([]);
+  Subscription.findOne = async () => ({ status: "active", currentPeriodEnd: new Date("2099-01-01") });
+  Salon.find = (query) => {
+    assert.deepEqual(query._id.$in, [eligibleSalonId]);
+    return createFindChain([
+      { _id: eligibleSalonId, name: "Eligible Salon", toObject() { return { ...this }; } },
+    ]);
+  };
+
+  await getProfileByBarberId({ params: { barberId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.salon.name, "Eligible Salon");
+  assert.equal(res.body.salonName, "Eligible Salon");
+});
+
+test("getProfileByBarberId keeps independent-ready barber visible without stale legacy salon", async () => {
+  const res = createResponse();
+  const barberId = "public-independent-barber";
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    name: "Independent Barber",
+    salonStatus: "approved",
+    salon: "stale-legacy-salon",
+    salons: [],
+  };
+
+  BarberProfile.findOne = async () => ({ barberId, city: "Yerevan", address: "Independent Street 1", toObject() { return { ...this }; } });
+  BarberProfile.find = () => createFindChain([{ barberId, city: "Yerevan", address: "Independent Street 1" }]);
+  User.findById = () => ({ select: async () => barber });
+  User.find = () => createFindChain([barber]);
+  Service.find = () => createFindChain([{ barberId, active: true }]);
+  Schedule.find = () => createFindChain([workingSchedule(barberId)]);
+  Subscription.findOne = async () => ({ status: "active", currentPeriodEnd: new Date("2099-01-01") });
+  Salon.find = () => {
+    throw new Error("legacy salon should not be queried");
+  };
+
+  await getProfileByBarberId({ params: { barberId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.salon, null);
+  assert.equal(res.body.salonName, "");
+  assert.equal(res.body.address, undefined);
+});
+
 test("generic public BarberProfile GET handlers serialize list and detail responses", async () => {
   const privateProfile = {
     _id: "profile-1",
@@ -734,6 +915,9 @@ test("generic public BarberProfile GET handlers serialize list and detail respon
   };
   BarberProfile.find = async () => [privateProfile];
   BarberProfile.findById = async () => privateProfile;
+  User.find = () => createFindChain([{ _id: "barber-1", role: "barber" }]);
+  Schedule.find = () => createFindChain([workingSchedule("barber-1")]);
+  Service.find = () => createFindChain([{ barberId: "barber-1", active: true }]);
 
   const listRes = createResponse();
   await barberProfileController.getAll({}, listRes);
@@ -749,6 +933,56 @@ test("generic public BarberProfile GET handlers serialize list and detail respon
   assert.equal(detailRes.statusCode, 200);
   assert.equal(detailRes.body.address, undefined);
   assert.equal(detailRes.body.bio, "Public bio");
+});
+
+test("getProfileByBarberId returns 404 for paid barber without active public readiness", async () => {
+  const res = createResponse();
+  const barberId = "paid-unready";
+
+  BarberProfile.findOne = async () => ({
+    barberId,
+    city: "Yerevan",
+    bio: "Hidden",
+    toObject() {
+      return { ...this };
+    },
+  });
+  BarberProfile.find = () => createFindChain([{ barberId, city: "Yerevan", bio: "Hidden" }]);
+  User.findById = () => ({
+    select: async () => ({
+      _id: barberId,
+      role: "barber",
+      name: "Paid Unready",
+      specialistOnboarding: {
+        version: 1,
+        status: "completed",
+        currentStep: null,
+        workplace: "independent",
+        completedAt: new Date("2026-07-16T10:00:00.000Z"),
+      },
+    }),
+  });
+  User.find = () => createFindChain([
+    {
+      _id: barberId,
+      role: "barber",
+      specialistOnboarding: {
+        version: 1,
+        status: "completed",
+        currentStep: null,
+        workplace: "independent",
+        completedAt: new Date("2026-07-16T10:00:00.000Z"),
+      },
+    },
+  ]);
+  Service.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([]);
+  Subscription.findOne = async () => ({ status: "active", currentPeriodEnd: new Date("2099-01-01") });
+
+  await getProfileByBarberId({ params: { barberId } }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Barber not found");
 });
 
 test("card summary populate uses active-only match for customCategoryId", async () => {

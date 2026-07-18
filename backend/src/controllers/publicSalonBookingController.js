@@ -12,6 +12,7 @@ import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import { getIdString } from "../utils/bookingUtils.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import { defaultScheduleFallback } from "../utils/scheduleUtils.js";
+import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
 
 const asPlainObject = (doc) => doc?.toObject?.() || doc || {};
 let getPaidAccessByBarberIdsForPublicBooking = getPaidAccessByBarberIdsForSalon;
@@ -114,9 +115,12 @@ export const getPublicSalonBooking = async (req, res) => {
       barberIds,
       salon._id
     );
+    const readinessByBarberId = await getPublicBarberReadinessByIds(barberIds);
     const paidBarbers = barbers.filter(
       (barber) =>
         paidAccessMap.get(String(barber._id)) === true &&
+        readinessByBarberId.get(String(barber._id))?.publicReady &&
+        readinessByBarberId.get(String(barber._id))?.eligibleSalonIds.has(String(salon._id)) &&
         isBookableSalonSpecialist(getApprovedSalonEntry(barber, salon._id, salon))
     );
 

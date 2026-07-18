@@ -15,6 +15,7 @@ import { sendControllerError } from "../utils/controllerError.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
 import { serializePublicBarberDirectory } from "../utils/publicBarberSerializer.js";
+import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
 import {
   BarberProfileConflictError,
   BarberProfileWriteError,
@@ -113,9 +114,11 @@ export const getBarbers = async (_req, res) => {
     const paidAccessByBarberId = await getPaidAccessByBarberIds(
       barbers.map((barber) => barber._id)
     );
-    const paidBarbers = barbers.filter((barber) =>
+    let paidBarbers = barbers.filter((barber) =>
       paidAccessByBarberId.get(String(barber._id))
     );
+    const readinessByBarberId = await getPublicBarberReadinessByIds(paidBarbers.map((barber) => barber._id));
+    paidBarbers = paidBarbers.filter((barber) => readinessByBarberId.get(String(barber._id))?.publicReady);
     const profiles = await BarberProfile.find({
       barberId: { $in: paidBarbers.map((barber) => barber._id) },
     });
@@ -123,15 +126,11 @@ export const getBarbers = async (_req, res) => {
       profiles.map((profile) => [String(profile.barberId), profile])
     );
 
-    // Collect all salon IDs from both new salons array and legacy fields
+    // Collect only canonical salon IDs that passed public readiness eligibility.
     const allSalonIds = new Set();
     paidBarbers.forEach((barber) => {
-      if (Array.isArray(barber.salons)) {
-        barber.salons.forEach((s) => {
-          if (s.salon) allSalonIds.add(String(s.salon));
-        });
-      }
-      if (barber.salon) allSalonIds.add(String(barber.salon));
+      const readiness = readinessByBarberId.get(String(barber._id));
+      readiness?.eligibleSalonIds?.forEach((salonId) => allSalonIds.add(String(salonId)));
     });
 
     const salons = await Salon.find({ _id: { $in: [...allSalonIds] } });
@@ -147,9 +146,12 @@ export const getBarbers = async (_req, res) => {
         let approvedSalon = null;
         let approvedSalons = [];
 
+        const readiness = readinessByBarberId.get(String(barber._id));
+        const eligibleSalonIds = readiness?.eligibleSalonIds || new Set();
+
         if (Array.isArray(barber.salons) && barber.salons.length > 0) {
           const approvedEntries = barber.salons.filter(
-            (s) => s.status === "approved"
+            (s) => s.status === "approved" && eligibleSalonIds.has(String(s.salon))
           );
           const primaryEntry =
             approvedEntries.find((s) => s.isPrimary) || approvedEntries[0];
@@ -172,22 +174,6 @@ export const getBarbers = async (_req, res) => {
                 : null;
             })
             .filter(Boolean);
-        }
-
-        // Fallback to legacy
-        if (!approvedSalon && barber.salonStatus === "approved" && barber.salon) {
-          approvedSalon = salonsById.get(String(barber.salon)) || null;
-          if (approvedSalon) {
-            approvedSalons = [
-              {
-                ...approvedSalon.toObject(),
-                id: approvedSalon._id,
-                status: "approved",
-                isPrimary: true,
-                joinedAt: barber.createdAt || new Date(),
-              },
-            ];
-          }
         }
 
         return serializePublicBarberDirectory({

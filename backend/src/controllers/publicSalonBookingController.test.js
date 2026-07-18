@@ -69,6 +69,7 @@ const makeBarber = (id, overrides = {}) => ({
       salon: salonId,
       status: "approved",
       relationshipType: overrides.relationshipType || "staff",
+      worksAsSpecialist: true,
       defaultSchedule: {},
     },
   ],
@@ -95,7 +96,7 @@ afterEach(() => {
 
 test("public booking data returns paid approved staff barber", async () => {
   const res = createResponse();
-  let userSelectFields = null;
+  const userSelectFields = [];
 
   __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
     async () => paidAccessMap
@@ -124,7 +125,7 @@ test("public booking data returns paid approved staff barber", async () => {
   ]);
   User.find = () =>
     makeFindChain([makeBarber(paidStaffBarberId)], (fields) => {
-      userSelectFields = fields;
+      userSelectFields.push(fields);
     });
   BarberProfile.find = async () => [];
   Schedule.find = async () => [];
@@ -151,7 +152,8 @@ test("public booking data returns paid approved staff barber", async () => {
   await getPublicSalonBooking({ params: { salonId } }, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(userSelectFields, "-password");
+  assert.ok(userSelectFields.includes("-password"));
+  assert.ok(userSelectFields.includes("_id specialistOnboarding salons role"));
   assert.equal(res.body.salon.name, "Test Salon");
   assert.equal(res.body.salon.averageRating, 4.7);
   assert.equal(res.body.barbers.length, 1);
@@ -188,7 +190,7 @@ test("returns paid approved chair_renter barber publicly", async () => {
   BarberProfile.find = async () => [];
   Schedule.find = async () => [];
   Booking.find = async () => [];
-  Service.find = () => makeLeanQuery([]);
+  Service.find = () => makeLeanQuery([{ barberId: paidChairRenterId, active: true }]);
   paidAccessMap = new Map([[String(paidChairRenterId), true]]);
 
   await getPublicSalonBooking({ params: { salonId } }, res);
@@ -197,6 +199,48 @@ test("returns paid approved chair_renter barber publicly", async () => {
   assert.equal(res.body.barbers.length, 1);
   assert.equal(String(res.body.barbers[0].id), String(paidChairRenterId));
   assert.equal(res.body.barbers[0].relationshipType, "chair_renter");
+});
+
+test("hides pending salon specialist from public booking data", async () => {
+  const res = createResponse();
+
+  __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
+    async () => paidAccessMap
+  );
+  __publicSalonBookingTestHooks.setGetSalonReviewStats(
+    async () => reviewStatsMap
+  );
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    name: "Test Salon",
+    city: "Yerevan",
+    address: "",
+    phone: "",
+    imageUrl: "",
+  });
+  User.find = () =>
+    makeFindChain([
+      makeBarber("barber-pending", {
+        salons: [{
+          salon: salonId,
+          status: "approved",
+          relationshipType: "staff",
+          relationshipStatus: "pending",
+          worksAsSpecialist: true,
+        }],
+      }),
+    ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Booking.find = async () => [];
+  Service.find = () => makeLeanQuery([{ barberId: "barber-pending", active: true }]);
+  paidAccessMap = new Map([["barber-pending", true]]);
+
+  await getPublicSalonBooking({ params: { salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barbers.length, 0);
 });
 
 test("hides unpaid barber from public booking data", async () => {
@@ -297,7 +341,23 @@ test("hides approved owner who does not work as specialist from public booking d
   BarberProfile.find = async () => [];
   Schedule.find = async () => [];
   Booking.find = async () => [];
-  Service.find = () => makeLeanQuery([]);
+  Service.find = () =>
+    makeLeanQuery([
+      {
+        _id: "srv-deposit",
+        barberId: paidStaffBarberId,
+        name: "Haircut",
+        price: 3000,
+        duration: 30,
+        description: "",
+        category: "haircut",
+        tags: [],
+        type: "single",
+        discountType: "none",
+        discountValue: 0,
+        active: true,
+      },
+    ]);
   paidAccessMap = new Map([[String(paidStaffBarberId), true]]);
 
   await getPublicSalonBooking({ params: { salonId } }, res);
@@ -405,7 +465,23 @@ test("public booking data includes safe deposit minimumBookingPrice", async () =
   ];
   Schedule.find = async () => [];
   Booking.find = async () => [];
-  Service.find = () => makeLeanQuery([]);
+  Service.find = () =>
+    makeLeanQuery([
+      {
+        _id: "srv-deposit",
+        barberId: paidStaffBarberId,
+        name: "Haircut",
+        price: 3000,
+        duration: 30,
+        description: "",
+        category: "haircut",
+        tags: [],
+        type: "single",
+        discountType: "none",
+        discountValue: 0,
+        active: true,
+      },
+    ]);
   paidAccessMap = new Map([[String(paidStaffBarberId), true]]);
 
   await getPublicSalonBooking({ params: { salonId } }, res);
@@ -418,6 +494,55 @@ test("public booking data includes safe deposit minimumBookingPrice", async () =
     minimumBookingPrice: 5000,
     noShowPolicyText: "Deposit applies to qualifying bookings.",
   });
+});
+
+test("public booking keeps salon-scoped readiness isolated from unrelated approved salons", async () => {
+  const res = createResponse();
+
+  __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
+    async () => paidAccessMap
+  );
+  __publicSalonBookingTestHooks.setGetSalonReviewStats(
+    async () => reviewStatsMap
+  );
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    name: "Test Salon",
+    city: "Yerevan",
+    address: "",
+    phone: "",
+    imageUrl: "",
+  });
+  User.find = () =>
+    makeFindChain([
+      makeBarber("barber-cross-salon", {
+        salons: [
+          {
+            salon: salonId,
+            status: "approved",
+            relationshipType: "staff",
+            worksAsSpecialist: false,
+          },
+          {
+            salon: "other-salon",
+            status: "approved",
+            relationshipType: "staff",
+            worksAsSpecialist: true,
+          },
+        ],
+      }),
+    ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Booking.find = async () => [];
+  Service.find = () => makeLeanQuery([{ barberId: "barber-cross-salon", active: true }]);
+  paidAccessMap = new Map([["barber-cross-salon", true]]);
+
+  await getPublicSalonBooking({ params: { salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barbers.length, 0);
 });
 
 test("missing salon returns 404", async () => {

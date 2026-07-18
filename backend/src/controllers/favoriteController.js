@@ -3,6 +3,7 @@ import SalonFavorite from "../models/SalonFavorite.js";
 import User from "../models/User.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
+import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import {
   serializePublicBarber,
@@ -50,10 +51,11 @@ export const getClientFavorites = async (req, res) => {
     }
 
     const paidAccessMap = await getPaidAccessByBarberIds(barberIds);
+    const readinessByBarberId = await getPublicBarberReadinessByIds(barberIds);
 
     const visibleFavorites = favorites.filter((favorite) => {
       const barberId = favorite.barberId?._id || favorite.barberId;
-      return paidAccessMap.get(String(barberId)) === true;
+      return paidAccessMap.get(String(barberId)) === true && readinessByBarberId.get(String(barberId))?.publicReady;
     });
 
     return res.json(visibleFavorites);
@@ -142,12 +144,14 @@ export const getFavoriteSalons = async (req, res) => {
     // Phase 11: Only include barbers with active subscription/seat access
     const barberIds = allBarbers.map((b) => b._id);
     const paidAccessMap = await getPaidAccessByBarberIds(barberIds);
-    const paidBarbers = allBarbers.filter((b) => paidAccessMap.get(String(b._id)) === true);
+    const readinessByBarberId = await getPublicBarberReadinessByIds(barberIds);
+    const paidBarbers = allBarbers.filter((b) => paidAccessMap.get(String(b._id)) === true && readinessByBarberId.get(String(b._id))?.publicReady);
 
     const barbersBySalonId = new Map();
     const favoriteSalonIds = new Set(salonIds.map((salonId) => getIdString(salonId)));
 
     paidBarbers.forEach((barber) => {
+      const readiness = readinessByBarberId.get(String(barber._id));
       const approvedSalonIds = new Set(
         (barber.salons || [])
           .filter((entry) => entry?.salon && entry.status === "approved")
@@ -159,7 +163,7 @@ export const getFavoriteSalons = async (req, res) => {
       }
 
       for (const salonId of approvedSalonIds) {
-        if (!favoriteSalonIds.has(salonId)) continue;
+        if (!favoriteSalonIds.has(salonId) || !readiness?.eligibleSalonIds.has(salonId)) continue;
 
         const safeBarber = serializePublicBarber({ barber });
         barbersBySalonId.set(salonId, [

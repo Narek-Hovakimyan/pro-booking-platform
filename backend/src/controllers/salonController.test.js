@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { createSalon, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
+import { createSalon, getSalonProfile, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
 import { getSalonStaff } from "./salonStaffController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
+import Service from "../models/Service.js";
 import User from "../models/User.js";
 import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
 
 const originalMethods = {
   barberProfileFind: BarberProfile.find,
+  scheduleFind: Schedule.find,
   scheduleFindOneAndUpdate: Schedule.findOneAndUpdate,
+  serviceFind: Service.find,
   salonCreate: Salon.create,
   salonFind: Salon.find,
   salonFindById: Salon.findById,
@@ -33,9 +36,19 @@ const unrelatedBarberId = "64b000000000000000000023";
 const clientId = "64b000000000000000000024";
 const staffUserId = "64b000000000000000000030";
 
+const completedSalonOnboarding = {
+  version: 1,
+  status: "completed",
+  currentStep: null,
+  workplace: "salon",
+  completedAt: new Date("2026-07-16T10:00:00.000Z"),
+};
+
 afterEach(() => {
   BarberProfile.find = originalMethods.barberProfileFind;
+  Schedule.find = originalMethods.scheduleFind;
   Schedule.findOneAndUpdate = originalMethods.scheduleFindOneAndUpdate;
+  Service.find = originalMethods.serviceFind;
   Salon.create = originalMethods.salonCreate;
   Salon.find = originalMethods.salonFind;
   Salon.findById = originalMethods.salonFindById;
@@ -43,6 +56,9 @@ afterEach(() => {
   User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
   User.findOneAndUpdate = originalMethods.userFindOneAndUpdate;
+  __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
+  __salonControllerTestHooks.resetGetPublicBarberReadinessByIds();
+  __salonControllerTestHooks.resetGetSalonReviewStats();
 });
 
 const createResponse = () => ({
@@ -870,6 +886,8 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
         salon: salonId,
         status: "approved",
         relationshipType: "chair_renter",
+        relationshipStatus: "accepted",
+        worksAsSpecialist: true,
         staffPayment: { type: "fixed", fixedAmount: 1000 },
       },
     ],
@@ -889,6 +907,11 @@ test("listSalons excludes unpaid barbers from salon barbers list", async () => {
   });
 
   BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [
+    { barberId: paidBarberId },
+    { barberId: unpaidBarberId },
+  ];
 
   await listSalons({ query: {} }, res);
 
@@ -949,12 +972,184 @@ test("listSalons excludes explicit non-working owner from salon barbers list", a
     ],
   });
   BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: ownerId }];
 
   await listSalons({ query: {} }, res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body[0].barbers.length, 0);
+});
 
-  __salonControllerTestHooks.resetGetPaidAccessByBarberIds();
-  __salonControllerTestHooks.resetGetSalonReviewStats();
+const makePublicSalonEndpointBarber = ({
+  id,
+  name,
+  salonId = salonAId,
+  salons,
+  onboarding = completedSalonOnboarding,
+} = {}) => ({
+  _id: id,
+  name,
+  role: "barber",
+  specialistOnboarding: onboarding,
+  platformRole: "superuser",
+  email: `${name || id}@example.com`,
+  phone: "555-PRIVATE",
+  salons: salons || [
+    {
+      salon: salonId,
+      status: "approved",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: true,
+      staffPayment: { type: "fixed", fixedAmount: 1000 },
+    },
+  ],
+  toObject() {
+    const { toObject, ...rest } = this;
+    return { ...rest };
+  },
+});
+
+const setupPublicSalonReadinessMocks = ({
+  salons = [
+    { _id: salonAId, name: "Alpha Salon", city: "Yerevan", ownerId, admins: [adminId] },
+    { _id: salonBId, name: "Empty Salon", city: "Gyumri", ownerId, admins: [adminId] },
+  ],
+  requestedSalon = salons[0],
+  barbers,
+  activeServiceIds,
+} = {}) => {
+  const serviceIds = new Set(activeServiceIds.map(String));
+
+  __salonControllerTestHooks.setGetPaidAccessByBarberIds(async (ids) =>
+    new Map(ids.map((id) => [String(id), true]))
+  );
+  __salonControllerTestHooks.setGetSalonReviewStats(async () => new Map());
+
+  Salon.find = () => ({ sort: async () => salons });
+  Salon.findById = async () => requestedSalon;
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  User.find = (query) => ({
+    select: async () => {
+      if (query?._id?.$in) {
+        const ids = new Set(query._id.$in.map(String));
+        return barbers.filter((barber) => ids.has(String(barber._id)));
+      }
+      return barbers;
+    },
+  });
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () =>
+    barbers
+      .filter((barber) => serviceIds.has(String(barber._id)))
+      .map((barber) => ({ barberId: barber._id }));
+};
+
+test("listSalons includes only barbers ready and eligible for that exact salon", async () => {
+  const readyId = "64b000000000000000002001";
+  const unfinalizedId = "64b000000000000000002002";
+  const noServiceId = "64b000000000000000002003";
+  const pendingId = "64b000000000000000002004";
+  const rejectedId = "64b000000000000000002005";
+  const nonSpecialistId = "64b000000000000000002006";
+  const crossSalonId = "64b000000000000000002007";
+  const res = createResponse();
+
+  setupPublicSalonReadinessMocks({
+    barbers: [
+      makePublicSalonEndpointBarber({ id: readyId, name: "Ready Specialist" }),
+      makePublicSalonEndpointBarber({
+        id: unfinalizedId,
+        name: "Unfinalized",
+        onboarding: {
+          ...completedSalonOnboarding,
+          status: "in_progress",
+          currentStep: "review",
+          completedAt: null,
+        },
+      }),
+      makePublicSalonEndpointBarber({ id: noServiceId, name: "No Service" }),
+      makePublicSalonEndpointBarber({
+        id: pendingId,
+        name: "Pending Specialist",
+        salons: [{ salon: salonAId, status: "pending", relationshipStatus: "pending", worksAsSpecialist: true }],
+      }),
+      makePublicSalonEndpointBarber({
+        id: rejectedId,
+        name: "Rejected Specialist",
+        salons: [{ salon: salonAId, status: "rejected", relationshipStatus: "rejected", worksAsSpecialist: true }],
+      }),
+      makePublicSalonEndpointBarber({
+        id: nonSpecialistId,
+        name: "Admin Only",
+        salons: [{ salon: salonAId, status: "approved", relationshipStatus: "accepted", worksAsSpecialist: false }],
+      }),
+      makePublicSalonEndpointBarber({ id: crossSalonId, name: "Other Salon", salonId: salonBId }),
+    ],
+    activeServiceIds: [readyId, unfinalizedId, pendingId, rejectedId, nonSpecialistId, crossSalonId],
+  });
+
+  await listSalons({ query: {} }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 2, "salons remain listed even when no eligible barber remains");
+  assert.deepEqual(res.body[0].barbers.map((barber) => barber.id), [readyId]);
+  assert.deepEqual(res.body[1].barbers.map((barber) => barber.id), [crossSalonId]);
+  assert.equal(res.body[0].ownerId, undefined);
+  assert.equal(res.body[0].admins, undefined);
+  assert.equal(res.body[0].barbers[0].email, undefined);
+  assert.equal(res.body[0].barbers[0].phone, undefined);
+  assert.equal(res.body[0].barbers[0].salons, undefined);
+  assert.equal(res.body[0].barbers[0].staffPayment, undefined);
+});
+
+test("getSalonProfile includes only ready barbers eligible for the requested salon", async () => {
+  const readyId = "64b000000000000000003001";
+  const crossSalonId = "64b000000000000000003002";
+  const noServiceId = "64b000000000000000003003";
+  const res = createResponse();
+
+  setupPublicSalonReadinessMocks({
+    requestedSalon: { _id: salonAId, name: "Alpha Salon", city: "Yerevan", ownerId, admins: [adminId] },
+    barbers: [
+      makePublicSalonEndpointBarber({ id: readyId, name: "Ready Detail" }),
+      makePublicSalonEndpointBarber({ id: crossSalonId, name: "Cross Detail", salonId: salonBId }),
+      makePublicSalonEndpointBarber({ id: noServiceId, name: "No Service Detail" }),
+    ],
+    activeServiceIds: [readyId, crossSalonId],
+  });
+
+  await getSalonProfile({ params: { salonId: salonAId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.barbers.map((barber) => barber.id), [readyId]);
+  assert.equal(res.body.ownerId, undefined);
+  assert.equal(res.body.admins, undefined);
+  assert.equal(res.body.barbers[0].email, undefined);
+  assert.equal(res.body.barbers[0].phone, undefined);
+  assert.equal(res.body.barbers[0].salons, undefined);
+});
+
+test("getSalonProfile handles an empty eligible-barber list without removing salon data", async () => {
+  const res = createResponse();
+
+  setupPublicSalonReadinessMocks({
+    requestedSalon: { _id: salonAId, name: "Alpha Salon", city: "Yerevan", address: "Safe St" },
+    barbers: [
+      makePublicSalonEndpointBarber({
+        id: "64b000000000000000004001",
+        name: "Non Specialist Detail",
+        salons: [{ salon: salonAId, status: "approved", relationshipStatus: "accepted", worksAsSpecialist: false }],
+      }),
+    ],
+    activeServiceIds: ["64b000000000000000004001"],
+  });
+
+  await getSalonProfile({ params: { salonId: salonAId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.id, salonAId);
+  assert.equal(res.body.name, "Alpha Salon");
+  assert.deepEqual(res.body.barbers, []);
 });

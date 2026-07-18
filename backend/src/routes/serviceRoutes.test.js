@@ -11,7 +11,7 @@ test("service list route uses optional auth before controller", () => {
   assert.ok(route, "expected GET /:barberId service route");
   assert.deepEqual(
     route.route.stack.map((stackLayer) => stackLayer.name),
-    ["optionalAuth", "getServicesByBarber"]
+    ["optionalAuth", "requirePublicBarberReadiness", "getServicesByBarber"]
   );
 });
 

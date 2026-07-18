@@ -5,21 +5,28 @@ import mongoose from "mongoose";
 
 import { getBarbers } from "./userController.js";
 import BarberProfile from "../models/BarberProfile.js";
+import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
+import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
+import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
 
 const originalUserFind = User.find;
 const originalBarberProfileFind = BarberProfile.find;
+const originalScheduleFind = Schedule.find;
 const originalSalonFind = Salon.find;
+const originalServiceFind = Service.find;
 const originalSubscriptionFind = Subscription.find;
 const originalSubscriptionSeatFind = SubscriptionSeat.find;
 
 afterEach(() => {
   User.find = originalUserFind;
   BarberProfile.find = originalBarberProfileFind;
+  Schedule.find = originalScheduleFind;
   Salon.find = originalSalonFind;
+  Service.find = originalServiceFind;
   Subscription.find = originalSubscriptionFind;
   SubscriptionSeat.find = originalSubscriptionSeatFind;
 });
@@ -52,6 +59,11 @@ const createResponse = () => ({
   },
 });
 
+const workingSchedule = (barberId) => ({
+  barberId,
+  weeklySchedule: createCanonicalPersonalSchedule().weeklySchedule,
+});
+
 const makeBarber = (overrides = {}) => {
   const barber = {
     _id: new mongoose.Types.ObjectId(),
@@ -78,7 +90,7 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
   const salonId = new mongoose.Types.ObjectId();
   const salonSeatBarber = makeBarber({
     name: "Seat Covered",
-    salons: [{ salon: salonId, status: "approved" }],
+    salons: [{ salon: salonId, status: "approved", worksAsSpecialist: true }],
   });
   const unpaidBarber = makeBarber({ name: "Unpaid Barber" });
   const activeSalonSubscriptionId = new mongoose.Types.ObjectId();
@@ -105,7 +117,14 @@ test("getBarbers hides unpaid barbers and shows paid individual or salon-seat co
         },
       },
     ]);
-  BarberProfile.find = async () => [];
+  BarberProfile.find = async () => [
+    { barberId: paidIndividualBarber._id, address: "Ready Street 1" },
+  ];
+  Schedule.find = async () => [workingSchedule(paidIndividualBarber._id)];
+  Service.find = async () => [
+    { barberId: paidIndividualBarber._id },
+    { barberId: salonSeatBarber._id },
+  ];
   Salon.find = async () => [];
 
   const res = createResponse();
@@ -130,6 +149,7 @@ test("getBarbers allowlists public fields and omits private profile data", async
       isPrimary: true,
       joinedAt: new Date("2025-01-01"),
       relationshipType: "chair_renter",
+      worksAsSpecialist: true,
       staffPayment: { fixedAmount: 5000 },
     }],
   });
@@ -158,6 +178,8 @@ test("getBarbers allowlists public fields and omits private profile data", async
       },
     },
   ];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: paidBarber._id }];
   Salon.find = async () => [{
     _id: salonId,
     name: "Public Salon",
@@ -191,6 +213,76 @@ test("getBarbers allowlists public fields and omits private profile data", async
   assert.equal(res.body[0].approvedSalons[0].ownerId, undefined);
 });
 
+test("getBarbers exposes only eligible canonical salon associations", async () => {
+  const eligibleSalonId = new mongoose.Types.ObjectId();
+  const pendingSalonId = new mongoose.Types.ObjectId();
+  const rejectedSalonId = new mongoose.Types.ObjectId();
+  const nonSpecialistSalonId = new mongoose.Types.ObjectId();
+  const staleLegacySalonId = new mongoose.Types.ObjectId();
+  const salonReadyBarber = makeBarber({
+    name: "Salon Ready",
+    salons: [
+      { salon: eligibleSalonId, status: "approved", worksAsSpecialist: true, isPrimary: true },
+      { salon: pendingSalonId, status: "pending", worksAsSpecialist: true },
+      { salon: rejectedSalonId, status: "approved", relationshipStatus: "rejected", worksAsSpecialist: true },
+      { salon: nonSpecialistSalonId, status: "approved", worksAsSpecialist: false },
+    ],
+    salon: staleLegacySalonId,
+    salonStatus: "approved",
+  });
+  const independentBarber = makeBarber({
+    name: "Independent Ready",
+    salon: staleLegacySalonId,
+    salonStatus: "approved",
+  });
+  const salonById = new Map([
+    [String(eligibleSalonId), { _id: eligibleSalonId, name: "Eligible Salon" }],
+    [String(pendingSalonId), { _id: pendingSalonId, name: "Pending Salon" }],
+    [String(rejectedSalonId), { _id: rejectedSalonId, name: "Rejected Salon" }],
+    [String(nonSpecialistSalonId), { _id: nonSpecialistSalonId, name: "Non Specialist Salon" }],
+    [String(staleLegacySalonId), { _id: staleLegacySalonId, name: "Stale Legacy Salon" }],
+  ]);
+
+  User.find = () => chainableQuery([salonReadyBarber, independentBarber]);
+  Subscription.find = () => chainableQuery([
+    { ownerId: salonReadyBarber._id, status: "active" },
+    { ownerId: independentBarber._id, status: "active" },
+  ]);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  BarberProfile.find = async () => [
+    { barberId: independentBarber._id, address: "Independent Street 1" },
+  ];
+  Schedule.find = async () => [workingSchedule(independentBarber._id)];
+  Service.find = async () => [
+    { barberId: salonReadyBarber._id },
+    { barberId: independentBarber._id },
+  ];
+  Salon.find = async (query) => {
+    assert.deepEqual(
+      query._id.$in.map(String).sort(),
+      [String(eligibleSalonId)].sort()
+    );
+    return query._id.$in.map((id) => ({
+      ...salonById.get(String(id)),
+      toObject() { return { ...this }; },
+    }));
+  };
+
+  const res = createResponse();
+  await getBarbers({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(
+    res.body.map((barber) => barber.name),
+    ["Salon Ready", "Independent Ready"]
+  );
+  assert.deepEqual(res.body[0].approvedSalons.map((salon) => salon.name), ["Eligible Salon"]);
+  assert.equal(res.body[0].salonName, "Eligible Salon");
+  assert.deepEqual(res.body[1].approvedSalons, []);
+  assert.deepEqual(res.body[1].salons, []);
+  assert.equal(res.body[1].salon, null);
+});
+
 test("getBarbers hides barber with stale salon seat", async () => {
   const salonId = new mongoose.Types.ObjectId();
   const staleSeatBarber = makeBarber({
@@ -214,6 +306,8 @@ test("getBarbers hides barber with stale salon seat", async () => {
       },
     ]);
   BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: staleSeatBarber._id }];
   Salon.find = async () => [];
 
   const res = createResponse();
@@ -236,7 +330,11 @@ test("getBarbers returns barber with grace-granted active subscription", async (
       },
     ]);
   SubscriptionSeat.find = () => chainableQuery([]);
-  BarberProfile.find = async () => [];
+  BarberProfile.find = async () => [
+    { barberId: graceBarber._id, address: "Grace Street 1" },
+  ];
+  Schedule.find = async () => [workingSchedule(graceBarber._id)];
+  Service.find = async () => [{ barberId: graceBarber._id }];
   Salon.find = async () => [];
 
   const res = createResponse();
@@ -247,4 +345,31 @@ test("getBarbers returns barber with grace-granted active subscription", async (
     res.body.map((barber) => barber.name),
     ["Grace Barber"]
   );
+});
+
+test("getBarbers hides unfinalized v1 barber despite paid access", async () => {
+  const barber = makeBarber({
+    name: "Unfinalized Barber",
+    specialistOnboarding: {
+      version: 1,
+      status: "in_progress",
+      currentStep: "review",
+      workplace: "independent",
+      completedAt: null,
+    },
+  });
+
+  User.find = () => chainableQuery([barber]);
+  Subscription.find = () => chainableQuery([{ ownerId: barber._id, status: "active" }]);
+  SubscriptionSeat.find = () => chainableQuery([]);
+  BarberProfile.find = async () => [{ barberId: barber._id, address: "Ready Street 1" }];
+  Schedule.find = async () => [workingSchedule(barber._id)];
+  Service.find = async () => [{ barberId: barber._id }];
+  Salon.find = async () => [];
+
+  const res = createResponse();
+  await getBarbers({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
 });

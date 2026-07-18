@@ -25,6 +25,7 @@ import {
   mutateSelfBarberProfile,
   SelfBarberProfileMutationError,
 } from "../services/barber/selfBarberProfileMutationService.js";
+import { getPublicBarberReadiness, getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
 
 const genericBarberProfileController = createCrudController(
   BarberProfile,
@@ -36,7 +37,8 @@ export const barberProfileController = {
   getAll: async (_req, res) => {
     try {
       const items = await BarberProfile.find();
-      return res.json(items.map(serializePublicBarberProfileRecord));
+      const readiness = await getPublicBarberReadinessByIds(items.map((item) => item.barberId));
+      return res.json(items.filter((item) => readiness.get(getIdString(item.barberId))?.publicReady).map(serializePublicBarberProfileRecord));
     } catch (error) {
       return sendControllerError(res, error, "Could not fetch Barber profile");
     }
@@ -45,6 +47,7 @@ export const barberProfileController = {
     try {
       const item = await BarberProfile.findById(req.params.id);
       if (!item) return res.status(404).json({ message: "Barber profile not found" });
+      if (!(await getPublicBarberReadiness(item.barberId)).publicReady) return res.status(404).json({ message: "Barber profile not found" });
       return res.json(serializePublicBarberProfileRecord(item));
     } catch (error) {
       return sendControllerError(res, error, "Could not fetch Barber profile");
@@ -146,7 +149,7 @@ const serviceMatchesDiscoveryFilters = (service, filters) => {
   return true;
 };
 
-const getApprovedSalonEntries = (barber, salonsById) => {
+const getApprovedSalonEntries = (barber, salonsById, eligibleSalonIds = new Set()) => {
   const entries = [];
   const salons = Array.isArray(barber?.salons) ? barber.salons : [];
 
@@ -154,6 +157,8 @@ const getApprovedSalonEntries = (barber, salonsById) => {
     if (entry?.status !== "approved") continue;
 
     const salonId = getIdString(entry.salon);
+    if (!eligibleSalonIds.has(salonId)) continue;
+
     const salon = salonsById.get(salonId);
 
     if (!salon) continue;
@@ -167,23 +172,6 @@ const getApprovedSalonEntries = (barber, salonsById) => {
       joinedAt: entry.joinedAt,
       defaultSchedule: entry.defaultSchedule || {},
     });
-  }
-
-  if (entries.length === 0 && barber?.salonStatus === "approved" && barber?.salon) {
-    const salonId = getIdString(barber.salon);
-    const salon = salonsById.get(salonId);
-
-    if (salon) {
-      entries.push({
-        ...normalizeForResponse(salon),
-        id: salon._id || salon.id || salonId,
-        salon: normalizeForResponse(salon),
-        status: "approved",
-        isPrimary: true,
-        joinedAt: barber.createdAt || new Date(),
-        defaultSchedule: {},
-      });
-    }
   }
 
   return entries;
@@ -247,20 +235,16 @@ export const getBarberCardSummary = async (req, res) => {
     const paidBarbers = barbers.filter((barber) =>
       paidAccessByBarberId.get(getIdString(barber._id))
     );
+    const readinessByBarberId = await getPublicBarberReadinessByIds(paidBarbers.map((barber) => barber._id));
+    const readyBarbers = paidBarbers.filter((barber) => readinessByBarberId.get(getIdString(barber._id))?.publicReady);
 
-    const barberIds = paidBarbers.map((barber) => barber._id).filter(Boolean);
+    const barberIds = readyBarbers.map((barber) => barber._id).filter(Boolean);
     const todayKey = getArmeniaDateKey(new Date());
 
     const allSalonIds = new Set();
-    paidBarbers.forEach((barber) => {
-      (barber.salons || []).forEach((entry) => {
-        const salonId = getIdString(entry?.salon);
-
-        if (salonId) allSalonIds.add(salonId);
-      });
-
-      const legacySalonId = getIdString(barber.salon);
-      if (legacySalonId) allSalonIds.add(legacySalonId);
+    readyBarbers.forEach((barber) => {
+      const readiness = readinessByBarberId.get(getIdString(barber._id));
+      readiness?.eligibleSalonIds?.forEach((salonId) => allSalonIds.add(String(salonId)));
     });
 
     const [
@@ -304,10 +288,15 @@ export const getBarberCardSummary = async (req, res) => {
     const responseReviewStats = [];
     const responseAvailability = [];
 
-    for (const barber of paidBarbers) {
+    for (const barber of readyBarbers) {
       const barberId = getIdString(barber._id);
       const profile = profilesByBarberId.get(barberId);
-      const approvedSalons = getApprovedSalonEntries(barber, salonsById);
+      const readiness = readinessByBarberId.get(barberId);
+      const approvedSalons = getApprovedSalonEntries(
+        barber,
+        salonsById,
+        readiness?.eligibleSalonIds || new Set()
+      );
       const primarySalon =
         approvedSalons.find((salon) => salon.isPrimary) || approvedSalons[0] || null;
       const barberServices = servicesByBarberId.get(barberId) || [];
@@ -392,20 +381,34 @@ export const getProfileByBarberId = async (req, res) => {
       }),
       User.findById(req.params.barberId).select("-password"),
     ]);
-    const approvedSalon =
-      barber?.salonStatus === "approved" && barber?.salon
-        ? await Salon.findById(barber.salon)
-        : null;
-
     if (!profile && !barber) {
       return res.json(null);
     }
 
     // Phase 11: Hide unpaid/expired barbers from public profile
+    let approvedSalon = null;
     if (barber) {
       const hasAccess = await barberHasPaidAccess(barber._id);
       if (!hasAccess) {
         return res.status(404).json({ message: "Barber not found" });
+      }
+
+      const readiness = await getPublicBarberReadiness(barber._id);
+      if (!readiness.publicReady) {
+        return res.status(404).json({ message: "Barber not found" });
+      }
+      const eligibleSalonIds = readiness.eligibleSalonIds || new Set();
+      const eligibleCanonicalEntries = Array.isArray(barber.salons)
+        ? barber.salons.filter((entry) => eligibleSalonIds.has(getIdString(entry?.salon)))
+        : [];
+      const primaryEntry =
+        eligibleCanonicalEntries.find((entry) => entry.isPrimary) ||
+        eligibleCanonicalEntries[0];
+      const primarySalonId = getIdString(primaryEntry?.salon);
+
+      if (primarySalonId) {
+        const salons = await chainToArray(Salon.find({ _id: { $in: [primarySalonId] } }));
+        approvedSalon = salons[0] || null;
       }
     }
 
