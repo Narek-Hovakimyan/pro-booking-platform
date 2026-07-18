@@ -107,6 +107,22 @@ const staffMembership = (id, overrides = {}) => ({
   status: "approved",
   relationshipType: "staff",
   relationshipStatus: "accepted",
+  worksAsSpecialist: true,
+  ...overrides,
+});
+
+const validSchedule = (overrides = {}) => ({
+  barberId,
+  salonId: null,
+  weeklySchedule: {
+    sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+    mon: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+    tue: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+    wed: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+    thu: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+    fri: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+    sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+  },
   ...overrides,
 });
 
@@ -141,6 +157,141 @@ const mockSalonScopedSeatAccess = ({
   });
   Salon.exists = async ({ _id }) => [salonId, salonBId].includes(String(_id));
 };
+
+test("createBooking succeeds independently with the null-salon personal schedule", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, {
+    ...barber,
+    specialistOnboarding: {
+      version: 1,
+      status: "completed",
+      currentStep: "review",
+      workplace: "independent",
+      completedAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+  });
+  let scheduleQuery;
+  Schedule.findOne = async (query) => {
+    scheduleQuery = query;
+    return validSchedule({ salonId: null });
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: { barberId, clientId, serviceId, bookingDate, time: "10:00", clientName: "Client" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(scheduleQuery, { barberId, salonId: null });
+  assert.equal(createdBookings[0].salonId, null);
+});
+
+test("createBooking rejects independent readiness without address or personal schedule", async () => {
+  for (const { name, profile, schedule } of [
+    { name: "missing address", profile: { barberId, address: "" }, schedule: validSchedule() },
+    { name: "missing schedule", profile: { barberId, address: "1 Main St" }, schedule: null },
+  ]) {
+    const createdBookings = [];
+    mockSuccessfulCreateDependencies(createdBookings, {
+      ...barber,
+      specialistOnboarding: {
+        version: 1,
+        status: "completed",
+        currentStep: "review",
+        workplace: "independent",
+        completedAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    });
+    BarberProfile.findOne = () => ({ lean: async () => profile });
+    Schedule.findOne = async () => schedule;
+
+    const res = createResponse();
+    await createBooking(
+      {
+        user: client,
+        body: { barberId, clientId, serviceId, bookingDate, time: "10:00", clientName: name },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(createdBookings.length, 0);
+  }
+});
+
+test("createBooking rejects non-eligible salon memberships and legacy fallback", async () => {
+  for (const membership of [
+    staffMembership(salonId, { status: "pending" }),
+    staffMembership(salonId, { status: "rejected" }),
+    staffMembership(salonId, { relationshipStatus: "pending" }),
+    staffMembership(salonId, { relationshipStatus: "rejected" }),
+    staffMembership(salonId, { worksAsSpecialist: false }),
+    staffMembership(salonBId),
+  ]) {
+    const createdBookings = [];
+    mockSuccessfulCreateDependencies(createdBookings, {
+      ...barber,
+      salon: salonId,
+      salonStatus: "approved",
+      salons: [membership],
+    });
+
+    const res = createResponse();
+    await createBooking(
+      {
+        user: client,
+        body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(createdBookings.length, 0);
+  }
+});
+
+test("createBooking resolves only the exact salon schedule", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const queries = [];
+  Schedule.findOne = async (query) => {
+    queries.push(query);
+    return String(query.salonId) === salonId
+      ? validSchedule({ salonId })
+      : validSchedule({ salonId: salonBId });
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(queries, [{ barberId, salonId }]);
+});
+
+test("slot validation exact mode does not use default schedule fallback", async () => {
+  Booking.find = async () => [];
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate,
+    time: "10:00",
+    duration: 30,
+    schedule: { weeklySchedule: {}, defaultSchedule: { startTime: "09:00", endTime: "18:00" } },
+    requireResolvedSchedule: true,
+  });
+
+  assert.equal(result.message, "Barber is not working this day");
+});
 
 // ── Slot validation and booking conflicts ──────────────────────────
 
@@ -901,7 +1052,7 @@ test("createBooking blocks active seat from another salon", async () => {
   assert.equal(String(createdBookings[0].salonId), salonId);
 });
 
-test("createBooking requires explicit salon for multi-salon barber", async () => {
+test("createBooking treats missing salonId as independent and does not infer a primary salon", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings);
   mockSalonScopedSeatAccess({ seatSalonId: salonId });
@@ -923,9 +1074,9 @@ test("createBooking requires explicit salon for multi-salon barber", async () =>
     res
   );
 
-  assert.equal(res.statusCode, 400);
-  assert.deepEqual(res.body, { message: "Salon is required for this barber" });
-  assert.equal(createdBookings.length, 0);
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(createdBookings[0].salonId, null);
 });
 
 test("createBooking blocks personal subscription in explicit unpaid salon context", async () => {

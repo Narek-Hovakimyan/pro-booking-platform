@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import { createBooking, quoteBookingPrice } from "./bookingController.js";
 import BarberProfile from "../models/BarberProfile.js";
@@ -8,10 +9,14 @@ import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
+import Subscription from "../models/Subscription.js";
+import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
 import Voucher from "../models/Voucher.js";
+import { normalizeScopedBookingReadinessIds } from "../services/booking/bookingReadinessService.js";
 
 import {
+  barber,
   barberId,
   barberWithSalon,
   bookingDate,
@@ -43,11 +48,132 @@ afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
+  SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   User.findById = originalMethods.userFindById;
   Voucher.find = originalVoucherMethods.find;
   Voucher.findByIdAndUpdate = originalVoucherMethods.findByIdAndUpdate;
   Voucher.findOne = originalVoucherMethods.findOne;
   Voucher.findOneAndUpdate = originalVoucherMethods.findOneAndUpdate;
+});
+
+test("booking readiness rejects request-derived IDs before model queries with create/quote parity", async () => {
+  const invalidBodies = [
+    { barberId: { $ne: null }, serviceId },
+    { barberId, serviceId: { $ne: null } },
+    { barberId: "not-an-object-id", serviceId },
+    { barberId: [barberId], serviceId },
+    { barberId, serviceId: [serviceId] },
+    { barberId, serviceId, salonId: " " },
+    { barberId, serviceId, salonId: { $ne: null } },
+  ];
+
+  for (const body of invalidBodies) {
+    let modelCalls = 0;
+    const shouldNotQuery = () => {
+      modelCalls += 1;
+      throw new Error("request-derived ID reached a model query");
+    };
+    Service.findOne = shouldNotQuery;
+    User.findById = shouldNotQuery;
+    Salon.exists = shouldNotQuery;
+    BarberProfile.findOne = shouldNotQuery;
+    Schedule.findOne = shouldNotQuery;
+    Subscription.findOne = shouldNotQuery;
+    SubscriptionSeat.find = shouldNotQuery;
+
+    const quoteRes = createResponse();
+    await quoteBookingPrice({ user: client, body }, quoteRes);
+
+    const createRes = createResponse();
+    await createBooking({
+      user: client,
+      body: { ...body, clientId, bookingDate, time: "10:00", clientName: "Client" },
+    }, createRes);
+
+    assert.equal(quoteRes.statusCode, 400);
+    assert.equal(createRes.statusCode, 400);
+    assert.deepEqual(quoteRes.body, { message: "Invalid booking identifiers" });
+    assert.deepEqual(createRes.body, quoteRes.body);
+    assert.equal(modelCalls, 0);
+  }
+});
+
+test("booking readiness normalizes only canonical strings and genuine ObjectIds", () => {
+  assert.deepEqual(
+    normalizeScopedBookingReadinessIds({ barberId, serviceId, salonId: null }),
+    { barberId, serviceId, salonId: null }
+  );
+
+  const objectIds = normalizeScopedBookingReadinessIds({
+    barberId: new mongoose.Types.ObjectId(barberId),
+    serviceId: new mongoose.Types.ObjectId(serviceId),
+    salonId: new mongoose.Types.ObjectId(salonId),
+  });
+  assert.deepEqual(objectIds, { barberId, serviceId, salonId });
+});
+
+test("quoteBookingPrice and createBooking make the same readiness decisions", async () => {
+  for (const { name, resolvedBarber, schedule } of [
+    {
+      name: "non-specialist salon",
+      resolvedBarber: {
+        ...barber,
+        salons: [{
+          salon: salonId,
+          status: "approved",
+          relationshipStatus: "accepted",
+          worksAsSpecialist: false,
+        }],
+      },
+      schedule: { weeklySchedule: { mon: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" } } },
+    },
+    {
+      name: "missing independent schedule",
+      resolvedBarber: {
+        ...barber,
+        specialistOnboarding: {
+          version: 1,
+          status: "completed",
+          currentStep: "review",
+          workplace: "independent",
+          completedAt: new Date("2026-01-01T00:00:00.000Z"),
+        },
+      },
+      schedule: null,
+    },
+  ]) {
+    const createdBookings = [];
+    mockSuccessfulCreateDependencies(createdBookings, resolvedBarber);
+    Schedule.findOne = async () => schedule;
+
+    const body = name === "non-specialist salon"
+      ? { barberId, serviceId, salonId }
+      : { barberId, serviceId };
+
+    const quoteRes = createResponse();
+    await quoteBookingPrice({ user: client, body }, quoteRes);
+
+    const createRes = createResponse();
+    await createBooking(
+      {
+        user: client,
+        body: {
+          ...body,
+          clientId,
+          bookingDate,
+          time: "10:00",
+          clientName: "Client",
+        },
+      },
+      createRes
+    );
+
+    assert.equal(quoteRes.statusCode, 403);
+    assert.equal(createRes.statusCode, 403);
+    assert.deepEqual(quoteRes.body, createRes.body);
+    assert.equal(createdBookings.length, 0);
+  }
 });
 
 test("createBooking with discounted service (percent) uses discountedPrice as booking.price", async () => {

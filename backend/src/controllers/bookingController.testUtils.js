@@ -98,7 +98,13 @@ export const barber = {
 
 export const barberWithSalon = {
   ...barber,
-  salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+  salons: [{
+    salon: salonId,
+    status: "approved",
+    relationshipStatus: "accepted",
+    worksAsSpecialist: true,
+    isPrimary: true,
+  }],
 };
 
 export const client = {
@@ -192,7 +198,7 @@ export const mockCreateBookingDependencies = (createdBookings) => {
     }),
   });
   BarberProfile.findOne = () => ({
-    lean: async () => null,
+    lean: async () => ({ barberId, address: "1 Main St" }),
   });
   Service.findOne = async () => ({
     _id: serviceId,
@@ -205,7 +211,19 @@ export const mockCreateBookingDependencies = (createdBookings) => {
     select: async () => barber,
   });
   Salon.exists = async () => false;
-  Schedule.findOne = async () => null;
+  Schedule.findOne = async () => ({
+    barberId,
+    salonId: null,
+    weeklySchedule: {
+      sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+      mon: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      tue: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      wed: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      thu: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      fri: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+    },
+  });
   Booking.find = mockBookingFind(createdBookings);
   Booking.create = async (payload) => {
     await new Promise((resolve) => setTimeout(resolve, 20));

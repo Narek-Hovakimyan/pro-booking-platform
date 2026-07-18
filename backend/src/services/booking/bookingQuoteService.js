@@ -1,13 +1,15 @@
-import Service from "../../models/Service.js";
 import {
   barberHasPaidAccessForSalon,
   barberHasPaidSeatAccessForSalon,
 } from "../subscriptionService.js";
 import { buildBookingPricing } from "./bookingPricingService.js";
-import { resolveBookingSalon } from "./bookingControllerHelpers.js";
+import {
+  normalizeScopedBookingReadinessIds,
+  resolveScopedBookingReadiness,
+} from "./bookingReadinessService.js";
 
 export const executeBookingPriceQuote = async ({ body, user }) => {
-  const { barberId, serviceId } = body || {};
+  const { barberId: requestedBarberId, serviceId: requestedServiceId } = body || {};
   const clientId = user?._id || user?.id;
   const rawVoucherCode =
     body?.promotionCode || body?.voucherCode || body?.voucher_code;
@@ -19,26 +21,25 @@ export const executeBookingPriceQuote = async ({ body, user }) => {
     };
   }
 
-  if (!barberId || !serviceId) {
+  if (!requestedBarberId || !requestedServiceId) {
     return {
       status: 400,
       body: { message: "barberId and serviceId are required" },
     };
   }
 
-  const salonResolution = await resolveBookingSalon({
-    barberId,
+  const normalizedIds = normalizeScopedBookingReadinessIds({
+    barberId: requestedBarberId,
+    serviceId: requestedServiceId,
     salonId: body.salonId,
   });
+  if (normalizedIds.body) return normalizedIds;
 
-  if (salonResolution.message) {
-    return { status: 400, body: { message: salonResolution.message } };
-  }
-
-  const hasExplicitSalonContext = Boolean(body.salonId);
+  const { barberId, serviceId, salonId } = normalizedIds;
+  const hasExplicitSalonContext = salonId !== null;
   const barberPaidAccess = hasExplicitSalonContext
-    ? await barberHasPaidSeatAccessForSalon(barberId, salonResolution.salonId)
-    : await barberHasPaidAccessForSalon(barberId, salonResolution.salonId);
+    ? await barberHasPaidSeatAccessForSalon(barberId, salonId)
+    : await barberHasPaidAccessForSalon(barberId, null);
   if (!barberPaidAccess) {
     return {
       status: 403,
@@ -49,22 +50,25 @@ export const executeBookingPriceQuote = async ({ body, user }) => {
     };
   }
 
-  const service = await Service.findOne({ _id: serviceId, barberId, active: true });
+  const bookingReadiness = await resolveScopedBookingReadiness({
+    barberId,
+    salonId,
+    serviceId,
+  });
 
-  if (!service) {
-    return {
-      status: 400,
-      body: { message: "Service is not available for this barber" },
-    };
+  if (bookingReadiness.body) {
+    return bookingReadiness;
   }
 
+  const service = bookingReadiness.service;
+
   const pricing = await buildBookingPricing({
-    barber: salonResolution.barber,
+    barber: bookingReadiness.barber,
     barberId,
     clientId,
     service,
     serviceId,
-    salonId: salonResolution.salonId,
+    salonId: bookingReadiness.salonId,
     voucherCode: rawVoucherCode,
     claimVoucher: false,
   });

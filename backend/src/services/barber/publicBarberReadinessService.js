@@ -20,6 +20,46 @@ const hasValidPersonalSchedule = (schedule) => {
   try { validatePersonalWeeklySchedule(schedule?.weeklySchedule); return true; } catch { return false; }
 };
 
+export const buildPublicBarberReadiness = ({
+  barber,
+  profile = null,
+  personalSchedule = null,
+  activeServices = [],
+} = {}) => {
+  if (!barber || barber.role !== "barber") {
+    return {
+      onboardingReady: false,
+      hasActiveService: false,
+      independentReady: false,
+      eligibleSalonIds: new Set(),
+      publicReady: false,
+    };
+  }
+
+  const state = classifySpecialistOnboardingState(barber);
+  const onboardingReady = isOnboardingReady(barber);
+  const hasActiveService = (Array.isArray(activeServices) ? activeServices : [])
+    .some((service) => idOf(service?.barberId) === idOf(barber));
+  const independentSupported =
+    state.kind === "legacy" ||
+    (state.kind === "valid" && state.state.workplace === "independent");
+  const independentReady =
+    independentSupported &&
+    nonEmpty(profile?.address) &&
+    hasValidPersonalSchedule(personalSchedule);
+  const eligibleSalonIds = new Set((Array.isArray(barber.salons) ? barber.salons : [])
+    .filter((membership) => membership?.status === "approved" && membership?.relationshipStatus !== "pending" && membership?.relationshipStatus !== "rejected" && membership?.worksAsSpecialist === true)
+    .map((membership) => idOf(membership.salon)).filter(Boolean));
+
+  return {
+    onboardingReady,
+    hasActiveService,
+    independentReady,
+    eligibleSalonIds,
+    publicReady: onboardingReady && hasActiveService && (independentReady || eligibleSalonIds.size > 0),
+  };
+};
+
 export const getPublicBarberReadinessByIds = async (barberIds) => {
   const ids = [...new Set((barberIds || []).map(idOf).filter(Boolean))];
   if (!ids.length) return new Map();
@@ -35,18 +75,12 @@ export const getPublicBarberReadinessByIds = async (barberIds) => {
   const result = new Map();
   for (const barber of Array.isArray(barbers) ? barbers : []) {
     const barberId = idOf(barber);
-    const state = classifySpecialistOnboardingState(barber);
-    const onboardingReady = isOnboardingReady(barber);
-    const hasActiveService = activeIds.has(barberId);
-    const independentSupported =
-      state.kind === "legacy" ||
-      (state.kind === "valid" && state.state.workplace === "independent");
-    const independentReady = independentSupported && nonEmpty(profilesById.get(barberId)?.address) && hasValidPersonalSchedule(schedulesById.get(barberId));
-    const eligibleSalonIds = new Set((Array.isArray(barber.salons) ? barber.salons : [])
-      .filter((membership) => membership?.status === "approved" && membership?.relationshipStatus !== "pending" && membership?.relationshipStatus !== "rejected" && membership?.worksAsSpecialist === true)
-      .map((membership) => idOf(membership.salon)).filter(Boolean));
-    result.set(barberId, { onboardingReady, hasActiveService, independentReady, eligibleSalonIds,
-      publicReady: onboardingReady && hasActiveService && (independentReady || eligibleSalonIds.size > 0) });
+    result.set(barberId, buildPublicBarberReadiness({
+      barber,
+      profile: profilesById.get(barberId),
+      personalSchedule: schedulesById.get(barberId),
+      activeServices: activeIds.has(barberId) ? [{ barberId }] : [],
+    }));
   }
   return result;
 };

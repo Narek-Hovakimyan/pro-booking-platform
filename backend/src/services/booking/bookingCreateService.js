@@ -1,6 +1,5 @@
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
-import Service from "../../models/Service.js";
 import { calculateDeposit } from "../../controllers/depositSettingsController.js";
 import { createNotification } from "../../controllers/notificationController.js";
 import {
@@ -29,9 +28,12 @@ import {
 } from "../../utils/bookingSlotValidation.js";
 import { emitBookingUpdated } from "./bookingSideEffectsService.js";
 import {
-  resolveBookingSalon,
   getClientName,
 } from "./bookingControllerHelpers.js";
+import {
+  normalizeScopedBookingReadinessIds,
+  resolveScopedBookingReadiness,
+} from "./bookingReadinessService.js";
 
 export const createBookingService = async ({
   body,
@@ -41,9 +43,9 @@ export const createBookingService = async ({
 }) => {
   const cleanup = cleanupReferenceImagesOnError;
   const {
-    barberId,
+    barberId: requestedBarberId,
     clientId,
-    serviceId,
+    serviceId: requestedServiceId,
     dayKey,
     bookingDate,
     time,
@@ -69,7 +71,7 @@ export const createBookingService = async ({
     };
   }
 
-  if (!barberId || !serviceId || (!isManualBooking && !clientId)) {
+  if (!requestedBarberId || !requestedServiceId || (!isManualBooking && !clientId)) {
     cleanup();
     return {
       status: 400,
@@ -77,7 +79,7 @@ export const createBookingService = async ({
     };
   }
 
-  if (!barberId || !bookingDate || !time) {
+  if (!requestedBarberId || !bookingDate || !time) {
     cleanup();
     return {
       status: 400,
@@ -103,7 +105,7 @@ export const createBookingService = async ({
 
   if (
     isManualBooking &&
-    (user?.role !== "barber" || String(user.id) !== String(barberId))
+    (user?.role !== "barber" || String(user.id) !== String(requestedBarberId))
   ) {
     cleanup();
     return {
@@ -112,24 +114,22 @@ export const createBookingService = async ({
     };
   }
 
-  const salonResolution = await resolveBookingSalon({
-    barberId,
+  const normalizedIds = normalizeScopedBookingReadinessIds({
+    barberId: requestedBarberId,
+    serviceId: requestedServiceId,
     salonId: body.salonId,
   });
-
-  if (salonResolution.message) {
+  if (normalizedIds.body) {
     cleanup();
-    return {
-      status: 400,
-      body: { message: salonResolution.message },
-    };
+    return normalizedIds;
   }
+  const { barberId, serviceId, salonId } = normalizedIds;
 
   // Block booking creation for unpaid barbers in the selected salon context.
-  const hasExplicitSalonContext = Boolean(body.salonId);
+  const hasExplicitSalonContext = salonId !== null;
   const barberPaidAccess = hasExplicitSalonContext
-    ? await barberHasPaidSeatAccessForSalon(barberId, salonResolution.salonId)
-    : await barberHasPaidAccessForSalon(barberId, salonResolution.salonId);
+    ? await barberHasPaidSeatAccessForSalon(barberId, salonId)
+    : await barberHasPaidAccessForSalon(barberId, null);
   if (!barberPaidAccess) {
     cleanup();
     return {
@@ -141,22 +141,26 @@ export const createBookingService = async ({
     };
   }
 
-  const service = await Service.findOne({ _id: serviceId, barberId, active: true });
+  const bookingReadiness = await resolveScopedBookingReadiness({
+    barberId,
+    salonId,
+    serviceId,
+  });
 
-  if (!service) {
+  if (bookingReadiness.body) {
     cleanup();
-    return {
-      status: 400,
-      body: { message: "Service is not available for this barber" },
-    };
+    return bookingReadiness;
   }
 
+  const service = bookingReadiness.service;
   const bookingDuration = Number(service.duration);
 
   const slotValidation = await validateBookingSlot({
     barberId,
-    salonId: salonResolution.salonId,
-    barber: salonResolution.barber,
+    salonId: bookingReadiness.salonId,
+    barber: bookingReadiness.barber,
+    schedule: bookingReadiness.schedule,
+    requireResolvedSchedule: true,
     bookingDate,
     dayKey,
     time,
@@ -175,8 +179,10 @@ export const createBookingService = async ({
   const createResult = await withBookingCreationLock(lockKey, async () => {
     const latestSlotValidation = await validateBookingSlot({
       barberId,
-      salonId: salonResolution.salonId,
-      barber: salonResolution.barber,
+      salonId: bookingReadiness.salonId,
+      barber: bookingReadiness.barber,
+      schedule: bookingReadiness.schedule,
+      requireResolvedSchedule: true,
       bookingDate,
       dayKey,
       time,
@@ -193,12 +199,12 @@ export const createBookingService = async ({
     let pricing;
     try {
       pricing = await buildBookingPricing({
-        barber: salonResolution.barber,
+        barber: bookingReadiness.barber,
         barberId,
         clientId: isManualBooking ? null : clientId,
         service,
         serviceId,
-        salonId: salonResolution.salonId,
+        salonId: bookingReadiness.salonId,
         voucherCode: rawVoucherCode,
         claimVoucher: Boolean(rawVoucherCode),
       });
@@ -241,7 +247,7 @@ export const createBookingService = async ({
         isManualBooking,
         note: body.note,
         referenceImages,
-        salonId: salonResolution.salonId,
+        salonId: bookingReadiness.salonId,
         bookingDate,
         time,
         dayKey: latestSlotValidation.effectiveDayKey,
