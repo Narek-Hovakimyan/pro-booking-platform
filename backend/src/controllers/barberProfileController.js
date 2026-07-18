@@ -2,7 +2,6 @@ import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Review from "../models/Review.js";
 import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
 import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 import User from "../models/User.js";
 import { createCrudController } from "./crudController.js";
@@ -26,6 +25,10 @@ import {
   SelfBarberProfileMutationError,
 } from "../services/barber/selfBarberProfileMutationService.js";
 import { getPublicBarberReadiness, getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
+import {
+  getPublicAvailabilitySchedule,
+  getPublicAvailabilityScheduleMaps,
+} from "../services/barber/publicAvailabilityContextService.js";
 
 const genericBarberProfileController = createCrudController(
   BarberProfile,
@@ -53,14 +56,6 @@ export const barberProfileController = {
       return sendControllerError(res, error, "Could not fetch Barber profile");
     }
   },
-};
-
-const defaultScheduleFallback = {
-  startTime: "09:00",
-  endTime: "18:00",
-  hasBreak: false,
-  breakStart: "",
-  breakEnd: "",
 };
 
 const getIdString = (value) => {
@@ -177,34 +172,6 @@ const getApprovedSalonEntries = (barber, salonsById, eligibleSalonIds = new Set(
   return entries;
 };
 
-const getMainScheduleForBarber = ({ barber, profile, schedules }) => {
-  const approvedSalons = (barber?.salons || []).filter(
-    (entry) => entry?.status === "approved"
-  );
-  const primaryEntry =
-    approvedSalons.find((entry) => entry.isPrimary) || approvedSalons[0];
-  const primarySalonId = getIdString(primaryEntry?.salon);
-  const schedule =
-    schedules.find((item) => getIdString(item?.salonId) === primarySalonId) ||
-    schedules[0] ||
-    {};
-
-  return {
-    ...normalizeForResponse(schedule),
-    barberId: getIdString(barber?._id),
-    weeklySchedule: schedule?.weeklySchedule || {},
-    dateSchedules: schedule?.dateSchedules || {},
-    scheduleOverrides: schedule?.scheduleOverrides || {},
-    nonWorkingDays: schedule?.nonWorkingDays || [],
-    defaultSchedule: {
-      ...defaultScheduleFallback,
-      ...(schedule?.defaultSchedule || {}),
-      ...(primaryEntry?.defaultSchedule || {}),
-      ...(profile?.defaultSchedule || {}),
-    },
-  };
-};
-
 export const getBarberCardSummary = async (req, res) => {
   try {
     const selectedServiceName = normalizeSearchValue(req.query?.serviceName);
@@ -253,7 +220,6 @@ export const getBarberCardSummary = async (req, res) => {
       services,
       reviews,
       bookings,
-      schedules,
     ] = await Promise.all([
       chainToArray(BarberProfile.find({ barberId: { $in: barberIds } })),
       chainToArray(Salon.find({ _id: { $in: [...allSalonIds] } })),
@@ -271,8 +237,12 @@ export const getBarberCardSummary = async (req, res) => {
           $or: [{ bookingDate: todayKey }, { dayKey: todayKey }],
         })
       ),
-      chainToArray(Schedule.find({ barberId: { $in: barberIds }, salonId: { $ne: null } })),
     ]);
+    const schedulesByBarberId = await getPublicAvailabilityScheduleMaps({
+      barbers: readyBarbers,
+      readinessByBarberId,
+      includeIndependent: true,
+    });
     const profilesByBarberId = new Map(
       profiles.map((profile) => [getIdString(profile.barberId), profile])
     );
@@ -281,7 +251,6 @@ export const getBarberCardSummary = async (req, res) => {
     );
     const servicesByBarberId = groupByBarberId(services);
     const bookingsByBarberId = groupByBarberId(bookings);
-    const schedulesByBarberId = groupByBarberId(schedules);
     const reviewStatsByBarberId = getReviewStatsByBarberId(reviews);
     const responseBarbers = [];
     const responseServices = [];
@@ -314,22 +283,36 @@ export const getBarberCardSummary = async (req, res) => {
         ? matchingServices
         : barberServices;
       const barberBookings = bookingsByBarberId.get(barberId) || [];
-      const barberSchedules = schedulesByBarberId.get(barberId) || [];
-      const mainSchedule = getMainScheduleForBarber({
-        barber,
-        profile,
-        schedules: barberSchedules,
-      });
-      const schedulesBySalonId = new Map(
-        barberSchedules.map((schedule) => [
-          getIdString(schedule.salonId),
-          normalizeForResponse(schedule),
-        ])
-      );
+      const barberScheduleMap = schedulesByBarberId.get(barberId) || new Map();
+      const availabilityContexts = [];
+
+      if (readiness?.independentReady) {
+        const independentSchedule = getPublicAvailabilitySchedule(barberScheduleMap, null);
+        if (independentSchedule) {
+          availabilityContexts.push({
+            salonId: null,
+            salonName: "",
+            schedule: independentSchedule,
+          });
+        }
+      }
+
+      for (const approvedSalon of approvedSalons) {
+        const salonSchedule = getPublicAvailabilitySchedule(
+          barberScheduleMap,
+          approvedSalon.id
+        );
+        if (!salonSchedule) continue;
+
+        availabilityContexts.push({
+          salonId: approvedSalon.id,
+          salonName: approvedSalon.name || "",
+          schedule: salonSchedule,
+        });
+      }
+
       const availability = getTodayFirstAvailableSlot({
-        salons: approvedSalons,
-        schedulesBySalonId,
-        fallbackSchedule: mainSchedule,
+        contexts: availabilityContexts,
         services: availabilityServices,
         bookings: barberBookings,
       });

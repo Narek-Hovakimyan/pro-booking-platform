@@ -604,3 +604,84 @@ test("multi‑salon: no availability in any salon returns no-availability-today"
   assert.equal(result.firstAvailableSlot, null);
   assert.equal(result.reason, "no-availability-today");
 });
+
+test("exact contexts use override hours and breaks without fallback", () => {
+  const result = getTodayFirstAvailableSlot({
+    contexts: [
+      {
+        salonId: "salon-a",
+        salonName: "Salon A",
+        schedule: {
+          weeklySchedule: {},
+          scheduleOverrides: {
+            [dateKey]: {
+              isWorking: true,
+              startTime: "10:10",
+              endTime: "12:00",
+              breakStart: "10:30",
+              breakEnd: "10:40",
+            },
+          },
+          nonWorkingDays: [],
+        },
+      },
+    ],
+    services: [makeService(21)],
+    bookings: [],
+    now,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.firstAvailableSlot.time, "10:40");
+  assert.equal(result.firstAvailableSlot.salonId, "salon-a");
+});
+
+test("exact contexts honor non-working days and return no availability today", () => {
+  const result = getTodayFirstAvailableSlot({
+    contexts: [
+      {
+        salonId: null,
+        salonName: "",
+        schedule: {
+          weeklySchedule: {
+            mon: { working: true, from: "09:00", to: "12:00", breakFrom: "", breakTo: "" },
+          },
+          nonWorkingDays: [dateKey],
+        },
+      },
+    ],
+    services: [service],
+    bookings: [],
+    now,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.firstAvailableSlot, null);
+  assert.equal(result.reason, "no-availability-today");
+});
+
+test("exact contexts ignore default-only schedules and cross-context fallback", () => {
+  const result = getTodayFirstAvailableSlot({
+    contexts: [
+      {
+        salonId: "salon-a",
+        salonName: "Salon A",
+        schedule: {
+          weeklySchedule: {},
+          defaultSchedule: {
+            startTime: "09:00",
+            endTime: "18:00",
+            hasBreak: false,
+          },
+        },
+      },
+    ],
+    services: [service],
+    bookings: [],
+    now,
+  });
+
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.firstAvailableSlot, null);
+  assert.equal(result.reason, "schedule-unavailable");
+});

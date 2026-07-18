@@ -6,6 +6,7 @@ import {
 } from "./bookingDateTime.js";
 import {
   blockingBookingStatuses,
+  isMeaningfulWeeklyDay,
   getScheduleForDate,
   normalizeBookingStatus,
 } from "./bookingUtils.js";
@@ -120,6 +121,58 @@ const getSalonName = (salonEntry) => {
   return salonEntry.name || "Salon";
 };
 
+const getContextHoursForDate = (schedule, dateKey) => {
+  const normalizedSchedule = normalizeScheduleForAvailability(schedule);
+  if (!normalizedSchedule) return null;
+
+  const override = normalizedSchedule.scheduleOverrides?.[dateKey];
+  if (override) {
+    if (!override.isWorking) return null;
+
+    return {
+      startTime: override.startTime || "",
+      endTime: override.endTime || "",
+      hasBreak: Boolean(override.breakStart && override.breakEnd),
+      breakStart: override.breakStart || "",
+      breakEnd: override.breakEnd || "",
+    };
+  }
+
+  if ((normalizedSchedule.nonWorkingDays || []).includes(dateKey)) {
+    return null;
+  }
+
+  const weeklyDay = normalizedSchedule.weeklySchedule?.[getDayKeyFromDate(dateKey)];
+  if (weeklyDay?.working === false || !isMeaningfulWeeklyDay(weeklyDay)) {
+    return null;
+  }
+
+  return {
+    startTime: weeklyDay.from || "",
+    endTime: weeklyDay.to || "",
+    hasBreak: Boolean(weeklyDay.breakFrom && weeklyDay.breakTo),
+    breakStart: weeklyDay.breakFrom || "",
+    breakEnd: weeklyDay.breakTo || "",
+  };
+};
+
+const hasExactScheduleSource = (schedule) => {
+  const normalizedSchedule = normalizeScheduleForAvailability(schedule);
+  if (!normalizedSchedule) return false;
+
+  if (Object.keys(normalizedSchedule.scheduleOverrides || {}).length > 0) {
+    return true;
+  }
+
+  if ((normalizedSchedule.nonWorkingDays || []).length > 0) {
+    return true;
+  }
+
+  return Object.values(normalizedSchedule.weeklySchedule || {}).some(
+    (day) => day?.working === false || isMeaningfulWeeklyDay(day)
+  );
+};
+
 const findSlotForDate = ({ hours, dateKey, nowTime, duration, bookings }) => {
   const startMin = timeToMinutes(hours.startTime);
   const endMin = timeToMinutes(hours.endTime);
@@ -164,6 +217,7 @@ const findSlotForDate = ({ hours, dateKey, nowTime, duration, bookings }) => {
 };
 
 export function getTodayFirstAvailableSlot({
+  contexts = null,
   salons = [],
   schedulesBySalonId = new Map(),
   fallbackSchedule = {},
@@ -185,14 +239,61 @@ export function getTodayFirstAvailableSlot({
     return { status: "ready", firstAvailableSlot: null, reason: "no-services" };
   }
 
-  if (!Array.isArray(salons) || salons.length === 0) {
-    return { status: "unavailable", firstAvailableSlot: null, reason: "schedule-unavailable" };
-  }
-
   const duration = Math.min(...durations);
   const todayKey = getArmeniaDateKey(now);
   const armeniaMinutes = getArmeniaMinutesOfDay(now);
   const nowTime = `${String(Math.floor(armeniaMinutes / 60)).padStart(2, "0")}:${String(armeniaMinutes % 60).padStart(2, "0")}`;
+
+  if (Array.isArray(contexts)) {
+    if (contexts.length === 0) {
+      return { status: "unavailable", firstAvailableSlot: null, reason: "schedule-unavailable" };
+    }
+
+    let bestSlot = null;
+    let bestIndex = -1;
+    let hasExactSchedule = false;
+
+    for (let i = 0; i < contexts.length; i += 1) {
+      const context = contexts[i];
+      if (hasExactScheduleSource(context?.schedule)) {
+        hasExactSchedule = true;
+      }
+
+      const hours = getContextHoursForDate(context?.schedule, todayKey);
+      if (!hours) continue;
+
+      const time = findSlotForDate({
+        hours,
+        dateKey: todayKey,
+        nowTime,
+        duration,
+        bookings,
+      });
+      if (!time) continue;
+
+      if (!bestSlot || time < bestSlot.time || (time === bestSlot.time && i < bestIndex)) {
+        bestSlot = {
+          dateKey: todayKey,
+          time,
+          salonId: context?.salonId ?? null,
+          salonName: context?.salonName || "",
+        };
+        bestIndex = i;
+      }
+    }
+
+    if (bestSlot) {
+      return { status: "ready", firstAvailableSlot: bestSlot, reason: "available" };
+    }
+
+    return hasExactSchedule
+      ? { status: "ready", firstAvailableSlot: null, reason: "no-availability-today" }
+      : { status: "unavailable", firstAvailableSlot: null, reason: "schedule-unavailable" };
+  }
+
+  if (!Array.isArray(salons) || salons.length === 0) {
+    return { status: "unavailable", firstAvailableSlot: null, reason: "schedule-unavailable" };
+  }
 
   // Search ALL salons, track earliest slot across them
   let bestSlot = null;

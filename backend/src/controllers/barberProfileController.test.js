@@ -22,6 +22,7 @@ import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
+import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
 
 const originalMethods = {
@@ -120,6 +121,24 @@ const createFindChain = (result) => ({
 const workingSchedule = (barberId) => ({
   barberId,
   weeklySchedule: createCanonicalPersonalSchedule().weeklySchedule,
+});
+
+const todayKey = getArmeniaDateKey(new Date());
+
+const readyAvailabilitySchedule = (barberId, salonId = null) => ({
+  barberId,
+  salonId,
+  weeklySchedule: createCanonicalPersonalSchedule().weeklySchedule,
+  scheduleOverrides: {
+    [todayKey]: {
+      isWorking: true,
+      startTime: "00:00",
+      endTime: "23:59",
+      breakStart: "",
+      breakEnd: "",
+    },
+  },
+  nonWorkingDays: [],
 });
 
 const mockPaidAccessForAllBarbers = (barberIds) => {
@@ -365,11 +384,12 @@ test("card summary returns barber card data without per-barber requests", async 
     if (query?.salonId === null) {
       return createFindChain([]);
     }
+
     assert.deepEqual(query, {
       barberId: { $in: [barberId] },
-      salonId: { $ne: null },
+      salonId: { $in: [salonId] },
     });
-    return createFindChain([]);
+    return createFindChain([readyAvailabilitySchedule(barberId, salonId)]);
   };
   mockPaidAccessForAllBarbers([barberId]);
 
@@ -461,7 +481,9 @@ test("card summary keeps independent-ready barber visible without salon associat
   Review.find = () => createFindChain([]);
   Booking.find = () => createFindChain([]);
   Schedule.find = (query) => {
-    if (query?.salonId === null) return createFindChain([workingSchedule(barberId)]);
+    if (query?.salonId === null) {
+      return createFindChain([readyAvailabilitySchedule(barberId, null)]);
+    }
     return createFindChain([]);
   };
   mockPaidAccessForAllBarbers([barberId]);
@@ -473,6 +495,92 @@ test("card summary keeps independent-ready barber visible without salon associat
   assert.deepEqual(res.body.barbers[0].approvedSalons, []);
   assert.deepEqual(res.body.barbers[0].salons, []);
   assert.equal(res.body.barbers[0].salon, null);
+  assert.equal(res.body.availability[0].status, "ready");
+  assert.equal(res.body.availability[0].firstAvailableSlot?.salonId, null);
+});
+
+test("card summary marks barber unavailable when exact independent and salon schedules are missing", async () => {
+  const res = createResponse();
+  const barberId = "64b000000000000000001013";
+  const salonId = "64b000000000000000001014";
+
+  User.find = () => createFindChain([
+    {
+      _id: barberId,
+      name: "Hybrid Barber",
+      role: "barber",
+      salons: [
+        { salon: salonId, status: "approved", worksAsSpecialist: true, isPrimary: true },
+      ],
+    },
+  ]);
+  BarberProfile.find = () => createFindChain([{ barberId, address: "Hybrid Street 1" }]);
+  Salon.find = () => createFindChain([{ _id: salonId, name: "Eligible Salon", toObject() { return { _id: salonId, name: "Eligible Salon" }; } }]);
+  Service.find = () => createFindChain([{ _id: "service-1", barberId, active: true, duration: 20 }]);
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([]);
+  mockPaidAccessForAllBarbers([barberId]);
+
+  await getBarberCardSummary({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.availability[0].status, "unavailable");
+  assert.equal(res.body.availability[0].firstAvailableSlot, null);
+  assert.equal(res.body.barbers[0].approvedSalons.length, 1);
+});
+
+test("card summary exact contexts ignore default fallback and preserve privacy shape", async () => {
+  const res = createResponse();
+  const barberId = "64b000000000000000001015";
+  const salonId = "64b000000000000000001016";
+
+  User.find = () => createFindChain([
+    {
+      _id: barberId,
+      name: "Scoped Availability Barber",
+      role: "barber",
+      salons: [
+        {
+          salon: salonId,
+          status: "approved",
+          worksAsSpecialist: true,
+          isPrimary: true,
+          defaultSchedule: {
+            startTime: "00:00",
+            endTime: "23:59",
+            hasBreak: false,
+          },
+        },
+      ],
+    },
+  ]);
+  BarberProfile.find = () => createFindChain([{ barberId, address: "Scoped Street 1", phone: "private" }]);
+  Salon.find = () => createFindChain([{ _id: salonId, name: "Scoped Salon", toObject() { return { _id: salonId, name: "Scoped Salon" }; } }]);
+  Service.find = () => createFindChain([{ _id: "service-1", barberId, active: true, duration: 20 }]);
+  Review.find = () => createFindChain([]);
+  Booking.find = () => createFindChain([]);
+  Schedule.find = () => createFindChain([
+    {
+      barberId,
+      salonId,
+      weeklySchedule: {},
+      defaultSchedule: {
+        startTime: "00:00",
+        endTime: "23:59",
+        hasBreak: false,
+      },
+    },
+  ]);
+  mockPaidAccessForAllBarbers([barberId]);
+
+  await getBarberCardSummary({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.availability[0].status, "unavailable");
+  assert.equal(res.body.availability[0].firstAvailableSlot, null);
+  assert.equal(res.body.barbers[0].address, undefined);
+  assert.equal(res.body.barbers[0].phone, undefined);
 });
 
 test("card summary filters specialists by active service category and tags", async () => {

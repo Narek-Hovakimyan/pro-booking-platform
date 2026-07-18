@@ -11,8 +11,11 @@ import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import { getIdString } from "../utils/bookingUtils.js";
 import { sendControllerError } from "../utils/controllerError.js";
-import { defaultScheduleFallback } from "../utils/scheduleUtils.js";
 import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
+import {
+  getPublicAvailabilitySchedule,
+  getPublicAvailabilityScheduleMaps,
+} from "../services/barber/publicAvailabilityContextService.js";
 
 const asPlainObject = (doc) => doc?.toObject?.() || doc || {};
 let getPaidAccessByBarberIdsForPublicBooking = getPaidAccessByBarberIdsForSalon;
@@ -127,7 +130,7 @@ export const getPublicSalonBooking = async (req, res) => {
     const paidBarberIds = paidBarbers.map((barber) => barber._id).filter(Boolean);
     const todayKey = getArmeniaDateKey(new Date());
 
-    const [profiles, services, schedules, todayBookings] = await Promise.all([
+    const [profiles, services, todayBookings] = await Promise.all([
       BarberProfile.find({
         barberId: { $in: paidBarberIds },
       }),
@@ -135,21 +138,19 @@ export const getPublicSalonBooking = async (req, res) => {
         barberId: { $in: paidBarberIds },
         active: true,
       }).lean(),
-      Schedule.find({
-        barberId: { $in: paidBarberIds },
-        salonId: salon._id,
-      }),
       Booking.find({
         barberId: { $in: paidBarberIds },
         $or: [{ bookingDate: todayKey }, { dayKey: todayKey }],
       }),
     ]);
+    const schedulesByBarberId = await getPublicAvailabilityScheduleMaps({
+      barbers: paidBarbers,
+      readinessByBarberId,
+      exactSalonId: salon._id,
+    });
 
     const profilesByBarberId = new Map(
       profiles.map((profile) => [String(profile.barberId), profile])
-    );
-    const schedulesByBarberId = new Map(
-      schedules.map((schedule) => [String(schedule.barberId), asPlainObject(schedule)])
     );
     const bookingsByBarberId = new Map();
     for (const booking of todayBookings) {
@@ -172,24 +173,18 @@ export const getPublicSalonBooking = async (req, res) => {
       const profile = profilesByBarberId.get(String(barber._id));
       const approvedSalonEntry = getApprovedSalonEntry(barber, salon._id, salon);
       const barberServices = servicesByBarberId.get(String(barber._id)) || [];
-      const schedule = schedulesByBarberId.get(String(barber._id)) || null;
+      const schedule = getPublicAvailabilitySchedule(
+        schedulesByBarberId.get(String(barber._id)),
+        salon._id
+      );
       const availability = getTodayFirstAvailableSlot({
-        salons: approvedSalonEntry ? [approvedSalonEntry] : [],
-        schedulesBySalonId: new Map(
-          schedule ? [[String(salon._id), schedule]] : []
-        ),
-        fallbackSchedule: {
-          weeklySchedule: schedule?.weeklySchedule || {},
-          dateSchedules: schedule?.dateSchedules || {},
-          scheduleOverrides: schedule?.scheduleOverrides || {},
-          nonWorkingDays: schedule?.nonWorkingDays || [],
-          defaultSchedule: {
-            ...defaultScheduleFallback,
-            ...(approvedSalonEntry?.defaultSchedule || {}),
-            ...(profile?.defaultSchedule || {}),
-            ...(schedule?.defaultSchedule || {}),
-          },
-        },
+        contexts: schedule && approvedSalonEntry
+          ? [{
+              salonId: String(salon._id),
+              salonName: salon.name || "",
+              schedule,
+            }]
+          : [],
         services: barberServices,
         bookings: bookingsByBarberId.get(String(barber._id)) || [],
       });

@@ -7,6 +7,7 @@ import Salon from "../models/Salon.js";
 import Schedule from "../models/Schedule.js";
 import Service from "../models/Service.js";
 import User from "../models/User.js";
+import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import {
   __publicSalonBookingTestHooks,
   getPublicSalonBooking,
@@ -80,6 +81,23 @@ const makeBarber = (id, overrides = {}) => ({
 
 let paidAccessMap = new Map();
 let reviewStatsMap = new Map();
+const todayKey = getArmeniaDateKey(new Date());
+
+const readyAvailabilitySchedule = (barberId, scopedSalonId = salonId) => ({
+  barberId,
+  salonId: scopedSalonId,
+  weeklySchedule: {},
+  scheduleOverrides: {
+    [todayKey]: {
+      isWorking: true,
+      startTime: "00:00",
+      endTime: "23:59",
+      breakStart: "",
+      breakEnd: "",
+    },
+  },
+  nonWorkingDays: [],
+});
 
 afterEach(() => {
   paidAccessMap = new Map();
@@ -128,7 +146,7 @@ test("public booking data returns paid approved staff barber", async () => {
       userSelectFields.push(fields);
     });
   BarberProfile.find = async () => [];
-  Schedule.find = async () => [];
+  Schedule.find = async () => [readyAvailabilitySchedule(paidStaffBarberId)];
   Booking.find = async () => [];
   paidAccessMap = new Map([[String(paidStaffBarberId), true]]);
   Service.find = () =>
@@ -162,6 +180,55 @@ test("public booking data returns paid approved staff barber", async () => {
   assert.equal(res.body.barbers[0].services.length, 1);
   assert.equal(res.body.services.length, 1);
   assert.equal(res.body.services[0].name, "Haircut");
+});
+
+test("public booking marks specialist unavailable when exact salon schedule is missing", async () => {
+  const res = createResponse();
+
+  __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
+    async () => paidAccessMap
+  );
+  __publicSalonBookingTestHooks.setGetSalonReviewStats(
+    async () => reviewStatsMap
+  );
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    name: "Test Salon",
+    city: "Yerevan",
+    address: "Main 1",
+    phone: "+3741000000",
+    imageUrl: "/uploads/salon.jpg",
+  });
+  User.find = () => makeFindChain([makeBarber(paidStaffBarberId)]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Booking.find = async () => [];
+  paidAccessMap = new Map([[String(paidStaffBarberId), true]]);
+  Service.find = () =>
+    makeLeanQuery([
+      {
+        _id: "srv1",
+        barberId: paidStaffBarberId,
+        name: "Haircut",
+        price: 3000,
+        duration: 30,
+        description: "",
+        category: "haircut",
+        tags: [],
+        type: "single",
+        discountType: "none",
+        discountValue: 0,
+        active: true,
+      },
+    ]);
+
+  await getPublicSalonBooking({ params: { salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.barbers.length, 1);
+  assert.equal(res.body.barbers[0].availabilityStatus, "unavailable");
+  assert.equal(res.body.barbers[0].firstAvailableSlot, null);
 });
 
 test("returns paid approved chair_renter barber publicly", async () => {
