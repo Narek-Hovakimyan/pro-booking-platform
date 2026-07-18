@@ -64,13 +64,15 @@ export default function Header() {
   const moreMenuRef = useRef(null);
   const isClient = currentUser?.role === "client";
   const isBarber = currentUser?.role === "barber";
+  const isBarberOnboarding = isAuthenticated && isBarber && pathname === "/onboarding";
+  const showBarberChrome = isAuthenticated && isBarber && !isBarberOnboarding;
   const isPlatformAdmin = canAccessPlatform(currentUser);
   const currentUserId = currentUser?.id || currentUser?._id;
   const canShowManageHiring =
-    isAuthenticated && isBarber && Boolean(currentUserId) && Boolean(token) && canManageSalon;
+    showBarberChrome && Boolean(currentUserId) && Boolean(token) && canManageSalon;
 
   useEffect(() => {
-    if (!isAuthenticated || !isBarber || !currentUserId || !token) {
+    if (!showBarberChrome || !currentUserId || !token) {
       let isMounted = true;
 
       queueMicrotask(() => {
@@ -101,7 +103,7 @@ export default function Header() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser?._id, currentUser?.id, currentUserId, isAuthenticated, isBarber, token]);
+  }, [currentUser?._id, currentUser?.id, currentUserId, showBarberChrome, token]);
 
   // Primary barber nav items (visible in top bar)
   const barberNavItems = [
@@ -312,7 +314,7 @@ export default function Header() {
         </Link>
 
         {/* ─── Center: Nav (Desktop) ─── */}
-        {isAuthenticated && isBarber && (
+        {showBarberChrome && (
           <nav className="hidden items-center gap-0.5 lg:flex">
             {barberNavItems.map((item) => (
               <Link
@@ -376,17 +378,27 @@ export default function Header() {
 
           {isAuthenticated && (
             <>
-              {renderAlertIcon()}
-              {renderMessageIcon()}
+              {isBarberOnboarding ? (
+                <button
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-300 transition hover:bg-white/10 hover:text-white"
+                  onClick={logout}
+                  type="button"
+                >
+                  {t("nav.logout")}
+                </button>
+              ) : (
+                <>
+                  {renderAlertIcon()}
+                  {renderMessageIcon()}
 
-              {/* User initials */}
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-700 text-[11px] font-bold text-white sm:h-8 sm:w-8 sm:text-xs">
-                {userInitials}
-              </div>
+                  {/* User initials */}
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-700 text-[11px] font-bold text-white sm:h-8 sm:w-8 sm:text-xs">
+                    {userInitials}
+                  </div>
 
-              {/* More menu (desktop) — barber or platform admin */}
-              {(isBarber || isPlatformAdmin) && (
-                <div className="relative" ref={moreMenuRef}>
+                  {/* More menu (desktop) — barber or platform admin */}
+                  {(isBarber || isPlatformAdmin) && (
+                    <div className="relative" ref={moreMenuRef}>
                   <button
                     className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
                     onClick={() => setIsMoreOpen((v) => !v)}
@@ -410,12 +422,12 @@ export default function Header() {
                     isPlatformAdmin={isPlatformAdmin}
                     showBusinessGroups={isBarber}
                   />
-                </div>
-              )}
+                    </div>
+                  )}
 
-              {/* Client simple dropdown */}
-              {isClient && !isPlatformAdmin && (
-                <div className="relative">
+                  {/* Client simple dropdown */}
+                  {isClient && !isPlatformAdmin && (
+                    <div className="relative">
                   <button
                     className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
                     onClick={() => setIsMoreOpen((v) => !v)}
@@ -440,7 +452,9 @@ export default function Header() {
                       </button>
                     </div>
                   )}
-                </div>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -471,7 +485,7 @@ export default function Header() {
           )}
 
           {/* Mobile menu toggle */}
-          {isAuthenticated && (
+          {isAuthenticated && !isBarberOnboarding && (
             <button
               className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-white/10 hover:text-white lg:hidden"
               onClick={() => setIsMobileMenuOpen((v) => !v)}
@@ -485,11 +499,11 @@ export default function Header() {
       </div>
 
       {/* ─── Mobile Navigation Drawer ─── */}
-      {isAuthenticated && isMobileMenuOpen && (
+      {isAuthenticated && !isBarberOnboarding && isMobileMenuOpen && (
         <div className="mt-3 border-t border-neutral-800 pt-3 lg:hidden">
           <nav className="flex flex-col gap-0.5">
             {/* Primary barber nav items first */}
-            {isBarber &&
+            {showBarberChrome &&
               barberNavItems.map((item) => (
                 <Link
                   key={item.to}
@@ -506,7 +520,7 @@ export default function Header() {
               ))}
 
             {/* Nested admin/account menu */}
-            {(isBarber || isPlatformAdmin) && (
+            {(showBarberChrome || isPlatformAdmin) && (
               <NestedHeaderMenu
                 variant="mobile"
                 isOpen

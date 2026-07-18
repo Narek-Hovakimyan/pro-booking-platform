@@ -45,9 +45,13 @@ export default function ProfileFormCard({
   onSaveProfile,
   onAvatarUploaded,
   editable = true,
+  variant = "full",
 }) {
+  const isBasicsVariant = variant === "basics";
   const headerDescription = editable
-    ? "Update the information clients see before booking."
+    ? isBasicsVariant
+      ? "Add the core details and private address used for onboarding readiness."
+      : "Update the information clients see before booking."
     : "Review the information clients see before booking.";
   const professionLabel =
     professionLabels[profile.profession || "barber"] || professionLabels.barber;
@@ -168,16 +172,18 @@ export default function ProfileFormCard({
             )}
           </div>
 
-          <label className="grid gap-2 text-sm font-semibold">
-            Bio
-            <textarea
-              className="min-h-28 w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-              disabled={isProfileSaving}
-              placeholder="Short introduction for clients"
-              value={profile.bio}
-              onChange={(event) => onUpdateField("bio", event.target.value)}
-            />
-          </label>
+          {!isBasicsVariant && (
+            <label className="grid gap-2 text-sm font-semibold">
+              Bio
+              <textarea
+                className="min-h-28 w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                disabled={isProfileSaving}
+                placeholder="Short introduction for clients"
+                value={profile.bio}
+                onChange={(event) => onUpdateField("bio", event.target.value)}
+              />
+            </label>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-semibold">
@@ -196,27 +202,30 @@ export default function ProfileFormCard({
               <input
                 className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 disabled={isProfileSaving}
-                placeholder="Address"
+                placeholder={isBasicsVariant ? "Private address" : "Address"}
                 value={profile.address}
                 onChange={(event) => onUpdateField("address", event.target.value)}
               />
             </label>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-semibold">
-              Instagram
-              <input
-                className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
-                placeholder="Instagram"
-                value={profile.instagram}
-                onChange={(event) => onUpdateField("instagram", event.target.value)}
-              />
-            </label>
-          </div>
+          {!isBasicsVariant && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm font-semibold">
+                Instagram
+                <input
+                  className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  disabled={isProfileSaving}
+                  placeholder="Instagram"
+                  value={profile.instagram}
+                  onChange={(event) => onUpdateField("instagram", event.target.value)}
+                />
+              </label>
+            </div>
+          )}
 
           {/* Upload photo block */}
+          {!isBasicsVariant && (
           <div className="grid gap-4 rounded-2xl border border-purple-100 bg-purple-50 p-4 sm:grid-cols-[112px_1fr] sm:items-center">
             {profile.imageUrl ? (
               <img
@@ -244,6 +253,7 @@ export default function ProfileFormCard({
               />
             </div>
           </div>
+          )}
 
           {saved && (
             <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">

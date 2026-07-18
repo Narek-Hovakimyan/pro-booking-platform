@@ -1,7 +1,7 @@
 const currentStepRoutes = Object.freeze({
   workplace: "/onboarding",
-  professional_basics: "/admin/profile",
-  personal_schedule: "/admin/schedule",
+  professional_basics: "/onboarding",
+  personal_schedule: "/onboarding",
   review: "/onboarding",
 });
 
@@ -12,7 +12,9 @@ export const isOnboardingComplete = (status) =>
   status?.needsOnboarding === false || status?.legacyCompatible === true;
 
 export const isRequiredOnboardingRoute = (pathname, status) =>
-  pathname === getOnboardingStepRoute(status?.state?.currentStep);
+  status?.needsOnboarding === true &&
+  !isOnboardingComplete(status) &&
+  pathname === "/onboarding";
 
 export const getBarberOnboardingRedirect = (pathname, status) => {
   if (!status || status.applicable === false) {
@@ -27,6 +29,5 @@ export const getBarberOnboardingRedirect = (pathname, status) => {
     return null;
   }
 
-  const requiredRoute = getOnboardingStepRoute(status.state?.currentStep);
-  return pathname === requiredRoute ? null : requiredRoute;
+  return "/onboarding";
 };

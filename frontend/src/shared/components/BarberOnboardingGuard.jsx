@@ -29,6 +29,7 @@ export const useBarberOnboardingGuard = () => useContext(BarberOnboardingContext
 export default function BarberOnboardingGuard({ children }) {
   const location = useLocation();
   const { currentUser } = useSelector((state) => state.auth);
+  const currentUserId = currentUser?.id || currentUser?._id || "";
   const requestIdRef = useRef(0);
   const [status, setStatus] = useState(null);
   const [checkedPath, setCheckedPath] = useState("");
@@ -58,7 +59,7 @@ export default function BarberOnboardingGuard({ children }) {
     return () => {
       requestIdRef.current += 1;
     };
-  }, [currentUser?.role, location.pathname]);
+  }, [currentUser?.role, currentUserId, location.pathname]);
 
   const contextValue = useMemo(
     () => ({

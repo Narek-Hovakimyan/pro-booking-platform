@@ -115,7 +115,11 @@ function validateWeeklySchedule(weeklySchedule) {
   return hasWorkingDay ? "" : "At least one working day is required.";
 }
 
-export default function PersonalScheduleView({ currentUserId }) {
+export default function PersonalScheduleView({
+  currentUserId,
+  embedded = false,
+  onStatusChange,
+}) {
   const navigate = useNavigate();
   const [weeklySchedule, setWeeklySchedule] = useState(() =>
     normalizeWeeklySchedule()
@@ -215,6 +219,11 @@ export default function PersonalScheduleView({ currentUserId }) {
       try {
         const onboardingStatus = await getMyBarberOnboarding();
         if (!isActiveRequest(token)) return;
+        if (embedded) {
+          onStatusChange?.(onboardingStatus);
+          return;
+        }
+
         const stepRoute = resolveNextRoute(onboardingStatus);
         if (stepRoute !== "/admin/schedule") {
           navigate(stepRoute);
