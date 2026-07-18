@@ -16,6 +16,7 @@ import {
 import { useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
+import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { formatDateKey } from "@/shared/utils/dates";
@@ -50,6 +51,11 @@ const hasApprovedSalonAccess = (statusData, currentUser) => {
     statusData?.salonStatus === "approved" ||
     currentUser?.salonStatus === "approved"
   );
+};
+
+const getSpecialistWorkplace = (statusData) => {
+  const workplace = statusData?.state?.workplace;
+  return ["independent", "salon", "both"].includes(workplace) ? workplace : null;
 };
 
 const getWeekBounds = () => {
@@ -134,14 +140,20 @@ export default function DashboardAnalytics({ bookings = [] }) {
   const [hasApprovedSalonMembership, setHasApprovedSalonMembership] = useState(false);
   const [manageableSalonLoading, setManageableSalonLoading] = useState(true);
   const [manageableSalonUserId, setManageableSalonUserId] = useState(null);
+  const [specialistWorkplace, setSpecialistWorkplace] = useState(null);
+  const [specialistWorkplaceLoadedFor, setSpecialistWorkplaceLoadedFor] = useState(null);
 
   const shouldCheckManageableSalons = currentUser?.role === "barber" && Boolean(currentUserId);
   const hasLoadedManageableSalonCount = !shouldCheckManageableSalons || manageableSalonUserId === currentUserId;
+  const hasLoadedSpecialistWorkplace = !shouldCheckManageableSalons || specialistWorkplaceLoadedFor === currentUserId;
+  const isSalonWorkplace = specialistWorkplace === "salon" || specialistWorkplace === "both";
   const hasMultipleManageableSalons =
     shouldCheckManageableSalons && hasLoadedManageableSalonCount && manageableSalonCount > 1;
   const shouldShowSalonOnboarding =
     shouldCheckManageableSalons &&
     hasLoadedManageableSalonCount &&
+    hasLoadedSpecialistWorkplace &&
+    isSalonWorkplace &&
     !manageableSalonLoading &&
     manageableSalonCount === 0 &&
     !hasApprovedSalonMembership;
@@ -383,12 +395,14 @@ export default function DashboardAnalytics({ bookings = [] }) {
     }
 
     let isMounted = true;
+    const requestedUserId = currentUserId;
 
     Promise.allSettled([
       api.get("/salons/mine/manageable"),
       api.get("/salons/me/status"),
+      getMyBarberOnboarding(),
     ])
-      .then(([manageableResult, statusResult]) => {
+      .then(([manageableResult, statusResult, onboardingResult]) => {
         if (isMounted) {
           const manageableData =
             manageableResult.status === "fulfilled"
@@ -396,12 +410,16 @@ export default function DashboardAnalytics({ bookings = [] }) {
               : [];
           const statusData =
             statusResult.status === "fulfilled" ? statusResult.value.data : {};
+          const onboardingData =
+            onboardingResult.status === "fulfilled" ? onboardingResult.value : null;
 
           setManageableSalonCount(getSalonList(manageableData).length);
           setHasApprovedSalonMembership(
             hasApprovedSalonAccess(statusData, currentUser)
           );
-          setManageableSalonUserId(currentUserId);
+          setSpecialistWorkplace(getSpecialistWorkplace(onboardingData));
+          setSpecialistWorkplaceLoadedFor(requestedUserId);
+          setManageableSalonUserId(requestedUserId);
         }
       })
       .catch(() => {
@@ -410,7 +428,9 @@ export default function DashboardAnalytics({ bookings = [] }) {
           setHasApprovedSalonMembership(
             hasApprovedSalonAccess({}, currentUser)
           );
-          setManageableSalonUserId(currentUserId);
+          setSpecialistWorkplace(null);
+          setSpecialistWorkplaceLoadedFor(requestedUserId);
+          setManageableSalonUserId(requestedUserId);
         }
       })
       .finally(() => {
@@ -525,13 +545,13 @@ export default function DashboardAnalytics({ bookings = [] }) {
                 </span>
                 <div>
                   <h2 className="text-base font-bold text-neutral-950">
-                    Set up your salon
+                    Connect your salon workspace
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">
-                    To manage bookings and schedule, create your salon or join an existing salon.
+                    Create your salon profile or join an existing salon to manage salon bookings and schedules.
                   </p>
                   <p className="mt-1 text-sm font-medium text-purple-700">
-                    After approval, schedule controls will appear automatically.
+                    Personal bookings and schedule remain available from your dashboard.
                   </p>
                 </div>
               </div>
