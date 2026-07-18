@@ -87,6 +87,15 @@ export default function ClientBooking({
     return salonData?.id || salonData?._id || "";
   };
   const getSalonName = (salonEntry) => getSalonData(salonEntry)?.name || "";
+  const normalizeBookingSalonId = (value) => {
+    if (value === undefined || value === null) return "";
+
+    const candidate = String(value).trim();
+    return /^[a-fA-F0-9]{24}$/.test(candidate) ? candidate : "";
+  };
+  const selectedBookingSalonId = normalizeBookingSalonId(externalSelectedSalonId);
+  const withSelectedSalonContext = (payload) =>
+    selectedBookingSalonId ? { ...payload, salonId: selectedBookingSalonId } : payload;
   const hasMultipleSalons = approvedSalons.length > 1;
   const primarySalon = barber?.primarySalon || approvedSalons.find((s) => s?.isPrimary) || approvedSalons[0];
   const selectedSalon = externalSelectedSalonId
@@ -280,13 +289,11 @@ export default function ClientBooking({
     setVoucherLoading(true);
     setVoucherError("");
     try {
-      const salonId = externalSelectedSalonId || getSalonId(selectedSalon) || "";
-      const { data } = await api.post("/vouchers/validate", {
+      const { data } = await api.post("/vouchers/validate", withSelectedSalonContext({
         code,
         barberId: selectedBarberId,
-        salonId,
         serviceId: selectedServiceEntityId,
-      });
+      }));
       if (data.valid) {
         setBookingQuote(null);
         setQuoteError("");
@@ -433,9 +440,7 @@ export default function ClientBooking({
     setError("");
 
     try {
-      const salonId = externalSelectedSalonId || getSalonId(selectedSalon) || "";
-
-      const bookingPayload = {
+      const bookingPayload = withSelectedSalonContext({
         barberId: selectedBarberId,
         clientId: currentUser.id || currentUser._id,
         serviceId: selectedServiceEntityId,
@@ -448,8 +453,7 @@ export default function ClientBooking({
         clientName: client.name,
         phone: client.phone,
         note: client.note,
-        salonId,
-      };
+      });
 
       if (referenceFiles.length > 0) {
         bookingPayload.files = referenceFiles;
@@ -537,16 +541,14 @@ export default function ClientBooking({
       setShowConfirmation(true);
       setIsQuoteLoading(true);
 
-      const salonId = externalSelectedSalonId || getSalonId(selectedSalon) || "";
-      const { data: quote } = await api.post("/bookings/quote", {
+      const { data: quote } = await api.post("/bookings/quote", withSelectedSalonContext({
         barberId: selectedBarberId,
         serviceId: selectedServiceEntityId,
-        salonId,
         bookingDate: selectedDate,
         dayKey: selectedDateDayKey,
         time: selectedTime,
         voucherCode: voucherCode || undefined,
-      });
+      }));
       setBookingQuote(quote);
     } catch (requestError) {
       const message =
@@ -861,7 +863,7 @@ export default function ClientBooking({
         {showWaitlistForm && selectedBarberId && selectedService && selectedDate && (
           <WaitlistForm
             barberId={selectedBarberId}
-            salonId={externalSelectedSalonId || getSalonId(selectedSalon) || ""}
+            salonId={selectedBookingSalonId}
             serviceId={selectedServiceEntityId}
             date={selectedDate}
             onClose={() => setShowWaitlistForm(false)}
