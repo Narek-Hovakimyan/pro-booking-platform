@@ -39,52 +39,96 @@ function StatusBadge({ type }) {
   );
 }
 
-const getSalonId = (salon) => salon?.id || salon?._id || salon;
+const SALON_ID_PATTERN = /^[a-f\d]{24}$/i;
+const SUPPORTED_STATUSES = new Set(["accepted", "pending", "rejected", "cancelled"]);
 
-const toState = ({ salonId, status, salon }) => ({
-  salonId: String(salonId || getSalonId(salon) || ""),
-  status,
-  salon: salon || {},
-});
+const isRecord = (value) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const normalizeSalonId = (value) => {
+  if (typeof value !== "string") return "";
+  const salonId = value.trim();
+  return SALON_ID_PATTERN.test(salonId) ? salonId : "";
+};
+
+const normalizeStatus = (value) => (
+  typeof value === "string" && SUPPORTED_STATUSES.has(value) ? value : ""
+);
+
+const getSalonId = (salon) => {
+  if (!isRecord(salon)) return "";
+  return normalizeSalonId(salon.id) || normalizeSalonId(salon._id);
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const toState = (entry) => {
+  if (!isRecord(entry)) return null;
+  const salon = isRecord(entry.salon) ? entry.salon : {};
+  const salonId = normalizeSalonId(entry.salonId) || getSalonId(salon);
+  const status = normalizeStatus(entry.status);
+  if (!salonId || !status) return null;
+  return {
+    salonId,
+    status,
+    salon,
+  };
+};
+
+const toCompatibilityState = (entry, impliedStatus, statusAliases = {}) => {
+  if (!isRecord(entry) || !SUPPORTED_STATUSES.has(impliedStatus)) return null;
+  const statusWasSupplied = Object.prototype.hasOwnProperty.call(entry, "status");
+  const aliasStatus =
+    statusWasSupplied &&
+    typeof entry.status === "string" &&
+    Object.prototype.hasOwnProperty.call(statusAliases, entry.status)
+      ? statusAliases[entry.status]
+      : "";
+  const status = statusWasSupplied
+    ? normalizeStatus(entry.status) || aliasStatus
+    : impliedStatus;
+  if (!status || status !== impliedStatus) return null;
+
+  const salon = isRecord(entry.salon) ? entry.salon : entry;
+  return toState({
+    salonId: normalizeSalonId(entry.salonId) || getSalonId(salon),
+    status,
+    salon,
+  });
+};
 
 const addState = (states, seen, state) => {
-  if (!state.salonId || seen.has(state.salonId)) return;
+  if (!state || !state.salonId || seen.has(state.salonId)) return;
   seen.add(state.salonId);
   states.push(state);
 };
 
-function getAuthoritativeStates(status = {}) {
-  if (Array.isArray(status.salonStates) && status.salonStates.length > 0) {
-    return status.salonStates
+function getAuthoritativeStates(status) {
+  const safeStatus = isRecord(status) ? status : {};
+  const salonStates = asArray(safeStatus.salonStates);
+
+  if (salonStates.length > 0) {
+    return salonStates
       .map((entry) => toState(entry))
-      .filter((entry) => entry.salonId && entry.status);
+      .filter((entry) => entry && entry.salonId && entry.status);
   }
 
   const states = [];
   const seen = new Set();
 
-  (status.salons || []).forEach((entry) => {
-    addState(states, seen, toState({
-      salonId: getSalonId(entry.salon),
-      status: entry.status || "accepted",
-      salon: entry.salon || entry,
-    }));
+  asArray(safeStatus.salons).filter(isRecord).forEach((entry) => {
+    addState(states, seen, toCompatibilityState(entry, "accepted", { approved: "accepted" }));
   });
 
-  (status.pendingEntries || []).forEach((entry) => {
-    addState(states, seen, toState({
-      salonId: getSalonId(entry.salon),
-      status: "pending",
-      salon: entry.salon || entry,
-    }));
+  asArray(safeStatus.pendingEntries).filter(isRecord).forEach((entry) => {
+    addState(states, seen, toCompatibilityState(entry, "pending"));
   });
 
-  if (status.pendingRequest) {
-    addState(states, seen, toState({
-      salonId: getSalonId(status.pendingRequest.salon),
-      status: "pending",
-      salon: status.pendingRequest.salon,
-    }));
+  if (isRecord(safeStatus.pendingRequest)) {
+    addState(states, seen, toCompatibilityState(safeStatus.pendingRequest, "pending"));
   }
 
   return states;
@@ -126,7 +170,7 @@ export default function SalonJoinView({ currentUserId }) {
       if (!isLoadActive(loadToken)) return false;
       if (actionToken !== null && !isActionActive(actionToken)) return false;
       setStatus(statusRes.data || {});
-      setSalons(salonsRes.data || []);
+      setSalons(asArray(salonsRes.data));
       return true;
     } catch {
       if (!isLoadActive(loadToken)) return false;
@@ -157,7 +201,7 @@ export default function SalonJoinView({ currentUserId }) {
 
         if (!isLoadActive(loadToken)) return;
         setStatus(statusRes.data || {});
-        setSalons(salonsRes.data || []);
+        setSalons(asArray(salonsRes.data));
       } catch {
         if (!isLoadActive(loadToken)) return;
         setError(ERR_MAP.load);
@@ -210,9 +254,10 @@ export default function SalonJoinView({ currentUserId }) {
   };
 
   const handleJoin = (salonId = selectedSalonId) => {
-    if (!salonId) return;
+    const normalizedSalonId = normalizeSalonId(salonId);
+    if (!normalizedSalonId) return;
     runAction({
-      action: () => requestJoinSalon(salonId),
+      action: () => requestJoinSalon(normalizedSalonId),
       errorKey: "join",
       successMessage: "Join request sent.",
       afterRefresh: () => setSelectedSalonId(""),
@@ -220,9 +265,10 @@ export default function SalonJoinView({ currentUserId }) {
   };
 
   const handleCancel = (salonId) => {
-    if (!salonId) return;
+    const normalizedSalonId = normalizeSalonId(salonId);
+    if (!normalizedSalonId) return;
     runAction({
-      action: () => cancelJoinRequestBySalon(salonId),
+      action: () => cancelJoinRequestBySalon(normalizedSalonId),
       errorKey: "cancel",
       successMessage: "Request cancelled.",
     });
@@ -234,10 +280,10 @@ export default function SalonJoinView({ currentUserId }) {
       .filter((entry) => entry.status === "accepted" || entry.status === "pending")
       .map((entry) => entry.salonId)
   );
-  const availableSalons = (salons || []).filter((salon) => {
-    const salonId = String(getSalonId(salon) || "");
-    return salonId && !blockedSalonIds.has(salonId);
-  });
+  const availableSalons = asArray(salons)
+    .filter(isRecord)
+    .map((salon) => ({ salon, salonId: getSalonId(salon) }))
+    .filter(({ salonId }) => salonId && !blockedSalonIds.has(salonId));
 
   if (loading && !status) {
     return <div className="p-4 text-sm text-neutral-500">Loading salon data...</div>;
@@ -308,11 +354,11 @@ export default function SalonJoinView({ currentUserId }) {
               className="rounded-2xl border border-neutral-200 bg-white p-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
               disabled={actionLoading}
               value={selectedSalonId}
-              onChange={(event) => setSelectedSalonId(event.target.value)}
+              onChange={(event) => setSelectedSalonId(normalizeSalonId(event.target.value))}
             >
               <option value="">Select salon</option>
-              {availableSalons.map((salon) => (
-                <option key={getSalonId(salon)} value={getSalonId(salon)}>
+              {availableSalons.map(({ salon, salonId }) => (
+                <option key={salonId} value={salonId}>
                   {salon.name}
                 </option>
               ))}
