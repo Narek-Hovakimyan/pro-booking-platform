@@ -83,6 +83,7 @@ export default function SalonSettingsSection({
   salonStatus = {},
   currentUserId,
   availableSalons = [],
+  hideJoinRequestControls = false,
   selectedSalonId = "",
   salonDraft = {},
   isSalonSaving,
@@ -117,8 +118,8 @@ export default function SalonSettingsSection({
   const hasRelationships =
     manageableEntries.length > 0 ||
     memberOnlyEntries.length > 0 ||
-    safePendingEntries.length > 0 ||
-    Boolean(safeSalonStatus.pendingRequest);
+    (!hideJoinRequestControls &&
+      (safePendingEntries.length > 0 || Boolean(safeSalonStatus.pendingRequest)));
   const createTitle = hasRelationships ? "Create another salon" : "Create my salon";
 
   return (
@@ -226,7 +227,7 @@ export default function SalonSettingsSection({
           )}
 
           {/* Pending requests */}
-          {safePendingEntries.length > 0 && (
+          {!hideJoinRequestControls && safePendingEntries.length > 0 && (
             <div className="space-y-3">
               <h4 className="font-semibold text-neutral-900">
                 Pending requests
@@ -275,7 +276,7 @@ export default function SalonSettingsSection({
           )}
 
           {/* Pending legacy request */}
-          {safeSalonStatus.pendingRequest && (
+          {!hideJoinRequestControls && safeSalonStatus.pendingRequest && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -321,58 +322,60 @@ export default function SalonSettingsSection({
         </div>
       )}
 
-      <section
-        className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5"
-        id="join-salon"
-      >
-        <div className="mb-4 flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-pink-50 text-pink-700">
-            <UserPlus className="h-5 w-5" />
-          </span>
-          <div>
-            <h3 className="text-lg font-bold text-neutral-950">Join existing salon</h3>
-            <p className="mt-1 text-sm leading-6 text-neutral-500">
-              Select a salon and send a request. Schedule access appears after approval.
-            </p>
+      {!hideJoinRequestControls && (
+        <section
+          className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5"
+          id="join-salon"
+        >
+          <div className="mb-4 flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-pink-50 text-pink-700">
+              <UserPlus className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-lg font-bold text-neutral-950">Join existing salon</h3>
+              <p className="mt-1 text-sm leading-6 text-neutral-500">
+                Select a salon and send a request. Schedule access appears after approval.
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <label className="grid gap-2 text-sm font-semibold text-neutral-800">
-            Salon
-            <select
-              className="rounded-2xl border border-neutral-200 bg-white p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-              disabled={isSalonSaving}
-              value={selectedSalonId}
-              onChange={(event) => onSelectedSalonChange(event.target.value)}
-            >
-              <option value="">Select salon</option>
-              {safeAvailableSalons.length === 0 ? (
-                <option disabled value="">
-                  No new salons available
-                </option>
-              ) : (
-                safeAvailableSalons.map((salon) => (
-                  <option
-                    key={salon.id || salon._id}
-                    value={salon.id || salon._id}
-                  >
-                    {salon.name}
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+            <label className="grid gap-2 text-sm font-semibold text-neutral-800">
+              Salon
+              <select
+                className="rounded-2xl border border-neutral-200 bg-white p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                disabled={isSalonSaving}
+                value={selectedSalonId}
+                onChange={(event) => onSelectedSalonChange(event.target.value)}
+              >
+                <option value="">Select salon</option>
+                {safeAvailableSalons.length === 0 ? (
+                  <option disabled value="">
+                    No new salons available
                   </option>
-                ))
-              )}
-            </select>
-          </label>
+                ) : (
+                  safeAvailableSalons.map((salon) => (
+                    <option
+                      key={salon.id || salon._id}
+                      value={salon.id || salon._id}
+                    >
+                      {salon.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
 
-          <Button
-            className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-100 hover:from-purple-700 hover:to-pink-600 sm:mt-7 sm:w-auto"
-            disabled={!selectedSalonId || isSalonSaving}
-            onClick={onRequestSalonJoin}
-          >
-            {isSalonSaving ? "Sending..." : "Send request"}
-          </Button>
-        </div>
-      </section>
+            <Button
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-100 hover:from-purple-700 hover:to-pink-600 sm:mt-7 sm:w-auto"
+              disabled={!selectedSalonId || isSalonSaving}
+              onClick={onRequestSalonJoin}
+            >
+              {isSalonSaving ? "Sending..." : "Send request"}
+            </Button>
+          </div>
+        </section>
+      )}
 
       <section
         className="rounded-2xl border border-purple-100 bg-white p-4 shadow-sm sm:p-5"

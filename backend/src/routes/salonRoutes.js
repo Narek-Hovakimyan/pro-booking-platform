@@ -33,7 +33,7 @@ import { getCalendar } from "../controllers/salonCalendarController.js";
 import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
 import { updateStaffDepositSettingsBySalonOwner } from "../controllers/depositSettingsController.js";
 
-import { protect } from "../middleware/authMiddleware.js";
+import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
 import {
   getSalonPromotions,
@@ -44,7 +44,7 @@ import {
 
 const router = express.Router();
 
-router.get("/", listSalons);
+router.get("/", optionalAuth, listSalons);
 router.get("/mine/manageable", protect, listManageableSalons);
 router.get("/me/status", protect, getMySalonStatus);
 router.get("/owner/requests", protect, getOwnerJoinRequests);

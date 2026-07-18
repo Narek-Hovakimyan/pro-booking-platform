@@ -254,6 +254,7 @@ export default function ManagedSalonsSection({
   salonAdmins,
   ownerRequests,
   currentUserId,
+  hideJoinRequestDecisions = false,
   isSalonSaving,
   onDecideSalonRequest,
   onOpenDemoteConfirmation,
@@ -600,7 +601,7 @@ export default function ManagedSalonsSection({
               </div>
             )}
 
-            {ownerRequests.length > 0 && (
+            {!hideJoinRequestDecisions && ownerRequests.length > 0 && (
               <div className="mt-3">
                 <div className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
                   Incoming requests

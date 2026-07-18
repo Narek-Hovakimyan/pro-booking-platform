@@ -13,6 +13,8 @@ import EventCertificatesSection from "@/barber/components/settings/EventCertific
 
 import DefaultScheduleSection from "@/barber/components/settings/DefaultScheduleSection";
 import SalonSettingsSection from "@/barber/components/settings/SalonSettingsSection";
+import JoinRequestDecisions from "@/barber/components/settings/JoinRequestDecisions";
+import SalonJoinView from "@/barber/components/settings/SalonJoinView";
 
 import ConfirmModal from "@/shared/components/common/ConfirmModal";
 
@@ -976,10 +978,13 @@ export default function BarberSettings({
                   You can create and manage multiple salons. Each salon has separate billing, staff, and schedules.
                 </p>
               )}
+              <JoinRequestDecisions />
+              <SalonJoinView currentUserId={currentUserId} />
               <SalonSettingsSection
                   allSalonEntries={allSalonEntries}
                   availableSalons={availableSalons}
                   currentUserId={currentUserId}
+                  hideJoinRequestControls
                   isSalonSaving={isSalonSaving}
                   pendingEntries={pendingEntries}
                   salonDraft={salonDraft}
@@ -1000,6 +1005,7 @@ export default function BarberSettings({
                   isSalonSaving={isSalonSaving}
                   managedSalons={managedSalons}
                   ownerRequests={ownerRequests}
+                  hideJoinRequestDecisions
                   salonAdmins={salonAdmins}
                   salonStaffById={salonStaffById}
                   salons={salons}

@@ -6,6 +6,7 @@ const getPersonId = (person) => person?.id || person?._id || "";
 export default function TeamSettingsSection({
   approvedSalonEntries,
   currentUserId,
+  hideJoinRequestDecisions = false,
   isSalonSaving,
   managedSalons,
   ownerRequests,
@@ -54,6 +55,7 @@ export default function TeamSettingsSection({
     <>
       <ManagedSalonsSection
         currentUserId={currentUserId}
+        hideJoinRequestDecisions={hideJoinRequestDecisions}
         isSalonSaving={isSalonSaving}
         managedSalonStaff={managedSalonStaff}
         ownerRequests={ownerRequests}
