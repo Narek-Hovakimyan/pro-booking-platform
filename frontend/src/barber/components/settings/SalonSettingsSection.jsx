@@ -236,7 +236,6 @@ export default function SalonSettingsSection({
                   const salonData = entry.salon || {};
                   const salonId = salonData?.id || salonData?._id || entry.salon;
                   const salonName = salonData?.name || "Salon";
-                  const requestId = entry.requestId;
 
                   return (
                     <div
@@ -262,7 +261,7 @@ export default function SalonSettingsSection({
                         <Button
                           className="w-full sm:w-auto"
                           disabled={isSalonSaving}
-                          onClick={() => onCancelSalonRequest(requestId)}
+                          onClick={() => onCancelSalonRequest(salonId)}
                           variant="outline"
                         >
                           Cancel request
@@ -292,7 +291,10 @@ export default function SalonSettingsSection({
                 <Button
                   className="w-full sm:w-auto"
                   disabled={isSalonSaving}
-                  onClick={onCancelSalonRequest}
+                  onClick={() => {
+                    const pendingSalon = safeSalonStatus.pendingRequest?.salon || {};
+                    onCancelSalonRequest(pendingSalon.id || pendingSalon._id);
+                  }}
                   variant="outline"
                 >
                   Cancel pending request

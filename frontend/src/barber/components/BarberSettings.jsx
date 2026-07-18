@@ -107,6 +107,17 @@ export default function BarberSettings({
 
   // Tracks whether initial profile fetch has been done (prevents re-fetch on derived dep changes)
   const profileFetchedRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const cancelSalonRequestTokenRef = useRef(0);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      cancelSalonRequestTokenRef.current += 1;
+    };
+  }, []);
 
   // Effect 1: Fetch profile from API once on mount/currentUser.id change only.
   // Uses profileFetchedRef to avoid re-fetching when currentUser.name/phone change (derived deps).
@@ -354,12 +365,14 @@ export default function BarberSettings({
     setProfileError("");
   };
 
-  const refreshSalonData = async () => {
+  const refreshSalonData = async (shouldContinue = () => true) => {
     const [salonsResponse, statusResponse, requestsResponse] = await Promise.all([
       api.get("/salons"),
       api.get("/salons/me/status"),
       api.get("/salons/owner/requests"),
     ]);
+
+    if (!shouldContinue()) return;
 
     setSalons(salonsResponse.data || []);
     setSalonStatus(statusResponse.data || {});
@@ -392,9 +405,11 @@ export default function BarberSettings({
           // Silently fail
         }
       }
+      if (!shouldContinue()) return;
       setSalonAdmins(adminMap);
       setSalonStaffById(staffMap);
     } else {
+      if (!shouldContinue()) return;
       setSalonAdmins({});
       setSalonStaffById({});
     }
@@ -461,26 +476,34 @@ export default function BarberSettings({
     }
   };
 
-  const cancelSalonRequest = async (requestId) => {
-    const id = requestId || salonStatus.pendingRequest?.id || salonStatus.pendingRequest?._id;
+  const cancelSalonRequest = async (salonId) => {
+    if (!salonId || isSalonSaving) return;
 
-    if (!id || isSalonSaving) return;
+    const requestToken = cancelSalonRequestTokenRef.current + 1;
+    cancelSalonRequestTokenRef.current = requestToken;
+    const isActiveCancelRequest = () =>
+      isMountedRef.current && cancelSalonRequestTokenRef.current === requestToken;
 
     setIsSalonSaving(true);
     setSalonError("");
     setSalonSaved("");
 
     try {
-      await api.put(`/salons/join-requests/${id}/cancel`);
-      await refreshSalonData();
+      await api.put(`/salons/join-requests/by-salon/${salonId}/cancel`);
+      if (!isActiveCancelRequest()) return;
+      await refreshSalonData(isActiveCancelRequest);
+      if (!isActiveCancelRequest()) return;
       setSalonSaved("Salon request cancelled.");
     } catch (requestError) {
+      if (!isActiveCancelRequest()) return;
       setSalonError(
         requestError.response?.data?.message ||
           "Could not cancel salon request. Please try again."
       );
     } finally {
-      setIsSalonSaving(false);
+      if (isActiveCancelRequest()) {
+        setIsSalonSaving(false);
+      }
     }
   };
 

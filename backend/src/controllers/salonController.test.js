@@ -837,8 +837,8 @@ test("listSalons applies authenticated self-scoped excludeForBarber filtering", 
     };
   };
   Salon.find = (query) => {
-    if (query?.ownerId) {
-      assert.equal(String(query.ownerId), barberId);
+    if (query?.$or) {
+      assert.deepEqual(query.$or, [{ ownerId: barberId }, { admins: barberId }]);
       return { distinct: async () => [ownedSalonId] };
     }
     capturedQuery = query;
@@ -865,6 +865,93 @@ test("listSalons applies authenticated self-scoped excludeForBarber filtering", 
     ownedSalonId,
     pendingRequestSalonId,
   ].sort());
+});
+
+test("listSalons keeps rejected and cancelled salons selectable", async () => {
+  const res = createResponse();
+  const approvedSalonId = "64b000000000000000000041";
+  const ownerSalonId = "64b000000000000000000042";
+  const activePendingSalonId = "64b000000000000000000043";
+  const rejectedSalonId = "64b000000000000000000044";
+  const cancelledSalonId = "64b000000000000000000045";
+  const salons = [
+    approvedSalonId,
+    ownerSalonId,
+    activePendingSalonId,
+    rejectedSalonId,
+    cancelledSalonId,
+  ].map((id) => ({
+    _id: id,
+    name: id,
+    city: "Yerevan",
+    address: "Public address",
+    phone: "Public phone",
+    imageUrl: "https://example.test/salon.jpg",
+    ownerId: barberId,
+    admins: [ownerId],
+    staffPayment: { enabled: true },
+  }));
+  let capturedQuery;
+
+  User.findById = async (id) => {
+    assert.equal(String(id), barberId);
+    return {
+      _id: barberId,
+      salons: [
+        { salon: approvedSalonId, status: "approved" },
+        { salon: activePendingSalonId, status: "pending" },
+        { salon: rejectedSalonId, status: "pending" },
+        { salon: cancelledSalonId, status: "pending" },
+      ],
+    };
+  };
+  Salon.find = (query) => {
+    if (query?.$or) {
+      assert.deepEqual(query.$or, [{ ownerId: barberId }, { admins: barberId }]);
+      return { distinct: async () => [ownerSalonId] };
+    }
+    capturedQuery = query;
+    return { sort: async () => salons };
+  };
+  SalonJoinRequest.find = (query) => {
+    assert.deepEqual(query, { barberId, status: "pending" });
+    return { distinct: async () => [activePendingSalonId] };
+  };
+  User.find = () => ({ select: async () => [] });
+  BarberProfile.find = async () => [];
+  __salonControllerTestHooks.setGetPaidAccessByBarberIds(async () => new Map());
+  __salonControllerTestHooks.setGetPublicBarberReadinessByIds(async () => new Map());
+  __salonControllerTestHooks.setGetSalonReviewStats(async () => new Map());
+
+  await listSalons({
+    user: { _id: barberId, role: "barber" },
+    query: { excludeForBarber: barberId },
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(capturedQuery._id.$nin.map(String).sort(), [
+    approvedSalonId,
+    ownerSalonId,
+    activePendingSalonId,
+  ].sort());
+  assert.deepEqual(Object.keys(res.body[0]).sort(), [
+    "_id",
+    "address",
+    "averageRating",
+    "barbers",
+    "city",
+    "id",
+    "image",
+    "imageUrl",
+    "latestReviews",
+    "name",
+    "phone",
+    "reviewsCount",
+    "totalReviews",
+  ].sort());
+  assert.equal(res.body[0].ownerId, undefined);
+  assert.equal(res.body[0].admins, undefined);
+  assert.equal(res.body[0].staffPayment, undefined);
 });
 
 test("listSalons rejects authenticated foreign excludeForBarber filtering", async () => {

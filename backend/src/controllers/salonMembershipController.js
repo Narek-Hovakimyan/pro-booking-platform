@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import User from "../models/User.js";
@@ -21,9 +23,15 @@ import { createNotification } from "./notificationController.js";
 import { sendControllerError } from "../utils/controllerError.js";
 import {
   cancelSalonJoinRequestLifecycle,
+  cancelSalonJoinRequestBySalonLifecycle,
   decideSalonJoinRequestLifecycle,
   requestSalonJoinLifecycle,
 } from "../services/salon/salonJoinRequestLifecycleService.js";
+
+const isValidSalonId = (salonId) =>
+  typeof salonId === "string" &&
+  /^[a-f\d]{24}$/i.test(salonId) &&
+  mongoose.Types.ObjectId.isValid(salonId);
 
 const sendLifecycleError = (res, error, fallbackMessage) => {
   if (error?.statusCode) {
@@ -72,6 +80,26 @@ export const cancelJoinRequest = async (req, res) => {
       request: serializeRequest(result.request),
       salonStatus: result.salonStatus,
     });
+  } catch (error) {
+    return sendLifecycleError(res, error, "Could not cancel salon request");
+  }
+};
+
+export const cancelJoinRequestBySalon = async (req, res) => {
+  try {
+    if (!requireBarber(req, res)) return undefined;
+
+    const salonId = req.params?.salonId;
+    if (!isValidSalonId(salonId)) {
+      return res.status(400).json({ message: "Invalid salonId" });
+    }
+
+    const result = await cancelSalonJoinRequestBySalonLifecycle({
+      salonId,
+      barberId: req.user._id,
+    });
+
+    return res.json({ salonStatus: result.salonStatus });
   } catch (error) {
     return sendLifecycleError(res, error, "Could not cancel salon request");
   }

@@ -6,12 +6,16 @@ import Notification from "../models/Notification.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
 import User from "../models/User.js";
 import { __notificationServiceTestHooks } from "../services/notification/notificationService.js";
-import { decideJoinRequest } from "./salonMembershipController.js";
+import {
+  cancelJoinRequestBySalon,
+  decideJoinRequest,
+} from "./salonMembershipController.js";
 
 const originalMethods = {
   mongooseStartSession: mongoose.startSession,
   notificationCreate: Notification.create,
   joinRequestFindById: SalonJoinRequest.findById,
+  joinRequestFindOne: SalonJoinRequest.findOne,
   joinRequestFindOneAndUpdate: SalonJoinRequest.findOneAndUpdate,
   userFindById: User.findById,
 };
@@ -26,6 +30,7 @@ afterEach(() => {
   mongoose.startSession = originalMethods.mongooseStartSession;
   Notification.create = originalMethods.notificationCreate;
   SalonJoinRequest.findById = originalMethods.joinRequestFindById;
+  SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
   SalonJoinRequest.findOneAndUpdate = originalMethods.joinRequestFindOneAndUpdate;
   User.findById = originalMethods.userFindById;
   __notificationServiceTestHooks.resetGetIO();
@@ -252,4 +257,104 @@ test("transaction errors are bounded and do not send notifications", async () =>
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Could not update salon request");
+});
+
+test("cancel by salon validates malformed values before querying", async () => {
+  SalonJoinRequest.findOne = () => {
+    throw new Error("query must not run");
+  };
+
+  for (const invalidSalonId of [
+    undefined,
+    "not-an-id",
+    [salonId],
+    { $ne: salonId },
+  ]) {
+    const res = createResponse();
+    await cancelJoinRequestBySalon(
+      {
+        user: { _id: barberId, role: "barber" },
+        params: { salonId: invalidSalonId },
+        body: { barberId: ownerId },
+      },
+      res
+    );
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, "Invalid salonId");
+  }
+});
+
+test("cancel by salon uses the authenticated barber instead of request body identity", async () => {
+  mockSession();
+  let queryFilter;
+  SalonJoinRequest.findOne = (query) => {
+    queryFilter = query;
+    return {
+      sort() {
+        return this;
+      },
+      session() {
+        return this;
+      },
+      then(resolve, reject) {
+        return Promise.resolve(null).then(resolve, reject);
+      },
+    };
+  };
+
+  const res = createResponse();
+  await cancelJoinRequestBySalon(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: { barberId },
+    },
+    res
+  );
+
+  assert.deepEqual(queryFilter, { salonId, barberId: ownerId });
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.body, { message: "Pending request not found" });
+});
+
+test("cancel by salon returns no request identifier", async () => {
+  const request = {
+    _id: requestId,
+    barberId,
+    salonId,
+    status: "pending",
+  };
+  mockSession();
+  SalonJoinRequest.findOne = () => ({
+    sort() {
+      return this;
+    },
+    session() {
+      return this;
+    },
+    then(resolve, reject) {
+      return Promise.resolve(request).then(resolve, reject);
+    },
+  });
+  SalonJoinRequest.findOneAndUpdate = () => ({
+    session() {
+      return this;
+    },
+    then(resolve, reject) {
+      request.status = "cancelled";
+      return Promise.resolve(request).then(resolve, reject);
+    },
+  });
+
+  const res = createResponse();
+  await cancelJoinRequestBySalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { salonStatus: "none" });
 });

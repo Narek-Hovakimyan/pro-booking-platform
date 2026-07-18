@@ -6,6 +6,7 @@ import Salon from "../../models/Salon.js";
 import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import User from "../../models/User.js";
 import {
+  cancelSalonJoinRequestBySalonLifecycle,
   cancelSalonJoinRequestLifecycle,
   decideSalonJoinRequestLifecycle,
   requestSalonJoinLifecycle,
@@ -330,6 +331,62 @@ test("own cancellation is idempotent, does not mutate memberships, and foreign c
   await assert.rejects(
     () => cancelSalonJoinRequestLifecycle({ requestId, barberId: otherBarberId }),
     /You can only cancel your own request/
+  );
+});
+
+test("self-scoped cancellation by salon uses the latest exact request", async () => {
+  const latestRequest = makeRequest({ _id: "64b100000000000000000098" });
+  let queryFilter;
+  let sortFilter;
+
+  SalonJoinRequest.findOne = (query) => {
+    queryFilter = query;
+    return {
+      sort(sort) {
+        sortFilter = sort;
+        return new Query(() => latestRequest);
+      },
+    };
+  };
+  SalonJoinRequest.findOneAndUpdate = (query, update) => {
+    assert.deepEqual(query, {
+      _id: latestRequest._id,
+      barberId,
+      status: "pending",
+    });
+    latestRequest.status = update.$set.status;
+    return new Query(() => latestRequest);
+  };
+
+  const result = await cancelSalonJoinRequestBySalonLifecycle({ salonId, barberId });
+
+  assert.deepEqual(queryFilter, { salonId, barberId });
+  assert.deepEqual(sortFilter, { updatedAt: -1, createdAt: -1, _id: -1 });
+  assert.equal(result.request.status, "cancelled");
+
+  const repeated = await cancelSalonJoinRequestBySalonLifecycle({ salonId, barberId });
+  assert.equal(repeated.request.status, "cancelled");
+});
+
+test("self-scoped cancellation by salon rejects final states, missing requests, and other barbers", async () => {
+  for (const status of ["accepted", "rejected"]) {
+    requests = [makeRequest({ status })];
+    await assert.rejects(
+      () => cancelSalonJoinRequestBySalonLifecycle({ salonId, barberId }),
+      (error) => error.statusCode === 400 && error.message === "Only pending requests can be cancelled"
+    );
+  }
+
+  requests = [];
+  await assert.rejects(
+    () => cancelSalonJoinRequestBySalonLifecycle({ salonId, barberId }),
+    (error) => error.statusCode === 404
+  );
+
+  requests = [makeRequest({ barberId: otherBarberId })];
+  await assert.rejects(
+    () => cancelSalonJoinRequestBySalonLifecycle({ salonId, barberId }),
+    (error) => error.statusCode === 404
   );
 });
 

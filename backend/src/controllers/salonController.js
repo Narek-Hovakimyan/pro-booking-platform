@@ -158,14 +158,17 @@ export const listSalons = async (req, res) => {
       const barber = await User.findById(barberId);
 
       if (barber) {
-        // Get salon IDs from barber's salons array (approved + pending)
+        // Only approved canonical memberships are ineligible. A stale pending
+        // entry must not hide a salon after its request was rejected/cancelled.
         const barberSalonIds = (barber.salons || [])
-          .filter((s) => s.status === "approved" || s.status === "pending")
+          .filter((s) => s.status === "approved")
           .map((s) => s.salon?.toString())
           .filter(Boolean);
 
         // Get salon IDs the barber owns
-        const ownedSalonIds = await Salon.find({ ownerId: barberId }).distinct("_id");
+        const ownedSalonIds = await Salon.find({
+          $or: [{ ownerId: barberId }, { admins: barberId }],
+        }).distinct("_id");
         const ownedIds = ownedSalonIds.map((id) => id.toString());
 
         // Get salon IDs with pending SalonJoinRequest

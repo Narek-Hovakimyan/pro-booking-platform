@@ -263,50 +263,60 @@ export const requestSalonJoinLifecycle = async ({ salonId, barber }) => {
   }
 };
 
-export const cancelSalonJoinRequestLifecycle = async ({ requestId, barberId }) => {
-  const result = await runTransaction(async (session) => {
-    const request = await sessionQuery(SalonJoinRequest.findById(requestId), session);
+const cancelRequestInTransaction = async ({ request, barberId, session }) => {
+  if (!request) {
+    throw new SalonJoinRequestLifecycleError(404, "Pending request not found");
+  }
 
-    if (!request) {
-      throw new SalonJoinRequestLifecycleError(404, "Pending request not found");
-    }
+  if (!sameId(request.barberId, barberId)) {
+    throw new SalonJoinRequestLifecycleError(403, "You can only cancel your own request");
+  }
 
-    if (!sameId(request.barberId, barberId)) {
-      throw new SalonJoinRequestLifecycleError(403, "You can only cancel your own request");
-    }
-
-    if (request.status === "cancelled") {
-      return {
-        request,
-        salonStatus: "none",
-      };
-    }
-
-    if (request.status !== "pending") {
-      throw new SalonJoinRequestLifecycleError(400, "Only pending requests can be cancelled");
-    }
-
-    const claimedRequest = await sessionQuery(
-      SalonJoinRequest.findOneAndUpdate(
-        { _id: requestId, barberId, status: "pending" },
-        { $set: { status: "cancelled" } },
-        { new: true, session }
-      ),
-      session
-    );
-
-    if (!claimedRequest) {
-      throw new SalonJoinRequestLifecycleError(409, "Salon request has already been decided");
-    }
-
+  if (request.status === "cancelled") {
     return {
-      request: claimedRequest,
+      request,
       salonStatus: "none",
     };
+  }
+
+  if (request.status !== "pending") {
+    throw new SalonJoinRequestLifecycleError(400, "Only pending requests can be cancelled");
+  }
+
+  const claimedRequest = await sessionQuery(
+    SalonJoinRequest.findOneAndUpdate(
+      { _id: request._id, barberId, status: "pending" },
+      { $set: { status: "cancelled" } },
+      { new: true, session }
+    ),
+    session
+  );
+
+  if (!claimedRequest) {
+    throw new SalonJoinRequestLifecycleError(409, "Salon request has already been decided");
+  }
+
+  return {
+    request: claimedRequest,
+    salonStatus: "none",
+  };
+};
+
+export const cancelSalonJoinRequestLifecycle = async ({ requestId, barberId }) =>
+  runTransaction(async (session) => {
+    const request = await sessionQuery(SalonJoinRequest.findById(requestId), session);
+    return cancelRequestInTransaction({ request, barberId, session });
   });
 
-  return result;
-};
+export const cancelSalonJoinRequestBySalonLifecycle = async ({ salonId, barberId }) =>
+  runTransaction(async (session) => {
+    const request = await sessionQuery(
+      SalonJoinRequest.findOne({ salonId, barberId })
+        .sort({ updatedAt: -1, createdAt: -1, _id: -1 }),
+      session
+    );
+    return cancelRequestInTransaction({ request, barberId, session });
+  });
 
 export const decideSalonJoinRequestLifecycle = async ({
   requestId,

@@ -8,6 +8,7 @@ import {
 } from "../controllers/salonController.js";
 import {
   cancelJoinRequest,
+  cancelJoinRequestBySalon,
   decideJoinRequest,
   getOwnerJoinRequests,
   leaveSalon,
@@ -76,6 +77,7 @@ router.patch(
   respondToRelationshipType
 );
 router.post("/:salonId/join-requests", protect, requestToJoinSalon);
+router.put("/join-requests/by-salon/:salonId/cancel", protect, cancelJoinRequestBySalon);
 router.put("/join-requests/:requestId", protect, decideJoinRequest);
 router.put("/join-requests/:requestId/cancel", protect, cancelJoinRequest);
 
