@@ -275,8 +275,8 @@ test("PATCH updates only workplace and status with trusted atomic filter", async
   });
 });
 
-test("PATCH accepts independent, salon, null, repeated, and switched workplaces", async () => {
-  for (const workplace of ["independent", "salon", null]) {
+test("PATCH accepts independent, salon, both, null, repeated, and switched workplaces", async () => {
+  for (const workplace of ["independent", "salon", "both", null]) {
     const deps = dependencies({
       user: validUser({ specialistOnboarding: validState({ status: "in_progress", workplace }) }),
       updatedUser: validUser({

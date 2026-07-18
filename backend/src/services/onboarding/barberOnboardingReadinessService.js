@@ -24,6 +24,9 @@ const findProfile = (BarberProfileModel, barberId) =>
 const findSchedule = (ScheduleModel, barberId) =>
   executeQuery(ScheduleModel.findOne({ barberId, salonId: null }), SCHEDULE_PROJECTION);
 
+const supportsIndependentContext = (workplace) =>
+  workplace === "independent" || workplace === "both";
+
 const readScheduleFacts = async (ScheduleModel, barberId, validateWeeklySchedule) => {
   const schedule = await findSchedule(ScheduleModel, barberId);
   if (!schedule) return { personalScheduleExists: false, personalScheduleValid: false };
@@ -51,7 +54,7 @@ export const getBarberOnboardingReadiness = async (
 ) => {
   const deps = normalizeDependencies(dependencies);
   const [profile, scheduleFacts] = await Promise.all([
-    onboardingState.workplace === "independent"
+    supportsIndependentContext(onboardingState.workplace)
       ? findProfile(deps.BarberProfileModel, barberId)
       : Promise.resolve(null),
     readScheduleFacts(deps.ScheduleModel, barberId, deps.validatePersonalWeeklySchedule),

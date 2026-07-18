@@ -99,6 +99,14 @@ const readyAvailabilitySchedule = (barberId, scopedSalonId = salonId) => ({
   nonWorkingDays: [],
 });
 
+const completedOnboarding = (workplace = "salon") => ({
+  version: 1,
+  status: "completed",
+  currentStep: null,
+  workplace,
+  completedAt: new Date("2026-07-16T10:00:00.000Z"),
+});
+
 afterEach(() => {
   paidAccessMap = new Map();
   reviewStatsMap = new Map();
@@ -431,6 +439,54 @@ test("hides approved owner who does not work as specialist from public booking d
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.barbers.length, 0);
+});
+
+test("public booking treats both as salon-capable only with approved specialist membership", async () => {
+  const res = createResponse();
+  const bothBarberId = "64b000000000000000001077";
+
+  __publicSalonBookingTestHooks.setGetPaidAccessByBarberIds(
+    async () => paidAccessMap
+  );
+  __publicSalonBookingTestHooks.setGetSalonReviewStats(
+    async () => reviewStatsMap
+  );
+
+  Salon.findById = async () => ({
+    _id: salonId,
+    name: "Test Salon",
+    city: "Yerevan",
+    address: "",
+    phone: "",
+    imageUrl: "",
+  });
+  User.find = () => makeFindChain([
+    makeBarber(bothBarberId, {
+      specialistOnboarding: completedOnboarding("both"),
+      salons: [{
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "accepted",
+        worksAsSpecialist: true,
+      }],
+    }),
+  ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [readyAvailabilitySchedule(bothBarberId)];
+  Booking.find = async () => [];
+  Service.find = () => makeLeanQuery([
+    { _id: "srv-both", barberId: bothBarberId, name: "Cut", price: 3000, duration: 30, active: true },
+  ]);
+  paidAccessMap = new Map([
+    [String(bothBarberId), true],
+  ]);
+
+  await getPublicSalonBooking({ params: { salonId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.barbers.map((barber) => String(barber.id)), [bothBarberId]);
+  assert.deepEqual(res.body.services.map((service) => String(service.barberId)), [bothBarberId]);
 });
 
 test("hides stale-seat barber from public booking data", async () => {

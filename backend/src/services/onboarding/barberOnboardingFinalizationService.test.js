@@ -87,6 +87,37 @@ test("finalization allows salon without profile readiness and blocks bounded mis
   assert.equal(incomplete.capture.some((entry) => entry.kind === "findOneAndUpdate"), false);
 });
 
+test("finalization allows both with independent readiness and no salon approval", async () => {
+  let readinessCall;
+  const bothUser = user({
+    salons: [{ salon: "salon-1", status: "pending", worksAsSpecialist: true }],
+    specialistOnboarding: state({ workplace: "both" }),
+  });
+  const deps = dependencies({
+    reads: [bothUser],
+    updateResult: user({
+      specialistOnboarding: state({
+        workplace: "both",
+        status: "completed",
+        currentStep: null,
+        completedAt: new Date("2026-07-16T10:00:00.000Z"),
+      }),
+    }),
+  });
+  deps.getBarberOnboardingReadiness = async (...args) => {
+    readinessCall = args;
+    return ready();
+  };
+
+  const result = await finalizeBarberOnboarding(barberId, deps);
+  const update = deps.capture.find((entry) => entry.kind === "findOneAndUpdate");
+
+  assert.equal(readinessCall[2].workplace, "both");
+  assert.equal(update.filter["specialistOnboarding.workplace"], "both");
+  assert.equal(result.state.workplace, "both");
+  assert.equal(result.state.status, "completed");
+});
+
 test("finalization preserves legacy, malformed, and completed history without readiness or writes", async () => {
   for (const [candidate, code] of [
     [{ _id: barberId, role: "barber" }, "LEGACY_ONBOARDING_NOT_APPLICABLE"],

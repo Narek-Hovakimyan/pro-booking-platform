@@ -42,7 +42,10 @@ export const buildPublicBarberReadiness = ({
     .some((service) => idOf(service?.barberId) === idOf(barber));
   const independentSupported =
     state.kind === "legacy" ||
-    (state.kind === "valid" && state.state.workplace === "independent");
+    (state.kind === "valid" && (
+      state.state.workplace === "independent" ||
+      state.state.workplace === "both"
+    ));
   const independentReady =
     independentSupported &&
     nonEmpty(profile?.address) &&

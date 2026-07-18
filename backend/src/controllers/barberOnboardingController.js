@@ -11,7 +11,7 @@ const defaultDependencies = {
   finalizeBarberOnboarding,
 };
 
-const allowedWorkplaces = ["independent", "salon", null];
+const allowedWorkplaces = ["independent", "salon", "both", null];
 
 const errorResponse = (res, statusCode, code, message) =>
   res.status(statusCode).json({ code, message });

@@ -113,7 +113,7 @@ test("GET maps unexpected failures generically without raw error leakage", async
 });
 
 test("PATCH accepts exact workplace body and trusted user id", async () => {
-  for (const workplace of ["independent", "salon", null]) {
+  for (const workplace of ["independent", "salon", "both", null]) {
     const calls = [];
     const controller = createBarberOnboardingController({
       async updateBarberOnboardingWorkplace(id, value) {

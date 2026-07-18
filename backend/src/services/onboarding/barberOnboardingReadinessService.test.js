@@ -87,3 +87,37 @@ test("readiness treats only independent non-empty addresses as finalization fact
     /validator unavailable/
   );
 });
+
+test("readiness treats both as independent-capable and ignores salon membership state", async () => {
+  for (const salons of [
+    [],
+    [{ salon: "salon-1", status: "pending", worksAsSpecialist: true }],
+    [{ salon: "salon-1", status: "rejected", worksAsSpecialist: true }],
+    [{ salon: "salon-1", status: "approved", relationshipStatus: "pending", worksAsSpecialist: true }],
+  ]) {
+    const deps = dependencies();
+    const result = await getBarberOnboardingReadiness(
+      barberId,
+      { ...user, salons },
+      state("both"),
+      deps
+    );
+
+    assert.equal(result.readyForFinalization, true);
+    assert.deepEqual(result.missing, []);
+    assert.deepEqual(deps.capture.find((entry) => entry.kind === "profile").filter, { barberId });
+    assert.deepEqual(deps.capture.find((entry) => entry.kind === "schedule").filter, { barberId, salonId: null });
+  }
+});
+
+test("readiness requires both address and valid personal schedule for both finalization", async () => {
+  for (const [deps, missing] of [
+    [dependencies({ profile: null }), ["INDEPENDENT_ADDRESS_REQUIRED"]],
+    [dependencies({ schedule: null }), ["PERSONAL_SCHEDULE_REQUIRED"]],
+    [dependencies({ schedule: { weeklySchedule: { mon: { working: true } } } }), ["PERSONAL_SCHEDULE_INVALID"]],
+  ]) {
+    const result = await getBarberOnboardingReadiness(barberId, user, state("both"), deps);
+    assert.equal(result.readyForFinalization, false);
+    assert.deepEqual(result.missing, missing);
+  }
+});

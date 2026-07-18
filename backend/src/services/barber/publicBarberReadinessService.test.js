@@ -136,6 +136,54 @@ test("readiness requires finalized v1 onboarding, active service, address, and w
   assert.equal(readiness.get("no-schedule-v1").publicReady, false);
 });
 
+test("readiness treats both as independently public while keeping pending and rejected salons ineligible", async () => {
+  User.find = () => createFindChain([
+    {
+      _id: "both-ready",
+      role: "barber",
+      specialistOnboarding: completedState("both"),
+      salons: [
+        { salon: "salon-pending", status: "approved", relationshipStatus: "pending", worksAsSpecialist: true },
+        { salon: "salon-rejected", status: "rejected", worksAsSpecialist: true },
+      ],
+    },
+  ]);
+  BarberProfile.find = async () => [{ barberId: "both-ready", address: "Both Street 1" }];
+  Schedule.find = async () => [{ barberId: "both-ready", weeklySchedule: workingSchedule }];
+  Service.find = async () => [{ barberId: "both-ready" }];
+
+  const readiness = await getPublicBarberReadiness("both-ready");
+
+  assert.equal(readiness.onboardingReady, true);
+  assert.equal(readiness.hasActiveService, true);
+  assert.equal(readiness.independentReady, true);
+  assert.deepEqual([...readiness.eligibleSalonIds], []);
+  assert.equal(readiness.publicReady, true);
+});
+
+test("readiness gives both exact approved specialist salon eligibility only", async () => {
+  User.find = () => createFindChain([
+    {
+      _id: "both-salon",
+      role: "barber",
+      specialistOnboarding: completedState("both"),
+      salons: [
+        { salon: "salon-a", status: "approved", relationshipStatus: "accepted", worksAsSpecialist: true },
+        { salon: "salon-b", status: "approved", relationshipStatus: "accepted", worksAsSpecialist: false },
+      ],
+    },
+  ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: "both-salon" }];
+
+  const readiness = await getPublicBarberReadiness("both-salon");
+
+  assert.equal(readiness.independentReady, false);
+  assert.deepEqual([...readiness.eligibleSalonIds], ["salon-a"]);
+  assert.equal(readiness.publicReady, true);
+});
+
 test("readiness allows approved specialist salon memberships and keeps eligibility scoped per salon", async () => {
   User.find = () => createFindChain([
     {

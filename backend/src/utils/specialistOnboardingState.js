@@ -18,6 +18,7 @@ export const specialistOnboardingSteps = Object.freeze([
 export const specialistOnboardingWorkplaces = Object.freeze([
   "independent",
   "salon",
+  "both",
 ]);
 
 const readOwnDataField = (candidate, field) => {

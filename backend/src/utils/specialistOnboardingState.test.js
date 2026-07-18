@@ -66,6 +66,28 @@ test("serializer safely resolves explicit onboarding states", () => {
   }
 });
 
+test("serializer accepts both workplace without response-shape drift", () => {
+  const result = serializeSpecialistOnboardingState({
+    role: "barber",
+    specialistOnboarding: {
+      version: 1,
+      status: "in_progress",
+      currentStep: "review",
+      workplace: "both",
+      completedAt: null,
+    },
+  });
+
+  assert.deepEqual(result, {
+    version: 1,
+    status: "in_progress",
+    currentStep: "review",
+    workplace: "both",
+    completedAt: null,
+    needsOnboarding: true,
+  });
+});
+
 test("serializer preserves legacy compatibility without mutation", () => {
   const legacyBarber = { role: "barber", name: "Legacy" };
 
@@ -316,6 +338,7 @@ test("classifier distinguishes valid v1 states", () => {
   for (const state of [
     validExplicitState({ status: "not_started", currentStep: "professional_basics" }),
     validExplicitState({ status: "in_progress", currentStep: "review", workplace: "salon" }),
+    validExplicitState({ status: "in_progress", currentStep: "review", workplace: "both" }),
     validExplicitState({
       status: "completed",
       currentStep: null,

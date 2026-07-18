@@ -166,7 +166,7 @@ const specialistOnboardingSchema = new mongoose.Schema(
     },
     workplace: {
       type: String,
-      enum: ["independent", "salon", null],
+      enum: ["independent", "salon", "both", null],
       default: null,
     },
     completedAt: {

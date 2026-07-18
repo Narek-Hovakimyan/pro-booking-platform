@@ -85,6 +85,19 @@ test("progress handles independent address without blocking review readiness", (
   }));
   assert.deepEqual(salon.missing, []);
   assert.equal(salon.readyForFinalization, true);
+
+  const both = buildBarberOnboardingProgress(completeFacts({
+    workplace: "both",
+    hasIndependentAddress: false,
+  }));
+  assert.equal(both.workplaceSelected, true);
+  assert.equal(both.readyForReview, true);
+  assert.equal(both.readyForFinalization, false);
+  assert.deepEqual(both.missing, ["INDEPENDENT_ADDRESS_REQUIRED"]);
+  assert.equal(
+    buildBarberOnboardingProgress(completeFacts({ workplace: "both" })).readyForFinalization,
+    true
+  );
 });
 
 test("progress controls allowed actions and completed override", () => {

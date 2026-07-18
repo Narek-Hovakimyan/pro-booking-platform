@@ -44,7 +44,10 @@ const isValidProfession = (profession) =>
   professionalBasicsProfessions.includes(profession);
 
 const isWorkplaceSelected = (workplace) =>
-  workplace === "independent" || workplace === "salon";
+  workplace === "independent" || workplace === "salon" || workplace === "both";
+
+const requiresIndependentAddress = (workplace) =>
+  workplace === "independent" || workplace === "both";
 
 export const buildBarberOnboardingProgress = (facts) => {
   const safeFacts = facts && typeof facts === "object" && !Array.isArray(facts)
@@ -85,7 +88,7 @@ export const buildBarberOnboardingProgress = (facts) => {
   } else if (!personalScheduleValid) {
     missing.push("PERSONAL_SCHEDULE_INVALID");
   }
-  if (workplace === "independent" && !hasIndependentAddress) {
+  if (requiresIndependentAddress(workplace) && !hasIndependentAddress) {
     missing.push("INDEPENDENT_ADDRESS_REQUIRED");
   }
   const readyForFinalization = missing.length === 0;

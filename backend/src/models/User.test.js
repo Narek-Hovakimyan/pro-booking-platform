@@ -533,25 +533,28 @@ describe("User specialist onboarding state", () => {
   });
 
   test("accepts a valid explicit v1 state without a subdocument id", () => {
-    const user = makeBarber({
-      specialistOnboarding: {
+    for (const workplace of ["independent", "salon", "both", null]) {
+      const user = makeBarber({
+        phoneSuffix: `valid-${workplace || "none"}`,
+        specialistOnboarding: {
+          version: 1,
+          status: "in_progress",
+          currentStep: "workplace",
+          workplace,
+          completedAt: null,
+        },
+      });
+
+      assert.equal(user.validateSync(), undefined);
+      assert.deepEqual(user.specialistOnboarding.toObject(), {
         version: 1,
         status: "in_progress",
         currentStep: "workplace",
-        workplace: "independent",
+        workplace,
         completedAt: null,
-      },
-    });
-
-    assert.equal(user.validateSync(), undefined);
-    assert.deepEqual(user.specialistOnboarding.toObject(), {
-      version: 1,
-      status: "in_progress",
-      currentStep: "workplace",
-      workplace: "independent",
-      completedAt: null,
-    });
-    assert.equal("_id" in user.specialistOnboarding.toObject(), false);
+      });
+      assert.equal("_id" in user.specialistOnboarding.toObject(), false);
+    }
   });
 
   for (const [label, specialistOnboarding, path] of [
