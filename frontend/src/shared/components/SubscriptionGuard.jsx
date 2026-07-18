@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
+import { useBarberOnboardingGuard } from "@/shared/components/BarberOnboardingGuard";
 
 export function SubscriptionRequired() {
   return (
@@ -36,8 +37,13 @@ export function SubscriptionRequired() {
 export default function SubscriptionGuard({ children }) {
   const { currentUser } = useSelector((state) => state.auth);
   const subscription = useSelector((state) => state.subscription);
+  const { isRequiredStep } = useBarberOnboardingGuard();
 
   if (currentUser?.role !== "barber") {
+    return children;
+  }
+
+  if (isRequiredStep) {
     return children;
   }
 

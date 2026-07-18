@@ -2,6 +2,7 @@ import {
   ArrowRight,
   BriefcaseBusiness,
   CheckCircle2,
+  ClipboardCheck,
   MapPin,
   Store,
 } from "lucide-react";
@@ -9,12 +10,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  finalizeMyBarberOnboarding,
   getMyBarberOnboarding,
   updateMyBarberOnboardingWorkplace,
 } from "@/shared/api/barberOnboarding";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { cn } from "@/shared/lib/utils";
+import {
+  getOnboardingStepRoute,
+  isOnboardingComplete,
+} from "@/shared/utils/barberOnboardingRoutes";
 
 const workplaceOptions = [
   {
@@ -44,8 +50,22 @@ const getSavedWorkplace = (status) => {
   return validWorkplaces.has(workplace) ? workplace : "";
 };
 
-const getNextPath = (workplace) =>
-  workplace === "salon" ? "/admin/settings/salon" : "/admin/profile";
+const getOnboardingPageRedirect = (status) => {
+  if (isOnboardingComplete(status)) {
+    return "/admin";
+  }
+
+  const stepRoute = getOnboardingStepRoute(status?.state?.currentStep);
+  if (stepRoute !== "/onboarding" && getSavedWorkplace(status)) {
+    return stepRoute;
+  }
+
+  return null;
+};
+
+const canFinalizeStatus = (status) =>
+  status?.progress?.readyForFinalization === true ||
+  status?.allowedActions?.includes("FINALIZE_ONBOARDING");
 
 export default function BarberOnboardingPage() {
   const navigate = useNavigate();
@@ -55,6 +75,7 @@ export default function BarberOnboardingPage() {
   const [selectedWorkplace, setSelectedWorkplace] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -70,6 +91,10 @@ export default function BarberOnboardingPage() {
         if (!isMounted) return;
         setStatus(data);
         setSelectedWorkplace(getSavedWorkplace(data));
+        const redirectPath = getOnboardingPageRedirect(data);
+        if (redirectPath) {
+          navigate(redirectPath, { replace: true });
+        }
       } catch {
         if (isMounted) {
           setError("Could not load onboarding status. Please try again.");
@@ -86,10 +111,15 @@ export default function BarberOnboardingPage() {
       isMountedRef.current = false;
       saveRequestIdRef.current += 1;
     };
-  }, []);
+  }, [navigate]);
 
   const savedWorkplace = getSavedWorkplace(status);
-  const canSave = validWorkplaces.has(selectedWorkplace) && !isLoading && !isSaving;
+  const isReadyForFinalization = canFinalizeStatus(status);
+  const canFinalize = isReadyForFinalization && !isLoading && !isSaving && !isFinalizing;
+  const canSave = validWorkplaces.has(selectedWorkplace) &&
+    !isLoading &&
+    !isSaving &&
+    !isFinalizing;
 
   const selectedOption = useMemo(
     () => workplaceOptions.find((option) => option.value === selectedWorkplace),
@@ -112,10 +142,16 @@ export default function BarberOnboardingPage() {
       isMountedRef.current && saveRequestIdRef.current === requestId;
 
     try {
-      const data = await updateMyBarberOnboardingWorkplace(workplaceToSave);
+      await updateMyBarberOnboardingWorkplace(workplaceToSave);
+      if (!isActiveSave()) return;
+      const data = await getMyBarberOnboarding();
       if (!isActiveSave()) return;
       setStatus(data);
-      navigate(getNextPath(workplaceToSave));
+      setSelectedWorkplace(getSavedWorkplace(data));
+      const redirectPath = getOnboardingPageRedirect(data);
+      if (redirectPath) {
+        navigate(redirectPath);
+      }
     } catch {
       if (isActiveSave()) {
         setError("Could not save your workplace choice. Please try again.");
@@ -123,6 +159,39 @@ export default function BarberOnboardingPage() {
     } finally {
       if (isActiveSave()) {
         setIsSaving(false);
+      }
+    }
+  };
+
+  const handleFinalize = async () => {
+    if (!canFinalize) return;
+
+    setIsFinalizing(true);
+    setError("");
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
+    const isActiveFinalize = () =>
+      isMountedRef.current && saveRequestIdRef.current === requestId;
+
+    try {
+      await finalizeMyBarberOnboarding();
+      if (!isActiveFinalize()) return;
+      const data = await getMyBarberOnboarding();
+      if (!isActiveFinalize()) return;
+      setStatus(data);
+      setSelectedWorkplace(getSavedWorkplace(data));
+      if (isOnboardingComplete(data)) {
+        navigate("/admin");
+      } else {
+        setError("Onboarding could not be confirmed complete. Please try again.");
+      }
+    } catch {
+      if (isActiveFinalize()) {
+        setError("Could not finalize onboarding. Please review the missing steps.");
+      }
+    } finally {
+      if (isActiveFinalize()) {
+        setIsFinalizing(false);
       }
     }
   };
@@ -168,7 +237,34 @@ export default function BarberOnboardingPage() {
                 </div>
               )}
 
-              <fieldset className="space-y-3" disabled={isSaving}>
+              {isReadyForFinalization && (
+                <div className="rounded-2xl border border-brand-100 bg-brand-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-brand-700">
+                      <ClipboardCheck className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-base font-bold text-neutral-950">
+                        Ready to finish onboarding
+                      </h2>
+                      <p className="mt-1 text-sm leading-6 text-neutral-600">
+                        Your basics, workplace choice, address, and personal schedule are ready.
+                      </p>
+                      <Button
+                        className="mt-4"
+                        disabled={isFinalizing}
+                        onClick={handleFinalize}
+                        type="button"
+                        variant="primary"
+                      >
+                        {isFinalizing ? "Finishing..." : "Finish onboarding"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <fieldset className="space-y-3" disabled={isSaving || isFinalizing}>
                 <legend className="sr-only">Workplace type</legend>
                 <div className="grid gap-3 md:grid-cols-3">
                   {workplaceOptions.map((option) => {
@@ -225,9 +321,7 @@ export default function BarberOnboardingPage() {
               <div className="flex flex-col gap-3 border-t border-neutral-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-neutral-500">
                   {selectedOption
-                    ? `${selectedOption.label} will continue to ${
-                        selectedWorkplace === "salon" ? "salon settings" : "profile setup"
-                      }.`
+                    ? `${selectedOption.label} will continue to the next onboarding step.`
                     : "Select one option to continue."}
                 </p>
                 <Button

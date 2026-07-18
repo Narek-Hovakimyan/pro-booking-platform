@@ -10,6 +10,23 @@ export const updateMyBarberOnboardingWorkplace = async (workplace) => {
   return data;
 };
 
+export const finalizeMyBarberOnboarding = async () => {
+  const { data } = await api.post("/barber-onboarding/me/finalize");
+  return data;
+};
+
+let onboardingStatusRequest = null;
+
+export const getMyBarberOnboardingDeduped = () => {
+  if (!onboardingStatusRequest) {
+    onboardingStatusRequest = getMyBarberOnboarding().finally(() => {
+      onboardingStatusRequest = null;
+    });
+  }
+
+  return onboardingStatusRequest;
+};
+
 export const resolvePostAuthDestination = async (
   user,
   existingDestination,
