@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import useProfileEmail from "@/barber/hooks/useProfileEmail";
 
 import api from "@/shared/api/axios";
 import { getMyPortfolio } from "@/shared/api/portfolio";
+import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
+import { getOnboardingStepRoute } from "@/shared/utils/barberOnboardingRoutes";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { setReviews } from "@/store/slices/reviewsSlice";
 import { updateBarberProfile } from "@/store/slices/usersSlice";
@@ -68,8 +71,17 @@ const getProfileHeadline = (profile) => {
   return [profession, barberType].filter(Boolean).join(" · ");
 };
 
+const resolveOnboardingRoute = (status) => {
+  if (status?.needsOnboarding === false || status?.legacyCompatible === true) {
+    return "/admin";
+  }
+
+  return getOnboardingStepRoute(status?.state?.currentStep);
+};
+
 export default function BarberProfilePage() {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { currentUser } = useSelector((state) => state.auth);
   const currentUserId = currentUser?.id;
   const currentUserName = currentUser?.name || "";
@@ -105,6 +117,9 @@ export default function BarberProfilePage() {
   const selfAddressContext = currentUserId ? `barber:${currentUserId}` : "";
   const selfAddressContextRef = useRef(selfAddressContext);
   const selfAddressRequestRef = useRef(0);
+  const profileLoadRequestRef = useRef(0);
+  const saveRequestRef = useRef(0);
+  const mountedRef = useRef(true);
   const addressEditedRef = useRef(false);
   const selfAddressHydratedRef = useRef(false);
 
@@ -187,17 +202,32 @@ export default function BarberProfilePage() {
   }, [selfAddressContext]);
 
   useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      profileLoadRequestRef.current += 1;
+      saveRequestRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!currentUserId) return;
 
     let isMounted = true;
+    const loadRequestId = ++profileLoadRequestRef.current;
+    const isActiveLoad = () =>
+      isMounted &&
+      mountedRef.current &&
+      profileLoadRequestRef.current === loadRequestId;
 
     async function fetchProfile() {
       setProfileError("");
 
       try {
-        const { data } = await api.get(`/barbers/profile/${currentUserId}`);
+        const { data } = await api.get("/users/me");
 
-        if (isMounted && data) {
+        if (isActiveLoad() && data) {
           setProfile((currentProfile) => ({
             name: data.name || currentUserName,
             phone: data.phone || currentUserPhone,
@@ -209,7 +239,7 @@ export default function BarberProfilePage() {
             profession: data.profession || "barber",
             barberType: data.barberType || "",
             specialty: data.specialty || "",
-            imageUrl: data.imageUrl || "",
+            imageUrl: data.imageUrl || data.avatarUrl || "",
             galleryImages: data.galleryImages || [],
             defaultSchedule: data.defaultSchedule || defaultPersonalSchedule,
             salon: data.salon || null,
@@ -220,12 +250,9 @@ export default function BarberProfilePage() {
             salons: data.salons || [],
           }));
         }
-      } catch (requestError) {
-        if (isMounted) {
-          setProfileError(
-            requestError.response?.data?.message ||
-              "Could not load profile. Please try again."
-          );
+      } catch {
+        if (isActiveLoad()) {
+          setProfileError("Could not load profile. Please try again.");
         }
       }
     }
@@ -237,7 +264,7 @@ export default function BarberProfilePage() {
       try {
         const { data } = await api.get(`/reviews/${currentUserId}`);
 
-        if (isMounted) {
+        if (isActiveLoad()) {
           dispatch(
             setReviews({
               barberId: currentUserId,
@@ -246,14 +273,14 @@ export default function BarberProfilePage() {
           );
         }
       } catch (requestError) {
-        if (isMounted) {
+        if (isActiveLoad()) {
           setReviewsError(
             requestError.response?.data?.message ||
               "Could not load reviews. Please try again."
           );
         }
       } finally {
-        if (isMounted) {
+        if (isActiveLoad()) {
           setIsReviewsLoading(false);
         }
       }
@@ -265,7 +292,7 @@ export default function BarberProfilePage() {
           api.get(`/barbers/${currentUserId}/certifications`),
           api.get(`/barbers/${currentUserId}/event-certificates`),
         ]);
-        if (isMounted) {
+        if (isActiveLoad()) {
           setCertifications(manualResponse.data || []);
           setEventCertifications(eventResponse.data || []);
         }
@@ -280,7 +307,7 @@ export default function BarberProfilePage() {
 
     api.get(`/services/${currentUserId}`)
       .then(({ data }) => {
-        if (isMounted) {
+        if (isActiveLoad()) {
           const activeServices = (data || []).filter(
             (service) => service?.active !== false
           );
@@ -288,24 +315,24 @@ export default function BarberProfilePage() {
         }
       })
       .catch(() => {
-        if (isMounted) setServicesCount(null);
+        if (isActiveLoad()) setServicesCount(null);
       });
 
     getMyPortfolio()
       .then((items) => {
-        if (isMounted) {
+        if (isActiveLoad()) {
           setPortfolioCount(Array.isArray(items) ? items.length : null);
         }
       })
       .catch(() => {
-        if (isMounted) setPortfolioCount(null);
+        if (isActiveLoad()) setPortfolioCount(null);
       });
 
     // Fetch salon review stats if barber belongs to approved salons
     if (currentUserSalonId) {
       api.get(`/salons/${currentUserSalonId}`)
         .then(({ data }) => {
-          if (isMounted) {
+          if (isActiveLoad()) {
             setSalonRating(Number(data?.averageRating || 0));
             setSalonReviewsCount(
               Number(data?.totalReviews ?? data?.reviewsCount ?? 0)
@@ -324,7 +351,7 @@ export default function BarberProfilePage() {
     api.get("/users/me")
       .then(({ data }) => {
         if (
-          isMounted &&
+          isActiveLoad() &&
           selfAddressContextRef.current === requestContext &&
           selfAddressRequestRef.current === requestId
         ) {
@@ -346,6 +373,7 @@ export default function BarberProfilePage() {
 
     return () => {
       isMounted = false;
+      profileLoadRequestRef.current += 1;
     };
   }, [currentUserId, currentUserName, currentUserPhone, currentUserSalonId, currentUserSalonStatus, dispatch, loadFromUsersMe, selfAddressContext]);
 
@@ -367,6 +395,10 @@ export default function BarberProfilePage() {
 
     if (isProfileSaving) return;
 
+    const requestId = ++saveRequestRef.current;
+    const isActiveSave = () =>
+      mountedRef.current && saveRequestRef.current === requestId;
+
     setProfileError("");
     setIsProfileSaving(true);
 
@@ -377,6 +409,8 @@ export default function BarberProfilePage() {
       };
       if (!selfAddressHydratedRef.current) profilePayload.address = undefined;
       const { data } = await api.put(`/barbers/profile/${currentUser.id}`, profilePayload);
+      if (!isActiveSave()) return;
+
       const nextProfile = {
         name: data.name || profile.name,
         phone: data.phone || profile.phone,
@@ -413,13 +447,26 @@ export default function BarberProfilePage() {
       );
       setProfile({ ...nextProfile, addressContext: selfAddressContext });
       setSaved(true);
-    } catch (requestError) {
-      setProfileError(
-        requestError.response?.data?.message ||
-          "Could not save profile. Please try again."
-      );
+
+      // Navigate by authoritative onboarding step.
+      try {
+        const onboardingStatus = await getMyBarberOnboarding();
+        if (!isActiveSave()) return;
+        const stepRoute = resolveOnboardingRoute(onboardingStatus);
+        if (stepRoute !== "/admin/profile") {
+          navigate(stepRoute);
+        }
+      } catch {
+        // Stay on profile if onboarding fetch fails.
+      }
+    } catch {
+      if (isActiveSave()) {
+        setProfileError("Could not save profile. Please try again.");
+      }
     } finally {
-      setIsProfileSaving(false);
+      if (isActiveSave()) {
+        setIsProfileSaving(false);
+      }
     }
   };
 

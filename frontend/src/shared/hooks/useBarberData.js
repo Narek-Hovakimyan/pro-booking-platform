@@ -5,6 +5,20 @@ import initialSchedule, { defaultPersonalSchedule } from "../data/schedule";
 import { setServices } from "../../store/slices/servicesSlice";
 import { setSchedule } from "../../store/slices/scheduleSlice";
 
+const personalScheduleDayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+const normalizePersonalWeeklySchedule = (weeklySchedule) => {
+  const source =
+    weeklySchedule && typeof weeklySchedule === "object" ? weeklySchedule : {};
+
+  return Object.fromEntries(
+    personalScheduleDayKeys.map((dayKey) => [
+      dayKey,
+      source[dayKey] || initialSchedule[dayKey],
+    ])
+  );
+};
+
 export function useBarberData({
   currentUser,
   currentUserId,
@@ -106,20 +120,24 @@ export function useBarberData({
 
       try {
         if (currentUserRole === "barber") {
-          const scheduleResponse = await api.get(`/schedules/${currentUserId}`);
+          const scheduleResponse = await api.get(`/schedules/${currentUserId}/personal`);
 
           if (!isMounted) return;
+
+          const scheduleData =
+            scheduleResponse.data?.schedule || scheduleResponse.data || {};
 
           dispatch(
             setSchedule({
               barberId: currentUserId,
-              weeklySchedule:
-                scheduleResponse.data?.weeklySchedule || initialSchedule,
-              dateSchedules: scheduleResponse.data?.dateSchedules || {},
-              scheduleOverrides: scheduleResponse.data?.scheduleOverrides || {},
+              weeklySchedule: normalizePersonalWeeklySchedule(
+                scheduleData.weeklySchedule
+              ),
+              dateSchedules: scheduleData.dateSchedules || {},
+              scheduleOverrides: scheduleData.scheduleOverrides || {},
               defaultSchedule:
-                scheduleResponse.data?.defaultSchedule || defaultPersonalSchedule,
-              nonWorkingDays: scheduleResponse.data?.nonWorkingDays || [],
+                scheduleData.defaultSchedule || defaultPersonalSchedule,
+              nonWorkingDays: scheduleData.nonWorkingDays || [],
             })
           );
         }

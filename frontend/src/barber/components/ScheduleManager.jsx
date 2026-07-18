@@ -20,6 +20,8 @@ import ScheduleSalonSelector from "@/barber/components/schedule/ScheduleSalonSel
 import DefaultScheduleSection from "@/barber/components/schedule/DefaultScheduleSection";
 import SalonScheduleSection from "@/barber/components/schedule/SalonScheduleSection";
 import ScheduleSkeleton from "@/barber/components/ScheduleSkeleton";
+import PersonalScheduleView from "@/barber/components/schedule/PersonalScheduleView";
+import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
 import {
   getSalonIdFromEntry,
   getSalonNameFromEntry,
@@ -80,9 +82,12 @@ export default function ScheduleManager({
   const [perSalonError, setPerSalonError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(null);
+  const [isOnboardingStepLoading, setIsOnboardingStepLoading] = useState(false);
   const isMountedRef = useRef(true);
   const hasNoUserRef = useRef(false);
   const servicesFetchAttemptedRef = useRef("");
+  const onboardingRequestRef = useRef(0);
 
   // Fetch barber's salons from API
   useEffect(() => {
@@ -159,6 +164,47 @@ export default function ScheduleManager({
       isMountedRef.current = false;
     };
   }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId || isLoadingSalons || salonEntries.length > 0) {
+      if (!currentUserId || salonEntries.length > 0) {
+        Promise.resolve().then(() => {
+          if (!isMountedRef.current) return;
+          setOnboardingStep(null);
+          setIsOnboardingStepLoading(false);
+        });
+      }
+      return;
+    }
+
+    const requestId = ++onboardingRequestRef.current;
+    let cancelled = false;
+
+    async function fetchOnboardingStep() {
+      setIsOnboardingStepLoading(true);
+      try {
+        const status = await getMyBarberOnboarding();
+        if (cancelled || !isMountedRef.current || onboardingRequestRef.current !== requestId) {
+          return;
+        }
+        setOnboardingStep(status?.state?.currentStep || null);
+      } catch {
+        if (cancelled || !isMountedRef.current || onboardingRequestRef.current !== requestId) return;
+        setOnboardingStep(null);
+      } finally {
+        if (!cancelled && isMountedRef.current && onboardingRequestRef.current === requestId) {
+          setIsOnboardingStepLoading(false);
+        }
+      }
+    }
+
+    fetchOnboardingStep();
+
+    return () => {
+      cancelled = true;
+      onboardingRequestRef.current += 1;
+    };
+  }, [currentUserId, isLoadingSalons, salonEntries.length]);
 
   // Handle no-user case separately to avoid setState in effect
   useEffect(() => {
@@ -705,12 +751,16 @@ export default function ScheduleManager({
     return errs;
   }, [validationError]);
   // Loading state
-  if (isLoadingSalons) {
+  if (isLoadingSalons || isOnboardingStepLoading) {
     return <ScheduleSkeleton />;
   }
 
   // No salon memberships
   if (approvedSalons.length === 0) {
+    if (onboardingStep === "personal_schedule") {
+      return <PersonalScheduleView currentUserId={currentUserId} />;
+    }
+
     return (
       <Card className="rounded-3xl border-purple-100 shadow-lg shadow-purple-100/40 lg:col-span-3">
         <CardContent className="space-y-5 p-4 sm:p-6">
