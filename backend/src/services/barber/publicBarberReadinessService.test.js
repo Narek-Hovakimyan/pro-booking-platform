@@ -223,3 +223,24 @@ test("readiness keeps unrelated canonical salon memberships from qualifying anot
   assert.equal(readiness.eligibleSalonIds.has("salon-a"), false);
   assert.equal(readiness.publicReady, true);
 });
+
+test("readiness does not allow legacy approved salon to override canonical pending membership", async () => {
+  User.find = () => createFindChain([
+    {
+      _id: "legacy-conflict-barber",
+      role: "barber",
+      specialistOnboarding: completedState("salon"),
+      salons: [{ salon: "salon-a", status: "pending", relationshipStatus: "pending", worksAsSpecialist: true }],
+      salon: "salon-a",
+      salonStatus: "approved",
+    },
+  ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: "legacy-conflict-barber" }];
+
+  const readiness = await getPublicBarberReadiness("legacy-conflict-barber");
+
+  assert.deepEqual([...readiness.eligibleSalonIds], []);
+  assert.equal(readiness.publicReady, false);
+});

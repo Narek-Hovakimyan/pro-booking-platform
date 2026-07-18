@@ -63,6 +63,9 @@ const isPublicReadyForSalon = (readinessByBarberId, barberId, salonId) => {
 };
 
 const getApprovedSalonEntry = (barber, salonId) => {
+  const hasCanonicalEntry = (barber?.salons || []).some(
+    (entry) => String(entry?.salon?._id || entry?.salon) === String(salonId)
+  );
   const approvedEntry = (barber?.salons || []).find(
     (entry) =>
       String(entry?.salon?._id || entry?.salon) === String(salonId) &&
@@ -70,6 +73,7 @@ const getApprovedSalonEntry = (barber, salonId) => {
   );
 
   if (approvedEntry) return approvedEntry;
+  if (hasCanonicalEntry) return null;
 
   if (
     String(barber?.salon?._id || barber?.salon) === String(salonId) &&
@@ -142,7 +146,15 @@ export const listSalons = async (req, res) => {
 
     // If excludeForBarber is provided, filter out salons the barber is already connected to
     if (req.query.excludeForBarber) {
-      const barberId = req.query.excludeForBarber;
+      if (!req.user?._id) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      if (String(req.query.excludeForBarber) !== String(req.user._id)) {
+        return res.status(403).json({ message: "You can only filter your own salons" });
+      }
+
+      const barberId = req.user._id;
       const barber = await User.findById(barberId);
 
       if (barber) {
@@ -242,6 +254,9 @@ export const listSalons = async (req, res) => {
       } else if (barber.salonStatus === "approved" && barber.salon) {
         // Fallback to legacy
         const salonId = String(barber.salon);
+        if (!barbersBySalonId.has(salonId)) {
+          return;
+        }
         if (
           paidAccessBySalonId.get(salonId)?.get(String(barber._id)) !== true ||
           !isPublicReadyForSalon(readinessByBarberId, barber._id, salonId)

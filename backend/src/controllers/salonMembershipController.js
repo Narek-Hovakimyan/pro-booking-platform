@@ -198,6 +198,10 @@ export const decideJoinRequest = async (req, res) => {
       return res.status(403).json({ message: "Only salon owner or admin can manage requests" });
     }
 
+    if (sameId(req.user._id, request.barberId?._id || request.barberId)) {
+      return res.status(403).json({ message: "You cannot manage your own join request" });
+    }
+
     if (status === "accepted") {
       const barber = await User.findById(request.barberId._id);
 

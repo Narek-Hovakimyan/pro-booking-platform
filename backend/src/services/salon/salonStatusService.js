@@ -18,8 +18,12 @@ const createDefaultSalonEntrySchedule = () => ({
 
 export const getSalonStatusForBarber = async (barberId) => {
   const barber = await User.findById(barberId);
+  const canonicalSalonEntries = Array.isArray(barber?.salons) ? barber.salons : [];
+  const hasCanonicalEntryForLegacySalon =
+    barber?.salon &&
+    canonicalSalonEntries.some((salonEntry) => sameId(salonEntry.salon, barber.salon));
 
-  const approvedSalonEntries = (barber?.salons || []).filter(
+  const approvedSalonEntries = canonicalSalonEntries.filter(
     (salonEntry) => salonEntry.status === "approved"
   );
   const approvedSalonIds = approvedSalonEntries.map((salonEntry) => salonEntry.salon);
@@ -36,7 +40,7 @@ export const getSalonStatusForBarber = async (barberId) => {
 
   const approvedSalon =
     primarySalon ||
-    (barber?.salonStatus === "approved" && barber?.salon
+    (!hasCanonicalEntryForLegacySalon && barber?.salonStatus === "approved" && barber?.salon
       ? await Salon.findById(barber.salon)
       : null);
 
@@ -45,7 +49,7 @@ export const getSalonStatusForBarber = async (barberId) => {
     status: "pending",
   }).populate("salonId");
 
-  const pendingSalonEntries = (barber?.salons || []).filter(
+  const pendingSalonEntries = canonicalSalonEntries.filter(
     (salonEntry) => salonEntry.status === "pending"
   );
   const pendingSalonIds = pendingSalonEntries.map((salonEntry) => salonEntry.salon);
@@ -90,7 +94,14 @@ export const getSalonStatusForBarber = async (barberId) => {
     : null;
 
   return {
-    salonStatus: barber?.salonStatus || "none",
+    salonStatus:
+      primarySalon
+        ? "approved"
+        : pendingSalonEntries.length > 0
+          ? "pending"
+          : canonicalSalonEntries.some((salonEntry) => salonEntry.status === "rejected")
+            ? "rejected"
+            : barber?.salonStatus || "none",
     salon: serializeSalon(approvedSalon),
     salons: enrichedApprovedEntries,
     pendingEntries: enrichedPendingEntries,

@@ -811,6 +811,81 @@ test("listSalons empty/whitespace search does not add search filter and still su
   assert.equal(capturedQuery.$or, undefined, "no $or filter for whitespace-only search");
 });
 
+test("listSalons rejects unauthenticated excludeForBarber filtering", async () => {
+  const res = createResponse();
+
+  await listSalons(
+    { query: { excludeForBarber: barberId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.message, "Authentication required");
+});
+
+test("listSalons applies authenticated self-scoped excludeForBarber filtering", async () => {
+  const res = createResponse();
+  const ownedSalonId = "64b000000000000000000031";
+  const pendingRequestSalonId = "64b000000000000000000032";
+  let capturedQuery;
+
+  User.findById = async (id) => {
+    assert.equal(String(id), barberId);
+    return {
+      _id: barberId,
+      salons: [{ salon: salonAId, status: "approved" }],
+    };
+  };
+  Salon.find = (query) => {
+    if (query?.ownerId) {
+      assert.equal(String(query.ownerId), barberId);
+      return { distinct: async () => [ownedSalonId] };
+    }
+    capturedQuery = query;
+    return { sort: async () => [] };
+  };
+  SalonJoinRequest.find = (query) => {
+    assert.deepEqual(query, { barberId, status: "pending" });
+    return { distinct: async () => [pendingRequestSalonId] };
+  };
+  User.find = () => ({ select: async () => [] });
+  BarberProfile.find = async () => [];
+
+  await listSalons(
+    {
+      user: { _id: barberId, role: "barber" },
+      query: { excludeForBarber: barberId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(capturedQuery._id.$nin.map(String).sort(), [
+    salonAId,
+    ownedSalonId,
+    pendingRequestSalonId,
+  ].sort());
+});
+
+test("listSalons rejects authenticated foreign excludeForBarber filtering", async () => {
+  const res = createResponse();
+
+  User.findById = () => {
+    throw new Error("foreign excludeForBarber should stop before barber lookup");
+  };
+
+  await listSalons(
+    {
+      user: { _id: barberId, role: "barber" },
+      query: { excludeForBarber: unrelatedBarberId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.message, "You can only filter your own salons");
+});
+
 test("listSalons malicious pattern is escaped, not passed raw", async () => {
   const res = createResponse();
   let capturedQuery;

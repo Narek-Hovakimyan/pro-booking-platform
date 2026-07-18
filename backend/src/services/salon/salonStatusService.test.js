@@ -236,6 +236,52 @@ test("legacy approved salon fallback is preserved", async () => {
   assert.deepEqual(status.salons, []);
 });
 
+test("canonical pending entry wins over contradictory legacy approved salon", async () => {
+  User.findById = async () => ({
+    _id: barberId,
+    salon: salonAId,
+    salonStatus: "approved",
+    salons: [{ salon: salonAId, status: "pending", isPrimary: false }],
+  });
+  createFindMock({
+    pendingSalons: [createSalon({ _id: salonAId, name: "Canonical Pending" })],
+  });
+  Salon.findById = () => {
+    throw new Error("legacy salon should not be loaded over canonical pending");
+  };
+  SalonJoinRequest.find = () => ({
+    populate: async () => [],
+  });
+
+  const status = await getSalonStatusForBarber(barberId);
+
+  assert.equal(status.salonStatus, "pending");
+  assert.equal(status.salon, null);
+  assert.deepEqual(status.salons, []);
+});
+
+test("canonical rejected entry wins over contradictory legacy approved salon", async () => {
+  User.findById = async () => ({
+    _id: barberId,
+    salon: salonAId,
+    salonStatus: "approved",
+    salons: [{ salon: salonAId, status: "rejected", isPrimary: false }],
+  });
+  createFindMock({ managedSalons: [] });
+  Salon.findById = () => {
+    throw new Error("legacy salon should not be loaded over canonical rejected");
+  };
+  SalonJoinRequest.find = () => ({
+    populate: async () => [],
+  });
+
+  const status = await getSalonStatusForBarber(barberId);
+
+  assert.equal(status.salonStatus, "rejected");
+  assert.equal(status.salon, null);
+  assert.deepEqual(status.salons, []);
+});
+
 test("missing barber preserves empty status response", async () => {
   User.findById = async () => null;
   createFindMock({ managedSalons: [] });
