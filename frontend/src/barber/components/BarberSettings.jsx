@@ -20,7 +20,6 @@ import ConfirmModal from "@/shared/components/common/ConfirmModal";
 
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { updateCurrentUser } from "@/store/slices/authSlice";
-import { updateBarberProfile } from "@/store/slices/usersSlice";
 
 function SettingsHubCard({ title, description, to }) {
   const iconMap = {
@@ -53,28 +52,6 @@ export default function BarberSettings({
 }) {
   const dispatch = useDispatch();
   const { currentUser } = useSelector((state) => state.auth);
-  const savedProfile = useSelector((state) =>
-    state.users.find((user) => String(user.id) === String(currentUser?.id))
-  );
-
-  // Profile state — kept for future settings page reuse; not rendered in any current view
-  const [profile, setProfile] = useState({
-    name: currentUser?.name || "",
-    city: savedProfile?.city || currentUser?.city || "",
-    phone: currentUser?.phone || "",
-    imageUrl: savedProfile?.imageUrl || currentUser?.avatarUrl || "",
-    bio: savedProfile?.bio || "",
-    profession: savedProfile?.profession || currentUser?.profession || "barber",
-    barberType: savedProfile?.barberType || currentUser?.barberType || "",
-    specialty: savedProfile?.specialty || currentUser?.specialty || "unisex",
-  });
-  // eslint-disable-next-line no-unused-vars
-  const [profileError, setProfileError] = useState("");
-  const [isProfileLoading, setIsProfileLoading] = useState(false);
-  // eslint-disable-next-line no-unused-vars
-  const [isProfileSaving, setIsProfileSaving] = useState(false);
-  // eslint-disable-next-line no-unused-vars
-  const [profileSaved, setProfileSaved] = useState(false);
   const [eventCertificates, setEventCertificates] = useState([]);
 
   // Salon state
@@ -107,8 +84,6 @@ export default function BarberSettings({
   const [respondingRelationshipSalonId, setRespondingRelationshipSalonId] =
     useState("");
 
-  // Tracks whether initial profile fetch has been done (prevents re-fetch on derived dep changes)
-  const profileFetchedRef = useRef(false);
   const isMountedRef = useRef(true);
   const cancelSalonRequestTokenRef = useRef(0);
 
@@ -120,69 +95,6 @@ export default function BarberSettings({
       cancelSalonRequestTokenRef.current += 1;
     };
   }, []);
-
-  // Effect 1: Fetch profile from API once on mount/currentUser.id change only.
-  // Uses profileFetchedRef to avoid re-fetching when currentUser.name/phone change (derived deps).
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    if (profileFetchedRef.current) {
-      setIsProfileLoading(false);
-      return;
-    }
-    profileFetchedRef.current = true;
-
-    let isMounted = true;
-
-    async function fetchProfile() {
-      setIsProfileLoading(true);
-      setProfileError("");
-
-      try {
-        const { data } = await api.get(`/barbers/profile/${currentUser.id}`);
-
-        if (!isMounted || !data) return;
-
-        const nextProfile = {
-          name: data.name || currentUser.name || "",
-          city: data.city || "",
-          phone: data.phone || currentUser.phone || "",
-          imageUrl: data.imageUrl || data.avatarUrl || "",
-          bio: data.bio || "",
-          profession: data.profession || "barber",
-          barberType: data.barberType || "",
-          specialty: data.specialty || "unisex",
-        };
-
-        setProfile(nextProfile);
-        dispatch(
-          updateBarberProfile({
-            barberId: currentUser.id,
-            profile: {
-              ...data,
-              avatarUrl: data.avatarUrl || data.imageUrl || "",
-            },
-          })
-        );
-      } catch (requestError) {
-        if (isMounted) {
-          setProfileError(
-            requestError.response?.data?.message ||
-              "Could not load settings. Please try again."
-          );
-        }
-      } finally {
-        if (isMounted) {
-          setIsProfileLoading(false);
-        }
-      }
-    }
-
-    fetchProfile();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser?.id, currentUser?.name, currentUser?.phone, dispatch]);
 
   useEffect(() => {
     if (!currentUser?.id) return undefined;
@@ -259,113 +171,6 @@ export default function BarberSettings({
       isMounted = false;
     };
   }, [currentUser?.id, dispatch]);
-
-  // eslint-disable-next-line no-unused-vars
-  const updateProfileField = (field, value) => {
-    setProfileSaved(false);
-    setProfileError("");
-    setProfile((currentProfile) => ({
-      ...currentProfile,
-      [field]: value,
-    }));
-  };
-
-  // eslint-disable-next-line no-unused-vars
-  const saveProfile = async (event) => {
-    event.preventDefault();
-
-    if (!currentUser?.id) return;
-
-    setIsProfileSaving(true);
-    setProfileError("");
-    setProfileSaved(false);
-
-    try {
-      const { data } = await api.put(`/barbers/profile/${currentUser.id}`, {
-        name: profile.name,
-        city: profile.city,
-        phone: profile.phone,
-        imageUrl: profile.imageUrl,
-        avatarUrl: profile.imageUrl,
-        bio: profile.bio,
-        profession: profile.profession,
-        barberType: profile.barberType,
-        specialty: profile.specialty,
-      });
-      const nextProfile = {
-        ...data,
-        avatarUrl: data.avatarUrl || data.imageUrl || "",
-      };
-
-      dispatch(
-        updateBarberProfile({
-          barberId: currentUser.id,
-          profile: nextProfile,
-        })
-      );
-      dispatch(
-        updateCurrentUser({
-          name: nextProfile.name,
-          city: nextProfile.city,
-          phone: nextProfile.phone,
-          avatarUrl: nextProfile.avatarUrl,
-        })
-      );
-      setProfile({
-        name: nextProfile.name || "",
-        city: nextProfile.city || "",
-        phone: nextProfile.phone || "",
-        imageUrl: nextProfile.imageUrl || nextProfile.avatarUrl || "",
-        bio: nextProfile.bio || "",
-        profession: nextProfile.profession || profile.profession || "barber",
-        barberType: nextProfile.barberType || profile.barberType || "",
-        specialty: nextProfile.specialty || profile.specialty || "unisex",
-      });
-      setProfileSaved(true);
-    } catch (requestError) {
-      setProfileError(
-        requestError.response?.data?.message ||
-          "Could not save settings. Please try again."
-      );
-    } finally {
-      setIsProfileSaving(false);
-    }
-  };
-
-  // eslint-disable-next-line no-unused-vars
-  const handleAvatarUploaded = (data) => {
-    const nextProfile = {
-      ...data,
-      avatarUrl: data.avatarUrl || data.imageUrl || "",
-    };
-
-    dispatch(
-      updateBarberProfile({
-        barberId: currentUser.id,
-        profile: nextProfile,
-      })
-    );
-    dispatch(
-      updateCurrentUser({
-        name: nextProfile.name,
-        city: nextProfile.city,
-        phone: nextProfile.phone,
-        avatarUrl: nextProfile.avatarUrl,
-      })
-    );
-    setProfile({
-      name: nextProfile.name || "",
-      city: nextProfile.city || "",
-      phone: nextProfile.phone || "",
-      imageUrl: nextProfile.imageUrl || nextProfile.avatarUrl || "",
-      bio: nextProfile.bio || "",
-      profession: nextProfile.profession || profile.profession || "barber",
-      barberType: nextProfile.barberType || profile.barberType || "",
-      specialty: nextProfile.specialty || profile.specialty || "unisex",
-    });
-    setProfileSaved(true);
-    setProfileError("");
-  };
 
   const refreshSalonData = async (shouldContinue = () => true) => {
     const [salonsResponse, statusResponse, requestsResponse] = await Promise.all([
@@ -969,7 +774,7 @@ export default function BarberSettings({
               {error}
             </p>
           )}
-          {isLoading || isProfileLoading ? (
+          {isLoading ? (
             <p className="text-neutral-500">Loading...</p>
           ) : (
             <>
@@ -1045,7 +850,7 @@ export default function BarberSettings({
                 {error}
               </p>
             )}
-            {isLoading || isProfileLoading ? (
+            {isLoading ? (
               <p className="text-neutral-500">Loading...</p>
             ) : (
               <DefaultScheduleSection
@@ -1071,7 +876,7 @@ export default function BarberSettings({
                 {error}
               </p>
             )}
-            {isLoading || isProfileLoading ? (
+            {isLoading ? (
               <p className="text-neutral-500">Loading...</p>
             ) : managedSalons.length === 0 ? (
               <p className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
@@ -1127,7 +932,7 @@ export default function BarberSettings({
                 {error}
               </p>
             )}
-            {isLoading || isProfileLoading ? (
+            {isLoading ? (
               <p className="text-neutral-500">Loading...</p>
             ) : (
               <DepositSettingsSection />
@@ -1143,7 +948,7 @@ export default function BarberSettings({
                 {error}
               </p>
             )}
-            {isLoading || isProfileLoading ? (
+            {isLoading ? (
               <p className="text-neutral-500">Loading...</p>
             ) : (
               <>
