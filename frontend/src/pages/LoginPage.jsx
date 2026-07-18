@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
@@ -7,6 +7,7 @@ import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
 import GoogleAuthButton from "@/shared/components/GoogleAuthButton";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { resolvePostAuthDestination } from "@/shared/api/barberOnboarding";
 import { loginUser } from "@/store/slices/authSlice";
 import { CalendarCheck, Scissors, ShieldCheck } from "lucide-react";
 
@@ -19,12 +20,19 @@ export default function LoginPage() {
   const [searchParams] = useSearchParams();
   const { currentUser, isAuthenticated } = useSelector((state) => state.auth);
   const redirectPath = searchParams.get("redirect") || "";
+  const authRequestRef = useRef(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     phone: "",
     password: "",
   });
+
+  useEffect(() => {
+    return () => {
+      authRequestRef.current += 1;
+    };
+  }, []);
 
   if (isAuthenticated) {
     return (
@@ -50,6 +58,8 @@ export default function LoginPage() {
     }
 
     setIsLoading(true);
+    const requestId = authRequestRef.current + 1;
+    authRequestRef.current = requestId;
 
     try {
       const { data } = await api.post("/auth/login", {
@@ -57,14 +67,25 @@ export default function LoginPage() {
         password: form.password,
       });
 
+      if (authRequestRef.current !== requestId) return;
+      const destination = await resolvePostAuthDestination(
+        data.user,
+        redirectPath || (data.user.role === "barber" ? "/admin" : "/"),
+        data.token
+      );
+
+      if (authRequestRef.current !== requestId) return;
       dispatch(loginUser(data));
-      navigate(redirectPath || (data.user.role === "barber" ? "/admin" : "/"));
+      navigate(destination);
     } catch (requestError) {
+      if (authRequestRef.current !== requestId) return;
       setError(
         requestError.response?.data?.message || t("auth.login.failed")
       );
     } finally {
-      setIsLoading(false);
+      if (authRequestRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   };
 

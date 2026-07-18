@@ -26,11 +26,35 @@ function getStoredToken() {
   }
 }
 
+function hasAuthorizationHeader(headers) {
+  if (!headers) {
+    return false;
+  }
+
+  if (typeof headers.has === "function") {
+    return headers.has("Authorization");
+  }
+
+  return Object.keys(headers).some(
+    (headerName) => headerName.toLowerCase() === "authorization"
+  );
+}
+
+function setAuthorizationHeader(headers, value) {
+  if (typeof headers.set === "function") {
+    headers.set("Authorization", value);
+    return;
+  }
+
+  headers.Authorization = value;
+}
+
 api.interceptors.request.use((config) => {
   const token = getStoredToken();
+  config.headers = config.headers || {};
 
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (token && !hasAuthorizationHeader(config.headers)) {
+    setAuthorizationHeader(config.headers, `Bearer ${token}`);
   }
 
   if (config.data instanceof FormData) {

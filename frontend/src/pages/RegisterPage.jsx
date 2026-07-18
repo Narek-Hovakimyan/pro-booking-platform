@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
@@ -7,6 +7,7 @@ import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
 import GoogleAuthButton from "@/shared/components/GoogleAuthButton";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { resolvePostAuthDestination } from "@/shared/api/barberOnboarding";
 import { registerUser } from "@/store/slices/authSlice";
 import { CalendarCheck, Scissors, ShieldCheck } from "lucide-react";
 
@@ -23,6 +24,7 @@ export default function RegisterPage() {
   const [searchParams] = useSearchParams();
   const { currentUser, isAuthenticated } = useSelector((state) => state.auth);
   const redirectPath = searchParams.get("redirect") || "";
+  const authRequestRef = useRef(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -32,6 +34,12 @@ export default function RegisterPage() {
     password: "",
     role: "client",
   });
+
+  useEffect(() => {
+    return () => {
+      authRequestRef.current += 1;
+    };
+  }, []);
 
   if (isAuthenticated) {
     return (
@@ -63,6 +71,8 @@ export default function RegisterPage() {
     }
 
     setIsLoading(true);
+    const requestId = authRequestRef.current + 1;
+    authRequestRef.current = requestId;
 
     try {
       const { data } = await api.post("/auth/register", {
@@ -73,14 +83,25 @@ export default function RegisterPage() {
         role: form.role,
       });
 
+      if (authRequestRef.current !== requestId) return;
+      const destination = await resolvePostAuthDestination(
+        data.user,
+        getPostRegistrationPath(data.user.role, redirectPath),
+        data.token
+      );
+
+      if (authRequestRef.current !== requestId) return;
       dispatch(registerUser(data));
-      navigate(getPostRegistrationPath(data.user.role, redirectPath));
+      navigate(destination);
     } catch (requestError) {
+      if (authRequestRef.current !== requestId) return;
       setError(
         requestError.response?.data?.message || t("auth.register.failed")
       );
     } finally {
-      setIsLoading(false);
+      if (authRequestRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -215,7 +236,7 @@ export default function RegisterPage() {
               </Button>
             </form>
 
-            {googleAvailable && <GoogleAuthButton />}
+            {googleAvailable && <GoogleAuthButton barberFallbackPath="/admin/settings/salon" />}
 
             <p className="text-center text-sm text-neutral-500">
               {t("auth.register.hasAccount")}{" "}
