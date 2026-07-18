@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
+import mongoose from "mongoose";
 
 import {
   getScheduleByBarber,
@@ -11,19 +12,26 @@ import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
 import SalonJoinRequest from "../models/SalonJoinRequest.js";
+import Service from "../models/Service.js";
 import Subscription from "../models/Subscription.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";
 import User from "../models/User.js";
+import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
 import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
+import { normalizePublicAvailabilityIds } from "../services/barber/publicAvailabilityContextService.js";
 
 const originalMethods = {
+  barberProfileFind: BarberProfile.find,
   barberProfileFindOne: BarberProfile.findOne,
+  scheduleFind: Schedule.find,
   scheduleFindOne: Schedule.findOne,
   scheduleFindOneAndUpdate: Schedule.findOneAndUpdate,
+  serviceFind: Service.find,
   salonFindById: Salon.findById,
   joinRequestFindOne: SalonJoinRequest.findOne,
   subscriptionFindOne: Subscription.findOne,
   subscriptionSeatFind: SubscriptionSeat.find,
+  userFind: User.find,
   userFindById: User.findById,
   userFindOneAndUpdate: User.findOneAndUpdate,
 };
@@ -34,6 +42,12 @@ const salonAId = "64b000000000000000000004";
 const salonBId = "64b000000000000000000005";
 
 beforeEach(() => {
+  User.find = () => createFindChain([createReadyBarber()]);
+  BarberProfile.find = () => createFindChain([{ barberId, address: "Ready Street 1" }]);
+  Schedule.find = () => createFindChain([
+    { barberId, salonId: null, weeklySchedule: workingSchedule },
+  ]);
+  Service.find = () => createFindChain([{ barberId }]);
   Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
   SubscriptionSeat.find = () => ({
     populate: () => ({
@@ -43,13 +57,17 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  BarberProfile.find = originalMethods.barberProfileFind;
   BarberProfile.findOne = originalMethods.barberProfileFindOne;
+  Schedule.find = originalMethods.scheduleFind;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Schedule.findOneAndUpdate = originalMethods.scheduleFindOneAndUpdate;
+  Service.find = originalMethods.serviceFind;
   Salon.findById = originalMethods.salonFindById;
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
   Subscription.findOne = originalMethods.subscriptionFindOne;
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
+  User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
   User.findOneAndUpdate = originalMethods.userFindOneAndUpdate;
 });
@@ -69,6 +87,62 @@ const createResponse = () => ({
 
 const createQuery = (value) => ({
   select: async () => value,
+});
+
+const createFindChain = (result) => ({
+  select() {
+    return this;
+  },
+  async lean() {
+    return result;
+  },
+});
+
+const completedState = (workplace = "independent") => ({
+  version: 1,
+  status: "completed",
+  currentStep: null,
+  workplace,
+  completedAt: new Date("2026-07-16T10:00:00.000Z"),
+});
+
+const workingSchedule = createCanonicalPersonalSchedule().weeklySchedule;
+
+const createReadyBarber = (overrides = {}) => ({
+  _id: barberId,
+  role: "barber",
+  specialistOnboarding: completedState("independent"),
+  salons: [
+    {
+      salon: salonAId,
+      status: "approved",
+      relationshipStatus: "active",
+      worksAsSpecialist: true,
+    },
+  ],
+  ...overrides,
+});
+
+const createScheduleDoc = (overrides = {}) => ({
+  barberId,
+  salonId: null,
+  weeklySchedule: workingSchedule,
+  dateSchedules: {},
+  scheduleOverrides: {},
+  nonWorkingDays: [],
+  defaultSchedule: selectedDefaultSchedule,
+  ...overrides,
+  toObject() {
+    return {
+      barberId: this.barberId,
+      salonId: this.salonId,
+      weeklySchedule: this.weeklySchedule,
+      dateSchedules: this.dateSchedules,
+      scheduleOverrides: this.scheduleOverrides,
+      nonWorkingDays: this.nonWorkingDays,
+      defaultSchedule: this.defaultSchedule,
+    };
+  },
 });
 
 const createScheduleBody = (overrides = {}) => ({
@@ -508,10 +582,7 @@ test("salon schedule endpoint cleans old all-days closed weekly schedule in resp
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body.weeklySchedule, {});
   assert.deepEqual(res.body.defaultSchedule, selectedDefaultSchedule);
-  assert.deepEqual(cleanupUpdate, {
-    query: { barberId, salonId: salonAId },
-    update: { $set: { weeklySchedule: {} } },
-  });
+  assert.equal(cleanupUpdate, null);
 });
 
 test("salon schedule endpoint removes past non-working days and date overrides", async () => {
@@ -595,51 +666,21 @@ test("salon schedule endpoint removes past non-working days and date overrides",
       "2026-06-04": { working: true, from: "10:00", to: "15:00", breakFrom: "", breakTo: "" },
       "2026-06-10": { working: true, from: "11:00", to: "16:00", breakFrom: "", breakTo: "" },
     });
-    assert.deepEqual(cleanupUpdate, {
-      query: { barberId, salonId: salonAId },
-      update: {
-        $set: {
-          dateSchedules: {
-            "2026-06-04": {
-              working: true,
-              from: "10:00",
-              to: "15:00",
-              breakFrom: "",
-              breakTo: "",
-            },
-            "2026-06-10": {
-              working: true,
-              from: "11:00",
-              to: "16:00",
-              breakFrom: "",
-              breakTo: "",
-            },
-          },
-          scheduleOverrides: {
-            "2026-06-04": {
-              isWorking: true,
-              startTime: "10:00",
-              endTime: "15:00",
-              breakStart: "",
-              breakEnd: "",
-            },
-            "2026-06-10": { isWorking: false },
-          },
-          nonWorkingDays: ["2026-06-04", "2026-06-10"],
-        },
-      },
-    });
+    assert.equal(cleanupUpdate, null);
   } finally {
     mock.timers.reset();
   }
 });
 
-test("legacy schedule endpoint returns clean defaultSchedule without mongoose internals", async () => {
+test("independent schedule endpoint returns clean defaultSchedule without mongoose internals", async () => {
   const res = createResponse();
+  let query;
 
-  Schedule.findOne = async () => ({
+  Schedule.findOne = async (nextQuery) => {
+    query = nextQuery;
+    return {
     barberId,
-    salonId: salonAId,
+    salonId: null,
     weeklySchedule: {},
     dateSchedules: {},
     scheduleOverrides: {},
@@ -655,35 +696,261 @@ test("legacy schedule endpoint returns clean defaultSchedule without mongoose in
         nonWorkingDays: this.nonWorkingDays,
       };
     },
-  });
-  User.findById = () =>
-    createQuery({
-      _id: barberId,
-      salons: [{ salon: salonAId, status: "approved", isPrimary: true }],
-    });
-  BarberProfile.findOne = async () => null;
+  };
+  };
 
   await getScheduleByBarber({ params: { barberId } }, res);
 
   assert.equal(res.statusCode, 200);
+  assert.deepEqual(query, { barberId, salonId: null });
   assertCleanDefaultSchedule(res.body.defaultSchedule);
   assert.equal(JSON.stringify(res.body).includes("_doc"), false);
   assert.equal(JSON.stringify(res.body).includes("$locals"), false);
 });
 
-test("legacy schedule fallback excludes a personal null-salon schedule", async () => {
+test("independent schedule endpoint does not infer any salon schedule", async () => {
   const res = createResponse();
-  let query;
+  const queries = [];
 
-  User.findById = () => createQuery({ salons: [] });
-  BarberProfile.findOne = async () => null;
   Schedule.findOne = async (nextQuery) => {
-    query = nextQuery;
+    queries.push(nextQuery);
     return null;
   };
 
   await getScheduleByBarber({ params: { barberId } }, res);
 
-  assert.deepEqual(query, { barberId, salonId: { $ne: null } });
+  assert.deepEqual(queries, [{ barberId, salonId: null }]);
+  assert.equal(res.statusCode, 404);
+});
+
+test("independent schedule endpoint requires null-salon readiness and schedule", async () => {
+  const res = createResponse();
+  let query;
+
+  Schedule.findOne = async (nextQuery) => {
+    query = nextQuery;
+    return createScheduleDoc();
+  };
+
+  await getScheduleByBarber({ params: { barberId } }, res);
+
   assert.equal(res.statusCode, 200);
+  assert.deepEqual(query, { barberId, salonId: null });
+  assert.equal(res.body.salonId, null);
+  assert.deepEqual(res.body.weeklySchedule, workingSchedule);
+});
+
+test("missing independent schedule returns safe not-found without fabricated defaults", async () => {
+  const res = createResponse();
+
+  Schedule.findOne = async () => null;
+
+  await getScheduleByBarber({ params: { barberId } }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.body, { message: "Schedule not found" });
+});
+
+test("exact eligible salon schedule succeeds and preserves overrides and non-working days", async () => {
+  const res = createResponse();
+  const schedule = createScheduleDoc({
+    salonId: salonAId,
+    dateSchedules: {
+      "2026-08-04": { working: true, from: "10:00", to: "15:00", breakFrom: "", breakTo: "" },
+    },
+    scheduleOverrides: {
+      "2026-08-04": {
+        isWorking: true,
+        startTime: "10:00",
+        endTime: "15:00",
+        breakStart: "",
+        breakEnd: "",
+      },
+    },
+    nonWorkingDays: ["2026-08-05"],
+  });
+  let query;
+
+  Schedule.findOne = async (nextQuery) => {
+    query = nextQuery;
+    return schedule;
+  };
+
+  await getScheduleByBarberAndSalon(
+    { params: { barberId, salonId: salonAId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(query, { barberId, salonId: salonAId });
+  assert.deepEqual(res.body.scheduleOverrides, schedule.scheduleOverrides);
+  assert.deepEqual(res.body.nonWorkingDays, schedule.nonWorkingDays);
+  assert.equal(res.body.password, undefined);
+});
+
+test("pending rejected non-specialist and cross-salon memberships cannot read salon schedules", async () => {
+  const cases = [
+    { status: "pending", relationshipStatus: "active", worksAsSpecialist: true, salon: salonAId },
+    { status: "rejected", relationshipStatus: "active", worksAsSpecialist: true, salon: salonAId },
+    { status: "approved", relationshipStatus: "active", worksAsSpecialist: false, salon: salonAId },
+    { status: "approved", relationshipStatus: "active", worksAsSpecialist: true, salon: salonBId },
+  ];
+
+  for (const membership of cases) {
+    const res = createResponse();
+    let scheduleFindOneCalled = false;
+    User.find = () => createFindChain([
+      createReadyBarber({
+        specialistOnboarding: completedState("salon"),
+        salons: [membership],
+      }),
+    ]);
+    Schedule.findOne = async () => {
+      scheduleFindOneCalled = true;
+      return createScheduleDoc({ salonId: salonAId });
+    };
+
+    await getScheduleByBarberAndSalon(
+      { params: { barberId, salonId: salonAId } },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.code, "BARBER_UNAVAILABLE");
+    assert.equal(scheduleFindOneCalled, false);
+  }
+});
+
+test("missing salon schedule returns safe not-found without fabricated defaults", async () => {
+  const res = createResponse();
+
+  Schedule.findOne = async () => null;
+
+  await getScheduleByBarberAndSalon(
+    { params: { barberId, salonId: salonAId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.body, { message: "Schedule not found" });
+});
+
+test("salon schedule endpoint preserves paid-access rejection before schedule exposure", async () => {
+  const res = createResponse();
+  let scheduleFindOneCalled = false;
+
+  Subscription.findOne = async () => null;
+  Schedule.findOne = async () => {
+    scheduleFindOneCalled = true;
+    return null;
+  };
+
+  await getScheduleByBarberAndSalon(
+    { params: { barberId, salonId: salonAId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, "BARBER_UNAVAILABLE");
+  assert.equal(scheduleFindOneCalled, false);
+});
+
+test("public schedule endpoint does not fabricate default hours when schedule has none", async () => {
+  const res = createResponse();
+
+  Schedule.findOne = async () => createScheduleDoc({
+    defaultSchedule: undefined,
+  });
+
+  await getScheduleByBarber({ params: { barberId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(Object.hasOwn(res.body, "defaultSchedule"), true);
+  assert.equal(res.body.defaultSchedule, null);
+});
+
+test("public schedule endpoints reject malformed and operator IDs before DB calls", async () => {
+  const dbCalls = [];
+  User.find = () => {
+    dbCalls.push("User.find");
+    return createFindChain([]);
+  };
+  BarberProfile.find = () => {
+    dbCalls.push("BarberProfile.find");
+    return createFindChain([]);
+  };
+  Schedule.find = () => {
+    dbCalls.push("Schedule.find");
+    return createFindChain([]);
+  };
+  Service.find = () => {
+    dbCalls.push("Service.find");
+    return createFindChain([]);
+  };
+  Schedule.findOne = async () => {
+    dbCalls.push("Schedule.findOne");
+    return null;
+  };
+
+  for (const params of [
+    { barberId: { $ne: null } },
+    { barberId: ["64b000000000000000000001"] },
+    { barberId: "not-an-id" },
+    { barberId: "64b000000000000000000001", salonId: { $ne: null } },
+    { barberId: "64b000000000000000000001", salonId: "64b000000000000000000001.bad" },
+  ]) {
+    const res = createResponse();
+    const handler = Object.hasOwn(params, "salonId")
+      ? getScheduleByBarberAndSalon
+      : getScheduleByBarber;
+    await handler({ params }, res);
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.body, { message: "Invalid schedule identifiers" });
+  }
+
+  assert.deepEqual(dbCalls, []);
+});
+
+test("public availability ID normalizer accepts valid strings and ObjectIds only", () => {
+  const objectBarberId = new mongoose.Types.ObjectId(barberId);
+  const objectSalonId = new mongoose.Types.ObjectId(salonAId);
+
+  assert.deepEqual(
+    normalizePublicAvailabilityIds({
+      barberId: objectBarberId,
+      salonId: objectSalonId,
+      requireSalon: true,
+    }),
+    { barberId, salonId: salonAId }
+  );
+  assert.deepEqual(
+    normalizePublicAvailabilityIds({
+      barberId: barberId.toUpperCase(),
+      salonId: null,
+    }),
+    { barberId, salonId: null }
+  );
+  assert.equal(normalizePublicAvailabilityIds({ barberId: " " }).status, 400);
+});
+
+test("public schedule GET cleans response without mutating fetched document", async () => {
+  const res = createResponse();
+  const schedule = createScheduleDoc({
+    salonId: salonAId,
+    weeklySchedule: oldAutoClosedWeeklySchedule,
+  });
+
+  Schedule.findOne = async () => schedule;
+  Schedule.findOneAndUpdate = async () => {
+    throw new Error("public GET must not persist cleaned schedules");
+  };
+
+  await getScheduleByBarberAndSalon(
+    { params: { barberId, salonId: salonAId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.weeklySchedule, {});
+  assert.deepEqual(schedule.weeklySchedule, oldAutoClosedWeeklySchedule);
 });

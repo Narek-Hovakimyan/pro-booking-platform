@@ -1,4 +1,3 @@
-import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";
 import User from "../models/User.js";
@@ -8,6 +7,10 @@ import {
   isUserApprovedForSalon,
 } from "../services/salon/salonMembershipService.js";
 import { barberHasPaidAccessForSalon } from "../services/subscriptionService.js";
+import {
+  normalizePublicAvailabilityIds,
+  resolvePublicScheduleContext,
+} from "../services/barber/publicAvailabilityContextService.js";
 import { createCrudController } from "./crudController.js";
 import {
   cleanCurrentAndFutureDateKeys,
@@ -66,100 +69,25 @@ const canEditSalonSchedule = async ({ barberId, salonId, user }) => {
   };
 };
 
-const areDateFieldsEqual = (left, right) =>
-  JSON.stringify(left || {}) === JSON.stringify(right || {});
-
 const getCleanedScheduleFields = (schedule = {}) => ({
   ...cleanPastScheduleDates(schedule),
   weeklySchedule: normalizeAutoClosedWeeklySchedule(schedule?.weeklySchedule),
 });
 
-const maybePersistCleanedSchedule = async (schedule, query, cleanedFields) => {
-  if (!schedule || !query) return;
-
-  const $set = {};
-
-  if (!areDateFieldsEqual(cleanedFields.weeklySchedule, schedule.weeklySchedule)) {
-    $set.weeklySchedule = cleanedFields.weeklySchedule;
-  }
-
-  if (!areDateFieldsEqual(cleanedFields.dateSchedules, schedule.dateSchedules)) {
-    $set.dateSchedules = cleanedFields.dateSchedules;
-  }
-
-  if (
-    !areDateFieldsEqual(
-      cleanedFields.scheduleOverrides,
-      schedule.scheduleOverrides
-    )
-  ) {
-    $set.scheduleOverrides = cleanedFields.scheduleOverrides;
-  }
-
-  if (!areDateFieldsEqual(cleanedFields.nonWorkingDays, schedule.nonWorkingDays)) {
-    $set.nonWorkingDays = cleanedFields.nonWorkingDays;
-  }
-
-  if (Object.keys($set).length === 0) return;
-
-  await Schedule.findOneAndUpdate(query, { $set });
-};
-
 export const getScheduleByBarber = async (req, res) => {
   try {
     const { barberId } = req.params;
+    const context = await resolvePublicScheduleContext({ barberId });
+    if (context.body) return res.status(context.status).json(context.body);
 
-    // Try to find the barber's primary salon to get the per-salon schedule
-    const barber = await User.findById(barberId).select("-password");
-    const primarySalonEntry = (barber?.salons || []).find(
-      (s) => s.status === "approved" && s.isPrimary
-    ) || (barber?.salons || []).find((s) => s.status === "approved");
-
-    let schedule = null;
-    let scheduleQuery = null;
-
-    if (primarySalonEntry?.salon) {
-      // Get the per-salon schedule for the primary salon
-      scheduleQuery = {
-        barberId,
-        salonId: primarySalonEntry.salon,
-      };
-      schedule = await Schedule.findOne(scheduleQuery);
-    }
-
-    // Fallback: try to find any schedule for this barber
-    if (!schedule) {
-      scheduleQuery = { barberId, salonId: { $ne: null } };
-      schedule = await Schedule.findOne(scheduleQuery);
-    }
-
-    const profile = await BarberProfile.findOne({ barberId });
-
-    // Build defaultSchedule from the schedule or user's salon entry
-    const scheduleDefault = schedule?.defaultSchedule;
-    const userDefault = primarySalonEntry?.defaultSchedule;
-
-    const defaultSchedule = serializeDefaultSchedule(
-      scheduleDefault,
-      userDefault,
-      profile?.defaultSchedule
-    );
+    const { schedule } = context;
+    const defaultSchedule = schedule.defaultSchedule
+      ? serializeDefaultSchedule(schedule.defaultSchedule)
+      : null;
     const cleanedScheduleFields = getCleanedScheduleFields(schedule);
 
-    await maybePersistCleanedSchedule(
-      schedule,
-      scheduleQuery,
-      cleanedScheduleFields
-    );
-
     return res.json({
-      ...(schedule?.toObject() || {
-        barberId,
-        weeklySchedule: {},
-        dateSchedules: {},
-        scheduleOverrides: {},
-        nonWorkingDays: [],
-      }),
+      ...schedule.toObject(),
       ...cleanedScheduleFields,
       defaultSchedule,
     });
@@ -171,13 +99,19 @@ export const getScheduleByBarber = async (req, res) => {
 export const getScheduleByBarberAndSalon = async (req, res) => {
   try {
     const { barberId, salonId } = req.params;
+    const normalizedIds = normalizePublicAvailabilityIds({
+      barberId,
+      salonId,
+      requireSalon: true,
+    });
+    if (normalizedIds.body) {
+      return res.status(normalizedIds.status).json(normalizedIds.body);
+    }
 
-    const [schedule, barber] = await Promise.all([
-      Schedule.findOne({ barberId, salonId }),
-      User.findById(barberId).select("-password"),
-    ]);
-
-    const hasPaidAccess = await barberHasPaidAccessForSalon(barberId, salonId);
+    const hasPaidAccess = await barberHasPaidAccessForSalon(
+      normalizedIds.barberId,
+      normalizedIds.salonId
+    );
     if (!hasPaidAccess) {
       return res.status(403).json({
         code: "BARBER_UNAVAILABLE",
@@ -185,33 +119,21 @@ export const getScheduleByBarberAndSalon = async (req, res) => {
       });
     }
 
-    // Find the salon entry in barber's salons array to get defaultSchedule
-    const salonEntry = (barber?.salons || []).find(
-      (s) => getIdString(s?.salon) === String(salonId)
-    );
+    const context = await resolvePublicScheduleContext({
+      barberId: normalizedIds.barberId,
+      salonId: normalizedIds.salonId,
+      requireSalon: true,
+    });
+    if (context.body) return res.status(context.status).json(context.body);
 
-    // Priority: 1) Schedule model's defaultSchedule, 2) User model's salon entry defaultSchedule, 3) hardcoded defaults
-    const scheduleDefault = schedule?.defaultSchedule;
-    const userDefault = salonEntry?.defaultSchedule;
-
-    const defaultSchedule = serializeDefaultSchedule(scheduleDefault, userDefault);
+    const { schedule } = context;
+    const defaultSchedule = schedule.defaultSchedule
+      ? serializeDefaultSchedule(schedule.defaultSchedule)
+      : null;
     const cleanedScheduleFields = getCleanedScheduleFields(schedule);
 
-    await maybePersistCleanedSchedule(
-      schedule,
-      { barberId, salonId },
-      cleanedScheduleFields
-    );
-
     return res.json({
-      ...(schedule?.toObject() || {
-        barberId,
-        salonId,
-        weeklySchedule: {},
-        dateSchedules: {},
-        scheduleOverrides: {},
-        nonWorkingDays: [],
-      }),
+      ...schedule.toObject(),
       ...cleanedScheduleFields,
       defaultSchedule,
     });
