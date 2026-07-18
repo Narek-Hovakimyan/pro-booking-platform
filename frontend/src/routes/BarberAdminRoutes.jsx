@@ -8,6 +8,7 @@ import SubscriptionGuard from "../shared/components/SubscriptionGuard";
 
 const BarberCalendarPage = lazy(() => import("../barber/pages/BarberCalendarPage"));
 const BarberCalendarDayPage = lazy(() => import("../barber/pages/BarberCalendarDayPage"));
+const BarberOnboardingPage = lazy(() => import("../barber/pages/BarberOnboardingPage"));
 const BarberProfilePage = lazy(() => import("../barber/pages/BarberProfilePage"));
 const BillingPage = lazy(() => import("../barber/pages/BillingPage"));
 const ClientsPage = lazy(() => import("../barber/pages/ClientsPage"));
@@ -20,6 +21,14 @@ const SalonReportsPage = lazy(() => import("../barber/pages/SalonReportsPage"));
 export function getBarberAdminRoutes({ renderAdminPage }) {
   return (
     <>
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute role="barber">
+            <BarberOnboardingPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/admin"
         element={renderAdminPage("dashboard")}
