@@ -4,9 +4,9 @@ import {
   getConversation,
   getMyMessages,
   markConversationRead,
-} from "../controllers/messaging/messageController.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { messageLimiter } from "../middleware/rateLimitMiddleware.js";
+} from "../../controllers/messaging/messageController.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { messageLimiter } from "../../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 

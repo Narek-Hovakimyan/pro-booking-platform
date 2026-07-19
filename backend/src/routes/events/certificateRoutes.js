@@ -4,8 +4,8 @@ import {
   getCertificateById,
   revokeCertificate,
   verifyCertificate,
-} from "../controllers/events/certificateController.js";
-import { protect } from "../middleware/authMiddleware.js";
+} from "../../controllers/events/certificateController.js";
+import { protect } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 
