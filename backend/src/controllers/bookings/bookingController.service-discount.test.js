@@ -2,18 +2,18 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
-import { createBooking, quoteBookingPrice } from "./bookings/bookingController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Booking from "../models/Booking.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import Voucher from "../models/Voucher.js";
-import { normalizeScopedBookingReadinessIds } from "../services/booking/bookingReadinessService.js";
+import { createBooking, quoteBookingPrice } from "./bookingController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Booking from "../../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import Voucher from "../../models/Voucher.js";
+import { normalizeScopedBookingReadinessIds } from "../../services/booking/bookingReadinessService.js";
 
 import {
   barber,

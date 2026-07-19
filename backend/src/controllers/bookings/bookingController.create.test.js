@@ -3,19 +3,19 @@ import { afterEach, test } from "node:test";
 import fs from "fs";
 import path from "path";
 
-import { __bookingTestHooks, createBooking, updateBooking } from "./bookings/bookingController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Booking from "../models/Booking.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import { handleReferenceImageUploadError } from "../middleware/uploadMiddleware.js";
-import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
+import { __bookingTestHooks, createBooking, updateBooking } from "./bookingController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Booking from "../../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { handleReferenceImageUploadError } from "../../middleware/uploadMiddleware.js";
+import { explicitAllDaysOffMarker } from "../../utils/scheduleUtils.js";
 
 import {
   barber,

@@ -5,14 +5,14 @@ import {
   acceptRescheduleRequest,
   createRescheduleRequest,
   rejectRescheduleRequest,
-} from "./bookings/bookingRescheduleController.js";
+} from "./bookingRescheduleController.js";
 import {
   __bookingSideEffectsTestHooks,
-} from "../services/booking/bookingSideEffectsService.js";
-import Booking from "../models/Booking.js";
-import Notification from "../models/Notification.js";
-import Schedule from "../models/Schedule.js";
-import User from "../models/User.js";
+} from "../../services/booking/bookingSideEffectsService.js";
+import Booking from "../../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Schedule from "../../models/Schedule.js";
+import User from "../../models/User.js";
 
 import {
   barber,

@@ -1,21 +1,21 @@
 
 import {
   __bookingSideEffectsTestHooks,
-} from "../services/booking/bookingSideEffectsService.js";
-import Booking from "../models/Booking.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionPaymentAttempt from "../models/SubscriptionPaymentAttempt.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
+} from "../../services/booking/bookingSideEffectsService.js";
+import Booking from "../../models/Booking.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
 import {
   getArmeniaDateKey,
   getDayKeyFromDate,
-} from "../utils/bookingDateTime.js";
+} from "../../utils/bookingDateTime.js";
 
 // ── Singleton model-method capture ──────────────────────────────────
 

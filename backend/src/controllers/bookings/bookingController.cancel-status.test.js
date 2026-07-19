@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 
-import { updateBooking } from "./bookings/bookingController.js";
-import Booking from "../models/Booking.js";
-import Notification from "../models/Notification.js";
-import Schedule from "../models/Schedule.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
+import { updateBooking } from "./bookingController.js";
+import Booking from "../../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Schedule from "../../models/Schedule.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
 
 import {
   barber,

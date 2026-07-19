@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import BarberProfile from "../models/BarberProfile.js";
-import Booking from "../models/Booking.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
-import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Booking from "../../models/Booking.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
+import { getArmeniaDateKey } from "../../utils/bookingDateTime.js";
 import {
   __publicSalonBookingTestHooks,
   getPublicSalonBooking,
-} from "./bookings/publicSalonBookingController.js";
+} from "./publicSalonBookingController.js";
 
 const salonId = "64b000000000000000001001";
 const paidStaffBarberId = "64b000000000000000001002";

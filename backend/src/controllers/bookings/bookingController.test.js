@@ -7,22 +7,22 @@ import {
   getReferenceImage,
   updateBooking,
   updateTreatmentRecord,
-} from "./bookings/bookingController.js";
-import { getBarberBookings } from "./bookings/bookingReadController.js";
-import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
-import Booking from "../models/Booking.js";
-import Notification from "../models/Notification.js";
-import Review from "../models/Review.js";
-import LoyaltyProgram from "../models/LoyaltyProgram.js";
-import LoyaltyProgress from "../models/LoyaltyProgress.js";
+} from "./bookingController.js";
+import { getBarberBookings } from "./bookingReadController.js";
+import { serializeAvailabilityBooking } from "../../utils/bookingUtils.js";
+import Booking from "../../models/Booking.js";
+import Notification from "../../models/Notification.js";
+import Review from "../../models/Review.js";
+import LoyaltyProgram from "../../models/LoyaltyProgram.js";
+import LoyaltyProgress from "../../models/LoyaltyProgress.js";
 import mongoose from "mongoose";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import { protect } from "../middleware/authMiddleware.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { protect } from "../../middleware/authMiddleware.js";
 import {
   barber,
   barberId,
@@ -1067,7 +1067,7 @@ test("booking not found returns 404 for treatmentRecord", async () => {
 });
 
 test("client booking read excludes treatmentRecord", async () => {
-  const { getClientBookingsForRequester } = await import("../services/booking/bookingReadService.js");
+  const { getClientBookingsForRequester } = await import("../../services/booking/bookingReadService.js");
 
   const booking = createMutableBooking({
     treatmentRecord: { colorFormula: "secret", recordedBy: barberId, recordedAt: new Date() },

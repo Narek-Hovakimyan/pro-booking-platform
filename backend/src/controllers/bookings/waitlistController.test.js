@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { approveEntry, cancelEntry, createEntry } from "./bookings/waitlistController.js";
-import Booking from "../models/Booking.js";
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
-import WaitlistEntry from "../models/WaitlistEntry.js";
+import { approveEntry, cancelEntry, createEntry } from "./waitlistController.js";
+import Booking from "../../models/Booking.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
+import WaitlistEntry from "../../models/WaitlistEntry.js";
 
 const clientId = "64b000000000000000000001";
 const barberId = "64b000000000000000000010";

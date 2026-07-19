@@ -1,14 +1,14 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import BarberProfile from "../models/BarberProfile.js";
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
 import {
   calculateDeposit,
   getMyDepositSettings,
   updateMyDepositSettings,
   updateStaffDepositSettingsBySalonOwner,
-} from "./bookings/depositSettingsController.js";
+} from "./depositSettingsController.js";
 
 const originalMethods = {
   barberProfileFindOne: BarberProfile.findOne,
