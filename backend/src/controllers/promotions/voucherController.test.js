@@ -3,9 +3,9 @@ import { afterEach, test } from "node:test";
 
 import mongoose from "mongoose";
 
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import Voucher from "../models/Voucher.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import Voucher from "../../models/Voucher.js";
 import {
   createVoucher,
   deleteVoucher,
@@ -14,7 +14,7 @@ import {
   getVoucherById,
   updateVoucher,
   validateVoucherCode,
-} from "./promotions/voucherController.js";
+} from "./voucherController.js";
 
 /* ── Stub state ─────────────────────────────────────────── */
 const originalVoucherFindOne = Voucher.findOne;

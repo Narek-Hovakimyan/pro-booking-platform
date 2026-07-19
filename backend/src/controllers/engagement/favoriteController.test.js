@@ -4,16 +4,16 @@ import { afterEach, mock, test } from "node:test";
 import {
   getClientFavorites,
   getFavoriteSalons,
-} from "./engagement/favoriteController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Favorite from "../models/Favorite.js";
-import Schedule from "../models/Schedule.js";
-import SalonFavorite from "../models/SalonFavorite.js";
-import SalonReview from "../models/SalonReview.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
+} from "./favoriteController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Favorite from "../../models/Favorite.js";
+import Schedule from "../../models/Schedule.js";
+import SalonFavorite from "../../models/SalonFavorite.js";
+import SalonReview from "../../models/SalonReview.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
 
 const originalMethods = {
   barberProfileFind: BarberProfile.find,

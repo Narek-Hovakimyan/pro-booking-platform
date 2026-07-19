@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
-import Voucher from "../models/Voucher.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
+import Voucher from "../../models/Voucher.js";
 import {
   createSalonPromotion,
   validateSalonPromotion,
-} from "./promotions/salonPromotionController.js";
+} from "./salonPromotionController.js";
 
 const originalMethods = {
   salonFindById: Salon.findById,

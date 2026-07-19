@@ -5,9 +5,9 @@ import {
   createReview,
   addReplyToReview,
   deleteReplyFromReview,
-} from "./reviews/reviewController.js";
-import Booking from "../models/Booking.js";
-import Review from "../models/Review.js";
+} from "./reviewController.js";
+import Booking from "../../models/Booking.js";
+import Review from "../../models/Review.js";
 
 const originalMethods = {
   bookingFindById: Booking.findById,
@@ -377,7 +377,7 @@ test("review not found returns 404 for delete reply", async () => {
 });
 
 test("getReviewsByBarber includes reply field", async () => {
-  const { getReviewsByBarber } = await import("./reviews/reviewController.js");
+  const { getReviewsByBarber } = await import("./reviewController.js");
   const res = createResponse();
 
   // Chainable mock: Review.find().populate().sort()
@@ -420,7 +420,7 @@ test("getReviewsByBarber includes reply field", async () => {
 });
 
 test("review without reply serializes reply as null", async () => {
-  const { getReviewsByBarber } = await import("./reviews/reviewController.js");
+  const { getReviewsByBarber } = await import("./reviewController.js");
   const res = createResponse();
 
   // Chainable mock for Review.find().populate().sort()

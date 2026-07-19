@@ -7,14 +7,14 @@ import {
   addPortfolioPhoto,
   updatePortfolioPhoto,
   deletePortfolioPhoto,
-} from "./portfolio/portfolioPhotoController.js";
+} from "./portfolioPhotoController.js";
 import {
   serveOwnerPortfolioImage,
   servePublicPortfolioImage,
-} from "./portfolio/portfolioPhotoMediaController.js";
-import PortfolioPhoto from "../models/PortfolioPhoto.js";
-import Service from "../models/Service.js";
-import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
+} from "./portfolioPhotoMediaController.js";
+import PortfolioPhoto from "../../models/PortfolioPhoto.js";
+import Service from "../../models/Service.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
 
 /* ── Test data ─────────────────────────────────────── */
 
@@ -207,7 +207,7 @@ test("GET /uploads/portfolio/:filename returns 404 for traversal filename", asyn
 
   const res = createSendFileResponse();
   await servePublicPortfolioImage(
-    { params: { filename: "../portfolio-secret.jpg" } },
+    { params: { filename: "../../portfolio-secret.jpg" } },
     res
   );
 
