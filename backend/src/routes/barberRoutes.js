@@ -21,7 +21,7 @@ import {
 import {
   getMyDepositSettings,
   updateMyDepositSettings,
-} from "../controllers/depositSettingsController.js";
+} from "../controllers/bookings/depositSettingsController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";

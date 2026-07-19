@@ -18,7 +18,7 @@ import {
   cancelPaymentAttempt,
   devConfirmSeatUpdate,
   devConfirmPaymentAttempt,
-} from "../controllers/subscriptionController.js";
+} from "../controllers/billing/subscriptionController.js";
 
 const router = express.Router();
 

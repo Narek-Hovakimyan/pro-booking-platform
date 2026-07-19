@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { getClientReliability } from "./bookingAnalyticsController.js";
+import { getClientReliability } from "./bookings/bookingAnalyticsController.js";
 import Booking from "../models/Booking.js";
 
 import {

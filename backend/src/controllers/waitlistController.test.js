@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { approveEntry, cancelEntry, createEntry } from "./waitlistController.js";
+import { approveEntry, cancelEntry, createEntry } from "./bookings/waitlistController.js";
 import Booking from "../models/Booking.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";

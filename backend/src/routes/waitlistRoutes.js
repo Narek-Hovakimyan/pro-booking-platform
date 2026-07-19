@@ -10,7 +10,7 @@ import {
   offerEntry,
   acceptOfferEntry,
   declineOfferEntry,
-} from "../controllers/waitlistController.js";
+} from "../controllers/bookings/waitlistController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 

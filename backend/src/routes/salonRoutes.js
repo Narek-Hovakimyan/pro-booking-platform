@@ -30,8 +30,8 @@ import {
   getReports,
 } from "../controllers/salons/salonReportController.js";
 import { getCalendar } from "../controllers/schedules/salonCalendarController.js";
-import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
-import { updateStaffDepositSettingsBySalonOwner } from "../controllers/depositSettingsController.js";
+import { getPublicSalonBooking } from "../controllers/bookings/publicSalonBookingController.js";
+import { updateStaffDepositSettingsBySalonOwner } from "../controllers/bookings/depositSettingsController.js";
 
 import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";

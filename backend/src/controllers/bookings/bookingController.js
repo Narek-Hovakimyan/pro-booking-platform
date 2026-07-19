@@ -1,43 +1,43 @@
-import Booking from "../models/Booking.js";
+import Booking from "../../models/Booking.js";
 import {
   allowedBookingDelayMinutes,
   attemptsDateTimeChange,
   sendControllerError,
-} from "../services/booking/bookingControllerHelpers.js";
+} from "../../services/booking/bookingControllerHelpers.js";
 import {
   collectReferenceImagePaths,
   cleanupReferenceImages,
-} from "../services/booking/bookingReferenceImageHelpers.js";
-import { updateBookingTreatmentRecord } from "../services/booking/bookingTreatmentRecordService.js";
-import { delayBookingService } from "../services/booking/bookingDelayService.js";
-import { createBookingService } from "../services/booking/bookingCreateService.js";
-import { executeBookingPriceQuote } from "../services/booking/bookingQuoteService.js";
-import { resolveReferenceImageRequest } from "../services/booking/bookingReferenceImageService.js";
-import Notification from "../models/Notification.js";
-import Review from "../models/Review.js";
-import LoyaltyProgram from "../models/LoyaltyProgram.js";
-import LoyaltyProgress from "../models/LoyaltyProgress.js";
+} from "../../services/booking/bookingReferenceImageHelpers.js";
+import { updateBookingTreatmentRecord } from "../../services/booking/bookingTreatmentRecordService.js";
+import { delayBookingService } from "../../services/booking/bookingDelayService.js";
+import { createBookingService } from "../../services/booking/bookingCreateService.js";
+import { executeBookingPriceQuote } from "../../services/booking/bookingQuoteService.js";
+import { resolveReferenceImageRequest } from "../../services/booking/bookingReferenceImageService.js";
+import Notification from "../../models/Notification.js";
+import Review from "../../models/Review.js";
+import LoyaltyProgram from "../../models/LoyaltyProgram.js";
+import LoyaltyProgress from "../../models/LoyaltyProgress.js";
 
 import {
   emitBookingUpdated,
   notifyUsersForBookingStatusChange,
   notifyWaitlistForReleasedBookingSlot,
-} from "../services/booking/bookingSideEffectsService.js";
-import { createNotification } from "./notificationController.js";
-import { createCrudController } from "./crudController.js";
+} from "../../services/booking/bookingSideEffectsService.js";
+import { createNotification } from "../notificationController.js";
+import { createCrudController } from "../crudController.js";
 import {
   barberHasPaidAccessForSalon,
-} from "../services/subscriptionService.js";
+} from "../../services/subscriptionService.js";
 import {
   claimVoucherForBooking,
   rollbackVoucherClaim,
   recordVoucherRedemption,
   restoreVoucherOnCancel,
-} from "../services/booking/bookingPricingService.js";
-import { buildBookingStatusUpdate } from "../services/booking/bookingStatusService.js";
+} from "../../services/booking/bookingPricingService.js";
+import { buildBookingStatusUpdate } from "../../services/booking/bookingStatusService.js";
 import {
   getDayKeyFromDate,
-} from "../utils/bookingDateTime.js";
+} from "../../utils/bookingDateTime.js";
 import {
   blockingBookingStatuses,
   defaultPersonalSchedule,
@@ -49,12 +49,12 @@ import {
   normalizeBookingStatus,
   serializeBookingForResponse,
   slotOverlaps,
-} from "../utils/bookingUtils.js";
+} from "../../utils/bookingUtils.js";
 import {
   getBookingCreationLockKey,
   validateBookingSlot,
   withBookingCreationLock,
-} from "../utils/bookingSlotValidation.js";
+} from "../../utils/bookingSlotValidation.js";
 
 export const bookingController = createCrudController(Booking, "Booking");
 

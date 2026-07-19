@@ -5,7 +5,7 @@ import {
   acceptRescheduleRequest,
   createRescheduleRequest,
   rejectRescheduleRequest,
-} from "./bookingRescheduleController.js";
+} from "./bookings/bookingRescheduleController.js";
 import {
   __bookingSideEffectsTestHooks,
 } from "../services/booking/bookingSideEffectsService.js";

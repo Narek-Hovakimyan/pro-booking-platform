@@ -1,5 +1,5 @@
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import {
   getOrCreateDefaultSubscriptionPlan,
   getMySubscriptionAccess,
@@ -15,7 +15,7 @@ import {
   cancelSubscriptionPaymentAttempt,
   confirmSubscriptionPaymentAttempt,
   confirmSubscriptionSeatUpdate,
-} from "../services/subscriptionService.js";
+} from "../../services/subscriptionService.js";
 
 const isProduction = () => process.env.NODE_ENV === "production";
 

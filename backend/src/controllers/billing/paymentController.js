@@ -1,4 +1,4 @@
-import { processPaymentWebhook } from "../services/payment/paymentAttemptService.js";
+import { processPaymentWebhook } from "../../services/payment/paymentAttemptService.js";
 
 export const handlePaymentWebhook = async (req, res) => {
   try {

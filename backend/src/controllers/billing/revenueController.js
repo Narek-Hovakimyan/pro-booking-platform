@@ -1,5 +1,5 @@
-import { getBarberRevenueSummary } from "../services/revenue/revenueService.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import { getBarberRevenueSummary } from "../../services/revenue/revenueService.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 export const getMyRevenue = async (req, res) => {
   try {

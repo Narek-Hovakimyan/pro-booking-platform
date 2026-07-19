@@ -7,8 +7,8 @@ import {
   getReferenceImage,
   updateBooking,
   updateTreatmentRecord,
-} from "./bookingController.js";
-import { getBarberBookings } from "./bookingReadController.js";
+} from "./bookings/bookingController.js";
+import { getBarberBookings } from "./bookings/bookingReadController.js";
 import { serializeAvailabilityBooking } from "../utils/bookingUtils.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";

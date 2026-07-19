@@ -1,8 +1,8 @@
-import BarberProfile from "../models/BarberProfile.js";
-import User from "../models/User.js";
-import Salon from "../models/Salon.js";
-import { isAcceptedStaffMember } from "../services/salon/salonRelationshipService.js";
-import { canManageSalon, sameId } from "../utils/salonPermissions.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import User from "../../models/User.js";
+import Salon from "../../models/Salon.js";
+import { isAcceptedStaffMember } from "../../services/salon/salonRelationshipService.js";
+import { canManageSalon, sameId } from "../../utils/salonPermissions.js";
 
 export const MAX_NO_SHOW_POLICY_TEXT_LENGTH = 1000;
 

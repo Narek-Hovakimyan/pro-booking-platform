@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
-import { getMyRevenue } from "../controllers/revenueController.js";
+import { getMyRevenue } from "../controllers/billing/revenueController.js";
 
 const router = Router();
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { createBooking, updateBooking } from "./bookingController.js";
+import { createBooking, updateBooking } from "./bookings/bookingController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";

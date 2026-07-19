@@ -11,7 +11,7 @@ import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import {
   __publicSalonBookingTestHooks,
   getPublicSalonBooking,
-} from "./publicSalonBookingController.js";
+} from "./bookings/publicSalonBookingController.js";
 
 const salonId = "64b000000000000000001001";
 const paidStaffBarberId = "64b000000000000000001002";

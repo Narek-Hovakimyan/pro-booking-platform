@@ -8,7 +8,7 @@ import {
   getMyDepositSettings,
   updateMyDepositSettings,
   updateStaffDepositSettingsBySalonOwner,
-} from "./depositSettingsController.js";
+} from "./bookings/depositSettingsController.js";
 
 const originalMethods = {
   barberProfileFindOne: BarberProfile.findOne,

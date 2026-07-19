@@ -6,26 +6,26 @@ import {
   quoteBookingPrice,
   updateBooking,
   updateTreatmentRecord,
-} from "../controllers/bookingController.js";
+} from "../controllers/bookings/bookingController.js";
 import { handleReferenceImageUpload } from "../middleware/uploadMiddleware.js";
 import {
   acceptRescheduleRequest,
   createRescheduleRequest,
   rejectRescheduleRequest,
-} from "../controllers/bookingRescheduleController.js";
+} from "../controllers/bookings/bookingRescheduleController.js";
 import {
   getBarberBookings,
   getClientBookings,
-} from "../controllers/bookingReadController.js";
+} from "../controllers/bookings/bookingReadController.js";
 import {
   markLateCancel,
   markNoShow,
-} from "../controllers/bookingOutcomeController.js";
+} from "../controllers/bookings/bookingOutcomeController.js";
 import {
   debugBookingAvailability,
   getBarberMonthlyIncome,
   getClientReliability,
-} from "../controllers/bookingAnalyticsController.js";
+} from "../controllers/bookings/bookingAnalyticsController.js";
 import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 import {

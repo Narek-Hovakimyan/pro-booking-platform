@@ -1,4 +1,4 @@
-import WaitlistEntry from "../models/WaitlistEntry.js";
+import WaitlistEntry from "../../models/WaitlistEntry.js";
 import {
   createWaitlistEntry,
   cancelWaitlistEntry,
@@ -9,8 +9,8 @@ import {
   offerWaitlistEntry,
   acceptWaitlistOffer,
   declineWaitlistOffer,
-} from "../services/waitlist/waitlistService.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../services/waitlist/waitlistService.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const getWaitlistActionStatus = (error) => {
   if (error.code === "NOT_FOUND") return 404;

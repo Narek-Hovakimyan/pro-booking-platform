@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { getMyRevenue } from "./revenueController.js";
+import { getMyRevenue } from "./billing/revenueController.js";
 import Booking from "../models/Booking.js";
 
 const originalMethods = {

@@ -455,7 +455,7 @@ test("manual barber subscription grants barberHasPaidAccess true", async () => {
 test("dev grant endpoint disabled in production", async () => {
   const originalEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
-  const { devGrantSubscription } = await import("../controllers/subscriptionController.js");
+  const { devGrantSubscription } = await import("../controllers/billing/subscriptionController.js");
   let statusCode = 200;
   let responseBody = null;
 
@@ -1211,7 +1211,7 @@ test("manual activation availability helper is false in production", async () =>
 });
 
 test("no existing barber route is blocked in Phase 1 (smoke test)", async () => {
-  const subController = await import("../controllers/subscriptionController.js");
+  const subController = await import("../controllers/billing/subscriptionController.js");
   const subRoutes = await import("../routes/subscriptionRoutes.js");
 
   assert.ok(subController.getMySubscription);
@@ -2819,7 +2819,7 @@ test("direct seatCount update cannot increase paid seats", async () => {
 });
 
 test("no existing barber route is blocked in Phase 2 (smoke test)", async () => {
-  const subController = await import("../controllers/subscriptionController.js");
+  const subController = await import("../controllers/billing/subscriptionController.js");
 
   assert.ok(subController.getSalonSubscription);
   assert.ok(subController.getSalonSubscriptionSeats);
@@ -2960,12 +2960,12 @@ test("booking creation is blocked for unpaid barber (salon-scoped paid access ch
   };
   SubscriptionSeat.findOne = () => chainableQuery(null);
 
-  const bookingCtrl = await import("../controllers/bookingController.js");
+  const bookingCtrl = await import("../controllers/bookings/bookingController.js");
   assert.ok(bookingCtrl.createBooking);
   // The check is within createBooking – verify it uses the salon-scoped helper.
   // This is a structural test to confirm the enforcement was added
   const fs = await import("fs");
-  const source = fs.readFileSync("./src/controllers/bookingController.js", "utf-8");
+  const source = fs.readFileSync("./src/controllers/bookings/bookingController.js", "utf-8");
   assert.ok(
     source.includes("barberHasPaidAccessForSalon("),
     "createBooking must call barberHasPaidAccessForSalon"

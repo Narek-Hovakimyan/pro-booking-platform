@@ -1,22 +1,22 @@
 import mongoose from "mongoose";
-import Booking from "../models/Booking.js";
+import Booking from "../../models/Booking.js";
 import {
   emitBookingUpdated,
   notifyWaitlistForReleasedBookingSlot,
-} from "../services/booking/bookingSideEffectsService.js";
-import { getDayKeyFromDate, isDateKey } from "../utils/bookingDateTime.js";
-import { storedDateToDateKey } from "../utils/bookingDateStorage.js";
-import { getBookingNotificationData } from "../utils/bookingNotificationData.js";
+} from "../../services/booking/bookingSideEffectsService.js";
+import { getDayKeyFromDate, isDateKey } from "../../utils/bookingDateTime.js";
+import { storedDateToDateKey } from "../../utils/bookingDateStorage.js";
+import { getBookingNotificationData } from "../../utils/bookingNotificationData.js";
 import {
   getBookingCreationLockKey,
   validateBookingSlot,
   withBookingCreationLock,
-} from "../utils/bookingSlotValidation.js";
+} from "../../utils/bookingSlotValidation.js";
 import {
   normalizeBookingStatus,
   serializeBookingForResponse,
-} from "../utils/bookingUtils.js";
-import { createNotification } from "./notificationController.js";
+} from "../../utils/bookingUtils.js";
+import { createNotification } from "../notificationController.js";
 
 const getRescheduleErrorStatusCode = (error) => {
   if (error?.statusCode) return error.statusCode;
