@@ -7,7 +7,7 @@ import {
   getScheduleByBarberAndSalon,
   upsertSchedule,
   upsertScheduleByBarberAndSalon,
-} from "./scheduleController.js";
+} from "./schedules/scheduleController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";

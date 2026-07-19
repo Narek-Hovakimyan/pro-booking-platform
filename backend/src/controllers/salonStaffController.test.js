@@ -8,7 +8,7 @@ import {
   respondToRelationshipType,
   updateMemberRelationshipType,
   updateStaffPaymentSettings,
-} from "./salonStaffController.js";
+} from "./salons/salonStaffController.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
 import SubscriptionSeat from "../models/SubscriptionSeat.js";

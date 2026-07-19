@@ -1,5 +1,5 @@
-import { getSalonDashboard, DashboardError } from "../services/salon/salonDashboardService.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import { getSalonDashboard, DashboardError } from "../../services/salon/salonDashboardService.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 /**
  * GET /api/salons/:salonId/dashboard

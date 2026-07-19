@@ -1,13 +1,13 @@
 import {
   getPersonalSchedule,
   upsertPersonalSchedule,
-} from "../services/schedule/personalScheduleService.js";
+} from "../../services/schedule/personalScheduleService.js";
 import {
   getPersonalScheduleRequestWeeklySchedule,
   PersonalScheduleValidationError,
   serializePersonalSchedule,
   validatePersonalWeeklySchedule,
-} from "../utils/personalScheduleUtils.js";
+} from "../../utils/personalScheduleUtils.js";
 
 const forbiddenResponse = (res) =>
   res.status(403).json({

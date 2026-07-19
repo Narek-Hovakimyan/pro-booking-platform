@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
 
-import Salon from "../models/Salon.js";
-import ServiceCategory from "../models/ServiceCategory.js";
-import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../models/Service.js";
-import { canManageSalonRequest } from "../utils/salonPermissions.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Salon from "../../models/Salon.js";
+import ServiceCategory from "../../models/ServiceCategory.js";
+import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../../models/Service.js";
+import { canManageSalonRequest } from "../../utils/salonPermissions.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 /* ── Helpers ────────────────────────────────────────────── */
 

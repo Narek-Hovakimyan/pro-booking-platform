@@ -1,7 +1,7 @@
 import Favorite from "../models/Favorite.js";
 import SalonFavorite from "../models/SalonFavorite.js";
 import User from "../models/User.js";
-import { getSalonReviewStats } from "./salonReviewController.js";
+import { getSalonReviewStats } from "./salons/salonReviewController.js";
 import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
 import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
 import { sendControllerError } from "../utils/controllerError.js";

@@ -1,33 +1,33 @@
-import BarberProfile from "../models/BarberProfile.js";
-import Salon from "../models/Salon.js";
-import SalonJoinRequest from "../models/SalonJoinRequest.js";
-import Schedule from "../models/Schedule.js";
-import User from "../models/User.js";
-import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
-import { getPaidAccessByBarberIdsForSalon } from "../services/subscriptionService.js";
-import { sanitizeMediaUrl } from "../utils/mediaUrl.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Salon from "../../models/Salon.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import Schedule from "../../models/Schedule.js";
+import User from "../../models/User.js";
+import { getPublicBarberReadinessByIds } from "../../services/barber/publicBarberReadinessService.js";
+import { getPaidAccessByBarberIdsForSalon } from "../../services/subscriptionService.js";
+import { sanitizeMediaUrl } from "../../utils/mediaUrl.js";
 import {
   findManageableSalonsForUser,
-} from "../services/salon/salonMembershipService.js";
-import { isBookableSalonSpecialist } from "../services/salon/salonRelationshipService.js";
-import { getSalonStatusForBarber } from "../services/salon/salonStatusService.js";
+} from "../../services/salon/salonMembershipService.js";
+import { isBookableSalonSpecialist } from "../../services/salon/salonRelationshipService.js";
+import { getSalonStatusForBarber } from "../../services/salon/salonStatusService.js";
 import { getSalonReviewStats } from "./salonReviewController.js";
 import {
   buildPublicSalonResponse,
   serializeSalon,
   serializeUser,
-} from "../utils/salonUtils.js";
-import { normalizeSalonDefaultSchedule } from "../utils/salonScheduleUtils.js";
+} from "../../utils/salonUtils.js";
+import { normalizeSalonDefaultSchedule } from "../../utils/salonScheduleUtils.js";
 import {
   markExplicitAllDaysOffWeeklySchedule,
   normalizeAutoClosedWeeklySchedule,
   sanitizeWeeklySchedule,
-} from "../utils/scheduleUtils.js";
+} from "../../utils/scheduleUtils.js";
 import {
   requireBarber,
   openCurrentWorkHistory,
-} from "../utils/salonHelpers.js";
-import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/salonHelpers.js";
+import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/controllerError.js";
 
 // Test hooks — allows tests to override dependencies without a DI framework
 let getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIdsForSalon;

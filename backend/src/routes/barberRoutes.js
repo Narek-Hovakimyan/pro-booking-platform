@@ -29,7 +29,7 @@ import {
   handleAvatarUpload,
   handleCertificationImageUpload,
 } from "../middleware/uploadMiddleware.js";
-import { updateSalonDefaultSchedule } from "../controllers/salonController.js";
+import { updateSalonDefaultSchedule } from "../controllers/salons/salonController.js";
 
 const router = express.Router();
 

@@ -1,9 +1,9 @@
-import Booking from "../models/Booking.js";
-import Salon from "../models/Salon.js";
-import SalonReview from "../models/SalonReview.js";
-import { createNotification } from "./notificationController.js";
-import { canManageSalonRequest } from "../utils/salonPermissions.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Booking from "../../models/Booking.js";
+import Salon from "../../models/Salon.js";
+import SalonReview from "../../models/SalonReview.js";
+import { createNotification } from "../notificationController.js";
+import { canManageSalonRequest } from "../../utils/salonPermissions.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const serializeReply = (reply) => {
   if (!reply || !reply.message) return null;

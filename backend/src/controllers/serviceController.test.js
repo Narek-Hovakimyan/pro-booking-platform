@@ -10,7 +10,7 @@ import {
   getServicesByBarber,
   __serviceControllerTestHooks,
   updateService,
-} from "./serviceController.js";
+} from "./services/serviceController.js";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
 import ServiceCategory from "../models/ServiceCategory.js";

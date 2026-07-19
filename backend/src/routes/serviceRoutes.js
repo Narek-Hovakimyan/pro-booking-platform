@@ -4,7 +4,7 @@ import {
   deleteService,
   getServicesByBarber,
   updateService,
-} from "../controllers/serviceController.js";
+} from "../controllers/services/serviceController.js";
 import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
 import { requirePublicBarberReadiness } from "../middleware/publicBarberReadinessMiddleware.js";

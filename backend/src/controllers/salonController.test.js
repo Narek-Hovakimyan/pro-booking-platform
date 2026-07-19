@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { createSalon, getSalonProfile, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
-import { getSalonStaff } from "./salonStaffController.js";
+import { createSalon, getSalonProfile, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salons/salonController.js";
+import { getSalonStaff } from "./salons/salonStaffController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";

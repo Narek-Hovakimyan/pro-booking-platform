@@ -2,8 +2,8 @@ import {
   ReportError,
   getSalonReport,
   getSalonReportCsvExport,
-} from "../services/salon/salonReportService.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../services/salon/salonReportService.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 /**
  * GET /api/salons/:salonId/reports

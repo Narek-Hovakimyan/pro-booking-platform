@@ -1,31 +1,31 @@
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
 import {
   canRemoveBarber,
   isSalonAdmin,
   isSalonOwner,
   sameId,
-} from "../utils/salonPermissions.js";
+} from "../../utils/salonPermissions.js";
 import {
   requireBarber,
   syncLegacySalonFields,
   closeCurrentWorkHistory,
-} from "../utils/salonHelpers.js";
+} from "../../utils/salonHelpers.js";
 import {
   serializeSalon,
   serializeUser,
-} from "../utils/salonUtils.js";
-import { getSalonAdminsForSalon } from "../services/salon/salonAdminService.js";
+} from "../../utils/salonUtils.js";
+import { getSalonAdminsForSalon } from "../../services/salon/salonAdminService.js";
 import {
   getSalonStaff as getSalonStaffForSalon,
   respondToSalonMemberRelationshipType,
   SalonStaffError,
   updateSalonMemberRelationshipType,
   updateSalonStaffPaymentSettings,
-} from "../services/salon/salonStaffService.js";
-import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
-import { createNotification } from "./notificationController.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../services/salon/salonStaffService.js";
+import { revokeSalonSeatsForRemovedMember } from "../../services/subscriptionService.js";
+import { createNotification } from "../notificationController.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 export const removeBarberFromSalon = async (req, res) => {
   try {

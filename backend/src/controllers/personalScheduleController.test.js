@@ -6,7 +6,7 @@ import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.
 import {
   getPersonalScheduleByBarber,
   upsertPersonalScheduleByBarber,
-} from "./personalScheduleController.js";
+} from "./schedules/personalScheduleController.js";
 
 const barberId = "64b000000000000000000001";
 const otherBarberId = "64b000000000000000000002";

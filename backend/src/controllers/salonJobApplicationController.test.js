@@ -7,7 +7,7 @@ import {
   listManagedSalonJobApplications,
   listMySalonJobApplications,
   updateSalonJobApplicationStatus,
-} from "./salonJobApplicationController.js";
+} from "./salons/salonJobApplicationController.js";
 import Salon from "../models/Salon.js";
 import SalonJobApplication from "../models/SalonJobApplication.js";
 import SalonJobPost from "../models/SalonJobPost.js";

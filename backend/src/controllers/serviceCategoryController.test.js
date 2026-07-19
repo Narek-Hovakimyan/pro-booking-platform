@@ -11,7 +11,7 @@ import {
   createServiceCategory,
   updateServiceCategory,
   deleteServiceCategory,
-} from "./serviceCategoryController.js";
+} from "./services/serviceCategoryController.js";
 
 /* ── Stub state ─────────────────────────────────────────── */
 const originalFind = ServiceCategory.find;

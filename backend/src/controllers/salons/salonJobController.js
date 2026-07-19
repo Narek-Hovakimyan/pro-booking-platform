@@ -1,11 +1,11 @@
-import Salon from "../models/Salon.js";
-import SalonJobPost from "../models/SalonJobPost.js";
-import { canUserManageSalon } from "../services/salon/salonMembershipService.js";
+import Salon from "../../models/Salon.js";
+import SalonJobPost from "../../models/SalonJobPost.js";
+import { canUserManageSalon } from "../../services/salon/salonMembershipService.js";
 import {
   pickSalonJobFields,
   serializeSalonJob,
-} from "../utils/salonJobUtils.js";
-import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/salonJobUtils.js";
+import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/controllerError.js";
 
 const salonJobPopulate = "name city address imageUrl";
 

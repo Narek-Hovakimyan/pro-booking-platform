@@ -5,7 +5,7 @@ import {
   createSalonReview,
   addReplyToSalonReview,
   deleteReplyFromSalonReview,
-} from "./salonReviewController.js";
+} from "./salons/salonReviewController.js";
 import Booking from "../models/Booking.js";
 import Notification from "../models/Notification.js";
 import Salon from "../models/Salon.js";
@@ -527,7 +527,7 @@ test("salon review not found returns 404 for delete reply", async () => {
 });
 
 test("getSalonReviews includes reply field", async () => {
-  const { getSalonReviews } = await import("./salonReviewController.js");
+  const { getSalonReviews } = await import("./salons/salonReviewController.js");
   const res = createResponse();
 
   SalonReview.find = () => ({
@@ -559,7 +559,7 @@ test("getSalonReviews includes reply field", async () => {
 });
 
 test("salon review without reply serializes reply as null", async () => {
-  const { getSalonReviews } = await import("./salonReviewController.js");
+  const { getSalonReviews } = await import("./salons/salonReviewController.js");
   const res = createResponse();
 
   SalonReview.find = () => ({

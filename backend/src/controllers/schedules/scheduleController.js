@@ -1,17 +1,17 @@
-import Schedule from "../models/Schedule.js";
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
+import Schedule from "../../models/Schedule.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
 import {
   canUserManageSalon,
   hasAcceptedSalonJoinRequest,
   isUserApprovedForSalon,
-} from "../services/salon/salonMembershipService.js";
-import { barberHasPaidAccessForSalon } from "../services/subscriptionService.js";
+} from "../../services/salon/salonMembershipService.js";
+import { barberHasPaidAccessForSalon } from "../../services/subscriptionService.js";
 import {
   normalizePublicAvailabilityIds,
   resolvePublicScheduleContext,
-} from "../services/barber/publicAvailabilityContextService.js";
-import { createCrudController } from "./crudController.js";
+} from "../../services/barber/publicAvailabilityContextService.js";
+import { createCrudController } from "../crudController.js";
 import {
   cleanCurrentAndFutureDateKeys,
   cleanPastScheduleDates,
@@ -24,8 +24,8 @@ import {
   sanitizeScheduleOverrides,
   serializeDefaultSchedule,
   sanitizeWeeklySchedule,
-} from "../utils/scheduleUtils.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/scheduleUtils.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 export const scheduleController = createCrudController(Schedule, "Schedule");
 

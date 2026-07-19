@@ -5,7 +5,7 @@ import {
   getMySalonStatus,
   getSalonProfile,
   listSalons,
-} from "../controllers/salonController.js";
+} from "../controllers/salons/salonController.js";
 import {
   cancelJoinRequest,
   cancelJoinRequestBySalon,
@@ -13,7 +13,7 @@ import {
   getOwnerJoinRequests,
   leaveSalon,
   requestToJoinSalon,
-} from "../controllers/salonMembershipController.js";
+} from "../controllers/salons/salonMembershipController.js";
 import {
   demoteAdmin,
   getSalonAdmins,
@@ -23,13 +23,13 @@ import {
   respondToRelationshipType,
   updateMemberRelationshipType,
   updateStaffPaymentSettings,
-} from "../controllers/salonStaffController.js";
-import { getDashboard } from "../controllers/salonDashboardController.js";
+} from "../controllers/salons/salonStaffController.js";
+import { getDashboard } from "../controllers/salons/salonDashboardController.js";
 import {
   exportReports,
   getReports,
-} from "../controllers/salonReportController.js";
-import { getCalendar } from "../controllers/salonCalendarController.js";
+} from "../controllers/salons/salonReportController.js";
+import { getCalendar } from "../controllers/schedules/salonCalendarController.js";
 import { getPublicSalonBooking } from "../controllers/publicSalonBookingController.js";
 import { updateStaffDepositSettingsBySalonOwner } from "../controllers/depositSettingsController.js";
 

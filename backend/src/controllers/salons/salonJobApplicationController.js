@@ -1,10 +1,10 @@
-import Salon from "../models/Salon.js";
-import SalonJobPost from "../models/SalonJobPost.js";
-import SalonJobApplication from "../models/SalonJobApplication.js";
-import { canUserManageSalon } from "../services/salon/salonMembershipService.js";
-import { serializeApplication } from "../utils/salonJobApplicationUtils.js";
-import { createNotification } from "./notificationController.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Salon from "../../models/Salon.js";
+import SalonJobPost from "../../models/SalonJobPost.js";
+import SalonJobApplication from "../../models/SalonJobApplication.js";
+import { canUserManageSalon } from "../../services/salon/salonMembershipService.js";
+import { serializeApplication } from "../../utils/salonJobApplicationUtils.js";
+import { createNotification } from "../notificationController.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const getUserId = (user) => String(user?._id || user?.id || "");
 const getId = (value) => {

@@ -362,7 +362,7 @@ export const validateSalonPromotion = async (req, res) => {
         .lean();
       if (service) {
         // Get the service discounted price
-        const { calculateServiceDiscountedPrice } = await import("./serviceController.js");
+        const { calculateServiceDiscountedPrice } = await import("./services/serviceController.js");
         const { discountedPrice } = calculateServiceDiscountedPrice(service);
         const servicePrice = discountedPrice;
 

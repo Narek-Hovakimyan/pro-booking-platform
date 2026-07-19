@@ -9,7 +9,7 @@ import {
   listMySalonJobs,
   listSalonJobs,
   updateSalonJob,
-} from "./salonJobController.js";
+} from "./salons/salonJobController.js";
 import Salon from "../models/Salon.js";
 import SalonJobPost from "../models/SalonJobPost.js";
 

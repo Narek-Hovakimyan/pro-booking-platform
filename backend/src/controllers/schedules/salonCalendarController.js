@@ -1,8 +1,8 @@
 import {
   getSalonCalendar,
   SalonCalendarError,
-} from "../services/salon/salonCalendarService.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../services/salon/salonCalendarService.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 export const getCalendar = async (req, res) => {
   try {

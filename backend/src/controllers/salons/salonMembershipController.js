@@ -1,32 +1,32 @@
 import mongoose from "mongoose";
 
-import Salon from "../models/Salon.js";
-import SalonJoinRequest from "../models/SalonJoinRequest.js";
-import User from "../models/User.js";
+import Salon from "../../models/Salon.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import User from "../../models/User.js";
 import {
   isSalonOwner,
   sameId,
-} from "../utils/salonPermissions.js";
+} from "../../utils/salonPermissions.js";
 import {
   barberFields,
   requireBarber,
   syncLegacySalonFields,
   closeCurrentWorkHistory,
-} from "../utils/salonHelpers.js";
+} from "../../utils/salonHelpers.js";
 import {
   serializeRequest,
   serializeSalon,
   serializeUser,
-} from "../utils/salonUtils.js";
-import { revokeSalonSeatsForRemovedMember } from "../services/subscriptionService.js";
-import { createNotification } from "./notificationController.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/salonUtils.js";
+import { revokeSalonSeatsForRemovedMember } from "../../services/subscriptionService.js";
+import { createNotification } from "../notificationController.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 import {
   cancelSalonJoinRequestLifecycle,
   cancelSalonJoinRequestBySalonLifecycle,
   decideSalonJoinRequestLifecycle,
   requestSalonJoinLifecycle,
-} from "../services/salon/salonJoinRequestLifecycleService.js";
+} from "../../services/salon/salonJoinRequestLifecycleService.js";
 
 const isValidSalonId = (salonId) =>
   typeof salonId === "string" &&

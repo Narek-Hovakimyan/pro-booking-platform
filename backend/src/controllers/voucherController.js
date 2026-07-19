@@ -2,7 +2,7 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
-import { calculateServiceDiscountedPrice } from "./serviceController.js";
+import { calculateServiceDiscountedPrice } from "./services/serviceController.js";
 
 
 import Voucher from "../models/Voucher.js";

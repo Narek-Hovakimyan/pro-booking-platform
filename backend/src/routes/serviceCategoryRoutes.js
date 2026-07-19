@@ -4,7 +4,7 @@ import {
   createServiceCategory,
   updateServiceCategory,
   deleteServiceCategory,
-} from "../controllers/serviceCategoryController.js";
+} from "../controllers/services/serviceCategoryController.js";
 import { protect, optionalAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

@@ -6,7 +6,7 @@ import Schedule from "../models/Schedule.js";
 import User from "../models/User.js";
 import { getPaidAccessByBarberIdsForSalon } from "../services/subscriptionService.js";
 import { isBookableSalonSpecialist } from "../services/salon/salonRelationshipService.js";
-import { getSalonReviewStats } from "./salonReviewController.js";
+import { getSalonReviewStats } from "./salons/salonReviewController.js";
 import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
 import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
 import { getIdString } from "../utils/bookingUtils.js";

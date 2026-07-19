@@ -9,7 +9,7 @@ import { __notificationServiceTestHooks } from "../services/notification/notific
 import {
   cancelJoinRequestBySalon,
   decideJoinRequest,
-} from "./salonMembershipController.js";
+} from "./salons/salonMembershipController.js";
 
 const originalMethods = {
   mongooseStartSession: mongoose.startSession,

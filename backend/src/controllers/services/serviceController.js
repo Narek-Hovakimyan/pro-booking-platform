@@ -1,12 +1,12 @@
 import mongoose from "mongoose";
 
-import Salon from "../models/Salon.js";
-import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
-import ServiceCategory from "../models/ServiceCategory.js";
-import { createCrudController } from "./crudController.js";
-import { canManageSalonRequest } from "../utils/salonPermissions.js";
-import { sendControllerError } from "../utils/controllerError.js";
-import { barberHasPaidAccessForSalon as _barberHasPaidAccess } from "../services/subscriptionService.js";
+import Salon from "../../models/Salon.js";
+import Service, { SERVICE_CATEGORIES } from "../../models/Service.js";
+import ServiceCategory from "../../models/ServiceCategory.js";
+import { createCrudController } from "../crudController.js";
+import { canManageSalonRequest } from "../../utils/salonPermissions.js";
+import { sendControllerError } from "../../utils/controllerError.js";
+import { barberHasPaidAccessForSalon as _barberHasPaidAccess } from "../../services/subscriptionService.js";
 
 // Test hooks — allows tests to override dependencies without a DI framework
 let barberHasPaidAccess = _barberHasPaidAccess;
