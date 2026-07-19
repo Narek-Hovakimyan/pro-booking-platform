@@ -3023,8 +3023,8 @@ test("no client booking flow is blocked in Phase 3", async () => {
 
 test("paid barber/admin routes require subscription", async () => {
   const fs = await import("fs");
-  const serviceRoutes = fs.readFileSync("./src/routes/serviceRoutes.js", "utf-8");
-  const scheduleRoutes = fs.readFileSync("./src/routes/scheduleRoutes.js", "utf-8");
+  const serviceRoutes = fs.readFileSync("./src/routes/services/serviceRoutes.js", "utf-8");
+  const scheduleRoutes = fs.readFileSync("./src/routes/schedules/scheduleRoutes.js", "utf-8");
   const bookingRoutes = fs.readFileSync("./src/routes/bookingRoutes.js", "utf-8");
   const voucherRoutes = fs.readFileSync("./src/routes/voucherRoutes.js", "utf-8");
   const revenueRoutes = fs.readFileSync("./src/routes/revenueRoutes.js", "utf-8");

@@ -5,7 +5,7 @@ import {
   getMySalonStatus,
   getSalonProfile,
   listSalons,
-} from "../controllers/salons/salonController.js";
+} from "../../controllers/salons/salonController.js";
 import {
   cancelJoinRequest,
   cancelJoinRequestBySalon,
@@ -13,7 +13,7 @@ import {
   getOwnerJoinRequests,
   leaveSalon,
   requestToJoinSalon,
-} from "../controllers/salons/salonMembershipController.js";
+} from "../../controllers/salons/salonMembershipController.js";
 import {
   demoteAdmin,
   getSalonAdmins,
@@ -23,24 +23,24 @@ import {
   respondToRelationshipType,
   updateMemberRelationshipType,
   updateStaffPaymentSettings,
-} from "../controllers/salons/salonStaffController.js";
-import { getDashboard } from "../controllers/salons/salonDashboardController.js";
+} from "../../controllers/salons/salonStaffController.js";
+import { getDashboard } from "../../controllers/salons/salonDashboardController.js";
 import {
   exportReports,
   getReports,
-} from "../controllers/salons/salonReportController.js";
-import { getCalendar } from "../controllers/schedules/salonCalendarController.js";
-import { getPublicSalonBooking } from "../controllers/bookings/publicSalonBookingController.js";
-import { updateStaffDepositSettingsBySalonOwner } from "../controllers/bookings/depositSettingsController.js";
+} from "../../controllers/salons/salonReportController.js";
+import { getCalendar } from "../../controllers/schedules/salonCalendarController.js";
+import { getPublicSalonBooking } from "../../controllers/bookings/publicSalonBookingController.js";
+import { updateStaffDepositSettingsBySalonOwner } from "../../controllers/bookings/depositSettingsController.js";
 
-import { optionalAuth, protect } from "../middleware/authMiddleware.js";
-import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
+import { optionalAuth, protect } from "../../middleware/authMiddleware.js";
+import { promoValidationLimiter } from "../../middleware/rateLimitMiddleware.js";
 import {
   getSalonPromotions,
   createSalonPromotion,
   updateSalonPromotion,
   validateSalonPromotion,
-} from "../controllers/promotions/salonPromotionController.js";
+} from "../../controllers/promotions/salonPromotionController.js";
 
 const router = express.Router();
 

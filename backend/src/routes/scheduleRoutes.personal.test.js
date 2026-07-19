@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import scheduleRoutes from "./scheduleRoutes.js";
+import scheduleRoutes from "./schedules/scheduleRoutes.js";
 
 const paths = scheduleRoutes.stack
   .map((layer) => layer.route?.path)

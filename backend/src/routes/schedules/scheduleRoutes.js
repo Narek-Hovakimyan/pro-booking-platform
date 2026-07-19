@@ -4,13 +4,13 @@ import {
   getScheduleByBarberAndSalon,
   upsertSchedule,
   upsertScheduleByBarberAndSalon,
-} from "../controllers/schedules/scheduleController.js";
+} from "../../controllers/schedules/scheduleController.js";
 import {
   getPersonalScheduleByBarber,
   upsertPersonalScheduleByBarber,
-} from "../controllers/schedules/personalScheduleController.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
+} from "../../controllers/schedules/personalScheduleController.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
 

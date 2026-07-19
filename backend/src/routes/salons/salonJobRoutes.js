@@ -6,15 +6,15 @@ import {
   listMySalonJobs,
   listSalonJobs,
   updateSalonJob,
-} from "../controllers/salons/salonJobController.js";
+} from "../../controllers/salons/salonJobController.js";
 import {
   applyToSalonJob,
   listJobApplications,
   listManagedSalonJobApplications,
   listMySalonJobApplications,
   updateSalonJobApplicationStatus,
-} from "../controllers/salons/salonJobApplicationController.js";
-import { protect } from "../middleware/authMiddleware.js";
+} from "../../controllers/salons/salonJobApplicationController.js";
+import { protect } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 

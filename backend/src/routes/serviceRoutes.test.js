@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import serviceRoutes from "./serviceRoutes.js";
+import serviceRoutes from "./services/serviceRoutes.js";
 
 test("service list route uses optional auth before controller", () => {
   const route = serviceRoutes.stack.find(

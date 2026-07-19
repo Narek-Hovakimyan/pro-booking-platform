@@ -6,8 +6,8 @@ import {
   checkSalonReview,
   addReplyToSalonReview,
   deleteReplyFromSalonReview,
-} from "../controllers/salons/salonReviewController.js";
-import { protect } from "../middleware/authMiddleware.js";
+} from "../../controllers/salons/salonReviewController.js";
+import { protect } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 

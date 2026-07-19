@@ -14,7 +14,7 @@ import eventRoutes from "./eventRoutes.js";
 import messageRoutes from "./messageRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
 import portfolioPhotoRoutes from "./portfolioPhotoRoutes.js";
-import salonRoutes from "./salonRoutes.js";
+import salonRoutes from "./salons/salonRoutes.js";
 import subscriptionRoutes from "./subscriptionRoutes.js";
 import userRoutes from "./users/userRoutes.js";
 

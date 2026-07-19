@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import salonRoutes from "./salonRoutes.js";
+import salonRoutes from "./salons/salonRoutes.js";
 
 const findRoute = (path, method) =>
   salonRoutes.stack.find(

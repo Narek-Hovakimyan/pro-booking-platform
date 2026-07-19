@@ -4,10 +4,10 @@ import {
   deleteService,
   getServicesByBarber,
   updateService,
-} from "../controllers/services/serviceController.js";
-import { optionalAuth, protect } from "../middleware/authMiddleware.js";
-import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
-import { requirePublicBarberReadiness } from "../middleware/publicBarberReadinessMiddleware.js";
+} from "../../controllers/services/serviceController.js";
+import { optionalAuth, protect } from "../../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
+import { requirePublicBarberReadiness } from "../../middleware/publicBarberReadinessMiddleware.js";
 
 const router = express.Router();
 

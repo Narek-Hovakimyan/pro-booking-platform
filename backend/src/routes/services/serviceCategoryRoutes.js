@@ -4,8 +4,8 @@ import {
   createServiceCategory,
   updateServiceCategory,
   deleteServiceCategory,
-} from "../controllers/services/serviceCategoryController.js";
-import { protect, optionalAuth } from "../middleware/authMiddleware.js";
+} from "../../controllers/services/serviceCategoryController.js";
+import { protect, optionalAuth } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 
