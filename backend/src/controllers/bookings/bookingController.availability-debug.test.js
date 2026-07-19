@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { debugBookingAvailability } from "./bookingAnalyticsController.js";
-import bookingRoutes from "../../routes/bookingRoutes.js";
+import bookingRoutes from "../../routes/bookings/bookingRoutes.js";
 import Booking from "../../models/Booking.js";
 import Salon from "../../models/Salon.js";
 import Schedule from "../../models/Schedule.js";

@@ -1212,7 +1212,7 @@ test("manual activation availability helper is false in production", async () =>
 
 test("no existing barber route is blocked in Phase 1 (smoke test)", async () => {
   const subController = await import("../controllers/billing/subscriptionController.js");
-  const subRoutes = await import("../routes/subscriptionRoutes.js");
+  const subRoutes = await import("../routes/billing/subscriptionRoutes.js");
 
   assert.ok(subController.getMySubscription);
   assert.ok(subController.getDefaultPlan);
@@ -2994,13 +2994,13 @@ test("public barber listings use paid-access filtering", async () => {
 });
 
 test("no client booking flow is blocked in Phase 3", async () => {
-  const bookingRoutes = await import("../routes/bookingRoutes.js");
+  const bookingRoutes = await import("../routes/bookings/bookingRoutes.js");
   // The createBooking route should still be unprotected from requireBarberSubscription
   // Only client-facing routes should pass through
   assert.ok(bookingRoutes.default);
 
   const fs = await import("fs");
-  const source = fs.readFileSync("./src/routes/bookingRoutes.js", "utf-8");
+  const source = fs.readFileSync("./src/routes/bookings/bookingRoutes.js", "utf-8");
 
   // Client routes should NOT have requireBarberSubscription
   // The booking creation route (POST /) should not have requireBarberSubscription middleware before it
@@ -3025,12 +3025,12 @@ test("paid barber/admin routes require subscription", async () => {
   const fs = await import("fs");
   const serviceRoutes = fs.readFileSync("./src/routes/services/serviceRoutes.js", "utf-8");
   const scheduleRoutes = fs.readFileSync("./src/routes/schedules/scheduleRoutes.js", "utf-8");
-  const bookingRoutes = fs.readFileSync("./src/routes/bookingRoutes.js", "utf-8");
+  const bookingRoutes = fs.readFileSync("./src/routes/bookings/bookingRoutes.js", "utf-8");
   const voucherRoutes = fs.readFileSync("./src/routes/voucherRoutes.js", "utf-8");
-  const revenueRoutes = fs.readFileSync("./src/routes/revenueRoutes.js", "utf-8");
+  const revenueRoutes = fs.readFileSync("./src/routes/billing/revenueRoutes.js", "utf-8");
   const barberRoutes = fs.readFileSync("./src/routes/barbers/barberRoutes.js", "utf-8");
   const portfolioRoutes = fs.readFileSync("./src/routes/portfolioPhotoRoutes.js", "utf-8");
-  const waitlistRoutes = fs.readFileSync("./src/routes/waitlistRoutes.js", "utf-8");
+  const waitlistRoutes = fs.readFileSync("./src/routes/bookings/waitlistRoutes.js", "utf-8");
 
   for (const source of [
     serviceRoutes,
@@ -3068,7 +3068,7 @@ test("paid barber/admin routes require subscription", async () => {
 
 test("subscription endpoints remain accessible while unpaid", async () => {
   const fs = await import("fs");
-  const source = fs.readFileSync("./src/routes/subscriptionRoutes.js", "utf-8");
+  const source = fs.readFileSync("./src/routes/billing/subscriptionRoutes.js", "utf-8");
 
   assert.ok(!source.includes("requireBarberSubscription"));
   assert.match(source, /router\.get\("\/me",\s*protect,\s*getMySubscription/);

@@ -10,9 +10,9 @@ import {
   offerEntry,
   acceptOfferEntry,
   declineOfferEntry,
-} from "../controllers/bookings/waitlistController.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
+} from "../../controllers/bookings/waitlistController.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 
 const router = express.Router();
 

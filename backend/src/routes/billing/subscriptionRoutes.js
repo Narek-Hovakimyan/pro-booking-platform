@@ -1,6 +1,6 @@
 import express from "express";
-import { protect } from "../middleware/authMiddleware.js";
-import { paymentLimiter } from "../middleware/rateLimitMiddleware.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { paymentLimiter } from "../../middleware/rateLimitMiddleware.js";
 import {
   getMySubscription,
   getDefaultPlan,
@@ -18,7 +18,7 @@ import {
   cancelPaymentAttempt,
   devConfirmSeatUpdate,
   devConfirmPaymentAttempt,
-} from "../controllers/billing/subscriptionController.js";
+} from "../../controllers/billing/subscriptionController.js";
 
 const router = express.Router();
 

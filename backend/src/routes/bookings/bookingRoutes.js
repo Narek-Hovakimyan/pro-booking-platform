@@ -6,32 +6,32 @@ import {
   quoteBookingPrice,
   updateBooking,
   updateTreatmentRecord,
-} from "../controllers/bookings/bookingController.js";
-import { handleReferenceImageUpload } from "../middleware/uploadMiddleware.js";
+} from "../../controllers/bookings/bookingController.js";
+import { handleReferenceImageUpload } from "../../middleware/uploadMiddleware.js";
 import {
   acceptRescheduleRequest,
   createRescheduleRequest,
   rejectRescheduleRequest,
-} from "../controllers/bookings/bookingRescheduleController.js";
+} from "../../controllers/bookings/bookingRescheduleController.js";
 import {
   getBarberBookings,
   getClientBookings,
-} from "../controllers/bookings/bookingReadController.js";
+} from "../../controllers/bookings/bookingReadController.js";
 import {
   markLateCancel,
   markNoShow,
-} from "../controllers/bookings/bookingOutcomeController.js";
+} from "../../controllers/bookings/bookingOutcomeController.js";
 import {
   debugBookingAvailability,
   getBarberMonthlyIncome,
   getClientReliability,
-} from "../controllers/bookings/bookingAnalyticsController.js";
-import { optionalAuth, protect } from "../middleware/authMiddleware.js";
-import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
+} from "../../controllers/bookings/bookingAnalyticsController.js";
+import { optionalAuth, protect } from "../../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 import {
   publicBookingLimiter,
   uploadLimiter,
-} from "../middleware/rateLimitMiddleware.js";
+} from "../../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 

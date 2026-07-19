@@ -9,13 +9,13 @@ import {
   uploadLimiter,
   webhookLimiter,
 } from "../middleware/rateLimitMiddleware.js";
-import bookingRoutes from "./bookingRoutes.js";
+import bookingRoutes from "./bookings/bookingRoutes.js";
 import eventRoutes from "./eventRoutes.js";
 import messageRoutes from "./messageRoutes.js";
-import paymentRoutes from "./paymentRoutes.js";
+import paymentRoutes from "./billing/paymentRoutes.js";
 import portfolioPhotoRoutes from "./portfolioPhotoRoutes.js";
 import salonRoutes from "./salons/salonRoutes.js";
-import subscriptionRoutes from "./subscriptionRoutes.js";
+import subscriptionRoutes from "./billing/subscriptionRoutes.js";
 import userRoutes from "./users/userRoutes.js";
 
 const findRoute = (router, path, method) =>
