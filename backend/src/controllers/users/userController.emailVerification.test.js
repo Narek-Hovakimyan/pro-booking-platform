@@ -7,19 +7,19 @@ import {
   sendEmailVerificationController,
   updateMyProfile,
   verifyEmailController,
-} from "./users/userController.js";
-import { loginUser, registerUser } from "./auth/authController.js";
-import User from "../models/User.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Salon from "../models/Salon.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionPlan from "../models/SubscriptionPlan.js";
-import { hashEmailVerificationToken } from "../utils/emailVerification.js";
-import { getLogger, resetLogger } from "../config/logger.js";
+} from "./userController.js";
+import { loginUser, registerUser } from "../auth/authController.js";
+import User from "../../models/User.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Salon from "../../models/Salon.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
+import { hashEmailVerificationToken } from "../../utils/emailVerification.js";
+import { getLogger, resetLogger } from "../../config/logger.js";
 import {
   sendEmailVerification,
   setResendClientFactoryForTesting,
-} from "../services/auth/emailService.js";
+} from "../../services/auth/emailService.js";
 
 const originalUserMethods = {
   findById: User.findById,

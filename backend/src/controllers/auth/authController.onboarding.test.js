@@ -3,10 +3,10 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { afterEach, test } from "node:test";
 
-import User from "../models/User.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionPlan from "../models/SubscriptionPlan.js";
-import { loginUser, registerUser } from "./auth/authController.js";
+import User from "../../models/User.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
+import { loginUser, registerUser } from "./authController.js";
 
 const originalUserMethods = {
   findOne: User.findOne,

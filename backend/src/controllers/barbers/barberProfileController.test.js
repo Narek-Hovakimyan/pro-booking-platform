@@ -5,25 +5,25 @@ import {
   barberProfileController,
   getBarberCardSummary,
   getProfileByBarberId,
-} from "./barbers/barberProfileController.js";
+} from "./barberProfileController.js";
 import {
   addCertification,
   deleteCertification,
   getEventCertificates,
   updateCertification,
-} from "./barbers/certificationController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Booking from "../models/Booking.js";
-import EventCertificate from "../models/EventCertificate.js";
-import Review from "../models/Review.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
-import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
+} from "./certificationController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Booking from "../../models/Booking.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import Review from "../../models/Review.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { getArmeniaDateKey } from "../../utils/bookingDateTime.js";
+import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 
 const originalMethods = {
   create: BarberProfile.create,

@@ -3,15 +3,15 @@ import { afterEach, test } from "node:test";
 
 import mongoose from "mongoose";
 
-import { getBarbers } from "./users/userController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Schedule from "../models/Schedule.js";
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
+import { getBarbers } from "./userController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Schedule from "../../models/Schedule.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 
 const originalUserFind = User.find;
 const originalBarberProfileFind = BarberProfile.find;

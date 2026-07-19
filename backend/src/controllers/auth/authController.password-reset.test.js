@@ -4,10 +4,10 @@ import crypto from "node:crypto";
 import { afterEach, beforeEach, test } from "node:test";
 import { Writable } from "node:stream";
 
-import { getLogger, resetLogger } from "../config/logger.js";
-import User from "../models/User.js";
-import { setEmailTransportFactoryForTesting } from "../services/auth/emailService.js";
-import { forgotPassword, resetPassword } from "./auth/authController.js";
+import { getLogger, resetLogger } from "../../config/logger.js";
+import User from "../../models/User.js";
+import { setEmailTransportFactoryForTesting } from "../../services/auth/emailService.js";
+import { forgotPassword, resetPassword } from "./authController.js";
 
 const genericResetMessage =
   "If an account exists, password reset instructions have been sent.";

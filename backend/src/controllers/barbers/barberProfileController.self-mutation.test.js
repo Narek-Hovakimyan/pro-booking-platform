@@ -5,8 +5,8 @@ import { afterEach, test } from "node:test";
 
 import {
   createBarberProfileSelfMutationController,
-} from "./barbers/barberProfileController.js";
-import { BarberProfileMutationPayloadError } from "../utils/barberProfileMutationPayload.js";
+} from "./barberProfileController.js";
+import { BarberProfileMutationPayloadError } from "../../utils/barberProfileMutationPayload.js";
 
 const uploadsDir = path.resolve(process.cwd(), "uploads", "avatars");
 const createdFiles = new Set();
