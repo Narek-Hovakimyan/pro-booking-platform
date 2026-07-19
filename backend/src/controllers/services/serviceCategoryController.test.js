@@ -3,15 +3,15 @@ import { afterEach, beforeEach, test } from "node:test";
 
 import mongoose from "mongoose";
 
-import Salon from "../models/Salon.js";
-import ServiceCategory from "../models/ServiceCategory.js";
-import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../models/Service.js";
+import Salon from "../../models/Salon.js";
+import ServiceCategory from "../../models/ServiceCategory.js";
+import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../../models/Service.js";
 import {
   listServiceCategories,
   createServiceCategory,
   updateServiceCategory,
   deleteServiceCategory,
-} from "./services/serviceCategoryController.js";
+} from "./serviceCategoryController.js";
 
 /* ── Stub state ─────────────────────────────────────────── */
 const originalFind = ServiceCategory.find;

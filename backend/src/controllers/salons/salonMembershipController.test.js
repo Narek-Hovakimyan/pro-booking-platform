@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
-import Notification from "../models/Notification.js";
-import SalonJoinRequest from "../models/SalonJoinRequest.js";
-import User from "../models/User.js";
-import { __notificationServiceTestHooks } from "../services/notification/notificationService.js";
+import Notification from "../../models/Notification.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import User from "../../models/User.js";
+import { __notificationServiceTestHooks } from "../../services/notification/notificationService.js";
 import {
   cancelJoinRequestBySalon,
   decideJoinRequest,
-} from "./salons/salonMembershipController.js";
+} from "./salonMembershipController.js";
 
 const originalMethods = {
   mongooseStartSession: mongoose.startSession,

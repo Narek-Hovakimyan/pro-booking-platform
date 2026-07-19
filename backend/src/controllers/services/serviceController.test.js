@@ -10,10 +10,10 @@ import {
   getServicesByBarber,
   __serviceControllerTestHooks,
   updateService,
-} from "./services/serviceController.js";
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import ServiceCategory from "../models/ServiceCategory.js";
+} from "./serviceController.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import ServiceCategory from "../../models/ServiceCategory.js";
 
 const originalServiceMethods = {
   create: Service.create,

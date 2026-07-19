@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import Schedule from "../models/Schedule.js";
-import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
+import Schedule from "../../models/Schedule.js";
+import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 import {
   getPersonalScheduleByBarber,
   upsertPersonalScheduleByBarber,
-} from "./schedules/personalScheduleController.js";
+} from "./personalScheduleController.js";
 
 const barberId = "64b000000000000000000001";
 const otherBarberId = "64b000000000000000000002";

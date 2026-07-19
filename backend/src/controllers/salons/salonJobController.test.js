@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { escapeRegex } from "../utils/controllerError.js";
+import { escapeRegex } from "../../utils/controllerError.js";
 import {
   closeSalonJob,
   createSalonJob,
@@ -9,9 +9,9 @@ import {
   listMySalonJobs,
   listSalonJobs,
   updateSalonJob,
-} from "./salons/salonJobController.js";
-import Salon from "../models/Salon.js";
-import SalonJobPost from "../models/SalonJobPost.js";
+} from "./salonJobController.js";
+import Salon from "../../models/Salon.js";
+import SalonJobPost from "../../models/SalonJobPost.js";
 
 const ownerId = "64b000000000000000000001";
 const adminId = "64b000000000000000000002";

@@ -8,12 +8,12 @@ import {
   respondToRelationshipType,
   updateMemberRelationshipType,
   updateStaffPaymentSettings,
-} from "./salons/salonStaffController.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import { __notificationServiceTestHooks } from "../services/notification/notificationService.js";
+} from "./salonStaffController.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { __notificationServiceTestHooks } from "../../services/notification/notificationService.js";
 
 const originalNotificationCreate = Notification.create;
 const originalSalonFindById = Salon.findById;

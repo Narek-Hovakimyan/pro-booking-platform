@@ -7,18 +7,18 @@ import {
   getScheduleByBarberAndSalon,
   upsertSchedule,
   upsertScheduleByBarberAndSalon,
-} from "./schedules/scheduleController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Schedule from "../models/Schedule.js";
-import Salon from "../models/Salon.js";
-import SalonJoinRequest from "../models/SalonJoinRequest.js";
-import Service from "../models/Service.js";
-import Subscription from "../models/Subscription.js";
-import SubscriptionSeat from "../models/SubscriptionSeat.js";
-import User from "../models/User.js";
-import { createCanonicalPersonalSchedule } from "../utils/personalScheduleUtils.js";
-import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
-import { normalizePublicAvailabilityIds } from "../services/barber/publicAvailabilityContextService.js";
+} from "./scheduleController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Schedule from "../../models/Schedule.js";
+import Salon from "../../models/Salon.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
+import { explicitAllDaysOffMarker } from "../../utils/scheduleUtils.js";
+import { normalizePublicAvailabilityIds } from "../../services/barber/publicAvailabilityContextService.js";
 
 const originalMethods = {
   barberProfileFind: BarberProfile.find,

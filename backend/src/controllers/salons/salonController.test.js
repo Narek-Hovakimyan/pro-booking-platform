@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { createSalon, getSalonProfile, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salons/salonController.js";
-import { getSalonStaff } from "./salons/salonStaffController.js";
-import BarberProfile from "../models/BarberProfile.js";
-import Schedule from "../models/Schedule.js";
-import Salon from "../models/Salon.js";
-import SalonJoinRequest from "../models/SalonJoinRequest.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
-import { explicitAllDaysOffMarker } from "../utils/scheduleUtils.js";
+import { createSalon, getSalonProfile, listManageableSalons, listSalons, updateSalonDefaultSchedule, __salonControllerTestHooks } from "./salonController.js";
+import { getSalonStaff } from "./salonStaffController.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Schedule from "../../models/Schedule.js";
+import Salon from "../../models/Salon.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
+import { explicitAllDaysOffMarker } from "../../utils/scheduleUtils.js";
 
 const originalMethods = {
   barberProfileFind: BarberProfile.find,

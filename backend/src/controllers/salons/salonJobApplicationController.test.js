@@ -7,11 +7,11 @@ import {
   listManagedSalonJobApplications,
   listMySalonJobApplications,
   updateSalonJobApplicationStatus,
-} from "./salons/salonJobApplicationController.js";
-import Salon from "../models/Salon.js";
-import SalonJobApplication from "../models/SalonJobApplication.js";
-import SalonJobPost from "../models/SalonJobPost.js";
-import Notification from "../models/Notification.js";
+} from "./salonJobApplicationController.js";
+import Salon from "../../models/Salon.js";
+import SalonJobApplication from "../../models/SalonJobApplication.js";
+import SalonJobPost from "../../models/SalonJobPost.js";
+import Notification from "../../models/Notification.js";
 
 const ownerId = "64b000000000000000000001";
 const adminId = "64b000000000000000000002";
