@@ -5,12 +5,12 @@ import {
   authorizeDebugAccess,
   buildScheduleContext,
   debugAvailability,
-} from "../services/booking/availabilityDebugService.js";
-import Booking from "../models/Booking.js";
-import Salon from "../models/Salon.js";
-import Schedule from "../models/Schedule.js";
-import Service from "../models/Service.js";
-import User from "../models/User.js";
+} from "./availabilityDebugService.js";
+import Booking from "../../models/Booking.js";
+import Salon from "../../models/Salon.js";
+import Schedule from "../../models/Schedule.js";
+import Service from "../../models/Service.js";
+import User from "../../models/User.js";
 
 const barberId = "64b000000000000000000001";
 const salonId = "64b000000000000000000002";
