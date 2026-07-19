@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { resetAllowlistCache } from "../middleware/platformMiddleware.js";
-import platformRoutes from "./platformRoutes.js";
+import platformRoutes from "./platform/platformRoutes.js";
 
 afterEach(() => {
   delete process.env.PLATFORM_ADMIN_EMAILS;

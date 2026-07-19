@@ -3026,10 +3026,10 @@ test("paid barber/admin routes require subscription", async () => {
   const serviceRoutes = fs.readFileSync("./src/routes/services/serviceRoutes.js", "utf-8");
   const scheduleRoutes = fs.readFileSync("./src/routes/schedules/scheduleRoutes.js", "utf-8");
   const bookingRoutes = fs.readFileSync("./src/routes/bookings/bookingRoutes.js", "utf-8");
-  const voucherRoutes = fs.readFileSync("./src/routes/voucherRoutes.js", "utf-8");
+  const voucherRoutes = fs.readFileSync("./src/routes/promotions/voucherRoutes.js", "utf-8");
   const revenueRoutes = fs.readFileSync("./src/routes/billing/revenueRoutes.js", "utf-8");
   const barberRoutes = fs.readFileSync("./src/routes/barbers/barberRoutes.js", "utf-8");
-  const portfolioRoutes = fs.readFileSync("./src/routes/portfolioPhotoRoutes.js", "utf-8");
+  const portfolioRoutes = fs.readFileSync("./src/routes/portfolio/portfolioPhotoRoutes.js", "utf-8");
   const waitlistRoutes = fs.readFileSync("./src/routes/bookings/waitlistRoutes.js", "utf-8");
 
   for (const source of [

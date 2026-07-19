@@ -1,8 +1,8 @@
 import express from "express";
-import User from "../models/User.js";
-import Salon from "../models/Salon.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import User from "../../models/User.js";
+import Salon from "../../models/Salon.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const router = express.Router();
 

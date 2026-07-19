@@ -1,6 +1,6 @@
 import express from "express";
-import { protect } from "../middleware/authMiddleware.js";
-import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 import {
   createVoucher,
   deleteVoucher,
@@ -9,8 +9,8 @@ import {
   getVoucherById,
   updateVoucher,
   validateVoucherCode,
-} from "../controllers/promotions/voucherController.js";
-import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
+} from "../../controllers/promotions/voucherController.js";
+import { promoValidationLimiter } from "../../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 

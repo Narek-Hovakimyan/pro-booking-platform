@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { protect } from "../middleware/authMiddleware.js";
+import { protect } from "../../middleware/authMiddleware.js";
 import {
   getMyPrograms,
   createProgram,
   updateProgram,
   deactivateProgram,
   getMyProgress,
-} from "../controllers/engagement/loyaltyController.js";
+} from "../../controllers/engagement/loyaltyController.js";
 
 const router = Router();
 

@@ -13,7 +13,7 @@ import bookingRoutes from "./bookings/bookingRoutes.js";
 import eventRoutes from "./events/eventRoutes.js";
 import messageRoutes from "./messaging/messageRoutes.js";
 import paymentRoutes from "./billing/paymentRoutes.js";
-import portfolioPhotoRoutes from "./portfolioPhotoRoutes.js";
+import portfolioPhotoRoutes from "./portfolio/portfolioPhotoRoutes.js";
 import salonRoutes from "./salons/salonRoutes.js";
 import subscriptionRoutes from "./billing/subscriptionRoutes.js";
 import userRoutes from "./users/userRoutes.js";

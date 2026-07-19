@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
-import voucherRoutes from "./voucherRoutes.js";
+import voucherRoutes from "./promotions/voucherRoutes.js";
 
 test("voucher routes expose CRUD and validate endpoints in safe order", () => {
   const routes = voucherRoutes.stack.map((layer) => ({
