@@ -3028,7 +3028,7 @@ test("paid barber/admin routes require subscription", async () => {
   const bookingRoutes = fs.readFileSync("./src/routes/bookingRoutes.js", "utf-8");
   const voucherRoutes = fs.readFileSync("./src/routes/voucherRoutes.js", "utf-8");
   const revenueRoutes = fs.readFileSync("./src/routes/revenueRoutes.js", "utf-8");
-  const barberRoutes = fs.readFileSync("./src/routes/barberRoutes.js", "utf-8");
+  const barberRoutes = fs.readFileSync("./src/routes/barbers/barberRoutes.js", "utf-8");
   const portfolioRoutes = fs.readFileSync("./src/routes/portfolioPhotoRoutes.js", "utf-8");
   const waitlistRoutes = fs.readFileSync("./src/routes/waitlistRoutes.js", "utf-8");
 
@@ -3079,7 +3079,7 @@ test("subscription endpoints remain accessible while unpaid", async () => {
 
 test("barber profile upsert does not require subscription (Phase 1 non-enforcement preserved)", async () => {
   const fs = await import("fs");
-  const source = fs.readFileSync("./src/routes/barberRoutes.js", "utf-8");
+  const source = fs.readFileSync("./src/routes/barbers/barberRoutes.js", "utf-8");
 
   // Profile upsert route should NOT have subscription guard
   const upsertMatch = source.match(/router\.put\(\s*"\/profile\/:barberId",/);

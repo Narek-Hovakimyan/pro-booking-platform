@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 
 import User from "../models/User.js";
 import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
-import barberRoutes from "./barberRoutes.js";
+import barberRoutes from "./barbers/barberRoutes.js";
 
 const genericTombstoneResponse = {
   code: "BARBER_PROFILE_GENERIC_WRITE_DEPRECATED",

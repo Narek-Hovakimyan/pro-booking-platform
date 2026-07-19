@@ -7,7 +7,7 @@ import {
   rateLimitCode,
   rateLimitMessage,
 } from "../middleware/rateLimitMiddleware.js";
-import authRoutes from "./authRoutes.js";
+import authRoutes from "./auth/authRoutes.js";
 
 const createRequest = () => ({
   app: {

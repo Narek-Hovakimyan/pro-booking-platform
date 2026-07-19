@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import router from "./barberOnboardingRoutes.js";
+import router from "./barbers/barberOnboardingRoutes.js";
 
 const routeLayers = () => router.stack.filter((layer) => layer.route);
 const routeFor = (path, method) =>

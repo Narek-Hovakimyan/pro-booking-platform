@@ -16,7 +16,7 @@ import paymentRoutes from "./paymentRoutes.js";
 import portfolioPhotoRoutes from "./portfolioPhotoRoutes.js";
 import salonRoutes from "./salonRoutes.js";
 import subscriptionRoutes from "./subscriptionRoutes.js";
-import userRoutes from "./userRoutes.js";
+import userRoutes from "./users/userRoutes.js";
 
 const findRoute = (router, path, method) =>
   router.stack.find(

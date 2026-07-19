@@ -12,9 +12,9 @@ import {
 } from "./config/sentry.js";
 import { requestContextMiddleware } from "./middleware/requestContextMiddleware.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
-import authRoutes from "./routes/authRoutes.js";
-import barberOnboardingRoutes from "./routes/barberOnboardingRoutes.js";
-import barberRoutes from "./routes/barberRoutes.js";
+import authRoutes from "./routes/auth/authRoutes.js";
+import barberOnboardingRoutes from "./routes/barbers/barberOnboardingRoutes.js";
+import barberRoutes from "./routes/barbers/barberRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import certificateRoutes from "./routes/certificateRoutes.js";
 
@@ -29,7 +29,7 @@ import scheduleRoutes from "./routes/scheduleRoutes.js";
 import serviceRoutes from "./routes/serviceRoutes.js";
 import serviceCategoryRoutes from "./routes/serviceCategoryRoutes.js";
 import salonRoutes from "./routes/salonRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
+import userRoutes from "./routes/users/userRoutes.js";
 import debugRoutes from "./routes/debugRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import waitlistRoutes from "./routes/waitlistRoutes.js";

@@ -4,32 +4,32 @@ import {
   getBarberCardSummary,
   getProfileByBarberId,
   upsertProfileByBarberId,
-} from "../controllers/barbers/barberProfileController.js";
+} from "../../controllers/barbers/barberProfileController.js";
 import {
   getMyLoyaltyDiscountSettings,
   getMyBarberClients,
   updateMyLoyaltyDiscountSettings,
   updateMyBarberClientLoyalty,
-} from "../controllers/barbers/barberClientController.js";
+} from "../../controllers/barbers/barberClientController.js";
 import {
   getCertifications,
   getEventCertificates,
   addCertification,
   updateCertification,
   deleteCertification,
-} from "../controllers/barbers/certificationController.js";
+} from "../../controllers/barbers/certificationController.js";
 import {
   getMyDepositSettings,
   updateMyDepositSettings,
-} from "../controllers/bookings/depositSettingsController.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
-import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
+} from "../../controllers/bookings/depositSettingsController.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { uploadLimiter } from "../../middleware/rateLimitMiddleware.js";
+import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 import {
   handleAvatarUpload,
   handleCertificationImageUpload,
-} from "../middleware/uploadMiddleware.js";
-import { updateSalonDefaultSchedule } from "../controllers/salons/salonController.js";
+} from "../../middleware/uploadMiddleware.js";
+import { updateSalonDefaultSchedule } from "../../controllers/salons/salonController.js";
 
 const router = express.Router();
 

@@ -5,10 +5,10 @@ import {
   sendEmailVerificationController,
   updateMyProfile,
   verifyEmailController,
-} from "../controllers/users/userController.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
-import { handleAvatarUpload } from "../middleware/uploadMiddleware.js";
+} from "../../controllers/users/userController.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { uploadLimiter } from "../../middleware/rateLimitMiddleware.js";
+import { handleAvatarUpload } from "../../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
