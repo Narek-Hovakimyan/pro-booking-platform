@@ -1,14 +1,14 @@
-import Favorite from "../models/Favorite.js";
-import SalonFavorite from "../models/SalonFavorite.js";
-import User from "../models/User.js";
-import { getSalonReviewStats } from "./salons/salonReviewController.js";
-import { getPaidAccessByBarberIds } from "../services/subscriptionService.js";
-import { getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Favorite from "../../models/Favorite.js";
+import SalonFavorite from "../../models/SalonFavorite.js";
+import User from "../../models/User.js";
+import { getSalonReviewStats } from "../salons/salonReviewController.js";
+import { getPaidAccessByBarberIds } from "../../services/subscriptionService.js";
+import { getPublicBarberReadinessByIds } from "../../services/barber/publicBarberReadinessService.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 import {
   serializePublicBarber,
   serializePublicSalon,
-} from "../utils/salonUtils.js";
+} from "../../utils/salonUtils.js";
 
 const userFields = "name role city salonName imageUrl profession barberType specialty";
 const salonFields = "name city address phone imageUrl";

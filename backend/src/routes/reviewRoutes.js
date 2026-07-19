@@ -4,7 +4,7 @@ import {
   getReviewsByBarber,
   addReplyToReview,
   deleteReplyFromReview,
-} from "../controllers/reviewController.js";
+} from "../controllers/reviews/reviewController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

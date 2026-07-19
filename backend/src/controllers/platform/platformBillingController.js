@@ -1,4 +1,4 @@
-import Salon from "../models/Salon.js";
+import Salon from "../../models/Salon.js";
 import {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
@@ -12,7 +12,7 @@ import {
   revokeSalonSeat,
   cancelSalonSubscription,
   confirmSalonPayment,
-} from "../services/platform/platformBillingService.js";
+} from "../../services/platform/platformBillingService.js";
 
 const getRequestIp = (req) => req.ip || req.socket?.remoteAddress || "";
 

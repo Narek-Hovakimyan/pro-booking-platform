@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
-import Salon from "../models/Salon.js";
-import Voucher from "../models/Voucher.js";
-import { canManageSalonRequest } from "../utils/salonPermissions.js";
+import Salon from "../../models/Salon.js";
+import Voucher from "../../models/Voucher.js";
+import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import {
   getMemberRelationshipType,
-} from "../services/salon/salonRelationshipService.js";
+} from "../../services/salon/salonRelationshipService.js";
 
 const isValidObjectId = (value) =>
   Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
@@ -352,7 +352,7 @@ export const validateSalonPromotion = async (req, res) => {
     let discountAmount = 0;
     let finalPrice = null;
     if (serviceId) {
-      const Service = (await import("../models/Service.js")).default;
+      const Service = (await import("../../models/Service.js")).default;
       const serviceQuery = { _id: serviceId, active: true };
       if (barberId && isValidObjectId(barberId)) {
         serviceQuery.barberId = barberId;
@@ -362,7 +362,7 @@ export const validateSalonPromotion = async (req, res) => {
         .lean();
       if (service) {
         // Get the service discounted price
-        const { calculateServiceDiscountedPrice } = await import("./services/serviceController.js");
+        const { calculateServiceDiscountedPrice } = await import("../services/serviceController.js");
         const { discountedPrice } = calculateServiceDiscountedPrice(service);
         const servicePrice = discountedPrice;
 

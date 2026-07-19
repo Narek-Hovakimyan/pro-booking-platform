@@ -2,7 +2,7 @@ import path from "path";
 
 import mongoose from "mongoose";
 
-import PortfolioPhoto from "../models/PortfolioPhoto.js";
+import PortfolioPhoto from "../../models/PortfolioPhoto.js";
 
 const portfolioUploadsDir = path.resolve(process.cwd(), "uploads", "portfolio");
 const portfolioUrlPrefix = "/uploads/portfolio/";

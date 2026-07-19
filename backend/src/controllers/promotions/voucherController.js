@@ -1,12 +1,12 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
-import Salon from "../models/Salon.js";
-import Service from "../models/Service.js";
-import { calculateServiceDiscountedPrice } from "./services/serviceController.js";
+import Salon from "../../models/Salon.js";
+import Service from "../../models/Service.js";
+import { calculateServiceDiscountedPrice } from "../services/serviceController.js";
 
 
-import Voucher from "../models/Voucher.js";
-import { canManageSalonRequest } from "../utils/salonPermissions.js";
+import Voucher from "../../models/Voucher.js";
+import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 
 const isValidObjectId = (value) =>
   Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));

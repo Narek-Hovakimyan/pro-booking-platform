@@ -7,11 +7,11 @@ import {
   addPortfolioPhoto,
   updatePortfolioPhoto,
   deletePortfolioPhoto,
-} from "./portfolioPhotoController.js";
+} from "./portfolio/portfolioPhotoController.js";
 import {
   serveOwnerPortfolioImage,
   servePublicPortfolioImage,
-} from "./portfolioPhotoMediaController.js";
+} from "./portfolio/portfolioPhotoMediaController.js";
 import PortfolioPhoto from "../models/PortfolioPhoto.js";
 import Service from "../models/Service.js";
 import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";

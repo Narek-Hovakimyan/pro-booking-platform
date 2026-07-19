@@ -6,7 +6,7 @@ import {
   updateProgram,
   deactivateProgram,
   getMyProgress,
-} from "../controllers/loyaltyController.js";
+} from "../controllers/engagement/loyaltyController.js";
 
 const router = Router();
 

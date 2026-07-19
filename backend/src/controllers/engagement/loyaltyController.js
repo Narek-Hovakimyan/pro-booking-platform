@@ -1,6 +1,6 @@
-import LoyaltyProgram from "../models/LoyaltyProgram.js";
-import LoyaltyProgress from "../models/LoyaltyProgress.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import LoyaltyProgram from "../../models/LoyaltyProgram.js";
+import LoyaltyProgress from "../../models/LoyaltyProgress.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 // ── Barber: get my programs ──
 export const getMyPrograms = async (req, res) => {

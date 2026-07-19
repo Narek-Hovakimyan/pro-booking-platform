@@ -4,7 +4,7 @@ import { afterEach, mock, test } from "node:test";
 import {
   getClientFavorites,
   getFavoriteSalons,
-} from "./favoriteController.js";
+} from "./engagement/favoriteController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Favorite from "../models/Favorite.js";
 import Schedule from "../models/Schedule.js";

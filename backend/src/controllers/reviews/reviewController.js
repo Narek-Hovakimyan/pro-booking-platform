@@ -1,7 +1,7 @@
-import Booking from "../models/Booking.js";
-import Review from "../models/Review.js";
-import { createCrudController } from "./crudController.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Booking from "../../models/Booking.js";
+import Review from "../../models/Review.js";
+import { createCrudController } from "../crudController.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 export const reviewController = createCrudController(Review, "Review");
 

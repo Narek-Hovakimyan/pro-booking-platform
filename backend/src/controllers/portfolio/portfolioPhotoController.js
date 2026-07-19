@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import PortfolioPhoto from "../models/PortfolioPhoto.js";
-import Service from "../models/Service.js";
-import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
+import PortfolioPhoto from "../../models/PortfolioPhoto.js";
+import Service from "../../models/Service.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
 
 /* ── Helpers ────────────────────────────────────────── */
 

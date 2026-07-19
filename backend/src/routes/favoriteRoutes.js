@@ -9,7 +9,7 @@ import {
   removeFavoriteBarber,
   removeFavorite,
   removeFavoriteSalon,
-} from "../controllers/favoriteController.js";
+} from "../controllers/engagement/favoriteController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

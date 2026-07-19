@@ -40,7 +40,7 @@ import revenueRoutes from "./routes/revenueRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import platformRoutes from "./routes/platformRoutes.js";
-import { servePublicPortfolioImage } from "./controllers/portfolioPhotoMediaController.js";
+import { servePublicPortfolioImage } from "./controllers/portfolio/portfolioPhotoMediaController.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/booking/bookingReminderScheduler.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";

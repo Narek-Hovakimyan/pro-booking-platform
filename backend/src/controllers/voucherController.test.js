@@ -14,7 +14,7 @@ import {
   getVoucherById,
   updateVoucher,
   validateVoucherCode,
-} from "./voucherController.js";
+} from "./promotions/voucherController.js";
 
 /* ── Stub state ─────────────────────────────────────────── */
 const originalVoucherFindOne = Voucher.findOne;

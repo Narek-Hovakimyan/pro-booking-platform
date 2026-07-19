@@ -9,7 +9,7 @@ import {
   getVoucherById,
   updateVoucher,
   validateVoucherCode,
-} from "../controllers/voucherController.js";
+} from "../controllers/promotions/voucherController.js";
 import { promoValidationLimiter } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();

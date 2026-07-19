@@ -40,7 +40,7 @@ import {
   createSalonPromotion,
   updateSalonPromotion,
   validateSalonPromotion,
-} from "../controllers/salonPromotionController.js";
+} from "../controllers/promotions/salonPromotionController.js";
 
 const router = express.Router();
 

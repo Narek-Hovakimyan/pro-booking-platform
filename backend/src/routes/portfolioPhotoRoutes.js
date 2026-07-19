@@ -5,8 +5,8 @@ import {
   addPortfolioPhoto,
   updatePortfolioPhoto,
   deletePortfolioPhoto,
-} from "../controllers/portfolioPhotoController.js";
-import { serveOwnerPortfolioImage } from "../controllers/portfolioPhotoMediaController.js";
+} from "../controllers/portfolio/portfolioPhotoController.js";
+import { serveOwnerPortfolioImage } from "../controllers/portfolio/portfolioPhotoMediaController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";

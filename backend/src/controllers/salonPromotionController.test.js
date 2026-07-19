@@ -8,7 +8,7 @@ import Voucher from "../models/Voucher.js";
 import {
   createSalonPromotion,
   validateSalonPromotion,
-} from "./salonPromotionController.js";
+} from "./promotions/salonPromotionController.js";
 
 const originalMethods = {
   salonFindById: Salon.findById,

@@ -1,7 +1,7 @@
 import express from "express";
 import { protect } from "../middleware/authMiddleware.js";
 import { requirePlatformSuperuser } from "../middleware/platformMiddleware.js";
-import { getPlatformDashboardSummaryHandler } from "../controllers/platformDashboardController.js";
+import { getPlatformDashboardSummaryHandler } from "../controllers/platform/platformDashboardController.js";
 import {
   listSalonBillingSummaries,
   getSalonBillingDetailHandler,
@@ -15,7 +15,7 @@ import {
   revokeSeat,
   cancelSubscription,
   confirmPayment,
-} from "../controllers/platformBillingController.js";
+} from "../controllers/platform/platformBillingController.js";
 
 const router = express.Router();
 
