@@ -2,8 +2,8 @@ import {
   BarberOnboardingStatusError,
   getBarberOnboardingStatus,
   updateBarberOnboardingWorkplace,
-} from "../services/onboarding/barberOnboardingStatusService.js";
-import { finalizeBarberOnboarding } from "../services/onboarding/barberOnboardingFinalizationService.js";
+} from "../../services/onboarding/barberOnboardingStatusService.js";
+import { finalizeBarberOnboarding } from "../../services/onboarding/barberOnboardingFinalizationService.js";
 
 const defaultDependencies = {
   getBarberOnboardingStatus,

@@ -3,7 +3,7 @@ import {
   getMyBarberOnboarding,
   updateMyBarberOnboardingWorkplace,
   finalizeMyBarberOnboarding,
-} from "../controllers/barberOnboardingController.js";
+} from "../controllers/barbers/barberOnboardingController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

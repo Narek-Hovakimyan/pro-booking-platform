@@ -2976,8 +2976,8 @@ test("booking creation is blocked for unpaid barber (salon-scoped paid access ch
 
 test("public barber listings use paid-access filtering", async () => {
   const fs = await import("fs");
-  const userSource = fs.readFileSync("./src/controllers/userController.js", "utf-8");
-  const profileSource = fs.readFileSync("./src/controllers/barberProfileController.js", "utf-8");
+  const userSource = fs.readFileSync("./src/controllers/users/userController.js", "utf-8");
+  const profileSource = fs.readFileSync("./src/controllers/barbers/barberProfileController.js", "utf-8");
 
   assert.ok(
     userSource.includes("getPaidAccessByBarberIds"),

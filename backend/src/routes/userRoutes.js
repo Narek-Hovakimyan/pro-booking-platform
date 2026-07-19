@@ -5,7 +5,7 @@ import {
   sendEmailVerificationController,
   updateMyProfile,
   verifyEmailController,
-} from "../controllers/userController.js";
+} from "../controllers/users/userController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { handleAvatarUpload } from "../middleware/uploadMiddleware.js";

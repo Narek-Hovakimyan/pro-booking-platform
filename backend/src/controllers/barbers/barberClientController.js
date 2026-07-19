@@ -3,7 +3,7 @@ import {
   getBarberClients,
   updateBarberLoyaltyDiscountSettings,
   updateBarberClientLoyalty,
-} from "../services/barberClientService.js";
+} from "../../services/barberClientService.js";
 
 export const getMyBarberClients = async (req, res) => {
   try {

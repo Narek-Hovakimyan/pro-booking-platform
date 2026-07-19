@@ -4,20 +4,20 @@ import {
   getBarberCardSummary,
   getProfileByBarberId,
   upsertProfileByBarberId,
-} from "../controllers/barberProfileController.js";
+} from "../controllers/barbers/barberProfileController.js";
 import {
   getMyLoyaltyDiscountSettings,
   getMyBarberClients,
   updateMyLoyaltyDiscountSettings,
   updateMyBarberClientLoyalty,
-} from "../controllers/barberClientController.js";
+} from "../controllers/barbers/barberClientController.js";
 import {
   getCertifications,
   getEventCertificates,
   addCertification,
   updateCertification,
   deleteCertification,
-} from "../controllers/certificationController.js";
+} from "../controllers/barbers/certificationController.js";
 import {
   getMyDepositSettings,
   updateMyDepositSettings,

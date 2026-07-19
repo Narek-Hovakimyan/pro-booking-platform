@@ -7,8 +7,8 @@ import {
   sendEmailVerificationController,
   updateMyProfile,
   verifyEmailController,
-} from "./userController.js";
-import { loginUser, registerUser } from "./authController.js";
+} from "./users/userController.js";
+import { loginUser, registerUser } from "./auth/authController.js";
 import User from "../models/User.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Salon from "../models/Salon.js";

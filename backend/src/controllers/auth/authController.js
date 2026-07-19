@@ -1,17 +1,17 @@
 import bcrypt from "bcrypt";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
-import User, { MAX_PHONE_LENGTH } from "../models/User.js";
-import { sendPasswordResetEmail } from "../services/auth/emailService.js";
-import { verifyGoogleIdToken } from "../services/auth/googleAuthService.js";
-import { createTrialSubscription } from "../services/subscriptionService.js";
-import { isPlatformSuperuser } from "../middleware/platformMiddleware.js";
-import { isValidEmail, normalizeEmail } from "../utils/emailVerification.js";
+import User, { MAX_PHONE_LENGTH } from "../../models/User.js";
+import { sendPasswordResetEmail } from "../../services/auth/emailService.js";
+import { verifyGoogleIdToken } from "../../services/auth/googleAuthService.js";
+import { createTrialSubscription } from "../../services/subscriptionService.js";
+import { isPlatformSuperuser } from "../../middleware/platformMiddleware.js";
+import { isValidEmail, normalizeEmail } from "../../utils/emailVerification.js";
 import {
   createInitialSpecialistOnboardingState,
   serializeSpecialistOnboardingState,
-} from "../utils/specialistOnboardingState.js";
-import { getLogger, safeErrorSerializer } from "../config/logger.js";
+} from "../../utils/specialistOnboardingState.js";
+import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 

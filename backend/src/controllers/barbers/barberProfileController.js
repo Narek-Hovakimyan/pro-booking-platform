@@ -1,34 +1,34 @@
-import BarberProfile from "../models/BarberProfile.js";
-import Booking from "../models/Booking.js";
-import Review from "../models/Review.js";
-import Salon from "../models/Salon.js";
-import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
-import User from "../models/User.js";
-import { createCrudController } from "./crudController.js";
-import { getTodayFirstAvailableSlot } from "../utils/barberCardAvailability.js";
-import { barberHasPaidAccess, getPaidAccessByBarberIds } from "../services/subscriptionService.js";
-import { getArmeniaDateKey } from "../utils/bookingDateTime.js";
-import { getDefaultSchedule, getUploadedAvatarPath } from "../utils/barberProfileUtils.js";
-import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Booking from "../../models/Booking.js";
+import Review from "../../models/Review.js";
+import Salon from "../../models/Salon.js";
+import Service, { SERVICE_CATEGORIES } from "../../models/Service.js";
+import User from "../../models/User.js";
+import { createCrudController } from "../crudController.js";
+import { getTodayFirstAvailableSlot } from "../../utils/barberCardAvailability.js";
+import { barberHasPaidAccess, getPaidAccessByBarberIds } from "../../services/subscriptionService.js";
+import { getArmeniaDateKey } from "../../utils/bookingDateTime.js";
+import { getDefaultSchedule, getUploadedAvatarPath } from "../../utils/barberProfileUtils.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
 import {
   BarberProfileMutationPayloadError,
   validateBarberProfileMutationPayload,
-} from "../utils/barberProfileMutationPayload.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/barberProfileMutationPayload.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 import {
   serializePublicBarberCard,
   serializePublicBarberProfile,
   serializePublicBarberProfileRecord,
-} from "../utils/publicBarberSerializer.js";
+} from "../../utils/publicBarberSerializer.js";
 import {
   mutateSelfBarberProfile,
   SelfBarberProfileMutationError,
-} from "../services/barber/selfBarberProfileMutationService.js";
-import { getPublicBarberReadiness, getPublicBarberReadinessByIds } from "../services/barber/publicBarberReadinessService.js";
+} from "../../services/barber/selfBarberProfileMutationService.js";
+import { getPublicBarberReadiness, getPublicBarberReadinessByIds } from "../../services/barber/publicBarberReadinessService.js";
 import {
   getPublicAvailabilitySchedule,
   getPublicAvailabilityScheduleMaps,
-} from "../services/barber/publicAvailabilityContextService.js";
+} from "../../services/barber/publicAvailabilityContextService.js";
 
 const genericBarberProfileController = createCrudController(
   BarberProfile,

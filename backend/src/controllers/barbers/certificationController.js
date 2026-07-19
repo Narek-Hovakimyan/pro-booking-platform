@@ -1,18 +1,18 @@
-import BarberProfile from "../models/BarberProfile.js";
-import EventCertificate from "../models/EventCertificate.js";
-import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 import {
   getPublicEventCertificatePayload,
   getUploadedCertImagePath,
   normalizeCertifications,
   parseCertificationDate,
   isFutureDate,
-} from "../utils/barberProfileUtils.js";
+} from "../../utils/barberProfileUtils.js";
 import {
   BarberProfileConflictError,
   isBarberProfileDuplicateConflict,
-} from "../utils/barberProfileDuplicateConflict.js";
+} from "../../utils/barberProfileDuplicateConflict.js";
 
 // --- Certification CRUD ---
 

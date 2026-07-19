@@ -5,7 +5,7 @@ import { afterEach, test } from "node:test";
 
 import {
   createBarberProfileSelfMutationController,
-} from "./barberProfileController.js";
+} from "./barbers/barberProfileController.js";
 import { BarberProfileMutationPayloadError } from "../utils/barberProfileMutationPayload.js";
 
 const uploadsDir = path.resolve(process.cwd(), "uploads", "avatars");

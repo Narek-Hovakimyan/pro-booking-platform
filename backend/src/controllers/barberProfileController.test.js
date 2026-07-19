@@ -5,13 +5,13 @@ import {
   barberProfileController,
   getBarberCardSummary,
   getProfileByBarberId,
-} from "./barberProfileController.js";
+} from "./barbers/barberProfileController.js";
 import {
   addCertification,
   deleteCertification,
   getEventCertificates,
   updateCertification,
-} from "./certificationController.js";
+} from "./barbers/certificationController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Booking from "../models/Booking.js";
 import EventCertificate from "../models/EventCertificate.js";

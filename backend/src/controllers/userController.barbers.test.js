@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 
 import mongoose from "mongoose";
 
-import { getBarbers } from "./userController.js";
+import { getBarbers } from "./users/userController.js";
 import BarberProfile from "../models/BarberProfile.js";
 import Schedule from "../models/Schedule.js";
 import Salon from "../models/Salon.js";

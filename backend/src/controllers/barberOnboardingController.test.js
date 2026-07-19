@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import {
   createBarberOnboardingController,
-} from "./barberOnboardingController.js";
+} from "./barbers/barberOnboardingController.js";
 import { BarberOnboardingStatusError } from "../services/onboarding/barberOnboardingStatusService.js";
 
 const responsePayload = {

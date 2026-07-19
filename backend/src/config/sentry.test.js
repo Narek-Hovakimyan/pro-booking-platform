@@ -347,7 +347,7 @@ test("beforeSend preserves safe grouping frames and removes unsafe frame data", 
         mechanism: { data: { secret } },
         stacktrace: {
           frames: [
-            { filename: "/home/narek/project/backend/src/controllers/authController.js", function: "saveBooking", lineno: 42, colno: 7, in_app: true, vars: { secret }, pre_context: [secret] },
+            { filename: "/home/narek/project/backend/src/controllers/auth/authController.js", function: "saveBooking", lineno: 42, colno: 7, in_app: true, vars: { secret }, pre_context: [secret] },
             { abs_path: "file:///srv/app/src/config/sentry.js", function: "Object.<anonymous>", lineno: 8, colno: 1, in_app: false },
             { filename: "/home/user/node_modules/package/file.js", function: "https://private.example", lineno: "bad", colno: -1, in_app: "yes" },
             { filename: "/srv/app/src/../secret.js", function: "getToken" },
@@ -359,7 +359,7 @@ test("beforeSend preserves safe grouping frames and removes unsafe frame data", 
   });
   const frames = filtered.exception.values[0].stacktrace.frames;
   assert.deepEqual(frames, [
-    { filename: "src/controllers/authController.js", function: "saveBooking", lineno: 42, colno: 7, in_app: true },
+    { filename: "src/controllers/auth/authController.js", function: "saveBooking", lineno: 42, colno: 7, in_app: true },
     { filename: "src/config/sentry.js", function: "Object.<anonymous>", lineno: 8, colno: 1, in_app: false },
     {},
     {},
