@@ -1,7 +1,7 @@
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
 import { calculateDeposit } from "../../controllers/bookings/depositSettingsController.js";
-import { createNotification } from "../../controllers/notificationController.js";
+import { createNotification } from "../../controllers/notifications/notificationController.js";
 import {
   barberHasPaidAccessForSalon,
   barberHasPaidSeatAccessForSalon,

@@ -1,15 +1,15 @@
 import crypto from "crypto";
 
-import Event from "../models/Event.js";
-import EventCertificate from "../models/EventCertificate.js";
-import EventRegistration from "../models/EventRegistration.js";
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
-import { createNotification } from "./notificationController.js";
-import { canManageSalonRequest } from "../utils/salonPermissions.js";
-import { deleteUploadedFile } from "../middleware/uploadMiddleware.js";
-import { getEventDateTime } from "../utils/eventUtils.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Event from "../../models/Event.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
+import { createNotification } from "../notifications/notificationController.js";
+import { canManageSalonRequest } from "../../utils/salonPermissions.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
+import { getEventDateTime } from "../../utils/eventUtils.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const APPROVED_REGISTRATION_STATUS = "approved";
 

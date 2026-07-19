@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import Notification from "../../models/Notification.js";
-import { getMyNotifications } from "../../controllers/notificationController.js";
+import { getMyNotifications } from "../../controllers/notifications/notificationController.js";
 import {
   __notificationServiceTestHooks,
   createNotification,

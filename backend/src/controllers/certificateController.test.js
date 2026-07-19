@@ -6,7 +6,7 @@ import {
   issueEventRegistrationCertificate,
   revokeCertificate,
   verifyCertificate,
-} from "./certificateController.js";
+} from "./events/certificateController.js";
 import Event from "../models/Event.js";
 import EventCertificate from "../models/EventCertificate.js";
 import EventRegistration from "../models/EventRegistration.js";

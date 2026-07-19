@@ -1,4 +1,4 @@
-import { createNotification } from "../notificationController.js";
+import { createNotification } from "../notifications/notificationController.js";
 import { getBookingNotificationData } from "../../utils/bookingNotificationData.js";
 import {
   markBookingLateCancel,

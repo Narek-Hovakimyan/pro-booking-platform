@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
-import Message from "../models/Message.js";
-import User from "../models/User.js";
-import { createNotification } from "./notificationController.js";
-import { getMessageAccessDecision } from "../services/messageAccessService.js";
-import { getIO } from "../socket.js";
+import Message from "../../models/Message.js";
+import User from "../../models/User.js";
+import { createNotification } from "../notifications/notificationController.js";
+import { getMessageAccessDecision } from "../../services/messageAccessService.js";
+import { getIO } from "../../socket.js";
 
 const userFields = "_id name role avatarUrl";
 const MAX_MESSAGE_TEXT_LENGTH = 5000;

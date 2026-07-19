@@ -5,7 +5,7 @@ import {
   createMessage,
   getConversation,
   getMyMessages,
-} from "./messageController.js";
+} from "./messaging/messageController.js";
 import Message from "../models/Message.js";
 import Notification from "../models/Notification.js";
 import User from "../models/User.js";

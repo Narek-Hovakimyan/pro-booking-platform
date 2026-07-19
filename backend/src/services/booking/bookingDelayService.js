@@ -15,7 +15,7 @@ import {
   validateBookingSlot,
   withBookingCreationLock,
 } from "../../utils/bookingSlotValidation.js";
-import { createNotification } from "../../controllers/notificationController.js";
+import { createNotification } from "../../controllers/notifications/notificationController.js";
 import { emitBookingUpdated } from "./bookingSideEffectsService.js";
 import { getBookingNotificationData } from "../../utils/bookingNotificationData.js";
 

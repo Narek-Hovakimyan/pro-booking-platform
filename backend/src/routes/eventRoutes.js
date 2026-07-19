@@ -9,7 +9,7 @@ import {
   checkInRegistration,
   updateAttendance,
   issueCertificates,
-} from "../controllers/eventController.js";
+} from "../controllers/events/eventController.js";
 import {
   registerForEvent,
   cancelRegistration,
@@ -18,12 +18,12 @@ import {
   approveRegistration,
   rejectRegistration,
   waitlistRegistration,
-} from "../controllers/eventRegistrationController.js";
-import { issueEventRegistrationCertificate, issueEventRegistrationCertificateUpload } from "../controllers/certificateController.js";
+} from "../controllers/events/eventRegistrationController.js";
+import { issueEventRegistrationCertificate, issueEventRegistrationCertificateUpload } from "../controllers/events/certificateController.js";
 import {
   createEventReview,
   getEventReviews,
-} from "../controllers/eventReviewController.js";
+} from "../controllers/events/eventReviewController.js";
 import { optionalAuth, protect } from "../middleware/authMiddleware.js";
 import { publicBookingLimiter, uploadLimiter } from "../middleware/rateLimitMiddleware.js";
 import { handleEventImageUpload, handleCertificateFileUpload } from "../middleware/uploadMiddleware.js";

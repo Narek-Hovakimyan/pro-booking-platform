@@ -1,8 +1,8 @@
-import Event from "../models/Event.js";
-import EventRegistration from "../models/EventRegistration.js";
-import EventReview from "../models/EventReview.js";
-import { getEventDateTime } from "../utils/eventUtils.js";
-import { sendControllerError } from "../utils/controllerError.js";
+import Event from "../../models/Event.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import EventReview from "../../models/EventReview.js";
+import { getEventDateTime } from "../../utils/eventUtils.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const serializeEventReview = (review) => {
   const plainReview = review.toObject ? review.toObject() : review;

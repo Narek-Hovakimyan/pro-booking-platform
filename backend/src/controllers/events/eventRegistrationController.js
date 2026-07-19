@@ -1,10 +1,10 @@
-import Event from "../models/Event.js";
-import EventCertificate from "../models/EventCertificate.js";
-import EventRegistration from "../models/EventRegistration.js";
-import EventReview from "../models/EventReview.js";
-import { createNotification } from "./notificationController.js";
-import { getEventAuthorization } from "../utils/eventAuthorization.js";
-import { getEventNotificationData } from "../utils/eventNotificationData.js";
+import Event from "../../models/Event.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import EventReview from "../../models/EventReview.js";
+import { createNotification } from "../notifications/notificationController.js";
+import { getEventAuthorization } from "../../utils/eventAuthorization.js";
+import { getEventNotificationData } from "../../utils/eventNotificationData.js";
 import {
   getId,
   APPROVED_REGISTRATION_STATUS,
@@ -17,8 +17,8 @@ import {
   buildUserRegistrationQuery,
   mapCertificateResponse,
   mapRegistrationResponse,
-} from "../utils/eventUtils.js";
-import { sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/eventUtils.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const countApprovedRegistrations = async (eventId) =>
   EventRegistration.countDocuments({

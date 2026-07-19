@@ -23,7 +23,7 @@ import {
   notifyUsersForBookingStatusChange,
   notifyWaitlistForReleasedBookingSlot,
 } from "../../services/booking/bookingSideEffectsService.js";
-import { createNotification } from "../notificationController.js";
+import { createNotification } from "../notifications/notificationController.js";
 import { createCrudController } from "../crudController.js";
 import {
   barberHasPaidAccessForSalon,

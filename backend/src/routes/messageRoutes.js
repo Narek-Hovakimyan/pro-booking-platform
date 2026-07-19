@@ -4,7 +4,7 @@ import {
   getConversation,
   getMyMessages,
   markConversationRead,
-} from "../controllers/messageController.js";
+} from "../controllers/messaging/messageController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { messageLimiter } from "../middleware/rateLimitMiddleware.js";
 

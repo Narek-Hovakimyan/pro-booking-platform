@@ -16,7 +16,7 @@ import {
   normalizeBookingStatus,
   serializeBookingForResponse,
 } from "../../utils/bookingUtils.js";
-import { createNotification } from "../notificationController.js";
+import { createNotification } from "../notifications/notificationController.js";
 
 const getRescheduleErrorStatusCode = (error) => {
   if (error?.statusCode) return error.statusCode;

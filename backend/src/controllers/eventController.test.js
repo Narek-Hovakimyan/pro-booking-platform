@@ -11,7 +11,7 @@ import {
   issueCertificates,
   updateAttendance,
   updateEvent,
-} from "./eventController.js";
+} from "./events/eventController.js";
 import {
   approveRegistration,
   cancelRegistration,
@@ -20,7 +20,7 @@ import {
   registerForEvent,
   rejectRegistration,
   waitlistRegistration,
-} from "./eventRegistrationController.js";
+} from "./events/eventRegistrationController.js";
 import Event from "../models/Event.js";
 import EventCertificate from "../models/EventCertificate.js";
 import EventRegistration from "../models/EventRegistration.js";

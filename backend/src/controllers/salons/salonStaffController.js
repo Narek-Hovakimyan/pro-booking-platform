@@ -24,7 +24,7 @@ import {
   updateSalonStaffPaymentSettings,
 } from "../../services/salon/salonStaffService.js";
 import { revokeSalonSeatsForRemovedMember } from "../../services/subscriptionService.js";
-import { createNotification } from "../notificationController.js";
+import { createNotification } from "../notifications/notificationController.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
 export const removeBarberFromSalon = async (req, res) => {

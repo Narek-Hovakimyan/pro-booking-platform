@@ -1,19 +1,19 @@
-import Event from "../models/Event.js";
-import EventCertificate from "../models/EventCertificate.js";
-import EventRegistration from "../models/EventRegistration.js";
-import EventReview from "../models/EventReview.js";
-import Salon from "../models/Salon.js";
+import Event from "../../models/Event.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import EventReview from "../../models/EventReview.js";
+import Salon from "../../models/Salon.js";
 import { createCertificateForRegistration } from "./certificateController.js";
-import { createNotification } from "./notificationController.js";
+import { createNotification } from "../notifications/notificationController.js";
 import {
   getEventAuthorization,
   getEventDetailAuthorization,
-} from "../utils/eventAuthorization.js";
-import { getEventNotificationData } from "../utils/eventNotificationData.js";
+} from "../../utils/eventAuthorization.js";
+import { getEventNotificationData } from "../../utils/eventNotificationData.js";
 import {
   canUserCreateEventForSalon,
   userHasAnyManageableSalon,
-} from "../services/salon/salonMembershipService.js";
+} from "../../services/salon/salonMembershipService.js";
 import {
   getId,
   APPROVED_REGISTRATION_STATUS,
@@ -26,8 +26,8 @@ import {
   isEventInPast,
   validateEventDateTime,
   validateEventNumbers,
-} from "../utils/eventUtils.js";
-import { escapeRegex, normalizeSearch, sendControllerError } from "../utils/controllerError.js";
+} from "../../utils/eventUtils.js";
+import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/controllerError.js";
 
 /**
  * GET /api/events
