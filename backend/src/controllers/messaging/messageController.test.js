@@ -5,11 +5,11 @@ import {
   createMessage,
   getConversation,
   getMyMessages,
-} from "./messaging/messageController.js";
-import Message from "../models/Message.js";
-import Notification from "../models/Notification.js";
-import User from "../models/User.js";
-import { __messageAccessTestHooks } from "../services/messageAccessService.js";
+} from "./messageController.js";
+import Message from "../../models/Message.js";
+import Notification from "../../models/Notification.js";
+import User from "../../models/User.js";
+import { __messageAccessTestHooks } from "../../services/messageAccessService.js";
 
 const originalMethods = {
   messageCreate: Message.create,

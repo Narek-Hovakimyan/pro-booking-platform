@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { createEventReview } from "./events/eventReviewController.js";
-import Event from "../models/Event.js";
-import EventRegistration from "../models/EventRegistration.js";
-import EventReview from "../models/EventReview.js";
+import { createEventReview } from "./eventReviewController.js";
+import Event from "../../models/Event.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import EventReview from "../../models/EventReview.js";
 
 const originalMethods = {
   eventFindById: Event.findById,

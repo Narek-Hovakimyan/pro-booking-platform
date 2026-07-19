@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { getMyNotifications } from "./notifications/notificationController.js";
-import Notification from "../models/Notification.js";
+import { getMyNotifications } from "./notificationController.js";
+import Notification from "../../models/Notification.js";
 
 const originalMethods = {
   notificationFind: Notification.find,

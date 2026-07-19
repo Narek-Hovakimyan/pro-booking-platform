@@ -6,13 +6,13 @@ import {
   issueEventRegistrationCertificate,
   revokeCertificate,
   verifyCertificate,
-} from "./events/certificateController.js";
-import Event from "../models/Event.js";
-import EventCertificate from "../models/EventCertificate.js";
-import EventRegistration from "../models/EventRegistration.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import User from "../models/User.js";
+} from "./certificateController.js";
+import Event from "../../models/Event.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import User from "../../models/User.js";
 
 const originalMethods = {
   eventFindById: Event.findById,

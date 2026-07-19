@@ -11,7 +11,7 @@ import {
   issueCertificates,
   updateAttendance,
   updateEvent,
-} from "./events/eventController.js";
+} from "./eventController.js";
 import {
   approveRegistration,
   cancelRegistration,
@@ -20,15 +20,15 @@ import {
   registerForEvent,
   rejectRegistration,
   waitlistRegistration,
-} from "./events/eventRegistrationController.js";
-import Event from "../models/Event.js";
-import EventCertificate from "../models/EventCertificate.js";
-import EventRegistration from "../models/EventRegistration.js";
-import EventReview from "../models/EventReview.js";
-import Notification from "../models/Notification.js";
-import Salon from "../models/Salon.js";
-import SalonJoinRequest from "../models/SalonJoinRequest.js";
-import User from "../models/User.js";
+} from "./eventRegistrationController.js";
+import Event from "../../models/Event.js";
+import EventCertificate from "../../models/EventCertificate.js";
+import EventRegistration from "../../models/EventRegistration.js";
+import EventReview from "../../models/EventReview.js";
+import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import User from "../../models/User.js";
 
 const originalMethods = {
   eventCreate: Event.create,
