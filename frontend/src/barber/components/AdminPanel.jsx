@@ -5,7 +5,7 @@ import DashboardAnalytics from "./DashboardAnalytics";
 
 const BookingsList = lazy(() => import("./BookingsList"));
 const BarberSettings = lazy(() => import("./BarberSettings"));
-const ServicesManager = lazy(() => import("./ServicesManager"));
+const ServicesManager = lazy(() => import("./services/ServicesManager"));
 const ScheduleManager = lazy(() => import("./ScheduleManager"));
 const WaitlistView = lazy(() => import("./WaitlistView"));
 const SalonJobsManager = lazy(() => import("./SalonJobsManager"));
