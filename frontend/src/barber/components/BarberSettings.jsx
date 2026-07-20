@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
@@ -11,6 +11,7 @@ import SettingsHub from "@/barber/components/settings/SettingsHub";
 import SalonSettingsView from "@/barber/components/settings/salon/SalonSettingsView";
 import PromotionSettingsView from "@/barber/components/settings/promotions/PromotionSettingsView";
 import CertificationSettingsView from "@/barber/components/settings/certifications/CertificationSettingsView";
+import useBarberSettingsData from "@/barber/components/settings/hooks/useBarberSettingsData";
 
 import ConfirmModal from "@/shared/components/common/ConfirmModal";
 
@@ -23,18 +24,8 @@ export default function BarberSettings({
 }) {
   const dispatch = useDispatch();
   const { currentUser } = useSelector((state) => state.auth);
-  const [eventCertificates, setEventCertificates] = useState([]);
 
   // Salon state
-  const [salons, setSalons] = useState([]);
-  const [salonStatus, setSalonStatus] = useState({
-    salonStatus: currentUser?.salonStatus || "none",
-    salon: null,
-    pendingRequest: null,
-    ownedSalons: [],
-    managedSalons: [],
-  });
-  const [ownerRequests, setOwnerRequests] = useState([]);
   const [salonDraft, setSalonDraft] = useState({
     name: "",
     city: "",
@@ -49,7 +40,6 @@ export default function BarberSettings({
   const [salonSaved, setSalonSaved] = useState("");
   const [isSalonSaving, setIsSalonSaving] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
-  const [salonStaffById, setSalonStaffById] = useState({});
   const [savingRelationshipKey, setSavingRelationshipKey] = useState("");
   const [savingPaymentKey, setSavingPaymentKey] = useState("");
   const [respondingRelationshipSalonId, setRespondingRelationshipSalonId] =
@@ -67,134 +57,40 @@ export default function BarberSettings({
     };
   }, []);
 
-  useEffect(() => {
-    if (!currentUser?.id) return undefined;
+  const updateCurrentUserSalonStatus = useCallback(
+    (nextSalonStatus) => {
+      dispatch(updateCurrentUser(nextSalonStatus));
+    },
+    [dispatch]
+  );
 
-    let isMounted = true;
+  const {
+    allSalonEntries,
+    availableSalons,
+    clearSalonReadError,
+    currentUserId,
+    eventCertificates,
+    managedSalons,
+    ownerRequests,
+    pendingEntries,
+    refreshSalonData,
+    salonAdmins,
+    salonReadError,
+    salonStaffById,
+    salonStatus,
+    salons,
+  } = useBarberSettingsData({
+    currentUser,
+    onCurrentUserSalonStatusChange: updateCurrentUserSalonStatus,
+  });
 
-    async function fetchEventCertificates() {
-      try {
-        const { data } = await api.get(
-          `/barbers/${currentUser.id}/event-certificates`
-        );
-
-        if (isMounted) {
-          setEventCertificates(data || []);
-        }
-      } catch {
-        if (isMounted) {
-          setEventCertificates([]);
-        }
-      }
-    }
-
-    fetchEventCertificates();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser?.id]);
-
-
-  useEffect(() => {
-    if (!currentUser?.id) return;
-
-    let isMounted = true;
-
-    async function fetchSalonData() {
-      setSalonError("");
-
-      try {
-        const [salonsResponse, statusResponse, requestsResponse] =
-          await Promise.all([
-            api.get("/salons"),
-            api.get("/salons/me/status"),
-            api.get("/salons/owner/requests"),
-          ]);
-
-        if (!isMounted) return;
-
-        setSalons(salonsResponse.data || []);
-        setSalonStatus(statusResponse.data || {});
-        setOwnerRequests(requestsResponse.data || []);
-        dispatch(
-          updateCurrentUser({
-            salon:
-              statusResponse.data?.salon?._id ||
-              statusResponse.data?.salon?.id ||
-              null,
-            salonStatus: statusResponse.data?.salonStatus || "none",
-          })
-        );
-      } catch (requestError) {
-        if (isMounted) {
-          setSalonError(
-            requestError.response?.data?.message ||
-              "Could not load salon settings. Please try again."
-          );
-        }
-      }
-    }
-
-    fetchSalonData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser?.id, dispatch]);
-
-  const refreshSalonData = async (shouldContinue = () => true) => {
-    const [salonsResponse, statusResponse, requestsResponse] = await Promise.all([
-      api.get("/salons"),
-      api.get("/salons/me/status"),
-      api.get("/salons/owner/requests"),
-    ]);
-
-    if (!shouldContinue()) return;
-
-    setSalons(salonsResponse.data || []);
-    setSalonStatus(statusResponse.data || {});
-    setOwnerRequests(requestsResponse.data || []);
-    dispatch(
-      updateCurrentUser({
-        salon:
-          statusResponse.data?.salon?._id ||
-          statusResponse.data?.salon?.id ||
-          null,
-        salonStatus: statusResponse.data?.salonStatus || "none",
-      })
-    );
-
-    // Re-fetch admin data for managed salons
-    const managed = statusResponse.data?.managedSalons || statusResponse.data?.ownedSalons || [];
-    if (managed.length > 0) {
-      const adminMap = {};
-      const staffMap = {};
-      for (const salon of managed) {
-        const salonId = salon.id || salon._id;
-        try {
-          const [adminsResponse, staffResponse] = await Promise.all([
-            api.get(`/salons/${salonId}/admins`),
-            api.get(`/salons/${salonId}/staff`),
-          ]);
-          adminMap[salonId] = adminsResponse.data;
-          staffMap[salonId] = staffResponse.data || [];
-        } catch {
-          // Silently fail
-        }
-      }
-      if (!shouldContinue()) return;
-      setSalonAdmins(adminMap);
-      setSalonStaffById(staffMap);
-    } else {
-      if (!shouldContinue()) return;
-      setSalonAdmins({});
-      setSalonStaffById({});
-    }
+  const clearSalonError = () => {
+    setSalonError("");
+    clearSalonReadError();
   };
 
   const updateSalonDraft = (field, value) => {
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
     setSalonDraft((currentDraft) => ({
       ...currentDraft,
@@ -208,7 +104,7 @@ export default function BarberSettings({
     if (!salonDraft.name.trim() || isSalonSaving) return;
 
     setIsSalonSaving(true);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -237,7 +133,7 @@ export default function BarberSettings({
     if (!selectedSalonId || isSalonSaving) return;
 
     setIsSalonSaving(true);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -263,7 +159,7 @@ export default function BarberSettings({
       isMountedRef.current && cancelSalonRequestTokenRef.current === requestToken;
 
     setIsSalonSaving(true);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -289,7 +185,7 @@ export default function BarberSettings({
     if (isSalonSaving) return;
 
     setIsSalonSaving(true);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -370,7 +266,7 @@ export default function BarberSettings({
     if (!confirmation || isSalonSaving) return;
 
     setIsSalonSaving(true);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -428,43 +324,6 @@ export default function BarberSettings({
     }
   };
 
-  // Build list of all approved salon entries from the new salons array
-  const salonEntries = (salonStatus.salons || []).map((entry) => {
-    const salonId = entry?.id || entry?._id;
-    const fullSalon = salons.find(
-      (salon) => String(salon.id || salon._id) === String(salonId)
-    );
-    return {
-      ...entry,
-      salon: fullSalon || entry,
-    };
-  });
-
-  // Build list of pending salon entries
-  const pendingEntries = (salonStatus.pendingEntries || []).map((entry) => {
-    const salonId = entry?.id || entry?._id;
-    const fullSalon = salons.find(
-      (salon) => String(salon.id || salon._id) === String(salonId)
-    );
-    return {
-      ...entry,
-      salon: fullSalon || entry,
-    };
-  });
-
-  // Fallback to legacy single salon
-  const legacySalonEntry =
-    salonStatus.salonStatus === "approved" && salonStatus.salon
-      ? {
-          salon: salonStatus.salon,
-          status: "approved",
-          isPrimary: true,
-        }
-      : null;
-
-  // Use new salons array if available, otherwise fallback to legacy
-  const allSalonEntries =
-    salonEntries.length > 0 ? salonEntries : legacySalonEntry ? [legacySalonEntry] : [];
   const salonEntriesWithRelationshipActions = allSalonEntries.map((entry) => {
     const salonId = entry?.salon?.id || entry?.salon?._id || entry?.id || entry?._id;
 
@@ -476,10 +335,6 @@ export default function BarberSettings({
     };
   });
 
-  const managedSalons = useMemo(
-    () => salonStatus.managedSalons || salonStatus.ownedSalons || [],
-    [salonStatus.managedSalons, salonStatus.ownedSalons]
-  );
   const effectivePromotionSalonId =
     selectedPromotionSalonId || managedSalons[0]?.id || managedSalons[0]?._id || "";
   const selectedPromotionSalon =
@@ -488,8 +343,6 @@ export default function BarberSettings({
         String(salon.id || salon._id || "") ===
         String(effectivePromotionSalonId || "")
     ) || managedSalons[0];
-  const currentUserId = currentUser?.id || currentUser?._id;
-  const [salonAdmins, setSalonAdmins] = useState({});
   const {
     salonSchedules,
     savingSalonId,
@@ -504,43 +357,6 @@ export default function BarberSettings({
     salonStatusSalons: salonStatus.salons,
   });
 
-  // Fetch admin info for each managed salon
-  useEffect(() => {
-    if (managedSalons.length === 0) return;
-
-    let isMounted = true;
-
-    async function fetchManagedSalonData() {
-      const adminMap = {};
-      const staffMap = {};
-      for (const salon of managedSalons) {
-        const salonId = salon.id || salon._id;
-        try {
-          const [adminsResponse, staffResponse] = await Promise.all([
-            api.get(`/salons/${salonId}/admins`),
-            api.get(`/salons/${salonId}/staff`),
-          ]);
-          if (isMounted) {
-            adminMap[salonId] = adminsResponse.data;
-            staffMap[salonId] = staffResponse.data || [];
-          }
-        } catch {
-          // Silently fail
-        }
-      }
-      if (isMounted) {
-        setSalonAdmins(adminMap);
-        setSalonStaffById(staffMap);
-      }
-    }
-
-    fetchManagedSalonData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [managedSalons]);
-
   const saveRelationshipType = async (
     salonId,
     barberId,
@@ -551,7 +367,7 @@ export default function BarberSettings({
     const nextSavingKey = `${salonId}:${barberId}`;
     setIsSalonSaving(true);
     setSavingRelationshipKey(nextSavingKey);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -578,7 +394,7 @@ export default function BarberSettings({
     const nextSavingKey = `${salonId}:${barberId}`;
     setIsSalonSaving(true);
     setSavingPaymentKey(nextSavingKey);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -605,7 +421,7 @@ export default function BarberSettings({
 
     setIsSalonSaving(true);
     setRespondingRelationshipSalonId(salonId);
-    setSalonError("");
+    clearSalonError();
     setSalonSaved("");
 
     try {
@@ -628,20 +444,6 @@ export default function BarberSettings({
       setIsSalonSaving(false);
     }
   };
-
-  // Filter out salons the barber is already connected to (frontend safety backup)
-  const barberConnectedSalonIds = new Set([
-    ...(currentUser?.salons || []).map((s) => s.salon?._id?.toString()),
-    ...(currentUser?.salons || []).map((s) => s.salon?.toString()),
-    ...allSalonEntries.map((e) => e.salon?.id || e.salon?._id?.toString()),
-    ...pendingEntries.map((e) => e.salon?.id || e.salon?._id?.toString()),
-    ...(salonStatus.ownedSalons || []).map((s) => s.id || s._id?.toString()),
-  ].filter(Boolean));
-
-  const availableSalons = (salons || []).filter((salon) => {
-    const salonId = salon.id || salon._id;
-    return !barberConnectedSalonIds.has(String(salonId));
-  });
 
   return (
     <BarberSettingsLayout
@@ -674,7 +476,7 @@ export default function BarberSettings({
             salonAdmins={salonAdmins}
             salonDraft={salonDraft}
             salonEntriesWithRelationshipActions={salonEntriesWithRelationshipActions}
-            salonError={salonError}
+            salonError={salonError || salonReadError}
             salonSaved={salonSaved}
             salonStaffById={salonStaffById}
             salonStatus={salonStatus}
