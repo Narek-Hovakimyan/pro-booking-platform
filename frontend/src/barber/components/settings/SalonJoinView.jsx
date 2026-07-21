@@ -111,9 +111,14 @@ function getAuthoritativeStates(status) {
   const salonStates = asArray(safeStatus.salonStates);
 
   if (salonStates.length > 0) {
-    return salonStates
-      .map((entry) => toState(entry))
-      .filter((entry) => entry && entry.salonId && entry.status);
+    const states = [];
+    const seen = new Set();
+
+    salonStates.forEach((entry) => {
+      addState(states, seen, toState(entry));
+    });
+
+    return states;
   }
 
   const states = [];
