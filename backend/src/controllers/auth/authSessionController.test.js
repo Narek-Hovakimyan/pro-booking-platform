@@ -16,6 +16,8 @@ import {
 } from "./authSessionController.js";
 
 const originalJwtSecret = process.env.JWT_SECRET;
+const originalNodeEnv = process.env.NODE_ENV;
+const originalSameSite = process.env.AUTH_REFRESH_COOKIE_SAME_SITE;
 const jwtSecret = "auth-session-controller-test-secret";
 
 function createResponse({ failCookie = false } = {}) {
@@ -79,6 +81,10 @@ afterEach(() => {
 
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = originalJwtSecret;
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
+  if (originalSameSite === undefined) delete process.env.AUTH_REFRESH_COOKIE_SAME_SITE;
+  else process.env.AUTH_REFRESH_COOKIE_SAME_SITE = originalSameSite;
 });
 
 test("refresh rotates only the cookie token and returns current compatible auth response", async () => {
@@ -227,6 +233,30 @@ test("refresh handles cookie-setting failure after rotation as a generic operati
   assert.equal(res.statusCode, 500);
   assert.deepEqual(res.body, { message: "Session refresh failed" });
   assert.equal(JSON.stringify(res.body).includes("replacement-token"), false);
+});
+
+test("refresh and logout use the configured runtime SameSite options", async () => {
+  process.env.NODE_ENV = "test";
+  process.env.AUTH_REFRESH_COOKIE_SAME_SITE = "strict";
+  process.env.JWT_SECRET = jwtSecret;
+  __setAuthSessionControllerDependencies({
+    User: { findById: findByIdReturning({ _id: "user-1", name: "User", role: "client" }, "user-1") },
+    rotateRefreshSession: async () => ({
+      refreshToken: "replacement-token",
+      session: { userId: "user-1", familyId: "family-runtime" },
+    }),
+    revokeRefreshToken: async () => {},
+  });
+
+  const refreshResponse = createResponse();
+  await refreshAuthSession(createRequest(), refreshResponse);
+  assert.equal(refreshResponse.cookieCalls[0].options.sameSite, "strict");
+  assert.equal(refreshResponse.cookieCalls[0].options.secure, false);
+
+  const logoutResponse = createResponse();
+  await logoutAuthSession(createRequest(), logoutResponse);
+  assert.equal(logoutResponse.clearCookieCalls[0].options.sameSite, "strict");
+  assert.equal(logoutResponse.clearCookieCalls[0].options.secure, false);
 });
 
 test("logout revokes only a valid cookie token and remains idempotent for missing or invalid tokens", async () => {

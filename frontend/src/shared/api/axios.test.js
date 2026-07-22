@@ -46,6 +46,17 @@ afterEach(() => {
 });
 
 describe("Axios Bearer interceptor", () => {
+  test("creates a credentialed client with the fixed CSRF protocol header", async () => {
+    const api = await importApi();
+    const { capturedConfig } = await captureRequest(api);
+
+    expect(capturedConfig.baseURL).toMatch(/\/api$/);
+    expect(capturedConfig.withCredentials).toBe(true);
+    expect(capturedConfig.headers.get("Content-Type")).toBe("application/json");
+    expect(capturedConfig.headers.get("Accept")).toBe("application/json");
+    expect(capturedConfig.headers.get("X-Hairbook-CSRF")).toBe("1");
+  });
+
   test("omits Authorization when storage is empty", async () => {
     const api = await importApi();
     const { capturedConfig } = await captureRequest(api);
@@ -121,6 +132,7 @@ describe("Axios Bearer interceptor", () => {
 
     expect(capturedConfig.data).toBe(formData);
     expect(capturedConfig.headers.get("Content-Type")).not.toBe("application/json");
+    expect(capturedConfig.headers.get("X-Hairbook-CSRF")).toBe("1");
     expect(capturedConfig.headers.get("Authorization")).toBe("Bearer form-token");
   });
 

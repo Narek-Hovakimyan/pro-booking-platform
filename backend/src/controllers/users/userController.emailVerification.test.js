@@ -8,7 +8,13 @@ import {
   updateMyProfile,
   verifyEmailController,
 } from "./userController.js";
-import { loginUser, registerUser } from "../auth/authController.js";
+import {
+  __resetAuthControllerDependencies,
+  __setAuthControllerDependencies,
+  loginUser,
+  registerUser,
+} from "../auth/authController.js";
+import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
 import User from "../../models/User.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Salon from "../../models/Salon.js";
@@ -49,6 +55,7 @@ const originalPlatformAdminIds = process.env.PLATFORM_ADMIN_IDS;
 
 const userId = "64c000000000000000000001";
 const otherUserId = "64c000000000000000000002";
+let issuedSessionCalls = [];
 
 const makeLoggerStream = () => {
   const lines = [];
@@ -62,10 +69,21 @@ const makeLoggerStream = () => {
 };
 
 beforeEach(() => {
+  issuedSessionCalls = [];
+  __setAuthControllerDependencies({
+    issueAuthSession: async ({ req, res, user }) => {
+      issuedSessionCalls.push({ req, res, user });
+      return {
+        token: signAccessToken(user._id),
+        user: serializeAuthUser(user),
+      };
+    },
+  });
   getLogger({ level: "silent" });
 });
 
 afterEach(() => {
+  __resetAuthControllerDependencies();
   User.findById = originalUserMethods.findById;
   User.findByIdAndUpdate = originalUserMethods.findByIdAndUpdate;
   User.findByIdAndDelete = originalUserMethods.findByIdAndDelete;
@@ -1056,6 +1074,7 @@ test("registerUser – still requires phone even if email is supplied", async ()
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Name, phone, email, and password are required");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – requires email", async () => {
@@ -1074,6 +1093,7 @@ test("registerUser – requires email", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Name, phone, email, and password are required");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – rejects invalid email", async () => {
@@ -1093,6 +1113,7 @@ test("registerUser – rejects invalid email", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Invalid email format");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – rejects passwords shorter than eight characters", async () => {
@@ -1112,6 +1133,7 @@ test("registerUser – rejects passwords shorter than eight characters", async (
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Password must be at least 8 characters");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – trims phone before duplicate lookup", async () => {
@@ -1138,6 +1160,7 @@ test("registerUser – trims phone before duplicate lookup", async () => {
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Phone already exists");
   assert.equal(phoneSeen, "+37400000000");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – rejects phone values over max length", async () => {
@@ -1157,12 +1180,14 @@ test("registerUser – rejects phone values over max length", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Phone must be 32 characters or less");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – normalizes email before duplicate lookup and save", async () => {
   const res = createResponse();
   let emailSeen;
   let createPayload;
+  let createdUser;
 
   process.env.JWT_SECRET = "test-secret";
   User.findOne = async (filter) => {
@@ -1173,26 +1198,33 @@ test("registerUser – normalizes email before duplicate lookup and save", async
   };
   User.create = async (payload) => {
     createPayload = payload;
-    return createBaseUser({ ...payload, _id: userId });
+    createdUser = createBaseUser({ ...payload, _id: userId });
+    return createdUser;
   };
 
-  await registerUser(
-    {
-      body: {
-        name: "Test User",
-        email: "  Test@Example.COM  ",
-        phone: "+37400000000",
-        password: "secret123",
-      },
+  const req = {
+    body: {
+      name: "Test User",
+      email: "  Test@Example.COM  ",
+      phone: "+37400000000",
+      password: "secret123",
     },
-    res
-  );
+  };
+  await registerUser(req, res);
 
   assert.equal(res.statusCode, 201);
+  assert.equal(issuedSessionCalls.length, 1);
+  assert.equal(issuedSessionCalls[0].req, req);
+  assert.equal(issuedSessionCalls[0].res, res);
+  assert.equal(issuedSessionCalls[0].user, createdUser);
   assert.equal(emailSeen, "test@example.com");
   assert.equal(createPayload.email, "test@example.com");
   assert.equal(res.body.user.email, "test@example.com");
   assert.equal(res.body.user.emailVerified, false);
+  assert.equal("refreshToken" in res.body, false);
+  assert.equal("session" in res.body, false);
+  assert.equal("familyId" in res.body, false);
+  assert.equal("tokenHash" in res.body, false);
 });
 
 test("registerUser – duplicate email returns safe 400", async () => {
@@ -1220,6 +1252,7 @@ test("registerUser – duplicate email returns safe 400", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Email already in use");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – duplicate key email does not report phone error", async () => {
@@ -1248,6 +1281,7 @@ test("registerUser – duplicate key email does not report phone error", async (
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Email already in use");
+  assert.equal(issuedSessionCalls.length, 0);
 });
 
 test("registerUser – new barber receives trial subscription", async () => {
@@ -1263,10 +1297,14 @@ test("registerUser – new barber receives trial subscription", async () => {
     currency: "AMD",
   };
   let createdSubscription = null;
+  let createdUser;
 
   process.env.JWT_SECRET = "test-secret";
   User.findOne = async () => null;
-  User.create = async (payload) => ({ ...barberUser, ...payload });
+  User.create = async (payload) => {
+    createdUser = { ...barberUser, ...payload };
+    return createdUser;
+  };
   SubscriptionPlan.findOne = async () => plan;
   Subscription.findOne = async () => null;
   Subscription.create = async (payload) => {
@@ -1274,24 +1312,30 @@ test("registerUser – new barber receives trial subscription", async () => {
     return { _id: "subscription-1", ...payload };
   };
 
-  await registerUser(
-    {
-      body: {
-        name: "Trial Barber",
-        email: "trial-barber@example.com",
-        phone: "+37400000000",
-        password: "secret123",
-        role: "barber",
-      },
+  const req = {
+    body: {
+      name: "Trial Barber",
+      email: "trial-barber@example.com",
+      phone: "+37400000000",
+      password: "secret123",
+      role: "barber",
     },
-    res
-  );
+  };
+  await registerUser(req, res);
 
   assert.equal(res.statusCode, 201);
+  assert.equal(issuedSessionCalls.length, 1);
+  assert.equal(issuedSessionCalls[0].req, req);
+  assert.equal(issuedSessionCalls[0].res, res);
+  assert.equal(issuedSessionCalls[0].user, createdUser);
   assert.equal(res.body.user.role, "barber");
   assert.equal(res.body.user.email, "trial-barber@example.com");
   assert.equal(res.body.user.emailVerified, false);
   assert.ok(res.body.token);
+  assert.equal("refreshToken" in res.body, false);
+  assert.equal("session" in res.body, false);
+  assert.equal("familyId" in res.body, false);
+  assert.equal("tokenHash" in res.body, false);
   assert.equal(createdSubscription.ownerType, "barber");
   assert.equal(createdSubscription.ownerRefModel, "User");
   assert.equal(String(createdSubscription.ownerId), String(userId));
@@ -1310,36 +1354,44 @@ test("registerUser – client registration does not create subscription", async 
   });
   let subscriptionCreateCalled = false;
   let createdPayload = null;
+  let createdUser;
 
   process.env.JWT_SECRET = "test-secret";
   User.findOne = async () => null;
   User.create = async (payload) => {
     createdPayload = payload;
-    return { ...clientUser, ...payload };
+    createdUser = { ...clientUser, ...payload };
+    return createdUser;
   };
   Subscription.create = async () => {
     subscriptionCreateCalled = true;
     return {};
   };
 
-  await registerUser(
-    {
-      body: {
-        name: "Free Client",
-        email: "free-client@example.com",
-        phone: "+37400000000",
-        password: "secret123",
-        role: "client",
-      },
+  const req = {
+    body: {
+      name: "Free Client",
+      email: "free-client@example.com",
+      phone: "+37400000000",
+      password: "secret123",
+      role: "client",
     },
-    res
-  );
+  };
+  await registerUser(req, res);
 
   assert.equal(res.statusCode, 201);
+  assert.equal(issuedSessionCalls.length, 1);
+  assert.equal(issuedSessionCalls[0].req, req);
+  assert.equal(issuedSessionCalls[0].res, res);
+  assert.equal(issuedSessionCalls[0].user, createdUser);
   assert.equal(res.body.user.role, "client");
   assert.equal(res.body.user.email, "free-client@example.com");
   assert.equal(createdPayload.email, "free-client@example.com");
   assert.equal(subscriptionCreateCalled, false);
+  assert.equal("refreshToken" in res.body, false);
+  assert.equal("session" in res.body, false);
+  assert.equal("familyId" in res.body, false);
+  assert.equal("tokenHash" in res.body, false);
 });
 
 test("loginUser – still requires phone and does not accept email-only login", async () => {
@@ -1352,4 +1404,5 @@ test("loginUser – still requires phone and does not accept email-only login", 
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Phone and password are required");
+  assert.equal(issuedSessionCalls.length, 0);
 });

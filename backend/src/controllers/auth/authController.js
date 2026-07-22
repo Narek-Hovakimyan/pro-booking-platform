@@ -3,13 +3,25 @@ import crypto from "node:crypto";
 import User, { MAX_PHONE_LENGTH } from "../../models/User.js";
 import { sendPasswordResetEmail } from "../../services/auth/emailService.js";
 import { verifyGoogleIdToken } from "../../services/auth/googleAuthService.js";
-import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
+import {
+  issueAuthSession,
+} from "../../services/auth/authSessionIssuanceService.js";
 import { createTrialSubscription } from "../../services/subscriptionService.js";
 import { isValidEmail, normalizeEmail } from "../../utils/emailVerification.js";
 import { createInitialSpecialistOnboardingState } from "../../utils/specialistOnboardingState.js";
 import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+
+let dependencies = { issueAuthSession };
+
+export function __setAuthControllerDependencies(overrides = {}) {
+  dependencies = { ...dependencies, ...overrides };
+}
+
+export function __resetAuthControllerDependencies() {
+  dependencies = { issueAuthSession };
+}
 
 const getAuthLogger = () => getLogger().child({ component: "auth" });
 
@@ -154,12 +166,9 @@ export const registerUser = async (req, res) => {
       }
     }
 
-    const token = signAccessToken(user._id);
+    const authResponse = await dependencies.issueAuthSession({ req, res, user });
 
-    return res.status(201).json({
-      token,
-      user: serializeAuthUser(user),
-    });
+    return res.status(201).json(authResponse);
   } catch (error) {
     if (error.code === 11000) {
       if (error.keyPattern?.email || error.keyValue?.email) {
@@ -199,12 +208,9 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid phone or password" });
     }
 
-    const token = signAccessToken(user._id);
+    const authResponse = await dependencies.issueAuthSession({ req, res, user });
 
-    return res.json({
-      token,
-      user: serializeAuthUser(user),
-    });
+    return res.json(authResponse);
   } catch (error) {
     logAuthError("auth.login_failed", error);
     return res.status(500).json({ message: "Login failed" });
@@ -236,8 +242,12 @@ export const googleAuth = async (req, res) => {
         await existingGoogleUser.save();
       }
 
-      const token = signAccessToken(existingGoogleUser._id);
-      return res.json({ token, user: serializeAuthUser(existingGoogleUser) });
+      const authResponse = await dependencies.issueAuthSession({
+        req,
+        res,
+        user: existingGoogleUser,
+      });
+      return res.json(authResponse);
     }
 
     const existingEmailUser = await User.findOne({
@@ -256,8 +266,12 @@ export const googleAuth = async (req, res) => {
         await existingEmailUser.save();
       }
 
-      const token = signAccessToken(existingEmailUser._id);
-      return res.json({ token, user: serializeAuthUser(existingEmailUser) });
+      const authResponse = await dependencies.issueAuthSession({
+        req,
+        res,
+        user: existingEmailUser,
+      });
+      return res.json(authResponse);
     }
 
     const { role } = req.body || {};
@@ -324,8 +338,8 @@ export const googleAuth = async (req, res) => {
       }
     }
 
-    const token = signAccessToken(user._id);
-    return res.status(201).json({ token, user: serializeAuthUser(user) });
+    const authResponse = await dependencies.issueAuthSession({ req, res, user });
+    return res.status(201).json(authResponse);
   } catch (error) {
     if (error.code === 11000) {
       if (error.keyPattern?.googleId || error.keyValue?.googleId) {

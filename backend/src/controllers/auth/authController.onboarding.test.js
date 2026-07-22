@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import User from "../../models/User.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
-import { loginUser, registerUser } from "./authController.js";
+import {
+  __resetAuthControllerDependencies,
+  __setAuthControllerDependencies,
+  loginUser,
+  registerUser,
+} from "./authController.js";
+import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
 
 const originalUserMethods = {
   findOne: User.findOne,
@@ -21,6 +27,7 @@ const originalSubscriptionPlanMethods = {
 };
 const originalJwtSecret = process.env.JWT_SECRET;
 const userId = "64d000000000000000000001";
+let issuedSessionCalls = [];
 
 const createResponse = () => ({
   statusCode: 200,
@@ -57,7 +64,21 @@ const createUser = (overrides = {}) => ({
   ...overrides,
 });
 
+beforeEach(() => {
+  issuedSessionCalls = [];
+  __setAuthControllerDependencies({
+    issueAuthSession: async ({ req, res, user }) => {
+      issuedSessionCalls.push({ req, res, user });
+      return {
+        token: signAccessToken(user._id),
+        user: serializeAuthUser(user),
+      };
+    },
+  });
+});
+
 afterEach(() => {
+  __resetAuthControllerDependencies();
   User.findOne = originalUserMethods.findOne;
   User.create = originalUserMethods.create;
   Subscription.findOne = originalSubscriptionMethods.findOne;
@@ -70,6 +91,7 @@ afterEach(() => {
 test("password registration assigns only server-created barber onboarding state", async () => {
   process.env.JWT_SECRET = "test-secret";
   let createPayload;
+  let createdUser;
   User.findOne = async () => null;
   Subscription.findOne = async () => null;
   SubscriptionPlan.findOne = async () => ({
@@ -80,26 +102,33 @@ test("password registration assigns only server-created barber onboarding state"
   Subscription.create = async (payload) => ({ _id: "subscription-1", ...payload });
   User.create = async (payload) => {
     createPayload = payload;
-    return createUser({ specialistOnboarding: payload.specialistOnboarding });
+    createdUser = createUser({ specialistOnboarding: payload.specialistOnboarding });
+    return createdUser;
   };
 
   const res = createResponse();
-  await registerUser(
-    {
-      body: {
-        name: "New Barber",
-        phone: "+37400111222",
-        email: "new-barber@example.com",
-        password: "password123",
-        role: "barber",
-        specialistOnboarding: { status: "completed", needsOnboarding: false },
-      },
+  const req = {
+    body: {
+      name: "New Barber",
+      phone: "+37400111222",
+      email: "new-barber@example.com",
+      password: "password123",
+      role: "barber",
+      specialistOnboarding: { status: "completed", needsOnboarding: false },
     },
-    res
-  );
+  };
+  await registerUser(req, res);
 
   assert.equal(res.statusCode, 201);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
+  assert.equal(issuedSessionCalls.length, 1);
+  assert.equal(issuedSessionCalls[0].req, req);
+  assert.equal(issuedSessionCalls[0].res, res);
+  assert.equal(issuedSessionCalls[0].user, createdUser);
+  assert.equal("refreshToken" in res.body, false);
+  assert.equal("session" in res.body, false);
+  assert.equal("familyId" in res.body, false);
+  assert.equal("tokenHash" in res.body, false);
   assert.deepEqual(createPayload.specialistOnboarding, {
     version: 1,
     status: "not_started",
@@ -117,29 +146,37 @@ test("password registration leaves clients without onboarding state", async () =
   process.env.JWT_SECRET = "test-secret";
   let createPayload;
   User.findOne = async () => null;
-  User.create = async (payload) => {
-    createPayload = payload;
-    return createUser({ role: "client", specialistOnboarding: undefined });
-  };
 
   const res = createResponse();
-  await registerUser(
-    {
-      body: {
-        name: "New Client",
-        phone: "+37400111222",
-        email: "new-client@example.com",
-        password: "password123",
-        role: "client",
-        specialistOnboarding: { status: "completed" },
-      },
+  const createdUser = createUser({ role: "client", specialistOnboarding: undefined });
+  User.create = async (payload) => {
+    createPayload = payload;
+    return createdUser;
+  };
+  const req = {
+    body: {
+      name: "New Client",
+      phone: "+37400111222",
+      email: "new-client@example.com",
+      password: "password123",
+      role: "client",
+      specialistOnboarding: { status: "completed" },
     },
-    res
-  );
+  };
+  await registerUser(req, res);
 
   assert.equal(res.statusCode, 201);
+  assert.equal(issuedSessionCalls.length, 1);
+  assert.equal(issuedSessionCalls[0].req, req);
+  assert.equal(issuedSessionCalls[0].res, res);
+  assert.equal(issuedSessionCalls[0].user, createdUser);
+  assert.equal(res.body.token, jwt.sign({ id: userId }, "test-secret", { expiresIn: "30d" }));
   assert.equal(createPayload.specialistOnboarding, undefined);
   assert.equal("specialistOnboarding" in res.body.user, false);
+  assert.equal("refreshToken" in res.body, false);
+  assert.equal("session" in res.body, false);
+  assert.equal("familyId" in res.body, false);
+  assert.equal("tokenHash" in res.body, false);
 });
 
 test("password login safely serializes explicit, legacy, and completed barber states", async () => {
@@ -156,9 +193,19 @@ test("password login safely serializes explicit, legacy, and completed barber st
     const user = createUser({ password: passwordHash, specialistOnboarding });
     User.findOne = async () => user;
     const res = createResponse();
-    await loginUser({ body: { phone: "+37400111222", password } }, res);
+    const req = { body: { phone: "+37400111222", password } };
+    const previousCallCount = issuedSessionCalls.length;
+    await loginUser(req, res);
 
     assert.equal(res.statusCode, 200);
+    assert.equal(issuedSessionCalls.length, previousCallCount + 1);
+    assert.equal(issuedSessionCalls.at(-1).req, req);
+    assert.equal(issuedSessionCalls.at(-1).res, res);
+    assert.equal(issuedSessionCalls.at(-1).user, user);
+    assert.equal("refreshToken" in res.body, false);
+    assert.equal("session" in res.body, false);
+    assert.equal("familyId" in res.body, false);
+    assert.equal("tokenHash" in res.body, false);
     assert.equal(res.body.user.specialistOnboarding.status, status);
     assert.equal(res.body.user.specialistOnboarding.needsOnboarding, needsOnboarding);
     assert.equal(user.specialistOnboarding, specialistOnboarding);
@@ -171,8 +218,20 @@ test("password login omits onboarding metadata for clients", async () => {
   User.findOne = async () => createUser({ role: "client", password: await bcrypt.hash(password, 10) });
 
   const res = createResponse();
-  await loginUser({ body: { phone: "+37400111222", password } }, res);
+  const req = { body: { phone: "+37400111222", password } };
+  const user = await User.findOne();
+  User.findOne = async () => user;
+  await loginUser(req, res);
 
   assert.equal(res.statusCode, 200);
+  assert.equal(issuedSessionCalls.length, 1);
+  assert.equal(issuedSessionCalls[0].req, req);
+  assert.equal(issuedSessionCalls[0].res, res);
+  assert.equal(issuedSessionCalls[0].user, user);
+  assert.equal(res.body.token, jwt.sign({ id: userId }, "test-secret", { expiresIn: "30d" }));
   assert.equal("specialistOnboarding" in res.body.user, false);
+  assert.equal("refreshToken" in res.body, false);
+  assert.equal("session" in res.body, false);
+  assert.equal("familyId" in res.body, false);
+  assert.equal("tokenHash" in res.body, false);
 });

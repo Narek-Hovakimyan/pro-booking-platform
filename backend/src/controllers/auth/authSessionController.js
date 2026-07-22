@@ -9,10 +9,10 @@ import {
 } from "../../services/auth/refreshSessionService.js";
 import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
 import {
-  clearRefreshCookie,
-  readRefreshTokenFromCookieHeader,
-  setRefreshCookie,
-} from "../../utils/authCookie.js";
+  clearRuntimeRefreshCookie,
+  readRuntimeRefreshToken,
+  setRuntimeRefreshCookie,
+} from "../../services/auth/authSessionCookieService.js";
 import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const REFRESH_FAILURE_BODY = {
@@ -27,9 +27,9 @@ let dependencies = {
   revokeRefreshToken,
   revokeRefreshFamily,
   revokeAllUserRefreshSessions,
-  readRefreshTokenFromCookieHeader,
-  setRefreshCookie,
-  clearRefreshCookie,
+  readRuntimeRefreshToken,
+  setRuntimeRefreshCookie,
+  clearRuntimeRefreshCookie,
   signAccessToken,
   serializeAuthUser,
 };
@@ -45,9 +45,9 @@ export function __resetAuthSessionControllerDependencies() {
     revokeRefreshToken,
     revokeRefreshFamily,
     revokeAllUserRefreshSessions,
-    readRefreshTokenFromCookieHeader,
-    setRefreshCookie,
-    clearRefreshCookie,
+    readRuntimeRefreshToken,
+    setRuntimeRefreshCookie,
+    clearRuntimeRefreshCookie,
     signAccessToken,
     serializeAuthUser,
   };
@@ -59,7 +59,7 @@ function getUserAgent(req) {
 
 function clearCookieSafely(res) {
   try {
-    dependencies.clearRefreshCookie(res);
+    dependencies.clearRuntimeRefreshCookie(res);
   } catch {
     // Response helpers can fail in exceptional states; controller still returns generic errors.
   }
@@ -81,7 +81,7 @@ function findUserById(userId) {
 }
 
 export async function refreshAuthSession(req, res) {
-  const refreshToken = dependencies.readRefreshTokenFromCookieHeader(req);
+  const refreshToken = dependencies.readRuntimeRefreshToken(req);
 
   if (!refreshToken) {
     clearCookieSafely(res);
@@ -107,7 +107,7 @@ export async function refreshAuthSession(req, res) {
 
     const token = dependencies.signAccessToken(user._id);
     const publicUser = dependencies.serializeAuthUser(user);
-    dependencies.setRefreshCookie(res, replacement.refreshToken);
+    dependencies.setRuntimeRefreshCookie(res, replacement.refreshToken);
 
     return res.status(200).json({ token, user: publicUser });
   } catch (error) {
@@ -124,7 +124,7 @@ export async function refreshAuthSession(req, res) {
 
 export async function logoutAuthSession(req, res) {
   try {
-    const refreshToken = dependencies.readRefreshTokenFromCookieHeader(req);
+    const refreshToken = dependencies.readRuntimeRefreshToken(req);
 
     if (refreshToken) {
       try {
@@ -136,7 +136,7 @@ export async function logoutAuthSession(req, res) {
       }
     }
 
-    dependencies.clearRefreshCookie(res);
+    dependencies.clearRuntimeRefreshCookie(res);
     return res.status(204).end();
   } catch (error) {
     clearCookieSafely(res);
@@ -151,7 +151,7 @@ export async function logoutAllAuthSessions(req, res) {
       userId: req.user?._id,
       reason: "logout_all",
     });
-    dependencies.clearRefreshCookie(res);
+    dependencies.clearRuntimeRefreshCookie(res);
     return res.status(204).end();
   } catch (error) {
     clearCookieSafely(res);

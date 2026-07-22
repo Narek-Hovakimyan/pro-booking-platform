@@ -83,6 +83,7 @@ const devOrigins = [
 ];
 const allowedOrigins = isProduction ? clientOrigins : [...clientOrigins, ...devOrigins];
 const corsOptions = {
+  credentials: true,
   origin(origin, callback) {
     if (!origin) {
       callback(null, true);

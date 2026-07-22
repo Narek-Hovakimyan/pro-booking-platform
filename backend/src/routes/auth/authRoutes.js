@@ -11,9 +11,9 @@ import { authLimiter } from "../../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
-router.post("/register", authLimiter, registerUser);
-router.post("/login", authLimiter, loginUser);
-router.post("/google", authLimiter, googleAuth);
+router.post("/register", authLimiter, requireAuthCookieRequestSecurity, registerUser);
+router.post("/login", authLimiter, requireAuthCookieRequestSecurity, loginUser);
+router.post("/google", authLimiter, requireAuthCookieRequestSecurity, googleAuth);
 
 router.post("/forgot-password", authLimiter, forgotPassword);
 router.post("/reset-password", authLimiter, resetPassword);

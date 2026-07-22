@@ -14,6 +14,7 @@ import {
   logoutAuthSession,
   refreshAuthSession,
 } from "../controllers/auth/authSessionController.js";
+import { googleAuth, loginUser, registerUser } from "../controllers/auth/authController.js";
 import authRoutes from "./auth/authRoutes.js";
 
 const createRequest = () => ({
@@ -81,7 +82,13 @@ test("auth routes apply rate limiters before controllers", () => {
 
   assert.equal(loginRoute.route.stack[0].handle, authLimiter);
   assert.equal(registerRoute.route.stack[0].handle, authLimiter);
+  assert.equal(registerRoute.route.stack[1].handle, requireAuthCookieRequestSecurity);
+  assert.equal(registerRoute.route.stack[2].handle, registerUser);
+  assert.equal(loginRoute.route.stack[1].handle, requireAuthCookieRequestSecurity);
+  assert.equal(loginRoute.route.stack[2].handle, loginUser);
   assert.equal(googleRoute.route.stack[0].handle, authLimiter);
+  assert.equal(googleRoute.route.stack[1].handle, requireAuthCookieRequestSecurity);
+  assert.equal(googleRoute.route.stack[2].handle, googleAuth);
   assert.equal(forgotPasswordRoute.route.stack[0].handle, authLimiter);
   assert.equal(resetPasswordRoute.route.stack[0].handle, authLimiter);
   assert.equal(refreshRoute.route.stack[0].handle, authLimiter);
@@ -94,9 +101,9 @@ test("auth routes apply rate limiters before controllers", () => {
   assert.equal(logoutAllRoute.route.stack[1].handle, protect);
   assert.equal(logoutAllRoute.route.stack[2].handle, requireAuthCookieRequestSecurity);
   assert.equal(logoutAllRoute.route.stack[3].handle, logoutAllAuthSessions);
-  assert.deepEqual(routes["/login"], ["<anonymous>", "loginUser"]);
-  assert.deepEqual(routes["/register"], ["<anonymous>", "registerUser"]);
-  assert.deepEqual(routes["/google"], ["<anonymous>", "googleAuth"]);
+  assert.deepEqual(routes["/login"], ["<anonymous>", "requireAuthCookieRequestSecurity", "loginUser"]);
+  assert.deepEqual(routes["/register"], ["<anonymous>", "requireAuthCookieRequestSecurity", "registerUser"]);
+  assert.deepEqual(routes["/google"], ["<anonymous>", "requireAuthCookieRequestSecurity", "googleAuth"]);
   assert.deepEqual(routes["/forgot-password"], ["<anonymous>", "forgotPassword"]);
   assert.deepEqual(routes["/reset-password"], ["<anonymous>", "resetPassword"]);
   assert.deepEqual(routes["/refresh"], ["<anonymous>", "requireAuthCookieRequestSecurity", "refreshAuthSession"]);
@@ -105,6 +112,9 @@ test("auth routes apply rate limiters before controllers", () => {
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/refresh").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/logout").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/logout-all").length, 1);
+  assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/register").length, 1);
+  assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/login").length, 1);
+  assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/google").length, 1);
 });
 
 test("auth limiter returns 429 after threshold per IP", async () => {

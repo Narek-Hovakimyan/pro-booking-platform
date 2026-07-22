@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import { getLogger, resetLogger } from "../../config/logger.js";
 import User from "../../models/User.js";
-import { loginUser, registerUser } from "./authController.js";
+import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
+import {
+  __resetAuthControllerDependencies,
+  __setAuthControllerDependencies,
+  loginUser,
+  registerUser,
+} from "./authController.js";
 
 const originalFindOne = User.findOne;
 const originalCreate = User.create;
 const originalJwtSecret = process.env.JWT_SECRET;
 const jwtSecret = "auth-controller-session-test-secret";
 const userId = "64d000000000000000000001";
+let issuedSessionCalls;
 
 const createResponse = () => {
   const res = { statusCode: 200, body: undefined };
@@ -50,7 +57,21 @@ const assertPublicAuthUser = (user, expected) => {
   assert.equal(user.emailVerificationTokenHash, undefined);
 };
 
+beforeEach(() => {
+  issuedSessionCalls = [];
+  __setAuthControllerDependencies({
+    issueAuthSession: ({ req, res, user }) => {
+      issuedSessionCalls.push({ req, res, user });
+      return {
+        token: signAccessToken(user._id),
+        user: serializeAuthUser(user),
+      };
+    },
+  });
+});
+
 afterEach(() => {
+  __resetAuthControllerDependencies();
   User.findOne = originalFindOne;
   User.create = originalCreate;
   resetLogger();
@@ -94,12 +115,11 @@ test("loginUser returns a 30-day JWT and public user contract for valid password
   };
 
   const res = createResponse();
-  await loginUser(
-    { body: { phone: "  +37400111222  ", password } },
-    res
-  );
+  const req = { body: { phone: "  +37400111222  ", password } };
+  await loginUser(req, res);
 
   assert.equal(res.statusCode, 200);
+  assert.deepEqual(issuedSessionCalls, [{ req, res, user }]);
   assertJwtContract(res.body.token, userId);
   assertPublicAuthUser(res.body.user, {
     id: userId,
@@ -116,6 +136,7 @@ test("registerUser creates a client with normalized auth fields and returns a 30
   process.env.JWT_SECRET = jwtSecret;
   const password = "Password123!";
   let createPayload;
+  let createdUser;
 
   User.findOne = async (query) => {
     assert.ok(query.phone === "+37400111222" || query.email === "client@example.com");
@@ -123,7 +144,7 @@ test("registerUser creates a client with normalized auth fields and returns a 30
   };
   User.create = async (payload) => {
     createPayload = payload;
-    return {
+    createdUser = {
       _id: userId,
       ...payload,
       emailVerified: false,
@@ -141,23 +162,23 @@ test("registerUser creates a client with normalized auth fields and returns a 30
       googleId: "hidden-google-id",
       resetPasswordTokenHash: "hidden-reset-token",
     };
+    return createdUser;
   };
 
   const res = createResponse();
-  await registerUser(
-    {
-      body: {
-        name: "Client Name",
-        phone: "  +37400111222  ",
-        email: "  Client@Example.com ",
-        password,
-        role: "client",
-      },
+  const req = {
+    body: {
+      name: "Client Name",
+      phone: "  +37400111222  ",
+      email: "  Client@Example.com ",
+      password,
+      role: "client",
     },
-    res
-  );
+  };
+  await registerUser(req, res);
 
   assert.equal(res.statusCode, 201);
+  assert.deepEqual(issuedSessionCalls, [{ req, res, user: createdUser }]);
   assert.deepEqual(
     {
       name: createPayload.name,
@@ -209,6 +230,7 @@ test("loginUser returns a generic server error when JWT_SECRET is missing", asyn
   );
 
   assert.equal(res.statusCode, 500);
+  assert.equal(issuedSessionCalls.length, 1);
   assert.deepEqual(res.body, { message: "Login failed" });
   assert.equal("token" in res.body, false);
   assert.equal(JSON.stringify(res.body).includes("JWT_SECRET"), false);

@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import User from "../../models/User.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
+import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
 import { setGoogleAuthClientFactoryForTesting } from "../../services/auth/googleAuthService.js";
-import { googleAuth, loginUser, registerUser } from "./authController.js";
+import {
+  __resetAuthControllerDependencies,
+  __setAuthControllerDependencies,
+  googleAuth,
+  loginUser,
+  registerUser,
+} from "./authController.js";
 
 const originalUserMethods = {
   findOne: User.findOne,
@@ -32,8 +39,23 @@ const originalConsoleError = console.error;
 
 const userId = "64d000000000000000000001";
 const otherUserId = "64d000000000000000000002";
+let issuedSessionCalls;
+
+beforeEach(() => {
+  issuedSessionCalls = [];
+  __setAuthControllerDependencies({
+    issueAuthSession: ({ req, res, user }) => {
+      issuedSessionCalls.push({ req, res, user });
+      return {
+        token: signAccessToken(user._id),
+        user: serializeAuthUser(user),
+      };
+    },
+  });
+});
 
 afterEach(() => {
+  __resetAuthControllerDependencies();
   User.findOne = originalUserMethods.findOne;
   User.create = originalUserMethods.create;
   User.findByIdAndDelete = originalUserMethods.findByIdAndDelete;
@@ -190,9 +212,13 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   };
 
   const res = createResponse();
-  await googleAuth({ body: { credential: "valid-google-token", role: "client", phone: "+37400999000" } }, res);
+  const req = {
+    body: { credential: "valid-google-token", role: "client", phone: "+37400999000" },
+  };
+  await googleAuth(req, res);
 
   assert.equal(res.statusCode, 200);
+  assert.deepEqual(issuedSessionCalls, [{ req, res, user: existingUser }]);
   assert.ok(res.body.token);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
   assert.equal(res.body.user.role, "barber");
@@ -292,9 +318,13 @@ test("googleAuth links existing verified email without changing role or phone", 
   };
 
   const res = createResponse();
-  await googleAuth({ body: { credential: "valid-google-token", role: "client", phone: "+37400999000" } }, res);
+  const req = {
+    body: { credential: "valid-google-token", role: "client", phone: "+37400999000" },
+  };
+  await googleAuth(req, res);
 
   assert.equal(res.statusCode, 200);
+  assert.deepEqual(issuedSessionCalls, [{ req, res, user: existingUser }]);
   assert.equal(jwt.verify(res.body.token, "test-secret").id, otherUserId);
   assert.equal(existingUser.googleId, "google-sub");
   assert.equal(existingUser.authProviders.includes("google"), true);
