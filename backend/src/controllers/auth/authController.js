@@ -1,16 +1,12 @@
 import bcrypt from "bcrypt";
 import crypto from "node:crypto";
-import jwt from "jsonwebtoken";
 import User, { MAX_PHONE_LENGTH } from "../../models/User.js";
 import { sendPasswordResetEmail } from "../../services/auth/emailService.js";
 import { verifyGoogleIdToken } from "../../services/auth/googleAuthService.js";
+import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
 import { createTrialSubscription } from "../../services/subscriptionService.js";
-import { isPlatformSuperuser } from "../../middleware/platformMiddleware.js";
 import { isValidEmail, normalizeEmail } from "../../utils/emailVerification.js";
-import {
-  createInitialSpecialistOnboardingState,
-  serializeSpecialistOnboardingState,
-} from "../../utils/specialistOnboardingState.js";
+import { createInitialSpecialistOnboardingState } from "../../utils/specialistOnboardingState.js";
 import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
@@ -22,44 +18,6 @@ const logAuthError = (event, error, metadata = {}) => {
     { event, err: safeErrorSerializer(error), ...metadata },
     "Authentication operation failed"
   );
-};
-
-const getUserData = (user) => {
-  const specialistOnboarding = serializeSpecialistOnboardingState(user);
-
-  return {
-    id: user._id,
-    name: user.name,
-    phone: user.phone,
-    email: user.email || "",
-    emailVerified: user.emailVerified || false,
-    emailVerifiedAt: user.emailVerifiedAt || null,
-    city: user.city || "",
-    avatarUrl: user.avatarUrl || "",
-    role: user.role,
-    salon: user.salon || null,
-    salonStatus: user.salonStatus || "none",
-    salons: user.salons || [],
-    profession: user.profession || "barber",
-    barberType: user.barberType || "",
-    specialty: user.specialty || "unisex",
-    workHistory: user.workHistory || [],
-    favoriteBarbers: user.favoriteBarbers || [],
-    favoriteSalons: user.favoriteSalons || [],
-    canAccessPlatform: isPlatformSuperuser(user),
-    createdAt: user.createdAt,
-    ...(specialistOnboarding ? { specialistOnboarding } : {}),
-  };
-};
-
-const signToken = (userId) => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET is not configured");
-  }
-
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: "30d",
-  });
 };
 
 const getPasswordResetClientUrl = () => {
@@ -196,11 +154,11 @@ export const registerUser = async (req, res) => {
       }
     }
 
-    const token = signToken(user._id);
+    const token = signAccessToken(user._id);
 
     return res.status(201).json({
       token,
-      user: getUserData(user),
+      user: serializeAuthUser(user),
     });
   } catch (error) {
     if (error.code === 11000) {
@@ -241,11 +199,11 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid phone or password" });
     }
 
-    const token = signToken(user._id);
+    const token = signAccessToken(user._id);
 
     return res.json({
       token,
-      user: getUserData(user),
+      user: serializeAuthUser(user),
     });
   } catch (error) {
     logAuthError("auth.login_failed", error);
@@ -278,8 +236,8 @@ export const googleAuth = async (req, res) => {
         await existingGoogleUser.save();
       }
 
-      const token = signToken(existingGoogleUser._id);
-      return res.json({ token, user: getUserData(existingGoogleUser) });
+      const token = signAccessToken(existingGoogleUser._id);
+      return res.json({ token, user: serializeAuthUser(existingGoogleUser) });
     }
 
     const existingEmailUser = await User.findOne({
@@ -298,8 +256,8 @@ export const googleAuth = async (req, res) => {
         await existingEmailUser.save();
       }
 
-      const token = signToken(existingEmailUser._id);
-      return res.json({ token, user: getUserData(existingEmailUser) });
+      const token = signAccessToken(existingEmailUser._id);
+      return res.json({ token, user: serializeAuthUser(existingEmailUser) });
     }
 
     const { role } = req.body || {};
@@ -366,8 +324,8 @@ export const googleAuth = async (req, res) => {
       }
     }
 
-    const token = signToken(user._id);
-    return res.status(201).json({ token, user: getUserData(user) });
+    const token = signAccessToken(user._id);
+    return res.status(201).json({ token, user: serializeAuthUser(user) });
   } catch (error) {
     if (error.code === 11000) {
       if (error.keyPattern?.googleId || error.keyValue?.googleId) {
