@@ -1,166 +1,232 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import jwt from "jsonwebtoken";
+
 import User from "../models/User.js";
-import { protect, optionalAuth } from "./authMiddleware.js";
+import { optionalAuth, protect } from "./authMiddleware.js";
 
-/* ── Stub state ─────────────────────────────────────────── */
 const originalFindById = User.findById;
+const originalJwtSecret = process.env.JWT_SECRET;
+const jwtSecret = "auth-middleware-test-secret";
 
-process.env.JWT_SECRET = "test-secret";
-
-afterEach(() => {
-  User.findById = originalFindById;
+const makeReq = (authorization) => ({
+  headers: authorization ? { authorization } : {},
 });
 
-/* ── Helpers ────────────────────────────────────────────── */
-const validToken = jwt.sign({ id: "user-1" }, process.env.JWT_SECRET);
-const badToken = "not-a-real-token";
-
-const makeReq = (headers = {}) => ({ headers: { ...headers } });
-
 const makeRes = () => {
-  let statusCode = 200;
-  let body;
-  return {
-    status(code) { statusCode = code; return this; },
-    json(payload) { body = payload; return this; },
-    get statusCode() { return statusCode; },
-    get body() { return body; },
+  const res = { statusCode: 200, body: undefined };
+  res.status = (code) => {
+    res.statusCode = code;
+    return res;
   };
+  res.json = (payload) => {
+    res.body = payload;
+    return res;
+  };
+  return res;
 };
 
 const makeNext = () => {
-  let called = false;
-  const fn = () => { called = true; };
-  fn.called = () => called;
-  return fn;
+  let callCount = 0;
+  const next = () => {
+    callCount += 1;
+  };
+  next.callCount = () => callCount;
+  return next;
 };
 
-/**
- * Stub User.findById to return a chainable query-like object.
- * Mongoose: User.findById(id).select(fields) => Promise<result>
- *
- * User.findById must NOT be async — it returns an object with .select(),
- * not a Promise directly. The .select() method returns a Promise.
- */
-const stubFindById = (result) => {
-  User.findById = () => ({
-    select: async () => result,
-  });
-};
+const selectable = (result, onSelect = () => {}) => ({
+  select(fields) {
+    onSelect(fields);
+    return result;
+  },
+});
 
-/* ── optionalAuth tests ─────────────────────────────────── */
+const signToken = (payload, options = {}) =>
+  jwt.sign(payload, jwtSecret, options);
 
-test("optionalAuth with no auth header calls next without user", async () => {
-  const req = makeReq({});
+afterEach(() => {
+  User.findById = originalFindById;
+
+  if (originalJwtSecret === undefined) {
+    delete process.env.JWT_SECRET;
+  } else {
+    process.env.JWT_SECRET = originalJwtSecret;
+  }
+});
+
+test("protect returns 401 when authorization header is missing", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const req = makeReq();
   const res = makeRes();
   const next = makeNext();
 
-  await optionalAuth(req, res, next);
+  await protect(req, res, next);
 
-  assert.equal(next.called(), true);
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.body, { message: "Not authorized, no token" });
+  assert.equal(next.callCount(), 0);
   assert.equal(req.user, undefined);
 });
 
-test("optionalAuth with valid token populates req.user and calls next", async () => {
-  stubFindById({ _id: "user-1", role: "barber", name: "Test Barber" });
+test("protect returns 401 for non-Bearer and empty Bearer headers", async () => {
+  process.env.JWT_SECRET = jwtSecret;
 
-  const req = makeReq({ authorization: `Bearer ${validToken}` });
+  for (const authorization of ["Basic abc123", "Bearer "]) {
+    const req = makeReq(authorization);
+    const res = makeRes();
+    const next = makeNext();
+
+    await protect(req, res, next);
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(next.callCount(), 0);
+    assert.equal(req.user, undefined);
+  }
+});
+
+test("protect returns 401 for invalid and expired tokens", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+
+  for (const token of ["not-a-jwt", signToken({ id: "user-1" }, { expiresIn: -1 })]) {
+    const req = makeReq(`Bearer ${token}`);
+    const res = makeRes();
+    const next = makeNext();
+
+    await protect(req, res, next);
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.body, { message: "Not authorized, token failed" });
+    assert.equal(next.callCount(), 0);
+  }
+});
+
+test("protect verifies JWT, loads the user from the database, and excludes password", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const user = { _id: "64d000000000000000000001", role: "barber", name: "Loaded User" };
+  const lookupCalls = [];
+  let selectedFields = "";
+
+  User.findById = (id) => {
+    lookupCalls.push(id);
+    return selectable(user, (fields) => {
+      selectedFields = fields;
+    });
+  };
+
+  const req = makeReq(`Bearer ${signToken({ id: user._id, role: "client", salons: ["forged"] })}`);
   const res = makeRes();
   const next = makeNext();
 
-  await optionalAuth(req, res, next);
+  await protect(req, res, next);
 
-  assert.equal(next.called(), true);
-  assert.equal(req.user._id, "user-1");
+  assert.deepEqual(lookupCalls, [user._id]);
+  assert.equal(selectedFields, "-password");
+  assert.equal(req.user, user);
   assert.equal(req.user.role, "barber");
+  assert.equal(next.callCount(), 1);
+  assert.equal(res.statusCode, 200);
 });
 
-test("optionalAuth with invalid token returns 401", async () => {
-  const req = makeReq({ authorization: `Bearer ${badToken}` });
-  const res = makeRes();
-  const next = makeNext();
+test("protect returns 401 when a valid token references a missing user", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  let selectedFields = "";
+  User.findById = (id) => {
+    assert.equal(id, "64d000000000000000000001");
+    return selectable(null, (fields) => {
+      selectedFields = fields;
+    });
+  };
 
-  await optionalAuth(req, res, next);
-
-  assert.equal(res.statusCode, 401);
-  assert.equal(next.called(), false);
-  assert.equal(req.user, undefined);
-});
-
-test("optionalAuth with expired token returns 401", async () => {
-  const expiredToken = jwt.sign({ id: "user-1" }, process.env.JWT_SECRET, { expiresIn: "0ms" });
-  // Small delay to ensure the token expires
-  await new Promise((r) => setTimeout(r, 15));
-
-  const req = makeReq({ authorization: `Bearer ${expiredToken}` });
-  const res = makeRes();
-  const next = makeNext();
-
-  await optionalAuth(req, res, next);
-
-  assert.equal(res.statusCode, 401);
-  assert.equal(next.called(), false);
-});
-
-test("optionalAuth with malformed auth header calls next without user", async () => {
-  const req = makeReq({ authorization: "Basic somebase64==" });
-  const res = makeRes();
-  const next = makeNext();
-
-  await optionalAuth(req, res, next);
-
-  assert.equal(next.called(), true);
-  assert.equal(req.user, undefined);
-});
-
-test("optionalAuth with valid token but deleted user calls next without user", async () => {
-  stubFindById(null);
-
-  const req = makeReq({ authorization: `Bearer ${validToken}` });
-  const res = makeRes();
-  const next = makeNext();
-
-  await optionalAuth(req, res, next);
-
-  assert.equal(next.called(), true);
-  assert.equal(req.user, undefined);
-});
-
-/* ── protect tests (verifying it still works) ───────────── */
-
-test("protect with no auth header returns 401", async () => {
-  const req = makeReq({});
+  const req = makeReq(`Bearer ${signToken({ id: "64d000000000000000000001" })}`);
   const res = makeRes();
   const next = makeNext();
 
   await protect(req, res, next);
 
+  assert.equal(selectedFields, "-password");
   assert.equal(res.statusCode, 401);
-  assert.equal(next.called(), false);
+  assert.deepEqual(res.body, { message: "Not authorized, user not found" });
+  assert.equal(next.callCount(), 0);
+  assert.equal(req.user, undefined);
 });
 
-test("protect with valid token populates req.user and calls next", async () => {
-  stubFindById({ _id: "user-1", role: "barber", name: "Test" });
+test("optionalAuth continues anonymously with no header or non-Bearer authorization", async () => {
+  process.env.JWT_SECRET = jwtSecret;
 
-  const req = makeReq({ authorization: `Bearer ${validToken}` });
+  for (const authorization of [undefined, "Basic abc123"]) {
+    const req = makeReq(authorization);
+    const res = makeRes();
+    const next = makeNext();
+
+    await optionalAuth(req, res, next);
+
+    assert.equal(next.callCount(), 1);
+    assert.equal(res.statusCode, 200);
+    assert.equal(req.user, undefined);
+  }
+});
+
+test("optionalAuth sets req.user for a valid Bearer token and calls next once", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const user = { _id: "64d000000000000000000010", role: "client" };
+  let selectedFields = "";
+
+  User.findById = (id) => {
+    assert.equal(id, user._id);
+    return selectable(user, (fields) => {
+      selectedFields = fields;
+    });
+  };
+
+  const req = makeReq(`Bearer ${signToken({ id: user._id })}`);
   const res = makeRes();
   const next = makeNext();
 
-  await protect(req, res, next);
+  await optionalAuth(req, res, next);
 
-  assert.equal(next.called(), true);
-  assert.equal(req.user._id, "user-1");
+  assert.equal(selectedFields, "-password");
+  assert.equal(req.user, user);
+  assert.equal(next.callCount(), 1);
+  assert.equal(res.statusCode, 200);
 });
 
-test("protect with invalid token returns 401", async () => {
-  const req = makeReq({ authorization: `Bearer ${badToken}` });
+test("optionalAuth returns 401 for invalid and expired Bearer tokens", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+
+  for (const token of ["not-a-jwt", signToken({ id: "user-1" }, { expiresIn: -1 })]) {
+    const req = makeReq(`Bearer ${token}`);
+    const res = makeRes();
+    const next = makeNext();
+
+    await optionalAuth(req, res, next);
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.body, { message: "Not authorized, token failed" });
+    assert.equal(next.callCount(), 0);
+    assert.equal(req.user, undefined);
+  }
+});
+
+test("optionalAuth keeps current anonymous behavior when a valid token references a missing user", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  let selectedFields = "";
+
+  User.findById = (id) => {
+    assert.equal(id, "64d000000000000000000020");
+    return selectable(null, (fields) => {
+      selectedFields = fields;
+    });
+  };
+
+  const req = makeReq(`Bearer ${signToken({ id: "64d000000000000000000020", role: "forged" })}`);
   const res = makeRes();
   const next = makeNext();
 
-  await protect(req, res, next);
+  await optionalAuth(req, res, next);
 
-  assert.equal(res.statusCode, 401);
-  assert.equal(next.called(), false);
+  assert.equal(selectedFields, "-password");
+  assert.equal(req.user, undefined);
+  assert.equal(next.callCount(), 1);
+  assert.equal(res.statusCode, 200);
 });
