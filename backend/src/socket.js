@@ -1,7 +1,29 @@
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
+
+import User from "./models/User.js";
+import {
+  assertAccessTokenMatchesUser,
+  verifyAccessToken,
+} from "./services/auth/accessTokenService.js";
 
 let io;
+let dependencies = {
+  User,
+  verifyAccessToken,
+  assertAccessTokenMatchesUser,
+};
+
+export function __setSocketAuthDependencies(overrides = {}) {
+  dependencies = { ...dependencies, ...overrides };
+}
+
+export function __resetSocketAuthDependencies() {
+  dependencies = {
+    User,
+    verifyAccessToken,
+    assertAccessTokenMatchesUser,
+  };
+}
 
 function getAllowedSocketOrigins() {
   const configuredOrigins = (process.env.CLIENT_URL || "")
@@ -23,22 +45,65 @@ function getAllowedSocketOrigins() {
 }
 
 export function getSocketToken(socket) {
-  return socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
+  const token = socket?.handshake?.auth?.token;
+
+  return typeof token === "string" && token.trim() ? token.trim() : null;
 }
 
-export function getAuthenticatedSocketUserId(socket) {
+function createSocketAuthError() {
+  const error = new Error("Not authorized");
+  error.data = { code: "SOCKET_AUTH_REQUIRED" };
+  return error;
+}
+
+function assertTokenExpiry(decoded) {
+  if (!Number.isInteger(decoded?.exp) || decoded.exp <= 0) {
+    throw createSocketAuthError();
+  }
+}
+
+function getTrustedUserId(user) {
+  const userId = user?._id ? String(user._id).trim() : "";
+
+  if (!userId) {
+    throw createSocketAuthError();
+  }
+
+  return userId;
+}
+
+async function findSocketUser(userId) {
+  return dependencies.User.findById(userId).select("-password +authVersion");
+}
+
+export async function authenticateSocket(socket) {
   const token = getSocketToken(socket);
 
-  if (!token || !process.env.JWT_SECRET) {
-    return null;
+  if (!token) {
+    throw createSocketAuthError();
   }
 
+  const decoded = dependencies.verifyAccessToken(token);
+  assertTokenExpiry(decoded);
+
+  const user = await findSocketUser(decoded.id);
+  dependencies.assertAccessTokenMatchesUser(decoded, user);
+
+  const userId = getTrustedUserId(user);
+  socket.userId = userId;
+  socket.accessTokenExpiresAt = decoded.exp * 1000;
+
+  return { userId, expiresAt: socket.accessTokenExpiresAt };
+}
+
+export async function socketAuthMiddleware(socket, next) {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    return decoded?.id ? String(decoded.id) : null;
+    await authenticateSocket(socket);
   } catch {
-    return null;
+    return next(createSocketAuthError());
   }
+
+  return next();
 }
 
 export function joinAuthenticatedUserRoom(socket) {
@@ -65,16 +130,7 @@ export function initSocket(server) {
     },
   });
 
-  io.use((socket, next) => {
-    const userId = getAuthenticatedSocketUserId(socket);
-
-    if (!userId) {
-      return next(new Error("Not authorized"));
-    }
-
-    socket.userId = userId;
-    return next();
-  });
+  io.use(socketAuthMiddleware);
 
   io.on("connection", handleAuthenticatedConnection);
 

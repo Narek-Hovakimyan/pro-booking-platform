@@ -3,20 +3,27 @@ import { afterEach, test } from "node:test";
 import jwt from "jsonwebtoken";
 
 import {
-  getAuthenticatedSocketUserId,
+  __resetSocketAuthDependencies,
+  __setSocketAuthDependencies,
+  authenticateSocket,
   getSocketToken,
   handleAuthenticatedConnection,
   joinAuthenticatedUserRoom,
+  socketAuthMiddleware,
 } from "./socket.js";
+import { signAccessTokenForUser } from "./services/auth/accessTokenService.js";
 
 const originalJwtSecret = process.env.JWT_SECRET;
 const jwtSecret = "socket-test-secret";
+const tokenUserId = "64d000000000000000000001";
+const trustedUserId = "64d000000000000000000002";
 
-const createSocket = ({
+function createSocket({
   authToken,
   authorization,
   userId,
-} = {}) => {
+  auth = {},
+} = {}) {
   const handlers = {};
   const joinedRooms = [];
 
@@ -25,7 +32,7 @@ const createSocket = ({
     handlers,
     joinedRooms,
     handshake: {
-      auth: authToken === undefined ? {} : { token: authToken },
+      auth: authToken === undefined ? auth : { ...auth, token: authToken },
       headers: authorization === undefined ? {} : { authorization },
     },
     join(room) {
@@ -35,9 +42,61 @@ const createSocket = ({
       handlers[eventName] = handler;
     },
   };
-};
+}
+
+function signVersionedToken({ id = tokenUserId, authVersion = 0 } = {}) {
+  process.env.JWT_SECRET = jwtSecret;
+  return signAccessTokenForUser({ _id: id, authVersion });
+}
+
+function signRawToken(payload, options) {
+  process.env.JWT_SECRET = jwtSecret;
+  return jwt.sign(payload, jwtSecret, options);
+}
+
+function installUserLookup({
+  user = { _id: tokenUserId, authVersion: 0 },
+  error,
+  captures = {},
+} = {}) {
+  __setSocketAuthDependencies({
+    User: {
+      findById(userId) {
+        captures.findById = userId;
+        return {
+          async select(selection) {
+            captures.selection = selection;
+            if (error) throw error;
+            return user;
+          },
+        };
+      },
+    },
+  });
+  return captures;
+}
+
+async function runSocketMiddleware(socket) {
+  const calls = [];
+
+  await socketAuthMiddleware(socket, (error) => {
+    calls.push(error);
+  });
+
+  assert.equal(calls.length, 1);
+  return calls[0];
+}
+
+async function assertSocketAuthFailure(socket) {
+  const error = await runSocketMiddleware(socket);
+
+  assert.ok(error instanceof Error);
+  assert.equal(error.message, "Not authorized");
+  assert.deepEqual(error.data, { code: "SOCKET_AUTH_REQUIRED" });
+}
 
 afterEach(() => {
+  __resetSocketAuthDependencies();
   if (originalJwtSecret === undefined) {
     delete process.env.JWT_SECRET;
   } else {
@@ -45,62 +104,144 @@ afterEach(() => {
   }
 });
 
-test("getSocketToken prefers handshake auth token over authorization header", () => {
+test("getSocketToken uses only trimmed handshake auth token", () => {
+  const token = signVersionedToken();
+
+  assert.equal(
+    getSocketToken(createSocket({ authToken: `  ${token}  ` })),
+    token
+  );
+  assert.equal(
+    getSocketToken(createSocket({ authorization: "Bearer header-token" })),
+    null
+  );
+  assert.equal(getSocketToken(createSocket({ authToken: "" })), null);
+  assert.equal(getSocketToken(createSocket({ authToken: "  " })), null);
+  assert.equal(getSocketToken(createSocket({ authToken: 42 })), null);
+  assert.equal(getSocketToken(createSocket({ authToken: ["token"] })), null);
+  assert.equal(getSocketToken(createSocket({ authToken: { token: "x" } })), null);
+});
+
+test("socket handshake verifies token, loads fresh authVersion, and trusts fetched user identity", async () => {
+  const captures = installUserLookup({
+    user: { _id: trustedUserId, authVersion: 4 },
+  });
   const socket = createSocket({
-    authToken: "auth-token",
-    authorization: "Bearer header-token",
+    authToken: signVersionedToken({ authVersion: 4 }),
+    auth: { userId: "forged-user", role: "admin", room: "user:forged" },
   });
 
-  assert.equal(getSocketToken(socket), "auth-token");
+  const result = await authenticateSocket(socket);
+
+  assert.equal(captures.findById, tokenUserId);
+  assert.equal(captures.selection, "-password +authVersion");
+  assert.equal(socket.userId, trustedUserId);
+  assert.equal(result.userId, trustedUserId);
+  assert.ok(Number.isInteger(socket.accessTokenExpiresAt));
+  assert.equal(socket.password, undefined);
+  assert.equal(socket.authVersion, undefined);
+  assert.equal(socket.token, undefined);
 });
 
-test("getSocketToken falls back to a case-insensitive Bearer authorization header", () => {
-  const socket = createSocket({
-    authorization: "bEaReR header-token",
+test("socket middleware succeeds once for a valid matching user", async () => {
+  installUserLookup({ user: { _id: tokenUserId, authVersion: 0 } });
+  const socket = createSocket({ authToken: signVersionedToken() });
+
+  const error = await runSocketMiddleware(socket);
+
+  assert.equal(error, undefined);
+  assert.equal(socket.userId, tokenUserId);
+});
+
+test("Authorization header is ignored even when it contains a valid token", async () => {
+  installUserLookup();
+
+  await assertSocketAuthFailure(createSocket({
+    authorization: `Bearer ${signVersionedToken()}`,
+  }));
+});
+
+test("missing, blank, and non-string handshake tokens fail generically", async () => {
+  for (const authToken of [undefined, "", "  ", 7, [], { token: "x" }]) {
+    await assertSocketAuthFailure(createSocket({ authToken }));
+  }
+});
+
+test("legacy or malformed authVersion access tokens fail generically", async () => {
+  installUserLookup();
+  const exp = Math.floor(Date.now() / 1000) + 60;
+
+  for (const payload of [
+    { id: tokenUserId, exp },
+    { id: tokenUserId, av: -1, exp },
+    { id: tokenUserId, av: 1.5, exp },
+    { id: tokenUserId, av: "0", exp },
+    { id: tokenUserId, av: null, exp },
+  ]) {
+    await assertSocketAuthFailure(createSocket({ authToken: signRawToken(payload) }));
+  }
+});
+
+test("missing, malformed, non-positive, and expired exp fail generically", async () => {
+  installUserLookup();
+  const goodToken = signVersionedToken();
+
+  await assertSocketAuthFailure(createSocket({
+    authToken: signRawToken({ id: tokenUserId, av: 0 }),
+  }));
+  await assertSocketAuthFailure(createSocket({
+    authToken: jwt.sign({ id: tokenUserId, av: 0, exp: 0 }, jwtSecret),
+  }));
+  await assertSocketAuthFailure(createSocket({
+    authToken: jwt.sign({ id: tokenUserId, av: 0 }, jwtSecret, { expiresIn: -1 }),
+  }));
+
+  __setSocketAuthDependencies({
+    verifyAccessToken: () => ({ id: tokenUserId, av: 0, exp: "soon" }),
   });
-
-  assert.equal(getSocketToken(socket), "header-token");
+  await assertSocketAuthFailure(createSocket({ authToken: goodToken }));
 });
 
-test("getSocketToken returns the current empty or malformed values without throwing", () => {
-  assert.equal(getSocketToken(createSocket()), undefined);
-  assert.equal(
-    getSocketToken(createSocket({ authorization: "Token raw-value" })),
-    "Token raw-value"
-  );
-  assert.equal(
-    getSocketToken(createSocket({ authorization: "" })),
-    ""
-  );
-});
+test("invalid signature and missing secret fail generically", async () => {
+  installUserLookup();
 
-test("getAuthenticatedSocketUserId returns the decoded user id for a valid JWT", () => {
-  process.env.JWT_SECRET = jwtSecret;
-  const token = jwt.sign({ id: "64d000000000000000000001" }, jwtSecret);
+  await assertSocketAuthFailure(createSocket({
+    authToken: jwt.sign({ id: tokenUserId, av: 0, exp: Math.floor(Date.now() / 1000) + 60 }, "other-secret"),
+  }));
 
-  assert.equal(
-    getAuthenticatedSocketUserId(createSocket({ authToken: token })),
-    "64d000000000000000000001"
-  );
-});
-
-test("getAuthenticatedSocketUserId returns null for invalid, expired, missing, or unusable tokens", () => {
-  process.env.JWT_SECRET = jwtSecret;
-  const expiredToken = jwt.sign(
-    { id: "64d000000000000000000001" },
-    jwtSecret,
-    { expiresIn: -1 }
-  );
-  const noIdToken = jwt.sign({ role: "barber" }, jwtSecret);
-
-  assert.equal(getAuthenticatedSocketUserId(createSocket({ authToken: "bad-token" })), null);
-  assert.equal(getAuthenticatedSocketUserId(createSocket({ authToken: expiredToken })), null);
-  assert.equal(getAuthenticatedSocketUserId(createSocket()), null);
-  assert.equal(getAuthenticatedSocketUserId(createSocket({ authToken: noIdToken })), null);
-
+  const token = signVersionedToken();
   delete process.env.JWT_SECRET;
-  const validToken = jwt.sign({ id: "64d000000000000000000001" }, jwtSecret);
-  assert.equal(getAuthenticatedSocketUserId(createSocket({ authToken: validToken })), null);
+  await assertSocketAuthFailure(createSocket({ authToken: token }));
+});
+
+test("missing user, mismatched version, malformed database version, and database errors fail generically", async () => {
+  for (const setup of [
+    { user: null },
+    { user: { _id: tokenUserId, authVersion: 2 } },
+    { user: { _id: tokenUserId, authVersion: "0" } },
+    { error: new Error("database unavailable") },
+  ]) {
+    installUserLookup(setup);
+    await assertSocketAuthFailure(createSocket({ authToken: signVersionedToken() }));
+  }
+});
+
+test("socket authentication failures do not log token or secret values", async () => {
+  installUserLookup({ error: new Error("database unavailable") });
+  const calls = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args) => calls.push(args);
+  console.warn = (...args) => calls.push(args);
+
+  try {
+    await assertSocketAuthFailure(createSocket({ authToken: signVersionedToken() }));
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual(calls, []);
 });
 
 test("joinAuthenticatedUserRoom joins only the authenticated user's room", () => {
@@ -113,7 +254,7 @@ test("joinAuthenticatedUserRoom joins only the authenticated user's room", () =>
   assert.deepEqual(anonymousSocket.joinedRooms, []);
 });
 
-test("handleAuthenticatedConnection joins the authenticated room immediately and on repeated join events", () => {
+test("handleAuthenticatedConnection rejoins only the verified user's room", () => {
   const socket = createSocket({ userId: "user-a", authToken: "secret-token" });
 
   handleAuthenticatedConnection(socket);
@@ -122,27 +263,12 @@ test("handleAuthenticatedConnection joins the authenticated room immediately and
   assert.equal(socket.handlers.join.length, 0);
   assert.deepEqual(socket.joinedRooms, ["user:user-a"]);
 
-  socket.handlers.join({ userId: "user-b", token: "forged-token" });
-  socket.handlers.join({ room: "user:user-c" });
+  socket.handlers.join({ userId: "user-b", token: "forged-token", room: "user:user-c" });
+  socket.handlers.join("user:user-d");
 
   assert.deepEqual(socket.joinedRooms, [
     "user:user-a",
     "user:user-a",
     "user:user-a",
   ]);
-  assert.equal(socket.joinedRooms.includes("user:user-b"), false);
-  assert.equal(socket.joinedRooms.includes("user:user-c"), false);
-});
-
-test("handleAuthenticatedConnection does not join rooms for unauthenticated sockets", () => {
-  const socket = createSocket();
-
-  handleAuthenticatedConnection(socket);
-
-  assert.deepEqual(Object.keys(socket.handlers), ["join"]);
-  assert.deepEqual(socket.joinedRooms, []);
-
-  socket.handlers.join({ userId: "ignored" });
-
-  assert.deepEqual(socket.joinedRooms, []);
 });
