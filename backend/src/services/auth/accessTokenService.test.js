@@ -19,15 +19,15 @@ afterEach(() => {
   else process.env.JWT_SECRET = originalJwtSecret;
 });
 
-test("signs a versioned 30-day token with string id and integer auth version", () => {
+test("signs a versioned 15-minute token with string id and integer auth version", () => {
   process.env.JWT_SECRET = jwtSecret;
   const token = signAccessTokenForUser({ _id: userId, authVersion: 7 });
   const decoded = jwt.verify(token, jwtSecret);
 
   assert.equal(decoded.id, userId);
   assert.equal(decoded.av, 7);
-  assert.ok(Math.abs(decoded.exp - decoded.iat - 30 * 24 * 60 * 60) <= 5);
-  assert.equal(ACCESS_TOKEN_EXPIRES_IN, "30d");
+  assert.ok(Math.abs(decoded.exp - decoded.iat - 15 * 60) <= 5);
+  assert.equal(ACCESS_TOKEN_EXPIRES_IN, "15m");
 });
 
 test("existing users with absent authVersion sign as version zero", () => {

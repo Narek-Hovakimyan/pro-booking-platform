@@ -170,7 +170,7 @@ test("password registration leaves clients without onboarding state", async () =
   assert.equal(issuedSessionCalls[0].req, req);
   assert.equal(issuedSessionCalls[0].res, res);
   assert.equal(issuedSessionCalls[0].user, createdUser);
-  assert.equal(res.body.token, jwt.sign({ id: userId, av: 0 }, "test-secret", { expiresIn: "30d" }));
+  assert.equal(res.body.token, jwt.sign({ id: userId, av: 0 }, "test-secret", { expiresIn: "15m" }));
   assert.equal(createPayload.specialistOnboarding, undefined);
   assert.equal("specialistOnboarding" in res.body.user, false);
   assert.equal("refreshToken" in res.body, false);
@@ -228,7 +228,7 @@ test("password login omits onboarding metadata for clients", async () => {
   assert.equal(issuedSessionCalls[0].req, req);
   assert.equal(issuedSessionCalls[0].res, res);
   assert.equal(issuedSessionCalls[0].user, user);
-  assert.equal(res.body.token, jwt.sign({ id: userId, av: 0 }, "test-secret", { expiresIn: "30d" }));
+  assert.equal(res.body.token, jwt.sign({ id: userId, av: 0 }, "test-secret", { expiresIn: "15m" }));
   assert.equal("specialistOnboarding" in res.body.user, false);
   assert.equal("refreshToken" in res.body, false);
   assert.equal("session" in res.body, false);

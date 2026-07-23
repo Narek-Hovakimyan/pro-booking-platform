@@ -38,7 +38,7 @@ const assertJwtContract = (token, expectedUserId) => {
   const decoded = jwt.verify(token, jwtSecret);
   assert.equal(decoded.id, expectedUserId);
   assert.equal(decoded.av, 0);
-  assert.ok(Math.abs((decoded.exp - decoded.iat) - 30 * 24 * 60 * 60) <= 5);
+  assert.ok(Math.abs((decoded.exp - decoded.iat) - 15 * 60) <= 5);
 };
 
 const assertPublicAuthUser = (user, expected) => {
@@ -84,7 +84,7 @@ afterEach(() => {
   }
 });
 
-test("loginUser returns a 30-day JWT and public user contract for valid password authentication", async () => {
+test("loginUser returns a 15-minute JWT and public user contract for valid password authentication", async () => {
   process.env.JWT_SECRET = jwtSecret;
   const password = "Password123!";
   const passwordHash = await bcrypt.hash(password, 10);
@@ -133,7 +133,7 @@ test("loginUser returns a 30-day JWT and public user contract for valid password
   assert.equal("token" in res.body.user, false);
 });
 
-test("registerUser creates a client with normalized auth fields and returns a 30-day JWT contract", async () => {
+test("registerUser creates a client with normalized auth fields and returns a 15-minute JWT contract", async () => {
   process.env.JWT_SECRET = jwtSecret;
   const password = "Password123!";
   let createPayload;

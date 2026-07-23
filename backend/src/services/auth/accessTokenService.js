@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 
-export const ACCESS_TOKEN_EXPIRES_IN = "30d";
+export const ACCESS_TOKEN_EXPIRES_IN = "15m";
 
 export class AccessTokenError extends Error {
   constructor(message = "Access token is invalid.") {
