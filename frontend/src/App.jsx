@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, Route, Routes } from "react-router-dom";
@@ -9,7 +9,7 @@ import ProtectedRoute from "./shared/components/ProtectedRoute";
 import SubscriptionGuard from "./shared/components/SubscriptionGuard";
 
 import { getMySubscription } from "./shared/api/subscriptions";
-import { connectSocket, disconnectSocket } from "./shared/lib/socket";
+import { connectSocket, disconnectSocket, scheduleSocketDisconnect } from "./shared/lib/socket";
 import {
   clearSubscription,
   loadSubscriptionFailure,
@@ -138,7 +138,7 @@ export default function App() {
     };
   }, [currentUserId, currentUserRole, dispatch, token]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!currentUserId || !token) {
       disconnectSocket();
       return undefined;
@@ -147,7 +147,7 @@ export default function App() {
     connectSocket(currentUserId, token);
 
     return () => {
-      disconnectSocket();
+      scheduleSocketDisconnect();
     };
   }, [currentUserId, token]);
 

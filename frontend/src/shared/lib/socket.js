@@ -7,35 +7,39 @@ const SOCKET_URL =
 let socket;
 let activeUserId;
 let activeToken;
+let pendingDisconnect = false;
 
-function getStoredToken() {
-  try {
-    const serializedState = localStorage.getItem("hairbook-redux-state");
-
-    if (!serializedState) {
-      return null;
-    }
-
-    return JSON.parse(serializedState)?.auth?.token ?? null;
-  } catch {
-    return null;
-  }
+function normalizeCredential(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export function connectSocket(userId, token = getStoredToken()) {
-  if (!userId || !token) return null;
+export function connectSocket(userId, token) {
+  const normalizedUserId = normalizeCredential(userId);
+  const normalizedToken = normalizeCredential(token);
 
-  if (socket && activeUserId === userId && activeToken === token) {
+  pendingDisconnect = false;
+
+  if (!normalizedUserId || !normalizedToken) return null;
+
+  if (socket && activeUserId === normalizedUserId && activeToken === normalizedToken) {
+    return socket;
+  }
+
+  if (socket && activeUserId === normalizedUserId) {
+    activeToken = normalizedToken;
+    socket.auth = { token: normalizedToken };
+    socket.disconnect();
+    socket.connect();
     return socket;
   }
 
   disconnectSocket();
 
-  activeUserId = userId;
-  activeToken = token;
+  activeUserId = normalizedUserId;
+  activeToken = normalizedToken;
   socket = io(SOCKET_URL, {
     autoConnect: false,
-    auth: { token },
+    auth: { token: normalizedToken },
   });
 
   socket.connect();
@@ -44,6 +48,8 @@ export function connectSocket(userId, token = getStoredToken()) {
 }
 
 export function disconnectSocket() {
+  pendingDisconnect = false;
+
   if (socket) {
     socket.disconnect();
   }
@@ -51,6 +57,16 @@ export function disconnectSocket() {
   socket = null;
   activeUserId = null;
   activeToken = null;
+}
+
+export function scheduleSocketDisconnect() {
+  pendingDisconnect = true;
+
+  queueMicrotask(() => {
+    if (pendingDisconnect) {
+      disconnectSocket();
+    }
+  });
 }
 
 export function getSocket() {

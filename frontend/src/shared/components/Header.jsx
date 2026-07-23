@@ -6,7 +6,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import api from "@/shared/api/axios";
 import { performLogout } from "@/shared/auth/performLogout";
-import { connectSocket, getSocket } from "@/shared/lib/socket";
+import { getSocket } from "@/shared/lib/socket";
 import { canAccessPlatform } from "@/shared/utils/platformAccess";
 import { addNotification } from "@/store/slices/notificationsSlice";
 import NestedHeaderMenu from "@/shared/components/NestedHeaderMenu";
@@ -196,7 +196,7 @@ export default function Header() {
   useEffect(() => {
     if (!currentUser?.id || !token) return undefined;
 
-    const socket = getSocket() || connectSocket(currentUser.id, token);
+    const socket = getSocket();
     const handleNewMessage = (message) => {
       const receiverId = getUserId(message.receiverId) || message.receiverId;
 
