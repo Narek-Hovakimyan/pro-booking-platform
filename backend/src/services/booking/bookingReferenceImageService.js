@@ -3,7 +3,7 @@ import Booking from "../../models/Booking.js";
 import {
   isValidObjectId,
   sameId,
-  canManageBookingSalon,
+  canManageBookingPrivateData,
 } from "./bookingControllerHelpers.js";
 
 export const resolveReferenceImageRequest = async ({ bookingId, imageName, user }) => {
@@ -33,7 +33,7 @@ export const resolveReferenceImageRequest = async ({ bookingId, imageName, user 
   const isSalonManager =
     !isBookingClient &&
     !isAssignedBarber &&
-    await canManageBookingSalon(booking, user?._id);
+    await canManageBookingPrivateData(booking, user?._id);
 
   if (!isBookingClient && !isAssignedBarber && !isSalonManager) {
     return { status: 403, error: "Not authorized to view these images" };

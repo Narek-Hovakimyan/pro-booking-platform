@@ -314,6 +314,20 @@ test("GET reference image allows booking salon owner", async () => {
       lean: async () => ({ _id: salonId, ownerId, admins: [] }),
     }),
   });
+  User.findById = () => ({
+    select: async () => ({
+      _id: barberId,
+      role: "barber",
+      salon: null,
+      salonStatus: "none",
+      salons: [{
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "accepted",
+      }],
+    }),
+  });
   const res = createSendFileResponse();
 
   await getReferenceImage(
@@ -911,6 +925,20 @@ test("salon owner can update treatmentRecord for booking in their salon", async 
   Salon.findById = () => ({
     select: () => ({
       lean: async () => ({ _id: salonId, ownerId, admins: [] }),
+    }),
+  });
+  User.findById = () => ({
+    select: async () => ({
+      _id: barberId,
+      role: "barber",
+      salon: null,
+      salonStatus: "none",
+      salons: [{
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "accepted",
+      }],
     }),
   });
 

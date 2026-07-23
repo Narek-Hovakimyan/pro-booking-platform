@@ -6,6 +6,7 @@ import {
   getApprovedUserSalonIds,
   getPrimaryApprovedSalonId,
 } from "../salon/salonMembershipService.js";
+import { getMemberRelationshipType } from "../salon/salonRelationshipService.js";
 
 /**
  * Check if a value is a valid MongoDB ObjectId.
@@ -167,6 +168,21 @@ export const canManageBookingSalon = async (booking, userId) => {
   );
 };
 
+export const canManageBookingPrivateData = async (booking, userId) => {
+  if (!booking?.barberId || !(await canManageBookingSalon(booking, userId))) {
+    return false;
+  }
+
+  const relationship = await getMemberRelationshipType(
+    booking.barberId,
+    booking.salonId
+  );
+
+  return (
+    relationship?.relationshipType === "staff" &&
+    relationship?.relationshipStatus === "accepted"
+  );
+};
 
 export const sameId = (left, right) =>
   String(left || "") === String(right || "");

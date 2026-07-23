@@ -1,5 +1,5 @@
 import Booking from "../../models/Booking.js";
-import { isValidObjectId, canManageBookingSalon, sameId } from "./bookingControllerHelpers.js";
+import { isValidObjectId, canManageBookingPrivateData, sameId } from "./bookingControllerHelpers.js";
 
 const treatmentRecordAllowedFields = [
   "colorFormula",
@@ -30,7 +30,7 @@ export const updateBookingTreatmentRecord = async ({ bookingId, body, user }) =>
   const isAssignedBarber =
     user?.role === "barber" && sameId(user._id, booking.barberId);
   const isSalonManager =
-    !isAssignedBarber && (await canManageBookingSalon(booking, user._id));
+    !isAssignedBarber && (await canManageBookingPrivateData(booking, user?._id));
 
   if (!isAssignedBarber && !isSalonManager) {
     return { error: "Not authorized to modify treatment record", status: 403 };
