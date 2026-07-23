@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import {
   __bookingSideEffectsTestHooks,
@@ -23,6 +24,18 @@ const createBooking = (overrides = {}) => ({
   time: "10:00",
   status: "accepted",
   serviceName: "Haircut",
+  consultation: { allergies: "none" },
+  consent: { photography: true },
+  referenceImages: [
+    {
+      path: "/private/uploads/reference-1.png",
+      url: "/uploads/reference-1.png",
+      filename: "reference-1.png",
+    },
+  ],
+  treatmentRecord: { formula: "toner-7a" },
+  paymentTransactionId: "txn_123",
+  providerClientSecret: "secret_123",
   ...overrides,
 });
 
@@ -51,7 +64,7 @@ afterEach(() => {
 
 const originalConsoleError = console.error;
 
-test("emits bookingUpdated to barber and client rooms with exact payload", () => {
+test("emits recipient-specific sanitized bookingUpdated payloads to barber and client rooms", () => {
   const booking = createBooking();
   const io = createFakeIO();
 
@@ -59,18 +72,100 @@ test("emits bookingUpdated to barber and client rooms with exact payload", () =>
 
   emitBookingUpdated(booking, "created");
 
-  assert.deepEqual(io.calls, [
+  assert.equal(io.calls.length, 2);
+
+  const [barberCall, clientCall] = io.calls;
+
+  assert.equal(barberCall.room, `user:${barberId}`);
+  assert.equal(barberCall.event, "bookingUpdated");
+  assert.equal(barberCall.payload.action, "created");
+  assert.notEqual(barberCall.payload.booking, booking);
+  assert.equal(barberCall.payload.booking.barberId, barberId);
+  assert.equal(barberCall.payload.booking.clientId, clientId);
+  assert.deepEqual(barberCall.payload.booking.consultation, booking.consultation);
+  assert.deepEqual(barberCall.payload.booking.consent, booking.consent);
+  assert.deepEqual(barberCall.payload.booking.referenceImages, booking.referenceImages);
+  assert.deepEqual(barberCall.payload.booking.treatmentRecord, booking.treatmentRecord);
+  assert.equal("paymentTransactionId" in barberCall.payload.booking, false);
+  assert.equal("providerClientSecret" in barberCall.payload.booking, false);
+
+  assert.equal(clientCall.room, `user:${clientId}`);
+  assert.equal(clientCall.event, "bookingUpdated");
+  assert.equal(clientCall.payload.action, "created");
+  assert.notEqual(clientCall.payload.booking, booking);
+  assert.notEqual(clientCall.payload.booking, barberCall.payload.booking);
+  assert.equal(clientCall.payload.booking.barberId, barberId);
+  assert.equal(clientCall.payload.booking.clientId, clientId);
+  assert.deepEqual(clientCall.payload.booking.consultation, booking.consultation);
+  assert.deepEqual(clientCall.payload.booking.consent, booking.consent);
+  assert.equal("referenceImages" in clientCall.payload.booking, false);
+  assert.equal("treatmentRecord" in clientCall.payload.booking, false);
+  assert.equal("paymentTransactionId" in clientCall.payload.booking, false);
+  assert.equal("providerClientSecret" in clientCall.payload.booking, false);
+
+  assert.deepEqual(booking.referenceImages, [
     {
-      room: `user:${barberId}`,
-      event: "bookingUpdated",
-      payload: { booking, action: "created" },
-    },
-    {
-      room: `user:${clientId}`,
-      event: "bookingUpdated",
-      payload: { booking, action: "created" },
+      path: "/private/uploads/reference-1.png",
+      url: "/uploads/reference-1.png",
+      filename: "reference-1.png",
     },
   ]);
+  assert.deepEqual(booking.treatmentRecord, { formula: "toner-7a" });
+  assert.equal(booking.paymentTransactionId, "txn_123");
+  assert.equal(booking.providerClientSecret, "secret_123");
+});
+
+test("emitted payloads stay isolated from each other and from the source booking", () => {
+  const booking = createBooking();
+  const originalConsultation = structuredClone(booking.consultation);
+  const originalReferenceImages = structuredClone(booking.referenceImages);
+  const originalTreatmentRecord = structuredClone(booking.treatmentRecord);
+  const io = createFakeIO();
+
+  __bookingSideEffectsTestHooks.setGetIO(() => io);
+  emitBookingUpdated(booking, "updated");
+
+  const [barberCall, clientCall] = io.calls;
+  barberCall.payload.booking.consultation.allergies = "bleach";
+  barberCall.payload.booking.referenceImages[0].path = "/private/uploads/changed.png";
+  barberCall.payload.booking.treatmentRecord.formula = "changed";
+
+  assert.deepEqual(clientCall.payload.booking.consultation, originalConsultation);
+  assert.equal(clientCall.payload.booking.referenceImages, undefined);
+  assert.equal(clientCall.payload.booking.treatmentRecord, undefined);
+  assert.deepEqual(booking.consultation, originalConsultation);
+  assert.deepEqual(booking.referenceImages, originalReferenceImages);
+  assert.deepEqual(booking.treatmentRecord, originalTreatmentRecord);
+
+  clientCall.payload.booking.consultation.notes = "client-change";
+  assert.deepEqual(booking.consultation, originalConsultation);
+});
+
+test("Mongoose-style ObjectId bookings emit recipient-specific privacy-safe payloads", () => {
+  const objectBarberId = new mongoose.Types.ObjectId(barberId);
+  const objectClientId = new mongoose.Types.ObjectId(clientId);
+  const booking = createBooking({
+    barberId: objectBarberId,
+    clientId: objectClientId,
+    toObject() {
+      return {
+        ...this,
+        barberId: objectBarberId,
+        clientId: objectClientId,
+      };
+    },
+  });
+  const io = createFakeIO();
+
+  __bookingSideEffectsTestHooks.setGetIO(() => io);
+  emitBookingUpdated(booking, "updated");
+
+  const [, clientCall] = io.calls;
+  assert.equal(clientCall.room, `user:${objectClientId}`);
+  assert.deepEqual(clientCall.payload.booking.consultation, booking.consultation);
+  assert.deepEqual(clientCall.payload.booking.consent, booking.consent);
+  assert.equal("referenceImages" in clientCall.payload.booking, false);
+  assert.equal("treatmentRecord" in clientCall.payload.booking, false);
 });
 
 test("skips client emit when booking has no clientId", () => {
@@ -81,13 +176,15 @@ test("skips client emit when booking has no clientId", () => {
 
   emitBookingUpdated(booking);
 
-  assert.deepEqual(io.calls, [
-    {
-      room: `user:${barberId}`,
-      event: "bookingUpdated",
-      payload: { booking, action: "updated" },
-    },
-  ]);
+  assert.equal(io.calls.length, 1);
+  assert.equal(io.calls[0].room, `user:${barberId}`);
+  assert.equal(io.calls[0].event, "bookingUpdated");
+  assert.equal(io.calls[0].payload.action, "updated");
+  assert.equal(io.calls[0].payload.booking.clientId, null);
+  assert.deepEqual(io.calls[0].payload.booking.referenceImages, booking.referenceImages);
+  assert.deepEqual(io.calls[0].payload.booking.treatmentRecord, booking.treatmentRecord);
+  assert.equal("paymentTransactionId" in io.calls[0].payload.booking, false);
+  assert.equal("providerClientSecret" in io.calls[0].payload.booking, false);
 });
 
 test("no-ops when getIO returns null or undefined", () => {

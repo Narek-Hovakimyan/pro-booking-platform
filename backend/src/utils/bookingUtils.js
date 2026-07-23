@@ -259,6 +259,43 @@ export const internalBookingPaymentFields = [
   "clientSecret",
 ];
 
+const objectIdPattern = /^[a-f\d]{24}$/i;
+
+const getObjectIdHexString = (value) => {
+  if (!value || typeof value !== "object") return "";
+
+  const toHexString = value.toHexString;
+  if (typeof toHexString !== "function") return "";
+
+  try {
+    const id = toHexString.call(value);
+    return typeof id === "string" && objectIdPattern.test(id) ? id : "";
+  } catch {
+    return "";
+  }
+};
+
+const isPlainObject = (value) => {
+  if (!value || typeof value !== "object") return false;
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const cloneBookingValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(cloneBookingValue);
+  }
+
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [key, cloneBookingValue(entryValue)])
+    );
+  }
+
+  return value;
+};
+
 const getViewerId = (viewer) => {
   if (!viewer) return "";
 
@@ -266,20 +303,23 @@ const getViewerId = (viewer) => {
     return getIdString(viewer);
   }
 
+  const directObjectId = getObjectIdHexString(viewer);
+  if (directObjectId) return directObjectId;
+
   if (typeof viewer !== "object" || Array.isArray(viewer)) {
     return "";
   }
 
   const explicitId = viewer._id ?? viewer.id;
 
-  if (
-    explicitId === undefined ||
-    explicitId === null ||
-    typeof explicitId === "function" ||
-    (typeof explicitId === "object" && explicitId !== null)
-  ) {
+  if (explicitId === undefined || explicitId === null || typeof explicitId === "function") {
     return "";
   }
+
+  const objectIdHexString = getObjectIdHexString(explicitId);
+  if (objectIdHexString) return objectIdHexString;
+
+  if (typeof explicitId === "object") return "";
 
   return getIdString(explicitId);
 };
@@ -294,7 +334,7 @@ const privateBookingFieldsWithoutViewer = [
 export const serializeBookingForResponse = (booking, viewer = null) => {
   if (!booking || typeof booking !== "object") return booking;
 
-  const response = booking.toObject ? booking.toObject() : { ...booking };
+  const response = cloneBookingValue(booking.toObject ? booking.toObject() : booking);
   const viewerId = getViewerId(viewer);
   const isBookingClient =
     viewer?.role === "client" &&

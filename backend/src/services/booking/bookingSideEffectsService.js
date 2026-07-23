@@ -4,6 +4,7 @@ import {
   formatCancelledMessage,
   formatRejectedMessage,
   formatStatusMessage,
+  serializeBookingForResponse,
 } from "../../utils/bookingUtils.js";
 import { createNotification } from "../notification/notificationService.js";
 import { notifyMatchingWaitlistEntries } from "../waitlist/waitlistService.js";
@@ -33,11 +34,25 @@ export const emitBookingUpdated = (booking, action = "updated") => {
     const io = getIOForBookingSideEffects();
     if (!io) return;
 
-    const payload = { booking, action };
+    const barberPayload = {
+      booking: serializeBookingForResponse(booking, {
+        _id: booking.barberId,
+        role: "barber",
+      }),
+      action,
+    };
 
-    io.to(`user:${booking.barberId}`).emit("bookingUpdated", payload);
+    io.to(`user:${booking.barberId}`).emit("bookingUpdated", barberPayload);
     if (booking.clientId) {
-      io.to(`user:${booking.clientId}`).emit("bookingUpdated", payload);
+      const clientPayload = {
+        booking: serializeBookingForResponse(booking, {
+          _id: booking.clientId,
+          role: "client",
+        }),
+        action,
+      };
+
+      io.to(`user:${booking.clientId}`).emit("bookingUpdated", clientPayload);
     }
   } catch {
     // Socket emit is non-critical

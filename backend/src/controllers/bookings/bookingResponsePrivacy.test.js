@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import { createBooking, delayBooking, updateBooking } from "./bookingController.js";
 import { markLateCancel, markNoShow } from "./bookingOutcomeController.js";
@@ -112,8 +113,34 @@ test("assigned barber serializer keeps treatmentRecord for Mongoose-like documen
   assert.equal(serialized.paymentTransactionIds, undefined);
 });
 
+test("ObjectId client viewers keep consultation and consent but lose treatment and reference data", () => {
+  const clientObjectId = new mongoose.Types.ObjectId(clientId);
+  const booking = createMutableBooking({
+    clientId: clientObjectId,
+    ...privateFields(),
+  });
+
+  for (const viewer of [{ _id: clientObjectId, role: "client" }, { id: clientObjectId, role: "client" }]) {
+    const serialized = serializeBookingForResponse(booking, viewer);
+    assert.deepEqual(serialized.consultation, booking.consultation);
+    assert.deepEqual(serialized.consent, booking.consent);
+    assert.equal(serialized.treatmentRecord, undefined);
+    assert.equal(serialized.referenceImages, undefined);
+  }
+});
+
+test("direct ObjectId viewers are accepted without stringifying arbitrary objects", () => {
+  const viewer = new mongoose.Types.ObjectId(clientId);
+  const booking = createMutableBooking(privateFields());
+  const serialized = serializeBookingForResponse(booking, viewer);
+
+  assert.deepEqual(serialized.consultation, booking.consultation);
+  assert.deepEqual(serialized.treatmentRecord, booking.treatmentRecord);
+  assert.equal(serialized.paymentTransactionIds, undefined);
+});
+
 test("unknown or malformed viewers fail closed without mutating the source booking", () => {
-  for (const viewer of [{}, { role: "barber" }, [], () => {}]) {
+  for (const viewer of [{}, { role: "barber" }, { _id: {} }, [], () => {}]) {
     const booking = createMutableBooking(privateFields());
     const original = {
       consultation: booking.consultation,
