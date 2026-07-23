@@ -7,6 +7,7 @@ import "./index.css";
 import "./i18n";
 import App from "./App.jsx";
 import { store } from "./store/store";
+import AuthSessionBootstrap from "./shared/components/AuthSessionBootstrap";
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
@@ -16,10 +17,14 @@ createRoot(document.getElementById("root")).render(
       <Provider store={store}>
         {googleClientId ? (
           <GoogleOAuthProvider clientId={googleClientId}>
-            <App />
+            <AuthSessionBootstrap>
+              <App />
+            </AuthSessionBootstrap>
           </GoogleOAuthProvider>
         ) : (
-          <App />
+          <AuthSessionBootstrap>
+            <App />
+          </AuthSessionBootstrap>
         )}
       </Provider>
     </BrowserRouter>

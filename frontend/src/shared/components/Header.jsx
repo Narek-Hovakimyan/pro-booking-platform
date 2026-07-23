@@ -5,9 +5,9 @@ import { useDispatch, useSelector } from "react-redux";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import api from "@/shared/api/axios";
+import { performLogout } from "@/shared/auth/performLogout";
 import { connectSocket, getSocket } from "@/shared/lib/socket";
 import { canAccessPlatform } from "@/shared/utils/platformAccess";
-import { logoutUser } from "@/store/slices/authSlice";
 import { addNotification } from "@/store/slices/notificationsSlice";
 import NestedHeaderMenu from "@/shared/components/NestedHeaderMenu";
 
@@ -61,7 +61,9 @@ export default function Header() {
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [canManageSalon, setCanManageSalon] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const moreMenuRef = useRef(null);
+  const isMountedRef = useRef(true);
   const isClient = currentUser?.role === "client";
   const isBarber = currentUser?.role === "barber";
   const isBarberOnboarding = isAuthenticated && isBarber && pathname === "/onboarding";
@@ -70,6 +72,12 @@ export default function Header() {
   const currentUserId = currentUser?.id || currentUser?._id;
   const canShowManageHiring =
     showBarberChrome && Boolean(currentUserId) && Boolean(token) && canManageSalon;
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!showBarberChrome || !currentUserId || !token) {
@@ -223,11 +231,25 @@ export default function Header() {
     };
   }, [currentUser?.id, dispatch, token]);
 
-  const logout = () => {
-    setUnreadCount(0);
-    setNotificationCount(0);
-    dispatch(logoutUser());
-    navigate("/login");
+  const logout = async () => {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+
+    await performLogout({
+      dispatch,
+      navigate,
+      onCleanup: () => {
+        setUnreadCount(0);
+        setNotificationCount(0);
+        setIsMoreOpen(false);
+        setIsMobileMenuOpen(false);
+      },
+    });
+
+    if (isMountedRef.current) {
+      setIsLoggingOut(false);
+    }
   };
 
   const handleMoreLink = (to) => {
@@ -383,6 +405,7 @@ export default function Header() {
                   className="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-300 transition hover:bg-white/10 hover:text-white"
                   onClick={logout}
                   type="button"
+                  disabled={isLoggingOut}
                 >
                   {t("nav.logout")}
                 </button>
@@ -447,6 +470,7 @@ export default function Header() {
                         className="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
                         onClick={logout}
                         type="button"
+                        disabled={isLoggingOut}
                       >
                         {t("nav.logout")}
                       </button>
@@ -573,6 +597,7 @@ export default function Header() {
                     logout();
                   }}
                   type="button"
+                  disabled={isLoggingOut}
                 >
                   {t("nav.logout")}
                 </button>

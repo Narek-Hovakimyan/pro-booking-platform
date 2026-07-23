@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 
 import authReducer, {
+  expireAuthSession,
   loginUser,
   logoutUser,
   registerUser,
+  restoreAuthSession,
   updateCurrentUser,
 } from "./authSlice";
 
@@ -26,6 +28,7 @@ describe("authSlice", () => {
   test.each([
     ["loginUser", loginUser],
     ["registerUser", registerUser],
+    ["restoreAuthSession", restoreAuthSession],
   ])("%s stores exact user/token and authenticates only when both exist", (_name, actionCreator) => {
     expect(authReducer(undefined, actionCreator({ user, token: "token-1" }))).toEqual({
       currentUser: user,
@@ -54,6 +57,23 @@ describe("authSlice", () => {
     };
 
     expect(authReducer(authenticatedState, logoutUser())).toEqual({
+      currentUser: null,
+      token: null,
+      isAuthenticated: false,
+    });
+  });
+
+  test("expireAuthSession clears the session silently", () => {
+    expect(
+      authReducer(
+        {
+          currentUser: user,
+          token: "token-1",
+          isAuthenticated: true,
+        },
+        expireAuthSession()
+      )
+    ).toEqual({
       currentUser: null,
       token: null,
       isAuthenticated: false,

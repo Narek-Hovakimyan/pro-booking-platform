@@ -1,7 +1,13 @@
 import { configureStore, createListenerMiddleware } from "@reduxjs/toolkit";
 
 import authReducer from "./slices/authSlice";
-import { loginUser, logoutUser } from "./slices/authSlice";
+import {
+  expireAuthSession,
+  loginUser,
+  logoutUser,
+  registerUser,
+  restoreAuthSession,
+} from "./slices/authSlice";
 import bookingsReducer from "./slices/bookingsSlice";
 import {
   acceptBooking,
@@ -20,8 +26,13 @@ import scheduleReducer from "./slices/scheduleSlice";
 import servicesReducer from "./slices/servicesSlice";
 import subscriptionReducer, { clearSubscription } from "./slices/subscriptionSlice";
 import usersReducer from "./slices/usersSlice";
+import { initializeAccessToken, setAccessToken, clearAccessToken } from "@/shared/auth/accessTokenStore";
+import { configureAuthSessionHandlers } from "@/shared/api/authSession";
 
 const listenerMiddleware = createListenerMiddleware();
+const preloadedState = loadState();
+
+initializeAccessToken(preloadedState?.auth?.token);
 
 listenerMiddleware.startListening({
   actionCreator: acceptBooking,
@@ -74,6 +85,7 @@ listenerMiddleware.startListening({
 listenerMiddleware.startListening({
   actionCreator: loginUser,
   effect: async (action, listenerApi) => {
+    setAccessToken(action.payload?.token);
     listenerApi.dispatch(
       addNotification({ message: "Logged in successfully", type: "success" })
     );
@@ -81,12 +93,34 @@ listenerMiddleware.startListening({
 });
 
 listenerMiddleware.startListening({
+  actionCreator: registerUser,
+  effect: async (action) => {
+    setAccessToken(action.payload?.token);
+  },
+});
+
+listenerMiddleware.startListening({
+  actionCreator: restoreAuthSession,
+  effect: async (action) => {
+    setAccessToken(action.payload?.token);
+  },
+});
+
+listenerMiddleware.startListening({
   actionCreator: logoutUser,
   effect: async (action, listenerApi) => {
+    clearAccessToken();
     listenerApi.dispatch(clearSubscription());
     listenerApi.dispatch(
       addNotification({ message: "Logged out", type: "info" })
     );
+  },
+});
+
+listenerMiddleware.startListening({
+  actionCreator: expireAuthSession,
+  effect: async () => {
+    clearAccessToken();
   },
 });
 
@@ -102,9 +136,18 @@ export const store = configureStore({
     subscription: subscriptionReducer,
     users: usersReducer,
   },
-  preloadedState: loadState(),
+  preloadedState,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().prepend(listenerMiddleware.middleware),
+});
+
+configureAuthSessionHandlers({
+  onRefresh: (session) => {
+    store.dispatch(restoreAuthSession(session));
+  },
+  onExpire: () => {
+    store.dispatch(expireAuthSession());
+  },
 });
 
 store.subscribe(() => {

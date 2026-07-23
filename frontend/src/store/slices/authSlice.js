@@ -6,21 +6,31 @@ const initialState = {
   isAuthenticated: false,
 };
 
+function applyAuthSession(state, payload = {}) {
+  state.currentUser = payload.user;
+  state.token = payload.token;
+  state.isAuthenticated = Boolean(payload.token && payload.user);
+}
+
 const authSlice = createSlice({
   name: "auth",
   initialState,
   reducers: {
     registerUser: (state, action) => {
-      state.currentUser = action.payload.user;
-      state.token = action.payload.token;
-      state.isAuthenticated = Boolean(action.payload.token && action.payload.user);
+      applyAuthSession(state, action.payload);
     },
     loginUser: (state, action) => {
-      state.currentUser = action.payload.user;
-      state.token = action.payload.token;
-      state.isAuthenticated = Boolean(action.payload.token && action.payload.user);
+      applyAuthSession(state, action.payload);
+    },
+    restoreAuthSession: (state, action) => {
+      applyAuthSession(state, action.payload);
     },
     logoutUser: (state) => {
+      state.currentUser = null;
+      state.token = null;
+      state.isAuthenticated = false;
+    },
+    expireAuthSession: (state) => {
       state.currentUser = null;
       state.token = null;
       state.isAuthenticated = false;
@@ -39,6 +49,12 @@ const authSlice = createSlice({
   },
 });
 
-export const { registerUser, loginUser, logoutUser, updateCurrentUser } =
-  authSlice.actions;
+export const {
+  registerUser,
+  loginUser,
+  restoreAuthSession,
+  logoutUser,
+  expireAuthSession,
+  updateCurrentUser,
+} = authSlice.actions;
 export default authSlice.reducer;
