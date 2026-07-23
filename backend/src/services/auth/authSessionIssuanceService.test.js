@@ -7,7 +7,7 @@ import {
   issueAuthSession,
 } from "./authSessionIssuanceService.js";
 
-const user = { _id: "64d000000000000000000001", name: "Current User" };
+const user = { _id: "64d000000000000000000001", name: "Current User", authVersion: 2 };
 const request = {
   ip: "203.0.113.10",
   headers: { "user-agent": "test-agent" },
@@ -45,7 +45,7 @@ test("prepares the access response and validates cookies before creating one ses
   assert.deepEqual(result, { token: "access-token", user: { id: user._id } });
   assert.deepEqual(events.map(([name]) => name), ["sign", "serialize", "options", "read", "create", "set"]);
   assert.equal(events[0][1], user);
-  assert.deepEqual(events[4][1], { userId: user._id, ip: request.ip, userAgent: "test-agent" });
+  assert.deepEqual(events[4][1], { userId: user._id, authVersion: 2, ip: request.ip, userAgent: "test-agent" });
   assert.equal(JSON.stringify(result).includes("new-refresh-token"), false);
 });
 

@@ -10,6 +10,7 @@ export const REFRESH_SESSION_REVOKE_REASONS = [
   "user_deleted",
   "expired",
   "reuse_detected",
+  "auth_version_mismatch",
 ];
 
 export const REFRESH_SESSION_MAX_IP_LENGTH = 128;
@@ -34,6 +35,20 @@ const refreshSessionSchema = new mongoose.Schema(
       immutable: true,
       select: false,
       trim: true,
+    },
+    authVersion: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+      select: false,
+      set(value) {
+        return typeof value === "string" ? Number.NaN : value;
+      },
+      validate: {
+        validator: Number.isInteger,
+        message: "authVersion must be a non-negative integer",
+      },
     },
     expiresAt: {
       type: Date,

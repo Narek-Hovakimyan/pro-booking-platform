@@ -3,9 +3,11 @@ import crypto from "node:crypto";
 import User, { MAX_PHONE_LENGTH } from "../../models/User.js";
 import { sendPasswordResetEmail } from "../../services/auth/emailService.js";
 import { verifyGoogleIdToken } from "../../services/auth/googleAuthService.js";
+import { issueAuthSession } from "../../services/auth/authSessionIssuanceService.js";
 import {
-  issueAuthSession,
-} from "../../services/auth/authSessionIssuanceService.js";
+  normalizeInvalidationAuthVersion,
+  revokeAllUserRefreshSessionsBestEffort,
+} from "../../services/auth/authInvalidationService.js";
 import { createTrialSubscription } from "../../services/subscriptionService.js";
 import { isValidEmail, normalizeEmail } from "../../utils/emailVerification.js";
 import { createInitialSpecialistOnboardingState } from "../../utils/specialistOnboardingState.js";
@@ -13,14 +15,14 @@ import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 
-let dependencies = { issueAuthSession };
+let dependencies = { issueAuthSession, revokeAllUserRefreshSessionsBestEffort };
 
 export function __setAuthControllerDependencies(overrides = {}) {
   dependencies = { ...dependencies, ...overrides };
 }
 
 export function __resetAuthControllerDependencies() {
-  dependencies = { issueAuthSession };
+  dependencies = { issueAuthSession, revokeAllUserRefreshSessionsBestEffort };
 }
 
 const getAuthLogger = () => getLogger().child({ component: "auth" });
@@ -443,19 +445,51 @@ export const resetPassword = async (req, res) => {
     const user = await User.findOne({
       resetPasswordTokenHash: tokenHash,
       resetPasswordExpires: { $gt: new Date() },
-    }).select("+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt");
+    }).select("+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt +authVersion");
 
     if (!user) {
       return res.status(400).json({ message: "Invalid or expired reset token" });
     }
 
-    // Hash new password and update
+    let expectedAuthVersion;
+    try {
+      expectedAuthVersion = normalizeInvalidationAuthVersion(user.authVersion, { allowMissing: true });
+    } catch {
+      return res.status(400).json({ message: "Invalid or expired reset token" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
-    user.password = hashedPassword;
-    user.resetPasswordTokenHash = "";
-    user.resetPasswordExpires = null;
-    user.resetPasswordSentAt = null;
-    await user.save();
+    const authVersionFilter =
+      expectedAuthVersion === 0
+        ? { $or: [{ authVersion: 0 }, { authVersion: { $exists: false } }] }
+        : { authVersion: expectedAuthVersion };
+    const updateResult = await User.updateOne(
+      {
+        _id: user._id,
+        resetPasswordTokenHash: tokenHash,
+        resetPasswordExpires: { $gt: new Date() },
+        ...authVersionFilter,
+      },
+      {
+        $set: {
+          password: hashedPassword,
+          resetPasswordTokenHash: "",
+          resetPasswordExpires: null,
+          resetPasswordSentAt: null,
+        },
+        $inc: { authVersion: 1 },
+      }
+    );
+
+    if (!updateResult?.matchedCount) {
+      return res.status(400).json({ message: "Invalid or expired reset token" });
+    }
+
+    await dependencies.revokeAllUserRefreshSessionsBestEffort({
+      userId: user._id,
+      reason: "password_reset",
+      event: "auth.password_reset_cleanup_failed",
+    });
 
     return res.json({ message: "Password has been reset successfully." });
   } catch (error) {

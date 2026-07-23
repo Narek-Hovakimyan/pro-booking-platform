@@ -7,12 +7,18 @@ import { Writable } from "node:stream";
 import { getLogger, resetLogger } from "../../config/logger.js";
 import User from "../../models/User.js";
 import { setEmailTransportFactoryForTesting } from "../../services/auth/emailService.js";
-import { forgotPassword, resetPassword } from "./authController.js";
+import {
+  __resetAuthControllerDependencies,
+  __setAuthControllerDependencies,
+  forgotPassword,
+  resetPassword,
+} from "./authController.js";
 
 const genericResetMessage =
   "If an account exists, password reset instructions have been sent.";
 
 const originalFindOne = User.findOne;
+const originalUpdateOne = User.updateOne;
 const originalNodeEnv = process.env.NODE_ENV;
 const originalClientUrl = process.env.CLIENT_URL;
 const originalEmailHost = process.env.EMAIL_HOST;
@@ -61,6 +67,8 @@ beforeEach(() => {
 
 afterEach(() => {
   User.findOne = originalFindOne;
+  User.updateOne = originalUpdateOne;
+  __resetAuthControllerDependencies();
   setEmailTransportFactoryForTesting();
   resetLogger();
 
@@ -400,34 +408,110 @@ test("reset-password with valid token changes password and clears reset fields",
   const oldPassword = "oldpassword123";
   const newPassword = "newpassword456";
   const user = {
+    _id: "64d000000000000000000001",
     password: await bcrypt.hash(oldPassword, 10),
     resetPasswordTokenHash: hashToken("valid-token"),
     resetPasswordExpires: new Date(Date.now() + 60_000),
     resetPasswordSentAt: new Date(),
-    saved: false,
-    async save() {
-      this.saved = true;
-    },
+    authVersion: 2,
   };
+  let updateCall;
+  let cleanupCall;
 
   User.findOne = (query) => {
     assert.equal(query.resetPasswordTokenHash, hashToken("valid-token"));
     assert.ok(query.resetPasswordExpires.$gt instanceof Date);
-    return selectable(user);
+    return selectable(user, (fields) => {
+      assert.equal(fields, "+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt +authVersion");
+    });
   };
+  User.updateOne = async (filter, update) => {
+    updateCall = { filter, update };
+    user.password = update.$set.password;
+    user.resetPasswordTokenHash = update.$set.resetPasswordTokenHash;
+    user.resetPasswordExpires = update.$set.resetPasswordExpires;
+    user.resetPasswordSentAt = update.$set.resetPasswordSentAt;
+    user.authVersion += update.$inc.authVersion;
+    return { matchedCount: 1, modifiedCount: 1 };
+  };
+  __setAuthControllerDependencies({
+    revokeAllUserRefreshSessionsBestEffort: async (payload) => {
+      cleanupCall = payload;
+      return true;
+    },
+  });
 
   const res = mockRes();
   await resetPassword({ body: { token: " valid-token ", password: newPassword } }, res);
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: "Password has been reset successfully." });
-  assert.equal(user.saved, true);
+  assert.deepEqual(updateCall.filter, {
+    _id: user._id,
+    resetPasswordTokenHash: hashToken("valid-token"),
+    resetPasswordExpires: { $gt: updateCall.filter.resetPasswordExpires.$gt },
+    authVersion: 2,
+  });
+  assert.ok(updateCall.filter.resetPasswordExpires.$gt instanceof Date);
+  assert.equal(updateCall.update.$inc.authVersion, 1);
   assert.equal(await bcrypt.compare(newPassword, user.password), true);
   assert.equal(await bcrypt.compare(oldPassword, user.password), false);
   assert.equal(user.resetPasswordTokenHash, "");
   assert.equal(user.resetPasswordExpires, null);
   assert.equal(user.resetPasswordSentAt, null);
+  assert.equal(user.authVersion, 3);
+  assert.deepEqual(cleanupCall, {
+    userId: user._id,
+    reason: "password_reset",
+    event: "auth.password_reset_cleanup_failed",
+  });
   assert.equal("password" in res.body, false);
+});
+
+test("reset-password conditional update prevents token reuse races", async () => {
+  const user = {
+    _id: "64d000000000000000000002",
+    authVersion: 0,
+  };
+  let updateCall;
+  let cleanupCalled = false;
+  User.findOne = () => selectable(user);
+  User.updateOne = async (filter, update) => {
+    updateCall = { filter, update };
+    return { matchedCount: 0, modifiedCount: 0 };
+  };
+  __setAuthControllerDependencies({
+    revokeAllUserRefreshSessionsBestEffort: async () => {
+      cleanupCalled = true;
+    },
+  });
+
+  const res = mockRes();
+  await resetPassword({ body: { token: "race-token", password: "newpassword123" } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid or expired reset token");
+  assert.deepEqual(updateCall.filter.$or, [
+    { authVersion: 0 },
+    { authVersion: { $exists: false } },
+  ]);
+  assert.equal(updateCall.update.$inc.authVersion, 1);
+  assert.equal(cleanupCalled, false);
+});
+
+test("reset-password cleanup failure remains successful after authVersion update", async () => {
+  getLogger({ level: "silent" });
+  User.findOne = () => selectable({ _id: "64d000000000000000000003", authVersion: 1 });
+  User.updateOne = async () => ({ matchedCount: 1, modifiedCount: 1 });
+  __setAuthControllerDependencies({
+    revokeAllUserRefreshSessionsBestEffort: async () => false,
+  });
+
+  const res = mockRes();
+  await resetPassword({ body: { token: "valid-token", password: "newpassword123" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: "Password has been reset successfully." });
 });
 
 test("password reset fields are excluded by default from User queries", () => {

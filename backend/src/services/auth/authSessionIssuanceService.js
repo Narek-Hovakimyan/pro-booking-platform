@@ -94,6 +94,7 @@ export async function issueAuthSession({ req, res, user } = {}) {
   try {
     replacement = await dependencies.createRefreshSession({
       userId: user._id,
+      authVersion: user.authVersion,
       ...requestMetadata(req),
     });
   } catch {

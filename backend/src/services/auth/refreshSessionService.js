@@ -71,6 +71,19 @@ function assertRequiredUserId(userId) {
   }
 }
 
+export function normalizeRefreshSessionAuthVersion(value, { allowMissing = false } = {}) {
+  if (value === undefined) {
+    if (allowMissing) return 0;
+    throw new TypeError("authVersion must be a non-negative integer.");
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new TypeError("authVersion must be a non-negative integer.");
+  }
+
+  return value;
+}
+
 function normalizeRawRefreshToken(rawToken) {
   if (typeof rawToken !== "string") {
     throw createRefreshSessionError(
@@ -118,6 +131,7 @@ export async function createRefreshSession({
   userId,
   familyId,
   parentSessionId = null,
+  authVersion,
   userAgent = "",
   ip = "",
   now = new Date(),
@@ -133,6 +147,7 @@ export async function createRefreshSession({
     userId,
     familyId: normalizeFamilyId(familyId),
     tokenHash,
+    authVersion: normalizeRefreshSessionAuthVersion(authVersion, { allowMissing: true }),
     expiresAt: new Date(createdAt.getTime() + ttlMs),
     parentSessionId,
     createdByIp: normalizeMetadata(ip, REFRESH_SESSION_MAX_IP_LENGTH),
@@ -168,7 +183,10 @@ export async function rotateRefreshSession({
         lastUsedIp,
       },
     },
-    { new: false }
+    {
+      new: false,
+      projection: "+authVersion",
+    }
   );
 
   if (!claimedSession) {
@@ -211,10 +229,16 @@ export async function rotateRefreshSession({
     );
   }
 
+  const claimedAuthVersion = normalizeRefreshSessionAuthVersion(
+    claimedSession.authVersion,
+    { allowMissing: true }
+  );
+
   const replacement = await createRefreshSession({
     userId: claimedSession.userId,
     familyId: claimedSession.familyId,
     parentSessionId: claimedSession._id,
+    authVersion: claimedAuthVersion,
     userAgent:
       userAgent || claimedSession.userAgent || "",
     ip,

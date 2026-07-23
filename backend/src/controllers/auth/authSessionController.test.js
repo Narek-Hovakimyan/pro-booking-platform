@@ -111,6 +111,7 @@ test("refresh rotates only the cookie token and returns current compatible auth 
         session: {
           userId,
           familyId: "family-1",
+          authVersion: 3,
           role: "admin",
           salon: "untrusted-session-salon",
         },
@@ -196,6 +197,67 @@ test("refresh revokes remaining family when the rotated user no longer exists", 
   assert.equal(res.statusCode, 401);
   assert.deepEqual(calls.family, [{ familyId: "family-2", reason: "user_deleted" }]);
   assert.equal(JSON.stringify(res.body).includes("replacement-token"), false);
+  assert.equal(res.clearCookieCalls.length, 1);
+});
+
+test("refresh rejects authVersion mismatch generically and never signs or serializes", async () => {
+  const calls = { family: [], sign: 0, serialize: 0 };
+  __setAuthSessionControllerDependencies({
+    User: { findById: findByIdReturning({ _id: "user-1", role: "client", authVersion: 2 }, "user-1") },
+    rotateRefreshSession: async () => ({
+      refreshToken: "replacement-token",
+      session: { userId: "user-1", familyId: "family-mismatch", authVersion: 1 },
+    }),
+    revokeRefreshFamily: async (payload) => {
+      calls.family.push(payload);
+    },
+    signAccessToken: () => {
+      calls.sign += 1;
+      return "access-token";
+    },
+    serializeAuthUser: () => {
+      calls.serialize += 1;
+      return {};
+    },
+  });
+
+  const res = createResponse();
+  await refreshAuthSession(createRequest(), res);
+
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.body, {
+    message: "Session expired",
+    code: "AUTH_REFRESH_FAILED",
+  });
+  assert.deepEqual(calls.family, [
+    { familyId: "family-mismatch", reason: "auth_version_mismatch" },
+  ]);
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.serialize, 0);
+  assert.equal(res.cookieCalls.length, 0);
+  assert.equal(res.clearCookieCalls.length, 1);
+});
+
+test("refresh rejects malformed session authVersion as a generic mismatch", async () => {
+  const familyCalls = [];
+  __setAuthSessionControllerDependencies({
+    User: { findById: findByIdReturning({ _id: "user-1", role: "client", authVersion: 0 }, "user-1") },
+    rotateRefreshSession: async () => ({
+      refreshToken: "replacement-token",
+      session: { userId: "user-1", familyId: "family-bad-version", authVersion: "0" },
+    }),
+    revokeRefreshFamily: async (payload) => {
+      familyCalls.push(payload);
+    },
+  });
+
+  const res = createResponse();
+  await refreshAuthSession(createRequest(), res);
+
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(familyCalls, [
+    { familyId: "family-bad-version", reason: "auth_version_mismatch" },
+  ]);
   assert.equal(res.clearCookieCalls.length, 1);
 });
 
@@ -306,8 +368,11 @@ test("logout clears the cookie and returns generic 500 on unexpected revocation 
 test("logout-all revokes only req.user sessions and ignores forged request user IDs", async () => {
   const calls = [];
   __setAuthSessionControllerDependencies({
-    revokeAllUserRefreshSessions: async (payload) => {
-      calls.push(payload);
+    incrementUserAuthVersion: async (userId) => {
+      calls.push(["increment", userId]);
+    },
+    revokeAllUserRefreshSessionsBestEffort: async (payload) => {
+      calls.push(["cleanup", payload]);
     },
   });
 
@@ -322,15 +387,18 @@ test("logout-all revokes only req.user sessions and ignores forged request user 
   );
 
   assert.equal(res.statusCode, 204);
-  assert.deepEqual(calls, [{ userId: "current-user", reason: "logout_all" }]);
+  assert.deepEqual(calls, [
+    ["increment", "current-user"],
+    ["cleanup", { userId: "current-user", reason: "logout_all", event: "auth.logout_all_cleanup_failed" }],
+  ]);
   assert.equal(res.clearCookieCalls.length, 1);
   assert.equal(res.body, undefined);
 });
 
-test("logout-all clears cookie and returns generic 500 on revocation failure", async () => {
+test("logout-all clears cookie and returns generic 500 when authVersion increment fails", async () => {
   getLogger({ level: "silent" });
   __setAuthSessionControllerDependencies({
-    revokeAllUserRefreshSessions: async () => {
+    incrementUserAuthVersion: async () => {
       throw new Error("database unavailable");
     },
   });
@@ -341,4 +409,25 @@ test("logout-all clears cookie and returns generic 500 on revocation failure", a
   assert.equal(res.statusCode, 500);
   assert.deepEqual(res.body, { message: "Logout failed" });
   assert.equal(res.clearCookieCalls.length, 1);
+});
+
+test("logout-all treats refresh-session cleanup failure as best-effort after increment", async () => {
+  const calls = [];
+  __setAuthSessionControllerDependencies({
+    incrementUserAuthVersion: async (userId) => {
+      calls.push(["increment", userId]);
+    },
+    revokeAllUserRefreshSessionsBestEffort: async (payload) => {
+      calls.push(["cleanup", payload]);
+      return false;
+    },
+  });
+
+  const res = createResponse();
+  await logoutAllAuthSessions(createRequest({ user: { _id: "current-user" } }), res);
+
+  assert.equal(res.statusCode, 204);
+  assert.equal(res.ended, true);
+  assert.equal(res.clearCookieCalls.length, 1);
+  assert.equal(calls.length, 2);
 });

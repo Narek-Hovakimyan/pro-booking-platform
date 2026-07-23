@@ -80,6 +80,7 @@ test("createRefreshSession stores only a hash, preserves/generates family metada
     userId: "user-1",
     familyId: "family-1",
     parentSessionId: "parent-1",
+    authVersion: 2,
     userAgent: `  ${"u".repeat(600)}  `,
     ip: `  ${"1".repeat(200)}  `,
     now,
@@ -88,26 +89,40 @@ test("createRefreshSession stores only a hash, preserves/generates family metada
 
   assert.equal(writes[0].familyId, "family-1");
   assert.equal(writes[0].parentSessionId, "parent-1");
+  assert.equal(writes[0].authVersion, 2);
   assert.equal(writes[0].expiresAt.toISOString(), new Date(now.getTime() + REFRESH_SESSION_TTL_MS).toISOString());
   assert.equal(writes[0].createdByIp.length, 128);
   assert.equal(writes[0].userAgent.length, 512);
   assert.ok(!("refreshToken" in writes[0]));
   assert.equal(hashRefreshToken(explicitFamily.refreshToken), writes[0].tokenHash);
+  assert.equal(writes[1].authVersion, 0);
   assert.match(generatedFamily.session.familyId, /^[0-9a-f-]{36}$/i);
+});
+
+test("createRefreshSession rejects malformed authVersion values", async () => {
+  for (const authVersion of [-1, 1.5, NaN, "1", null]) {
+    await assert.rejects(
+      () => createRefreshSession({ userId: "user-1", authVersion }),
+      /authVersion/
+    );
+  }
 });
 
 test("rotateRefreshSession atomically claims the old session, creates a linked replacement, and keeps raw tokens out of writes", async () => {
   const now = new Date("2026-07-22T12:00:00.000Z");
   const oldToken = "active-token";
   const writes = [];
+  const claimOptions = [];
   const claimedSession = {
     _id: "session-old",
     userId: "user-1",
     familyId: "family-1",
     userAgent: "agent-a",
+    authVersion: 4,
   };
 
-  RefreshSession.findOneAndUpdate = async (filter, update) => {
+  RefreshSession.findOneAndUpdate = async (filter, update, options) => {
+    claimOptions.push(options);
     writes.push({ type: "claim", filter, update });
     return claimedSession;
   };
@@ -132,11 +147,14 @@ test("rotateRefreshSession atomically claims the old session, creates a linked r
     revokedAt: null,
     expiresAt: { $gt: now },
   });
+  assert.deepEqual(claimOptions[0], { new: false, projection: "+authVersion" });
   assert.equal(writes[0].update.$set.revokedReason, "rotated");
   assert.equal(writes[0].update.$set.lastUsedIp, "10.0.0.5");
   assert.equal(writes[1].document.userId, "user-1");
   assert.equal(writes[1].document.familyId, "family-1");
   assert.equal(writes[1].document.parentSessionId, "session-old");
+  assert.equal(writes[1].document.authVersion, 4);
+  assert.notEqual(writes[1].document.authVersion, 0);
   assert.equal(hashRefreshToken(result.refreshToken), writes[1].document.tokenHash);
   assert.notEqual(result.refreshToken, oldToken);
   assert.deepEqual(writes[2], {
@@ -146,6 +164,43 @@ test("rotateRefreshSession atomically claims the old session, creates a linked r
   });
   assert.equal(JSON.stringify(writes).includes(oldToken), false);
   assert.equal(JSON.stringify(writes).includes(result.refreshToken), false);
+});
+
+test("rotateRefreshSession treats legacy missing authVersion as zero and rejects malformed stored versions", async () => {
+  const now = new Date("2026-07-22T12:30:00.000Z");
+  const legacyToken = "legacy-version-token";
+  const malformedToken = "malformed-version-token";
+  const malformedHash = hashRefreshToken(malformedToken);
+  const writes = [];
+
+  RefreshSession.findOneAndUpdate = async (filter) => {
+    if (filter.tokenHash === malformedHash) {
+      return {
+        _id: "session-bad",
+        userId: "user-1",
+        familyId: "family-bad",
+        authVersion: "1",
+      };
+    }
+    return {
+      _id: "session-legacy",
+      userId: "user-1",
+      familyId: "family-legacy",
+    };
+  };
+  RefreshSession.create = async (document) => {
+    writes.push(document);
+    return { ...document, _id: "session-new" };
+  };
+  RefreshSession.updateOne = async () => ({ modifiedCount: 1 });
+
+  await rotateRefreshSession({ refreshToken: legacyToken, now });
+  assert.equal(writes[0].authVersion, 0);
+  await assert.rejects(
+    () => rotateRefreshSession({ refreshToken: malformedToken, now }),
+    /authVersion/
+  );
+  assert.equal(writes.length, 1);
 });
 
 test("rotateRefreshSession rejects unknown, expired, and reused tokens with stable codes", async () => {

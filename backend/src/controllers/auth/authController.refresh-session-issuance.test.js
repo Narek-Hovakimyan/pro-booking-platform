@@ -276,7 +276,7 @@ test("dependency reset restores the real issuer without requiring res.cookie", a
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { token: "real-issuer-token", user: { id: userId } });
   assert.deepEqual(events, [
-    ["create", { userId, ip: "198.51.100.10", userAgent: undefined }],
+    ["create", { userId, authVersion: undefined, ip: "198.51.100.10", userAgent: undefined }],
     ["set", res, "replacement"],
   ]);
 });

@@ -5,8 +5,13 @@ import {
   revokeAllUserRefreshSessions,
   revokeRefreshFamily,
   revokeRefreshToken,
+  normalizeRefreshSessionAuthVersion,
   rotateRefreshSession,
 } from "../../services/auth/refreshSessionService.js";
+import {
+  incrementUserAuthVersion,
+  revokeAllUserRefreshSessionsBestEffort,
+} from "../../services/auth/authInvalidationService.js";
 import { serializeAuthUser, signAccessToken } from "../../services/auth/authResponseService.js";
 import {
   clearRuntimeRefreshCookie,
@@ -27,6 +32,8 @@ let dependencies = {
   revokeRefreshToken,
   revokeRefreshFamily,
   revokeAllUserRefreshSessions,
+  incrementUserAuthVersion,
+  revokeAllUserRefreshSessionsBestEffort,
   readRuntimeRefreshToken,
   setRuntimeRefreshCookie,
   clearRuntimeRefreshCookie,
@@ -45,6 +52,8 @@ export function __resetAuthSessionControllerDependencies() {
     revokeRefreshToken,
     revokeRefreshFamily,
     revokeAllUserRefreshSessions,
+    incrementUserAuthVersion,
+    revokeAllUserRefreshSessionsBestEffort,
     readRuntimeRefreshToken,
     setRuntimeRefreshCookie,
     clearRuntimeRefreshCookie,
@@ -80,6 +89,15 @@ function findUserById(userId) {
   return dependencies.User.findById(userId).select("-password +authVersion");
 }
 
+function authVersionsMatch(session, user) {
+  try {
+    return normalizeRefreshSessionAuthVersion(session?.authVersion, { allowMissing: true }) ===
+      normalizeRefreshSessionAuthVersion(user?.authVersion, { allowMissing: true });
+  } catch {
+    return false;
+  }
+}
+
 export async function refreshAuthSession(req, res) {
   const refreshToken = dependencies.readRuntimeRefreshToken(req);
 
@@ -100,6 +118,15 @@ export async function refreshAuthSession(req, res) {
       await dependencies.revokeRefreshFamily({
         familyId: replacement.session.familyId,
         reason: "user_deleted",
+      });
+      clearCookieSafely(res);
+      return res.status(401).json(REFRESH_FAILURE_BODY);
+    }
+
+    if (!authVersionsMatch(replacement.session, user)) {
+      await dependencies.revokeRefreshFamily({
+        familyId: replacement.session.familyId,
+        reason: "auth_version_mismatch",
       });
       clearCookieSafely(res);
       return res.status(401).json(REFRESH_FAILURE_BODY);
@@ -147,9 +174,11 @@ export async function logoutAuthSession(req, res) {
 
 export async function logoutAllAuthSessions(req, res) {
   try {
-    await dependencies.revokeAllUserRefreshSessions({
+    await dependencies.incrementUserAuthVersion(req.user?._id);
+    await dependencies.revokeAllUserRefreshSessionsBestEffort({
       userId: req.user?._id,
       reason: "logout_all",
+      event: "auth.logout_all_cleanup_failed",
     });
     dependencies.clearRuntimeRefreshCookie(res);
     return res.status(204).end();
