@@ -8,12 +8,11 @@ const usersSlice = createSlice({
       reducer: (state, action) => {
         state.push(action.payload);
       },
-      prepare: ({ name, phone, password, role }) => ({
+      prepare: ({ name, phone, role }) => ({
         payload: {
           id: Date.now(),
           name,
           phone,
-          password,
           role,
           bio: "",
           city: "",

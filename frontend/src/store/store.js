@@ -17,7 +17,7 @@ import {
   updateBooking,
 } from "./slices/bookingsSlice";
 import favoritesReducer from "./slices/favoritesSlice";
-import { loadState, saveState } from "./localStorage";
+import { clearLegacyReduxState } from "./localStorage";
 import notificationsReducer, {
   addNotification,
 } from "./slices/notificationsSlice";
@@ -30,9 +30,9 @@ import { initializeAccessToken, setAccessToken, clearAccessToken } from "@/share
 import { configureAuthSessionHandlers } from "@/shared/api/authSession";
 
 const listenerMiddleware = createListenerMiddleware();
-const preloadedState = loadState();
 
-initializeAccessToken(preloadedState?.auth?.token);
+clearLegacyReduxState();
+initializeAccessToken(null);
 
 listenerMiddleware.startListening({
   actionCreator: acceptBooking,
@@ -136,7 +136,6 @@ export const store = configureStore({
     subscription: subscriptionReducer,
     users: usersReducer,
   },
-  preloadedState,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().prepend(listenerMiddleware.middleware),
 });
@@ -148,8 +147,4 @@ configureAuthSessionHandlers({
   onExpire: () => {
     store.dispatch(expireAuthSession());
   },
-});
-
-store.subscribe(() => {
-  saveState(store.getState());
 });

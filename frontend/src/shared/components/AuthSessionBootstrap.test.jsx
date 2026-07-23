@@ -25,12 +25,12 @@ function createStore(preloadedAuth) {
   });
 }
 
-async function renderBootstrap(store) {
+async function renderBootstrap(preloadedAuth) {
   vi.resetModules();
   const { default: AuthSessionBootstrap } = await import("./AuthSessionBootstrap");
 
   return (
-    <Provider store={store}>
+    <Provider store={createStore(preloadedAuth)}>
       <StrictMode>
         <AuthSessionBootstrap>
           <div>bootstrapped app</div>
@@ -55,9 +55,11 @@ describe("AuthSessionBootstrap", () => {
     authSessionMocks.applyRefreshedAuthSessionMock.mockResolvedValueOnce(undefined);
     const { render } = await import("@testing-library/react");
     render(
-      await renderBootstrap(
-        createStore({ currentUser: null, token: null, isAuthenticated: false })
-      )
+      await renderBootstrap({
+        currentUser: null,
+        token: null,
+        isAuthenticated: false,
+      })
     );
 
     expect(screen.queryByText("bootstrapped app")).not.toBeInTheDocument();
@@ -70,43 +72,33 @@ describe("AuthSessionBootstrap", () => {
       token: "fresh-token",
       user: { id: "user-1" },
     });
-  });
-
-  test("preserves a complete legacy session on refresh 401", async () => {
-    authSessionMocks.requestRefreshSessionMock.mockRejectedValueOnce({
-      response: { status: 401 },
-    });
-    const { render } = await import("@testing-library/react");
-    render(
-      await renderBootstrap(
-        createStore({
-          currentUser: { id: "legacy-user" },
-          token: "legacy-token",
-          isAuthenticated: true,
-        })
-      )
-    );
-
-    await waitFor(() =>
-      expect(screen.getByText("bootstrapped app")).toBeInTheDocument()
-    );
     expect(authSessionMocks.expireCurrentAuthSessionMock).not.toHaveBeenCalled();
   });
 
-  test("expires malformed refresh success and mounts children after settlement", async () => {
-    authSessionMocks.requestRefreshSessionMock.mockRejectedValueOnce({
-      code: "AUTH_SESSION_INVALID_RESPONSE",
-    });
+  test.each([
+    ["401", { response: { status: 401 } }],
+    ["malformed refresh response", { code: "AUTH_SESSION_INVALID_RESPONSE" }],
+    ["network error", new Error("Network Error")],
+    ["403", { response: { status: 403 } }],
+    ["429", { response: { status: 429 } }],
+    ["5xx", { response: { status: 503 } }],
+  ])("expires auth on bootstrap failure: %s", async (_label, error) => {
+    authSessionMocks.requestRefreshSessionMock.mockRejectedValueOnce(error);
     const { render } = await import("@testing-library/react");
     render(
-      await renderBootstrap(
-        createStore({ currentUser: null, token: null, isAuthenticated: false })
-      )
+      await renderBootstrap({
+        currentUser: { id: "legacy-user" },
+        token: "legacy-token",
+        isAuthenticated: true,
+      })
     );
+
+    expect(screen.queryByText("bootstrapped app")).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(screen.getByText("bootstrapped app")).toBeInTheDocument()
     );
+    expect(authSessionMocks.applyRefreshedAuthSessionMock).not.toHaveBeenCalled();
     expect(authSessionMocks.expireCurrentAuthSessionMock).toHaveBeenCalledTimes(1);
   });
 
@@ -118,9 +110,11 @@ describe("AuthSessionBootstrap", () => {
     authSessionMocks.applyRefreshedAuthSessionMock.mockResolvedValueOnce(undefined);
     const { render } = await import("@testing-library/react");
     render(
-      await renderBootstrap(
-        createStore({ currentUser: null, token: null, isAuthenticated: false })
-      )
+      await renderBootstrap({
+        currentUser: null,
+        token: null,
+        isAuthenticated: false,
+      })
     );
 
     await waitFor(() =>
