@@ -43,7 +43,7 @@ const selectable = (result, onSelect = () => {}) => ({
 });
 
 const signToken = (payload, options = {}) =>
-  jwt.sign(payload, jwtSecret, options);
+  jwt.sign({ av: 0, ...payload }, jwtSecret, options);
 
 afterEach(() => {
   User.findById = originalFindById;
@@ -101,9 +101,32 @@ test("protect returns 401 for invalid and expired tokens", async () => {
   }
 });
 
+test("protect returns 401 for legacy, malformed-version, and version-mismatched tokens", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const user = { _id: "64d000000000000000000001", role: "client", authVersion: 2 };
+  User.findById = () => selectable(user);
+
+  for (const token of [
+    jwt.sign({ id: user._id }, jwtSecret),
+    jwt.sign({ id: user._id, av: "2" }, jwtSecret),
+    signToken({ id: user._id, av: 1 }),
+  ]) {
+    const req = makeReq(`Bearer ${token}`);
+    const res = makeRes();
+    const next = makeNext();
+
+    await protect(req, res, next);
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.body, { message: "Not authorized, token failed" });
+    assert.equal(next.callCount(), 0);
+    assert.equal(req.user, undefined);
+  }
+});
+
 test("protect verifies JWT, loads the user from the database, and excludes password", async () => {
   process.env.JWT_SECRET = jwtSecret;
-  const user = { _id: "64d000000000000000000001", role: "barber", name: "Loaded User" };
+  const user = { _id: "64d000000000000000000001", role: "barber", name: "Loaded User", authVersion: 2 };
   const lookupCalls = [];
   let selectedFields = "";
 
@@ -114,14 +137,14 @@ test("protect verifies JWT, loads the user from the database, and excludes passw
     });
   };
 
-  const req = makeReq(`Bearer ${signToken({ id: user._id, role: "client", salons: ["forged"] })}`);
+  const req = makeReq(`Bearer ${signToken({ id: user._id, av: 2, role: "client", salons: ["forged"] })}`);
   const res = makeRes();
   const next = makeNext();
 
   await protect(req, res, next);
 
   assert.deepEqual(lookupCalls, [user._id]);
-  assert.equal(selectedFields, "-password");
+  assert.equal(selectedFields, "-password +authVersion");
   assert.equal(req.user, user);
   assert.equal(req.user.role, "barber");
   assert.equal(next.callCount(), 1);
@@ -144,7 +167,7 @@ test("protect returns 401 when a valid token references a missing user", async (
 
   await protect(req, res, next);
 
-  assert.equal(selectedFields, "-password");
+  assert.equal(selectedFields, "-password +authVersion");
   assert.equal(res.statusCode, 401);
   assert.deepEqual(res.body, { message: "Not authorized, user not found" });
   assert.equal(next.callCount(), 0);
@@ -169,7 +192,7 @@ test("optionalAuth continues anonymously with no header or non-Bearer authorizat
 
 test("optionalAuth sets req.user for a valid Bearer token and calls next once", async () => {
   process.env.JWT_SECRET = jwtSecret;
-  const user = { _id: "64d000000000000000000010", role: "client" };
+  const user = { _id: "64d000000000000000000010", role: "client", authVersion: 0 };
   let selectedFields = "";
 
   User.findById = (id) => {
@@ -185,7 +208,7 @@ test("optionalAuth sets req.user for a valid Bearer token and calls next once", 
 
   await optionalAuth(req, res, next);
 
-  assert.equal(selectedFields, "-password");
+  assert.equal(selectedFields, "-password +authVersion");
   assert.equal(req.user, user);
   assert.equal(next.callCount(), 1);
   assert.equal(res.statusCode, 200);
@@ -195,6 +218,28 @@ test("optionalAuth returns 401 for invalid and expired Bearer tokens", async () 
   process.env.JWT_SECRET = jwtSecret;
 
   for (const token of ["not-a-jwt", signToken({ id: "user-1" }, { expiresIn: -1 })]) {
+    const req = makeReq(`Bearer ${token}`);
+    const res = makeRes();
+    const next = makeNext();
+
+    await optionalAuth(req, res, next);
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.body, { message: "Not authorized, token failed" });
+    assert.equal(next.callCount(), 0);
+    assert.equal(req.user, undefined);
+  }
+});
+
+test("optionalAuth returns 401 for legacy or version-mismatched Bearer tokens", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const user = { _id: "64d000000000000000000010", role: "client", authVersion: 3 };
+  User.findById = () => selectable(user);
+
+  for (const token of [
+    jwt.sign({ id: user._id }, jwtSecret),
+    signToken({ id: user._id, av: 2 }),
+  ]) {
     const req = makeReq(`Bearer ${token}`);
     const res = makeRes();
     const next = makeNext();
@@ -225,7 +270,7 @@ test("optionalAuth keeps current anonymous behavior when a valid token reference
 
   await optionalAuth(req, res, next);
 
-  assert.equal(selectedFields, "-password");
+  assert.equal(selectedFields, "-password +authVersion");
   assert.equal(req.user, undefined);
   assert.equal(next.callCount(), 1);
   assert.equal(res.statusCode, 200);

@@ -37,6 +37,7 @@ const assertJwtContract = (token, expectedUserId) => {
   assert.equal(typeof token, "string");
   const decoded = jwt.verify(token, jwtSecret);
   assert.equal(decoded.id, expectedUserId);
+  assert.equal(decoded.av, 0);
   assert.ok(Math.abs((decoded.exp - decoded.iat) - 30 * 24 * 60 * 60) <= 5);
 };
 

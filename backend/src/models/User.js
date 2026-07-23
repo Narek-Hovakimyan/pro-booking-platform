@@ -393,6 +393,18 @@ const userSchema = new mongoose.Schema({
       ref: "Salon",
     },
   ],
+  authVersion: {
+    type: Number,
+    default: 0,
+    min: 0,
+    validate: {
+      validator(value) {
+        return Number.isInteger(value);
+      },
+      message: "authVersion must be a non-negative integer",
+    },
+    select: false,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

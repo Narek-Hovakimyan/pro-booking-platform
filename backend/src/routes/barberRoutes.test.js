@@ -69,14 +69,19 @@ const invokeMiddleware = (middleware, req) =>
 const withAuthenticatedUser = async (user, callback) => {
   const originalFindById = User.findById;
   const originalJwtSecret = process.env.JWT_SECRET;
+  const authVersion = Number.isInteger(user.authVersion) ? user.authVersion : 0;
+  const versionedUser = { ...user, authVersion };
 
   process.env.JWT_SECRET = "barber-route-test-secret";
-  User.findById = () => ({ select: async () => user });
+  User.findById = () => ({ select: async () => versionedUser });
 
   try {
     return await callback({
       headers: {
-        authorization: `Bearer ${jwt.sign({ id: String(user._id) }, process.env.JWT_SECRET)}`,
+        authorization: `Bearer ${jwt.sign(
+          { id: String(user._id), av: authVersion },
+          process.env.JWT_SECRET
+        )}`,
       },
     });
   } finally {

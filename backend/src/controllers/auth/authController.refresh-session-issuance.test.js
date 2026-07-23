@@ -27,7 +27,12 @@ const response = () => ({
   json(body) { this.body = body; return this; },
 });
 
-const selectable = (value) => ({ select: () => value });
+const selectable = (value, onSelect = () => {}) => ({
+  select(selection) {
+    onSelect(selection);
+    return value;
+  },
+});
 const user = (overrides = {}) => ({
   _id: userId,
   name: "Current User",
@@ -117,7 +122,8 @@ test("register and password login issue exactly once with no response cookie hel
   assertIssuanceCall(calls[0], { req: registerReq, res: registerRes, user: createdUser });
 
   const loginUserDocument = user({ password: passwordHash });
-  User.findOne = async () => loginUserDocument;
+  let loginSelection = "";
+  User.findOne = () => selectable(loginUserDocument, (selection) => { loginSelection = selection; });
   const loginReq = {
     body: {
       phone: createdUser.phone,
@@ -132,6 +138,7 @@ test("register and password login issue exactly once with no response cookie hel
   const loginRes = response();
   await loginUser(loginReq, loginRes);
   assert.equal(loginRes.statusCode, 200);
+  assert.equal(loginSelection, "+authVersion");
   assert.equal(calls.length, 2);
   assertIssuanceCall(calls[1], { req: loginReq, res: loginRes, user: loginUserDocument });
 });
@@ -159,19 +166,27 @@ test("all Google success branches issue exactly once for their authenticated use
     familyId: "forged-family",
     sessionId: "forged-session",
   };
-  User.findOne = (query) => query.googleId ? selectable(existingGoogleUser) : selectable(null);
+  const selections = [];
+  User.findOne = (query) => query.googleId
+    ? selectable(existingGoogleUser, (selection) => selections.push(selection))
+    : selectable(null, (selection) => selections.push(selection));
   const googleIdReq = { body: requestBody, query: { userId: "forged-query-user" } };
   const googleIdRes = response();
   await googleAuth(googleIdReq, googleIdRes);
   assert.equal(googleIdRes.statusCode, 200);
+  assert.deepEqual(selections, ["+googleId +authVersion"]);
   assert.equal(calls.length, 1);
   assertIssuanceCall(calls[0], { req: googleIdReq, res: googleIdRes, user: existingGoogleUser });
 
-  User.findOne = (query) => query.googleId ? selectable(null) : selectable(existingEmailUser);
+  selections.length = 0;
+  User.findOne = (query) => query.googleId
+    ? selectable(null, (selection) => selections.push(selection))
+    : selectable(existingEmailUser, (selection) => selections.push(selection));
   const emailReq = { body: requestBody };
   const emailRes = response();
   await googleAuth(emailReq, emailRes);
   assert.equal(emailRes.statusCode, 200);
+  assert.deepEqual(selections, ["+googleId +authVersion", "+googleId +authVersion"]);
   assert.equal(calls.length, 2);
   assertIssuanceCall(calls[1], { req: emailReq, res: emailRes, user: existingEmailUser });
 

@@ -220,7 +220,10 @@ test("googleAuth logs in existing googleId user and preserves role fields", asyn
   assert.equal(res.statusCode, 200);
   assert.deepEqual(issuedSessionCalls, [{ req, res, user: existingUser }]);
   assert.ok(res.body.token);
-  assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
+  assert.deepEqual(
+    (({ id, av }) => ({ id, av }))(jwt.verify(res.body.token, "test-secret")),
+    { id: userId, av: 0 }
+  );
   assert.equal(res.body.user.role, "barber");
   assert.equal(res.body.user.platformRole, undefined);
   assert.equal(res.body.user.canAccessPlatform, true);
@@ -325,7 +328,10 @@ test("googleAuth links existing verified email without changing role or phone", 
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(issuedSessionCalls, [{ req, res, user: existingUser }]);
-  assert.equal(jwt.verify(res.body.token, "test-secret").id, otherUserId);
+  assert.deepEqual(
+    (({ id, av }) => ({ id, av }))(jwt.verify(res.body.token, "test-secret")),
+    { id: otherUserId, av: 0 }
+  );
   assert.equal(existingUser.googleId, "google-sub");
   assert.equal(existingUser.authProviders.includes("google"), true);
   assert.equal(existingUser.emailVerified, true);
@@ -435,7 +441,10 @@ test("googleAuth creates first-time client user and returns JWT response shape",
   await googleAuth({ body: { credential: "valid-google-token", role: "client", phone: "  +37400111222  " } }, res);
 
   assert.equal(res.statusCode, 201);
-  assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
+  assert.deepEqual(
+    (({ id, av }) => ({ id, av }))(jwt.verify(res.body.token, "test-secret")),
+    { id: userId, av: 0 }
+  );
   assert.equal(res.body.user.email, "google@example.com");
   assert.equal(res.body.user.emailVerified, true);
   assert.equal(res.body.user.avatarUrl, "https://example.com/avatar.png");
@@ -656,7 +665,10 @@ test("normal registration creates clean client user fields", async () => {
   assert.equal(createPayload.platformRole, undefined);
   assert.equal(res.body.user.platformRole, undefined);
   assert.equal(res.body.user.canAccessPlatform, false);
-  assert.equal(jwt.verify(res.body.token, "test-secret").id, userId);
+  assert.deepEqual(
+    (({ id, av }) => ({ id, av }))(jwt.verify(res.body.token, "test-secret")),
+    { id: userId, av: 0 }
+  );
   const rawUser = createdUser.toObject();
   assert.deepEqual(rawUser.favoriteBarbers, []);
   assert.deepEqual(rawUser.favoriteSalons, []);

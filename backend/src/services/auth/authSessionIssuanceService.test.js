@@ -32,7 +32,7 @@ test("prepares the access response and validates cookies before creating one ses
   const res = response();
   const replacement = { refreshToken: "new-refresh-token", session: { _id: "session-1" } };
   __setAuthSessionIssuanceDependencies({
-    signAccessToken: (userId) => { events.push(["sign", userId]); return "access-token"; },
+    signAccessToken: (currentUser) => { events.push(["sign", currentUser]); return "access-token"; },
     serializeAuthUser: (currentUser) => { events.push(["serialize", currentUser]); return { id: currentUser._id }; },
     resolveRuntimeRefreshCookieOptions: () => { events.push(["options"]); return { secure: false }; },
     readRuntimeRefreshToken: () => { events.push(["read"]); return null; },
@@ -44,6 +44,7 @@ test("prepares the access response and validates cookies before creating one ses
 
   assert.deepEqual(result, { token: "access-token", user: { id: user._id } });
   assert.deepEqual(events.map(([name]) => name), ["sign", "serialize", "options", "read", "create", "set"]);
+  assert.equal(events[0][1], user);
   assert.deepEqual(events[4][1], { userId: user._id, ip: request.ip, userAgent: "test-agent" });
   assert.equal(JSON.stringify(result).includes("new-refresh-token"), false);
 });

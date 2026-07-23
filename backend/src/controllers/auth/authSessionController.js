@@ -77,7 +77,7 @@ function isRefreshSessionFailure(error) {
 }
 
 function findUserById(userId) {
-  return dependencies.User.findById(userId).select("-password");
+  return dependencies.User.findById(userId).select("-password +authVersion");
 }
 
 export async function refreshAuthSession(req, res) {
@@ -105,7 +105,7 @@ export async function refreshAuthSession(req, res) {
       return res.status(401).json(REFRESH_FAILURE_BODY);
     }
 
-    const token = dependencies.signAccessToken(user._id);
+    const token = dependencies.signAccessToken(user);
     const publicUser = dependencies.serializeAuthUser(user);
     dependencies.setRuntimeRefreshCookie(res, replacement.refreshToken);
 

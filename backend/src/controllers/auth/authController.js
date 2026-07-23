@@ -60,6 +60,9 @@ const addAuthProvider = (user, provider) => {
   return false;
 };
 
+const selectAuthVersion = (query, selection = "+authVersion") =>
+  query && typeof query.select === "function" ? query.select(selection) : query;
+
 const applyGoogleLink = (user, googlePayload) => {
   let changed = false;
 
@@ -192,7 +195,7 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ message: "Phone and password are required" });
     }
 
-    const user = await User.findOne({ phone });
+    const user = await selectAuthVersion(User.findOne({ phone }));
 
     if (!user) {
       return res.status(401).json({ message: "Invalid phone or password" });
@@ -233,9 +236,9 @@ export const googleAuth = async (req, res) => {
       return res.status(401).json({ message: "Invalid Google credential" });
     }
 
-    const existingGoogleUser = await User.findOne({
+    const existingGoogleUser = await selectAuthVersion(User.findOne({
       googleId: googlePayload.googleId,
-    }).select("+googleId");
+    }), "+googleId +authVersion");
 
     if (existingGoogleUser) {
       if (applyGoogleLink(existingGoogleUser, googlePayload)) {
@@ -250,9 +253,9 @@ export const googleAuth = async (req, res) => {
       return res.json(authResponse);
     }
 
-    const existingEmailUser = await User.findOne({
+    const existingEmailUser = await selectAuthVersion(User.findOne({
       email: googlePayload.email,
-    }).select("+googleId");
+    }), "+googleId +authVersion");
 
     if (existingEmailUser) {
       if (

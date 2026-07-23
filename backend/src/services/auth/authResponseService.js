@@ -1,16 +1,13 @@
-import jwt from "jsonwebtoken";
-
 import { isPlatformSuperuser } from "../../middleware/platformMiddleware.js";
 import { serializeSpecialistOnboardingState } from "../../utils/specialistOnboardingState.js";
+import { signAccessTokenForUser } from "./accessTokenService.js";
 
-export function signAccessToken(userId) {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET is not configured");
+export function signAccessToken(user) {
+  if (user && typeof user === "object" && !Array.isArray(user)) {
+    return signAccessTokenForUser(user);
   }
 
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: "30d",
-  });
+  return signAccessTokenForUser({ _id: user, authVersion: 0 });
 }
 
 export function serializeAuthUser(user) {

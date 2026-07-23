@@ -68,7 +68,7 @@ function findByIdReturning(user, expectedId) {
     assert.equal(userId, expectedId);
     return {
       select(selection) {
-        assert.equal(selection, "-password");
+        assert.equal(selection, "-password +authVersion");
         return user;
       },
     };
@@ -96,6 +96,7 @@ test("refresh rotates only the cookie token and returns current compatible auth 
     phone: "+37400111222",
     email: "fresh@example.com",
     role: "barber",
+    authVersion: 3,
     salons: [{ salon: "64d000000000000000000010", status: "approved" }],
     password: "hidden",
   };
@@ -134,7 +135,9 @@ test("refresh rotates only the cookie token and returns current compatible auth 
     ip: "203.0.113.10",
     userAgent: " Test Agent ",
   });
-  assert.equal(jwt.verify(res.body.token, jwtSecret).id, userId);
+  const decodedToken = jwt.verify(res.body.token, jwtSecret);
+  assert.equal(decodedToken.id, userId);
+  assert.equal(decodedToken.av, 3);
   assert.equal(res.body.user.name, "Fresh User");
   assert.deepEqual(res.body.user.salons, user.salons);
   assert.equal(res.body.user.password, undefined);
@@ -200,7 +203,7 @@ test("refresh failure after rotation clears the cookie and does not expose repla
   getLogger({ level: "silent" });
   delete process.env.JWT_SECRET;
   __setAuthSessionControllerDependencies({
-    User: { findById: findByIdReturning({ _id: "user-1", name: "User", role: "client" }, "user-1") },
+    User: { findById: findByIdReturning({ _id: "user-1", name: "User", role: "client", authVersion: 0 }, "user-1") },
     rotateRefreshSession: async () => ({
       refreshToken: "replacement-token",
       session: { userId: "user-1", familyId: "family-3" },
@@ -220,7 +223,7 @@ test("refresh handles cookie-setting failure after rotation as a generic operati
   getLogger({ level: "silent" });
   process.env.JWT_SECRET = jwtSecret;
   __setAuthSessionControllerDependencies({
-    User: { findById: findByIdReturning({ _id: "user-1", name: "User", role: "client" }, "user-1") },
+    User: { findById: findByIdReturning({ _id: "user-1", name: "User", role: "client", authVersion: 0 }, "user-1") },
     rotateRefreshSession: async () => ({
       refreshToken: "replacement-token",
       session: { userId: "user-1", familyId: "family-4" },

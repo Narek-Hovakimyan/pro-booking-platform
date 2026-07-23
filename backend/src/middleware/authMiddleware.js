@@ -1,5 +1,8 @@
-import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import {
+  assertAccessTokenMatchesUser,
+  verifyAccessToken,
+} from "../services/auth/accessTokenService.js";
 
 export const protect = async (req, res, next) => {
   try {
@@ -10,12 +13,14 @@ export const protect = async (req, res, next) => {
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select("-password");
+    const decoded = verifyAccessToken(token);
+    const user = await User.findById(decoded.id).select("-password +authVersion");
 
     if (!user) {
       return res.status(401).json({ message: "Not authorized, user not found" });
     }
+
+    assertAccessTokenMatchesUser(decoded, user);
 
     req.user = user;
     return next();
@@ -42,10 +47,11 @@ export const optionalAuth = async (req, res, next) => {
 
   try {
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select("-password");
+    const decoded = verifyAccessToken(token);
+    const user = await User.findById(decoded.id).select("-password +authVersion");
 
     if (user) {
+      assertAccessTokenMatchesUser(decoded, user);
       req.user = user;
     }
 

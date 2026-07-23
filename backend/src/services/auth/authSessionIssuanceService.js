@@ -71,7 +71,7 @@ export async function issueAuthSession({ req, res, user } = {}) {
     throw new TypeError("user._id is required for authentication session issuance.");
   }
 
-  const token = dependencies.signAccessToken(user._id);
+  const token = dependencies.signAccessToken(user);
   const publicUser = dependencies.serializeAuthUser(user);
   dependencies.resolveRuntimeRefreshCookieOptions();
 
