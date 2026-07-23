@@ -18,7 +18,7 @@ export const getClientBookingsForRequester = async ({ clientId, requester }) => 
   }
 
   const bookings = await Booking.find({ clientId }).select("-treatmentRecord");
-  return bookings.map(serializeBookingForResponse);
+  return bookings.map((booking) => serializeBookingForResponse(booking, requester));
 };
 
 export const getBarberBookingsForRequester = async ({ barberId, requester }) => {
@@ -32,7 +32,7 @@ export const getBarberBookingsForRequester = async ({ barberId, requester }) => 
   const bookings = await Booking.find({ barberId });
 
   if (isOwnBarberCalendar) {
-    return bookings.map(serializeBookingForResponse);
+    return bookings.map((booking) => serializeBookingForResponse(booking, requester));
   }
 
   return bookings.map((booking) =>

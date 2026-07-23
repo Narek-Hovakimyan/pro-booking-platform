@@ -133,7 +133,7 @@ export const createRescheduleRequest = async (req, res) => {
 
     emitBookingUpdated(booking, "updated");
 
-    return res.status(201).json(serializeBookingForResponse(booking));
+    return res.status(201).json(serializeBookingForResponse(booking, req.user));
   } catch (error) {
     return sendRescheduleError(res, error, "Could not request reschedule");
   }
@@ -262,7 +262,7 @@ export const acceptRescheduleRequest = async (req, res) => {
 
     emitBookingUpdated(updatedBooking, "updated");
 
-    return res.json(serializeBookingForResponse(updatedBooking));
+    return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
     return sendRescheduleError(res, error, "Could not accept reschedule request");
   }
@@ -308,7 +308,7 @@ export const rejectRescheduleRequest = async (req, res) => {
 
     emitBookingUpdated(booking, "updated");
 
-    return res.json(serializeBookingForResponse(booking));
+    return res.json(serializeBookingForResponse(booking, req.user));
   } catch (error) {
     return sendRescheduleError(res, error, "Could not reject reschedule request");
   }

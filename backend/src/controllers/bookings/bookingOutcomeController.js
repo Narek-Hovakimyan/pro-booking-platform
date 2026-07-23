@@ -32,7 +32,7 @@ export const markNoShow = async (req, res) => {
 
     emitBookingUpdated(updatedBooking, "updated");
 
-    return res.json(serializeBookingForResponse(updatedBooking));
+    return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
     return sendControllerError(res, error, "Could not mark no-show");
   }
@@ -59,7 +59,7 @@ export const markLateCancel = async (req, res) => {
 
     emitBookingUpdated(updatedBooking, "updated");
 
-    return res.json(serializeBookingForResponse(updatedBooking));
+    return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
     return sendControllerError(res, error, "Could not mark late cancellation");
   }

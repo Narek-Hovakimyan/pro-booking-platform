@@ -259,13 +259,62 @@ export const internalBookingPaymentFields = [
   "clientSecret",
 ];
 
-export const serializeBookingForResponse = (booking) => {
+const getViewerId = (viewer) => {
+  if (!viewer) return "";
+
+  if (typeof viewer === "string" || typeof viewer === "number") {
+    return getIdString(viewer);
+  }
+
+  if (typeof viewer !== "object" || Array.isArray(viewer)) {
+    return "";
+  }
+
+  const explicitId = viewer._id ?? viewer.id;
+
+  if (
+    explicitId === undefined ||
+    explicitId === null ||
+    typeof explicitId === "function" ||
+    (typeof explicitId === "object" && explicitId !== null)
+  ) {
+    return "";
+  }
+
+  return getIdString(explicitId);
+};
+
+const privateBookingFieldsWithoutViewer = [
+  "consultation",
+  "consent",
+  "referenceImages",
+  "treatmentRecord",
+];
+
+export const serializeBookingForResponse = (booking, viewer = null) => {
   if (!booking || typeof booking !== "object") return booking;
 
   const response = booking.toObject ? booking.toObject() : { ...booking };
+  const viewerId = getViewerId(viewer);
+  const isBookingClient =
+    viewer?.role === "client" &&
+    viewerId &&
+    viewerId === getIdString(booking.clientId);
 
   for (const field of internalBookingPaymentFields) {
     delete response[field];
+  }
+
+  if (isBookingClient) {
+    delete response.treatmentRecord;
+    delete response.referenceImages;
+    return response;
+  }
+
+  if (!viewerId) {
+    for (const field of privateBookingFieldsWithoutViewer) {
+      delete response[field];
+    }
   }
 
   return response;

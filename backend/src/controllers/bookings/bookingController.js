@@ -90,7 +90,7 @@ export const createBooking = async (req, res) => {
     }
 
     const { booking, payment } = createResult;
-    const responseBooking = serializeBookingForResponse(booking);
+    const responseBooking = serializeBookingForResponse(booking, req.user);
     if (payment) {
       responseBooking.payment = payment;
       responseBooking.depositPayment = payment;
@@ -507,7 +507,7 @@ export const updateBooking = async (req, res) => {
 
     emitBookingUpdated(booking, "updated");
 
-    return res.json(serializeBookingForResponse(booking));
+    return res.json(serializeBookingForResponse(booking, req.user));
   } catch (error) {
     return sendControllerError(res, error, "Could not update booking");
   }
@@ -521,7 +521,7 @@ export const delayBooking = async (req, res) => {
       user: req.user,
     });
 
-    return res.json(serializeBookingForResponse(updatedBooking));
+    return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
     return sendControllerError(res, error, "Could not delay booking");
   }
@@ -539,7 +539,7 @@ export const updateTreatmentRecord = async (req, res) => {
       return res.status(result.status).json({ message: result.error });
     }
 
-    return res.json(serializeBookingForResponse(result.booking));
+    return res.json(serializeBookingForResponse(result.booking, req.user));
   } catch (error) {
     return sendControllerError(res, error, "Could not update treatment record");
   }
