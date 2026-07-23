@@ -1,4 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, Route, Routes } from "react-router-dom";
@@ -9,7 +17,13 @@ import ProtectedRoute from "./shared/components/ProtectedRoute";
 import SubscriptionGuard from "./shared/components/SubscriptionGuard";
 
 import { getMySubscription } from "./shared/api/subscriptions";
-import { connectSocket, disconnectSocket, scheduleSocketDisconnect } from "./shared/lib/socket";
+import {
+  connectSocket,
+  disconnectSocket,
+  scheduleSocketDisconnect,
+  subscribeToSocketAuthFailures,
+} from "./shared/lib/socket";
+import { recoverSocketAuthSession } from "./shared/lib/socketAuthRecovery";
 import {
   clearSubscription,
   loadSubscriptionFailure,
@@ -42,6 +56,13 @@ export default function App() {
   const currentUserRole = currentUser?.role;
   const [dataError, setDataError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const socketAuthGenerationRef = useRef(0);
+  const socketAuthRef = useRef({
+    userId: null,
+    token: null,
+    generation: 0,
+    active: false,
+  });
   const {
     step,
     setStep,
@@ -139,14 +160,47 @@ export default function App() {
   }, [currentUserId, currentUserRole, dispatch, token]);
 
   useLayoutEffect(() => {
-    if (!currentUserId || !token) {
+    const normalizedUserId =
+      typeof currentUserId === "string" && currentUserId.trim() ? currentUserId.trim() : null;
+    const normalizedToken =
+      typeof token === "string" && token.trim() ? token.trim() : null;
+    const generation = socketAuthGenerationRef.current + 1;
+
+    socketAuthGenerationRef.current = generation;
+    socketAuthRef.current = {
+      userId: normalizedUserId,
+      token: normalizedToken,
+      generation,
+      active: Boolean(normalizedUserId && normalizedToken),
+    };
+
+    if (!normalizedUserId || !normalizedToken) {
       disconnectSocket();
       return undefined;
     }
 
-    connectSocket(currentUserId, token);
+    const getCurrentAuth = () => socketAuthRef.current;
+    const unsubscribeFromSocketAuthFailures = subscribeToSocketAuthFailures(() =>
+      recoverSocketAuthSession({
+        expectedUserId: normalizedUserId,
+        expectedAccessToken: normalizedToken,
+        expectedGeneration: generation,
+        getCurrentAuth,
+      })
+    );
+
+    connectSocket(normalizedUserId, normalizedToken);
 
     return () => {
+      unsubscribeFromSocketAuthFailures();
+
+      if (socketAuthRef.current.generation === generation) {
+        socketAuthRef.current = {
+          ...socketAuthRef.current,
+          active: false,
+        };
+      }
+
       scheduleSocketDisconnect();
     };
   }, [currentUserId, token]);

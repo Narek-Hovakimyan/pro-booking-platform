@@ -5,24 +5,27 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import { expireAuthSession, restoreAuthSession } from "@/store/slices/authSlice";
 
-const ioMock = vi.hoisted(() => vi.fn());
-
-vi.mock("socket.io-client", () => ({
-  io: ioMock,
+const socketModuleMocks = vi.hoisted(() => ({
+  connectSocket: vi.fn(),
+  disconnectSocket: vi.fn(),
+  scheduleSocketDisconnect: vi.fn(),
+  subscribeToSocketAuthFailures: vi.fn(),
+}));
+const socketAuthRecoveryMocks = vi.hoisted(() => ({
+  recoverSocketAuthSession: vi.fn(),
 }));
 
+vi.mock("./shared/lib/socket", () => socketModuleMocks);
+vi.mock("./shared/lib/socketAuthRecovery", () => socketAuthRecoveryMocks);
 vi.mock("./shared/components/Header", () => ({
   default: () => <div data-testid="header" />,
 }));
-
 vi.mock("./shared/components/Notifications", () => ({
   default: () => <div data-testid="notifications" />,
 }));
-
 vi.mock("./shared/api/subscriptions", () => ({
   getMySubscription: vi.fn(),
 }));
-
 vi.mock("./shared/hooks/useBookingFlow", () => ({
   useBookingFlow: () => ({
     step: "service",
@@ -39,7 +42,6 @@ vi.mock("./shared/hooks/useBookingFlow", () => ({
     resetBooking: vi.fn(),
   }),
 }));
-
 vi.mock("./shared/hooks/useBarberData", () => ({
   useBarberData: () => ({
     barberBookings: [],
@@ -53,7 +55,6 @@ vi.mock("./shared/hooks/useBarberData", () => ({
     isDataLoading: false,
   }),
 }));
-
 vi.mock("./shared/hooks/useServiceManagement", () => ({
   useServiceManagement: () => ({
     addService: vi.fn(),
@@ -61,7 +62,6 @@ vi.mock("./shared/hooks/useServiceManagement", () => ({
     deleteService: vi.fn(),
   }),
 }));
-
 vi.mock("./shared/hooks/useScheduleManagement", () => ({
   useScheduleManagement: () => ({
     updateSchedule: vi.fn(),
@@ -69,7 +69,6 @@ vi.mock("./shared/hooks/useScheduleManagement", () => ({
     updateScheduleOverride: vi.fn(),
   }),
 }));
-
 vi.mock("./routes/ClientDiscoveryRoutes", () => ({ clientDiscoveryRoutes: null }));
 vi.mock("./routes/AccountRoutes", () => ({ accountRoutes: null }));
 vi.mock("./routes/BookingRoutes", () => ({ getBookingRoutes: () => null }));
@@ -78,22 +77,13 @@ vi.mock("./routes/PublicRoutes", () => ({ publicRoutes: null }));
 vi.mock("./routes/EventRoutes", () => ({ eventRoutes: null }));
 vi.mock("./routes/PlatformRoutes", () => ({ platformRoutes: null }));
 
-function createFakeSocket(label) {
-  return {
-    label,
-    auth: {},
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-  };
-}
-
 const authState = (userId, token) => ({
-  currentUser: { id: userId, role: "client", name: "Test Client" },
+  currentUser: userId ? { id: userId, role: "client", name: "Test Client" } : null,
   token,
-  isAuthenticated: true,
+  isAuthenticated: Boolean(userId && token),
 });
 
-async function renderApp({ strict = false, auth = authState("user-1", "token-1") } = {}) {
+async function renderApp({ auth = authState("user-1", "token-1"), strict = false } = {}) {
   const { default: App } = await import("./App");
   const ui = strict ? (
     <StrictMode>
@@ -110,31 +100,61 @@ async function renderApp({ strict = false, auth = authState("user-1", "token-1")
 }
 
 beforeEach(() => {
-  ioMock.mockReset();
+  Object.values(socketModuleMocks).forEach((mock) => mock.mockReset());
+  Object.values(socketAuthRecoveryMocks).forEach((mock) => mock.mockReset());
+  socketModuleMocks.subscribeToSocketAuthFailures.mockImplementation(() => vi.fn());
+  socketAuthRecoveryMocks.recoverSocketAuthSession.mockResolvedValue(null);
 });
 
-afterEach(async () => {
-  const { disconnectSocket } = await import("./shared/lib/socket");
-  disconnectSocket();
+afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("App Socket.IO auth lifecycle", () => {
-  test("StrictMode keeps one socket instance for the same user and token", async () => {
-    const fakeSocket = createFakeSocket("strict");
-    ioMock.mockReturnValue(fakeSocket);
+describe("App Socket.IO auth ownership", () => {
+  test("subscribes before connecting and auth failure triggers bounded recovery without direct reconnect", async () => {
+    const calls = [];
+    let authFailureListener;
 
-    await renderApp({ strict: true });
-    await Promise.resolve();
+    socketModuleMocks.subscribeToSocketAuthFailures.mockImplementation((listener) => {
+      calls.push("subscribe");
+      authFailureListener = listener;
+      return vi.fn();
+    });
+    socketModuleMocks.connectSocket.mockImplementation(() => {
+      calls.push("connect");
+      return {};
+    });
 
-    expect(ioMock).toHaveBeenCalledTimes(1);
-    expect(fakeSocket.connect).toHaveBeenCalledTimes(1);
-    expect(fakeSocket.disconnect).not.toHaveBeenCalled();
+    await renderApp();
+
+    expect(calls).toEqual(["subscribe", "connect"]);
+
+    await authFailureListener();
+
+    expect(socketAuthRecoveryMocks.recoverSocketAuthSession).toHaveBeenCalledTimes(1);
+    expect(socketModuleMocks.connectSocket).toHaveBeenCalledTimes(1);
+
+    const [{ expectedUserId, expectedAccessToken, getCurrentAuth }] =
+      socketAuthRecoveryMocks.recoverSocketAuthSession.mock.calls[0];
+
+    expect(expectedUserId).toBe("user-1");
+    expect(expectedAccessToken).toBe("token-1");
+    expect(getCurrentAuth()).toMatchObject({
+      userId: "user-1",
+      token: "token-1",
+      active: true,
+    });
   });
 
-  test("refreshed token reauthenticates the same socket instance", async () => {
-    const fakeSocket = createFakeSocket("refresh");
-    ioMock.mockReturnValue(fakeSocket);
+  test("refreshed Redux token drives same-user reauthentication and user switch replaces ownership", async () => {
+    const unsubscribeFirst = vi.fn();
+    const unsubscribeSecond = vi.fn();
+    const unsubscribeThird = vi.fn();
+
+    socketModuleMocks.subscribeToSocketAuthFailures
+      .mockImplementationOnce(() => unsubscribeFirst)
+      .mockImplementationOnce(() => unsubscribeSecond)
+      .mockImplementationOnce(() => unsubscribeThird);
     const { store } = await renderApp();
 
     store.dispatch(
@@ -143,21 +163,51 @@ describe("App Socket.IO auth lifecycle", () => {
         user: { id: "user-1", role: "client", name: "Test Client" },
       })
     );
+    await waitFor(() =>
+      expect(socketModuleMocks.connectSocket.mock.calls).toEqual([
+        ["user-1", "token-1"],
+        ["user-1", "token-2"],
+      ])
+    );
 
-    await waitFor(() => expect(fakeSocket.auth).toEqual({ token: "token-2" }));
+    store.dispatch(
+      restoreAuthSession({
+        token: "token-3",
+        user: { id: "user-2", role: "client", name: "Next User" },
+      })
+    );
 
-    expect(ioMock).toHaveBeenCalledTimes(1);
-    expect(fakeSocket.disconnect).toHaveBeenCalledTimes(1);
-    expect(fakeSocket.connect).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(socketModuleMocks.connectSocket.mock.calls).toEqual([
+        ["user-1", "token-1"],
+        ["user-1", "token-2"],
+        ["user-2", "token-3"],
+      ])
+    );
+
+    expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+    expect(unsubscribeSecond).toHaveBeenCalledTimes(1);
+    expect(socketModuleMocks.scheduleSocketDisconnect).toHaveBeenCalledTimes(2);
   });
 
-  test("session expiry disconnects the active socket immediately", async () => {
-    const fakeSocket = createFakeSocket("expire");
-    ioMock.mockReturnValue(fakeSocket);
-    const { store } = await renderApp();
+  test("logout disconnects without recovery, unmount cleanup is exact, and StrictMode does not duplicate ownership", async () => {
+    const unsubscribe = vi.fn();
+    socketModuleMocks.subscribeToSocketAuthFailures.mockImplementation(() => unsubscribe);
+    const { store, unmount } = await renderApp({ strict: true });
+
+    await waitFor(() => {
+      expect(socketModuleMocks.subscribeToSocketAuthFailures).toHaveBeenCalledTimes(1);
+      expect(socketModuleMocks.connectSocket).toHaveBeenCalledTimes(1);
+    });
 
     store.dispatch(expireAuthSession());
 
-    await waitFor(() => expect(fakeSocket.disconnect).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(socketModuleMocks.disconnectSocket).toHaveBeenCalledTimes(1));
+    expect(socketAuthRecoveryMocks.recoverSocketAuthSession).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(socketModuleMocks.scheduleSocketDisconnect).toHaveBeenCalledTimes(1);
   });
 });
