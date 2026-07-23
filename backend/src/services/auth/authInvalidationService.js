@@ -1,10 +1,12 @@
 import User from "../../models/User.js";
 import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 import { revokeAllUserRefreshSessions } from "./refreshSessionService.js";
+import { disconnectAuthenticatedUserSockets } from "../../socket.js";
 
 let dependencies = {
   User,
   revokeAllUserRefreshSessions,
+  disconnectAuthenticatedUserSockets,
 };
 
 export function __setAuthInvalidationDependencies(overrides = {}) {
@@ -15,6 +17,7 @@ export function __resetAuthInvalidationDependencies() {
   dependencies = {
     User,
     revokeAllUserRefreshSessions,
+    disconnectAuthenticatedUserSockets,
   };
 }
 
@@ -22,6 +25,10 @@ function assertUserId(userId) {
   if (!userId) {
     throw new TypeError("userId is required.");
   }
+}
+
+function normalizeUserId(userId) {
+  return typeof userId === "string" && userId.trim() ? userId.trim() : null;
 }
 
 export function normalizeInvalidationAuthVersion(value, { allowMissing = false } = {}) {
@@ -69,3 +76,24 @@ export async function revokeAllUserRefreshSessionsBestEffort({
   }
 }
 
+export async function disconnectUserSocketsBestEffort({
+  userId,
+  event,
+} = {}) {
+  const normalizedUserId = normalizeUserId(userId);
+
+  if (!normalizedUserId) {
+    return false;
+  }
+
+  try {
+    dependencies.disconnectAuthenticatedUserSockets(normalizedUserId);
+    return true;
+  } catch (error) {
+    getLogger().child({ component: "auth-invalidation" }).error(
+      { event: event || "auth.socket_cleanup_failed", err: safeErrorSerializer(error) },
+      "Authentication invalidation cleanup failed"
+    );
+    return false;
+  }
+}

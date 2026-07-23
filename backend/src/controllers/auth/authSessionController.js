@@ -9,6 +9,7 @@ import {
   rotateRefreshSession,
 } from "../../services/auth/refreshSessionService.js";
 import {
+  disconnectUserSocketsBestEffort,
   incrementUserAuthVersion,
   revokeAllUserRefreshSessionsBestEffort,
 } from "../../services/auth/authInvalidationService.js";
@@ -34,6 +35,7 @@ let dependencies = {
   revokeAllUserRefreshSessions,
   incrementUserAuthVersion,
   revokeAllUserRefreshSessionsBestEffort,
+  disconnectUserSocketsBestEffort,
   readRuntimeRefreshToken,
   setRuntimeRefreshCookie,
   clearRuntimeRefreshCookie,
@@ -54,6 +56,7 @@ export function __resetAuthSessionControllerDependencies() {
     revokeAllUserRefreshSessions,
     incrementUserAuthVersion,
     revokeAllUserRefreshSessionsBestEffort,
+    disconnectUserSocketsBestEffort,
     readRuntimeRefreshToken,
     setRuntimeRefreshCookie,
     clearRuntimeRefreshCookie,
@@ -179,6 +182,10 @@ export async function logoutAllAuthSessions(req, res) {
       userId: req.user?._id,
       reason: "logout_all",
       event: "auth.logout_all_cleanup_failed",
+    });
+    await dependencies.disconnectUserSocketsBestEffort({
+      userId: req.user?._id,
+      event: "auth.logout_all_socket_cleanup_failed",
     });
     dependencies.clearRuntimeRefreshCookie(res);
     return res.status(204).end();

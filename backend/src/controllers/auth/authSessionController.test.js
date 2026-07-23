@@ -326,9 +326,14 @@ test("refresh and logout use the configured runtime SameSite options", async () 
 
 test("logout revokes only a valid cookie token and remains idempotent for missing or invalid tokens", async () => {
   const revoked = [];
+  let socketCleanupCalls = 0;
   __setAuthSessionControllerDependencies({
     revokeRefreshToken: async (payload) => {
       revoked.push(payload);
+    },
+    disconnectUserSocketsBestEffort: async () => {
+      socketCleanupCalls += 1;
+      return true;
     },
   });
 
@@ -347,6 +352,8 @@ test("logout revokes only a valid cookie token and remains idempotent for missin
     assert.equal(res.statusCode, 204);
     assert.equal(res.clearCookieCalls.length, 1);
   }
+
+  assert.equal(socketCleanupCalls, 0);
 });
 
 test("logout clears the cookie and returns generic 500 on unexpected revocation failure", async () => {
@@ -374,6 +381,10 @@ test("logout-all revokes only req.user sessions and ignores forged request user 
     revokeAllUserRefreshSessionsBestEffort: async (payload) => {
       calls.push(["cleanup", payload]);
     },
+    disconnectUserSocketsBestEffort: async (payload) => {
+      calls.push(["socketCleanup", payload]);
+      return true;
+    },
   });
 
   const res = createResponse();
@@ -390,6 +401,7 @@ test("logout-all revokes only req.user sessions and ignores forged request user 
   assert.deepEqual(calls, [
     ["increment", "current-user"],
     ["cleanup", { userId: "current-user", reason: "logout_all", event: "auth.logout_all_cleanup_failed" }],
+    ["socketCleanup", { userId: "current-user", event: "auth.logout_all_socket_cleanup_failed" }],
   ]);
   assert.equal(res.clearCookieCalls.length, 1);
   assert.equal(res.body, undefined);
@@ -397,9 +409,14 @@ test("logout-all revokes only req.user sessions and ignores forged request user 
 
 test("logout-all clears cookie and returns generic 500 when authVersion increment fails", async () => {
   getLogger({ level: "silent" });
+  let socketCleanupCalls = 0;
   __setAuthSessionControllerDependencies({
     incrementUserAuthVersion: async () => {
       throw new Error("database unavailable");
+    },
+    disconnectUserSocketsBestEffort: async () => {
+      socketCleanupCalls += 1;
+      return true;
     },
   });
 
@@ -409,6 +426,7 @@ test("logout-all clears cookie and returns generic 500 when authVersion incremen
   assert.equal(res.statusCode, 500);
   assert.deepEqual(res.body, { message: "Logout failed" });
   assert.equal(res.clearCookieCalls.length, 1);
+  assert.equal(socketCleanupCalls, 0);
 });
 
 test("logout-all treats refresh-session cleanup failure as best-effort after increment", async () => {
@@ -421,6 +439,10 @@ test("logout-all treats refresh-session cleanup failure as best-effort after inc
       calls.push(["cleanup", payload]);
       return false;
     },
+    disconnectUserSocketsBestEffort: async (payload) => {
+      calls.push(["socketCleanup", payload]);
+      return true;
+    },
   });
 
   const res = createResponse();
@@ -429,5 +451,69 @@ test("logout-all treats refresh-session cleanup failure as best-effort after inc
   assert.equal(res.statusCode, 204);
   assert.equal(res.ended, true);
   assert.equal(res.clearCookieCalls.length, 1);
-  assert.equal(calls.length, 2);
+  assert.deepEqual(calls, [
+    ["increment", "current-user"],
+    ["cleanup", { userId: "current-user", reason: "logout_all", event: "auth.logout_all_cleanup_failed" }],
+    ["socketCleanup", { userId: "current-user", event: "auth.logout_all_socket_cleanup_failed" }],
+  ]);
+});
+
+test("logout-all keeps the 204 response when socket cleanup fails after auth invalidation", async () => {
+  const calls = [];
+  __setAuthSessionControllerDependencies({
+    incrementUserAuthVersion: async (userId) => {
+      calls.push(["increment", userId]);
+    },
+    revokeAllUserRefreshSessionsBestEffort: async (payload) => {
+      calls.push(["cleanup", payload]);
+      return true;
+    },
+    disconnectUserSocketsBestEffort: async (payload) => {
+      calls.push(["socketCleanup", payload]);
+      return false;
+    },
+  });
+
+  const res = createResponse();
+  await logoutAllAuthSessions(createRequest({ user: { _id: "current-user" } }), res);
+
+  assert.equal(res.statusCode, 204);
+  assert.equal(res.ended, true);
+  assert.equal(res.clearCookieCalls.length, 1);
+  assert.deepEqual(calls, [
+    ["increment", "current-user"],
+    ["cleanup", { userId: "current-user", reason: "logout_all", event: "auth.logout_all_cleanup_failed" }],
+    ["socketCleanup", { userId: "current-user", event: "auth.logout_all_socket_cleanup_failed" }],
+  ]);
+});
+
+test("concurrent logout-all requests stay ordered per request and do not throw", async () => {
+  const calls = [];
+  __setAuthSessionControllerDependencies({
+    incrementUserAuthVersion: async (userId) => {
+      calls.push(["increment", userId]);
+    },
+    revokeAllUserRefreshSessionsBestEffort: async (payload) => {
+      calls.push(["cleanup", payload]);
+      return true;
+    },
+    disconnectUserSocketsBestEffort: async (payload) => {
+      calls.push(["socketCleanup", payload]);
+      return true;
+    },
+  });
+
+  const firstRes = createResponse();
+  const secondRes = createResponse();
+
+  await Promise.all([
+    logoutAllAuthSessions(createRequest({ user: { _id: "current-user" } }), firstRes),
+    logoutAllAuthSessions(createRequest({ user: { _id: "current-user" } }), secondRes),
+  ]);
+
+  assert.equal(firstRes.statusCode, 204);
+  assert.equal(secondRes.statusCode, 204);
+  assert.equal(calls.filter(([step]) => step === "increment").length, 2);
+  assert.equal(calls.filter(([step]) => step === "cleanup").length, 2);
+  assert.equal(calls.filter(([step]) => step === "socketCleanup").length, 2);
 });

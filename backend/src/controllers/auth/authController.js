@@ -5,6 +5,7 @@ import { sendPasswordResetEmail } from "../../services/auth/emailService.js";
 import { verifyGoogleIdToken } from "../../services/auth/googleAuthService.js";
 import { issueAuthSession } from "../../services/auth/authSessionIssuanceService.js";
 import {
+  disconnectUserSocketsBestEffort,
   normalizeInvalidationAuthVersion,
   revokeAllUserRefreshSessionsBestEffort,
 } from "../../services/auth/authInvalidationService.js";
@@ -15,14 +16,22 @@ import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 
-let dependencies = { issueAuthSession, revokeAllUserRefreshSessionsBestEffort };
+let dependencies = {
+  issueAuthSession,
+  revokeAllUserRefreshSessionsBestEffort,
+  disconnectUserSocketsBestEffort,
+};
 
 export function __setAuthControllerDependencies(overrides = {}) {
   dependencies = { ...dependencies, ...overrides };
 }
 
 export function __resetAuthControllerDependencies() {
-  dependencies = { issueAuthSession, revokeAllUserRefreshSessionsBestEffort };
+  dependencies = {
+    issueAuthSession,
+    revokeAllUserRefreshSessionsBestEffort,
+    disconnectUserSocketsBestEffort,
+  };
 }
 
 const getAuthLogger = () => getLogger().child({ component: "auth" });
@@ -489,6 +498,10 @@ export const resetPassword = async (req, res) => {
       userId: user._id,
       reason: "password_reset",
       event: "auth.password_reset_cleanup_failed",
+    });
+    await dependencies.disconnectUserSocketsBestEffort({
+      userId: user._id,
+      event: "auth.password_reset_socket_cleanup_failed",
     });
 
     return res.json({ message: "Password has been reset successfully." });

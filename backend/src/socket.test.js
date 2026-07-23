@@ -31,6 +31,8 @@ function createSocket({
     userId,
     handlers,
     joinedRooms,
+    emittedEvents: [],
+    disconnected: [],
     handshake: {
       auth: authToken === undefined ? auth : { ...auth, token: authToken },
       headers: authorization === undefined ? {} : { authorization },
@@ -40,6 +42,17 @@ function createSocket({
     },
     on(eventName, handler) {
       handlers[eventName] = handler;
+    },
+    off(eventName, handler) {
+      if (handlers[eventName] === handler) {
+        delete handlers[eventName];
+      }
+    },
+    emit(eventName, payload) {
+      this.emittedEvents.push([eventName, payload]);
+    },
+    disconnect(force) {
+      this.disconnected.push(force);
     },
   };
 }
@@ -255,20 +268,33 @@ test("joinAuthenticatedUserRoom joins only the authenticated user's room", () =>
 });
 
 test("handleAuthenticatedConnection rejoins only the verified user's room", () => {
-  const socket = createSocket({ userId: "user-a", authToken: "secret-token" });
+  const futureExpirySocket = createSocket({
+    userId: "user-a",
+    authToken: "secret-token",
+  });
+  futureExpirySocket.accessTokenExpiresAt = Date.now() + 60_000;
 
-  handleAuthenticatedConnection(socket);
+  handleAuthenticatedConnection(futureExpirySocket);
 
-  assert.deepEqual(Object.keys(socket.handlers), ["join"]);
-  assert.equal(socket.handlers.join.length, 0);
-  assert.deepEqual(socket.joinedRooms, ["user:user-a"]);
+  assert.deepEqual(Object.keys(futureExpirySocket.handlers).sort(), [
+    "disconnect",
+    "join",
+  ]);
+  assert.equal(futureExpirySocket.handlers.join.length, 0);
+  assert.deepEqual(futureExpirySocket.joinedRooms, ["user:user-a"]);
 
-  socket.handlers.join({ userId: "user-b", token: "forged-token", room: "user:user-c" });
-  socket.handlers.join("user:user-d");
+  futureExpirySocket.handlers.join({
+    userId: "user-b",
+    token: "forged-token",
+    room: "user:user-c",
+  });
+  futureExpirySocket.handlers.join("user:user-d");
 
-  assert.deepEqual(socket.joinedRooms, [
+  assert.deepEqual(futureExpirySocket.joinedRooms, [
     "user:user-a",
     "user:user-a",
     "user:user-a",
   ]);
+  assert.deepEqual(futureExpirySocket.emittedEvents, []);
+  assert.deepEqual(futureExpirySocket.disconnected, []);
 });

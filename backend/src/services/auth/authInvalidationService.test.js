@@ -5,6 +5,7 @@ import { getLogger, resetLogger } from "../../config/logger.js";
 import {
   __resetAuthInvalidationDependencies,
   __setAuthInvalidationDependencies,
+  disconnectUserSocketsBestEffort,
   incrementUserAuthVersion,
   normalizeInvalidationAuthVersion,
   revokeAllUserRefreshSessionsBestEffort,
@@ -68,3 +69,45 @@ test("best-effort refresh-session cleanup logs generic failures without throwing
   assert.equal(result, false);
 });
 
+test("disconnectUserSocketsBestEffort delegates the normalized user ID and returns true for success or no-op", async () => {
+  const calls = [];
+  __setAuthInvalidationDependencies({
+    disconnectAuthenticatedUserSockets: (userId) => {
+      calls.push(userId);
+      return { ok: true, room: `user:${userId}`, disconnected: userId === "user-1" };
+    },
+  });
+
+  assert.equal(
+    await disconnectUserSocketsBestEffort({
+      userId: " user-1 ",
+      event: "auth.socket_cleanup_failed",
+    }),
+    true
+  );
+  assert.equal(
+    await disconnectUserSocketsBestEffort({
+      userId: "user-2",
+      event: "auth.socket_cleanup_failed",
+    }),
+    true
+  );
+  assert.equal(await disconnectUserSocketsBestEffort({ userId: "   " }), false);
+  assert.deepEqual(calls, ["user-1", "user-2"]);
+});
+
+test("disconnectUserSocketsBestEffort returns false and logs generic metadata when socket cleanup fails", async () => {
+  getLogger({ level: "silent" });
+  __setAuthInvalidationDependencies({
+    disconnectAuthenticatedUserSockets: () => {
+      throw new Error("socket adapter failed");
+    },
+  });
+
+  const result = await disconnectUserSocketsBestEffort({
+    userId: "user-1",
+    event: "auth.password_reset_socket_cleanup_failed",
+  });
+
+  assert.equal(result, false);
+});

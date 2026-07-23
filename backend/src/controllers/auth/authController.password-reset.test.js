@@ -417,6 +417,7 @@ test("reset-password with valid token changes password and clears reset fields",
   };
   let updateCall;
   let cleanupCall;
+  let socketCleanupCall;
 
   User.findOne = (query) => {
     assert.equal(query.resetPasswordTokenHash, hashToken("valid-token"));
@@ -437,6 +438,10 @@ test("reset-password with valid token changes password and clears reset fields",
   __setAuthControllerDependencies({
     revokeAllUserRefreshSessionsBestEffort: async (payload) => {
       cleanupCall = payload;
+      return true;
+    },
+    disconnectUserSocketsBestEffort: async (payload) => {
+      socketCleanupCall = payload;
       return true;
     },
   });
@@ -465,6 +470,10 @@ test("reset-password with valid token changes password and clears reset fields",
     reason: "password_reset",
     event: "auth.password_reset_cleanup_failed",
   });
+  assert.deepEqual(socketCleanupCall, {
+    userId: user._id,
+    event: "auth.password_reset_socket_cleanup_failed",
+  });
   assert.equal("password" in res.body, false);
 });
 
@@ -475,6 +484,7 @@ test("reset-password conditional update prevents token reuse races", async () =>
   };
   let updateCall;
   let cleanupCalled = false;
+  let socketCleanupCalled = false;
   User.findOne = () => selectable(user);
   User.updateOne = async (filter, update) => {
     updateCall = { filter, update };
@@ -483,6 +493,9 @@ test("reset-password conditional update prevents token reuse races", async () =>
   __setAuthControllerDependencies({
     revokeAllUserRefreshSessionsBestEffort: async () => {
       cleanupCalled = true;
+    },
+    disconnectUserSocketsBestEffort: async () => {
+      socketCleanupCalled = true;
     },
   });
 
@@ -497,14 +510,20 @@ test("reset-password conditional update prevents token reuse races", async () =>
   ]);
   assert.equal(updateCall.update.$inc.authVersion, 1);
   assert.equal(cleanupCalled, false);
+  assert.equal(socketCleanupCalled, false);
 });
 
 test("reset-password cleanup failure remains successful after authVersion update", async () => {
   getLogger({ level: "silent" });
+  let socketCleanupCall;
   User.findOne = () => selectable({ _id: "64d000000000000000000003", authVersion: 1 });
   User.updateOne = async () => ({ matchedCount: 1, modifiedCount: 1 });
   __setAuthControllerDependencies({
     revokeAllUserRefreshSessionsBestEffort: async () => false,
+    disconnectUserSocketsBestEffort: async (payload) => {
+      socketCleanupCall = payload;
+      return true;
+    },
   });
 
   const res = mockRes();
@@ -512,6 +531,35 @@ test("reset-password cleanup failure remains successful after authVersion update
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { message: "Password has been reset successfully." });
+  assert.deepEqual(socketCleanupCall, {
+    userId: "64d000000000000000000003",
+    event: "auth.password_reset_socket_cleanup_failed",
+  });
+});
+
+test("reset-password preserves success when socket cleanup fails after the matched atomic update", async () => {
+  getLogger({ level: "silent" });
+  let cleanupCall;
+  User.findOne = () => selectable({ _id: "64d000000000000000000004", authVersion: 1 });
+  User.updateOne = async () => ({ matchedCount: 1, modifiedCount: 1 });
+  __setAuthControllerDependencies({
+    revokeAllUserRefreshSessionsBestEffort: async (payload) => {
+      cleanupCall = payload;
+      return true;
+    },
+    disconnectUserSocketsBestEffort: async () => false,
+  });
+
+  const res = mockRes();
+  await resetPassword({ body: { token: "valid-token", password: "newpassword123" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: "Password has been reset successfully." });
+  assert.deepEqual(cleanupCall, {
+    userId: "64d000000000000000000004",
+    reason: "password_reset",
+    event: "auth.password_reset_cleanup_failed",
+  });
 });
 
 test("password reset fields are excluded by default from User queries", () => {
