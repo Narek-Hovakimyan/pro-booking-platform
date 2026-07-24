@@ -44,6 +44,7 @@ import platformRoutes from "./routes/platform/platformRoutes.js";
 import { servePublicPortfolioImage } from "./controllers/portfolio/portfolioPhotoMediaController.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/booking/bookingReminderScheduler.js";
+import { serverLifecycleService } from "./services/serverLifecycleService.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
@@ -123,7 +124,14 @@ const corsOptions = {
 app.use(requestContextMiddleware(logger));
 app.use(sentryRequestContextMiddleware);
 
-initSocket(server);
+const socketServer = initSocket(server);
+
+serverLifecycleService.configure({
+  logger,
+  server,
+  socketServer,
+});
+serverLifecycleService.installSignalHandlers();
 
 app.use(cors(corsOptions));
 app.use((req, res, next) => {
@@ -204,27 +212,30 @@ app.use(errorMiddleware);
 
 const startServer = async () => {
   await connectDB();
+  const cronTasks = [];
 
   if (process.env.ENABLE_CLEANUP_NON_WORKING_DAYS_CRON === "true") {
     logger.info("Starting non-working days cleanup cron");
-    startCleanupNonWorkingDaysCron();
+    cronTasks.push(startCleanupNonWorkingDaysCron());
   } else {
     logger.info("Non-working days cleanup cron skipped (ENABLE_CLEANUP_NON_WORKING_DAYS_CRON !== true)");
   }
 
   if (process.env.ENABLE_EXPIRE_PENDING_BOOKINGS_CRON === "true") {
     logger.info("Starting pending booking expiration cron");
-    startExpirePendingBookingsCron();
+    cronTasks.push(startExpirePendingBookingsCron());
   } else {
     logger.info("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== true)");
   }
 
   if (process.env.ENABLE_EVENT_REMINDERS_CRON === "true") {
     logger.info("Starting event reminders cron");
-    startEventRemindersCron();
+    cronTasks.push(startEventRemindersCron());
   } else {
     logger.info("Event reminders cron skipped (ENABLE_EVENT_REMINDERS_CRON !== true)");
   }
+
+  serverLifecycleService.setCronTasks(cronTasks);
 
   server.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);

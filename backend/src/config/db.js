@@ -28,6 +28,47 @@ const exitForConnectionFailure = async (reason) => {
   process.exit(1);
 };
 
+const createTimeoutError = () => {
+  const error = new Error("database_ping_timeout");
+  error.code = "database_ping_timeout";
+  return error;
+};
+
+export const isDatabaseConnected = () => mongoose.connection.readyState === 1;
+
+export const pingDatabase = async ({ timeoutMs = 1000 } = {}) => {
+  if (!isDatabaseConnected() || !mongoose.connection.db) {
+    throw new Error("database_not_connected");
+  }
+
+  let timeoutId = null;
+
+  try {
+    await Promise.race([
+      mongoose.connection.db.admin().command({ ping: 1 }),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(createTimeoutError());
+        }, timeoutMs);
+
+        timeoutId.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
+export const disconnectDB = async () => {
+  if (mongoose.connection.readyState === 0) {
+    return;
+  }
+
+  await mongoose.disconnect();
+};
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_URI;
 
