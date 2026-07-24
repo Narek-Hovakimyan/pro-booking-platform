@@ -6,6 +6,7 @@ import {
   createJsonRateLimiter,
   rateLimitCode,
   rateLimitMessage,
+  securityMutationLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 import { requireAuthCookieRequestSecurity } from "../middleware/authCsrfMiddleware.js";
 import { protect } from "../middleware/authMiddleware.js";
@@ -97,8 +98,8 @@ test("auth routes apply rate limiters before controllers", () => {
   assert.equal(logoutRoute.route.stack[0].handle, authLimiter);
   assert.equal(logoutRoute.route.stack[1].handle, requireAuthCookieRequestSecurity);
   assert.equal(logoutRoute.route.stack[2].handle, logoutAuthSession);
-  assert.equal(logoutAllRoute.route.stack[0].handle, authLimiter);
-  assert.equal(logoutAllRoute.route.stack[1].handle, protect);
+  assert.equal(logoutAllRoute.route.stack[0].handle, protect);
+  assert.equal(logoutAllRoute.route.stack[1].handle, securityMutationLimiter);
   assert.equal(logoutAllRoute.route.stack[2].handle, requireAuthCookieRequestSecurity);
   assert.equal(logoutAllRoute.route.stack[3].handle, logoutAllAuthSessions);
   assert.deepEqual(routes["/login"], ["<anonymous>", "requireAuthCookieRequestSecurity", "loginUser"]);
@@ -108,7 +109,7 @@ test("auth routes apply rate limiters before controllers", () => {
   assert.deepEqual(routes["/reset-password"], ["<anonymous>", "resetPassword"]);
   assert.deepEqual(routes["/refresh"], ["<anonymous>", "requireAuthCookieRequestSecurity", "refreshAuthSession"]);
   assert.deepEqual(routes["/logout"], ["<anonymous>", "requireAuthCookieRequestSecurity", "logoutAuthSession"]);
-  assert.deepEqual(routes["/logout-all"], ["<anonymous>", "protect", "requireAuthCookieRequestSecurity", "logoutAllAuthSessions"]);
+  assert.deepEqual(routes["/logout-all"], ["protect", "<anonymous>", "requireAuthCookieRequestSecurity", "logoutAllAuthSessions"]);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/refresh").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/logout").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/logout-all").length, 1);

@@ -7,7 +7,10 @@ import {
 } from "../../controllers/auth/authSessionController.js";
 import { requireAuthCookieRequestSecurity } from "../../middleware/authCsrfMiddleware.js";
 import { protect } from "../../middleware/authMiddleware.js";
-import { authLimiter } from "../../middleware/rateLimitMiddleware.js";
+import {
+  authLimiter,
+  securityMutationLimiter,
+} from "../../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
@@ -19,6 +22,12 @@ router.post("/forgot-password", authLimiter, forgotPassword);
 router.post("/reset-password", authLimiter, resetPassword);
 router.post("/refresh", authLimiter, requireAuthCookieRequestSecurity, refreshAuthSession);
 router.post("/logout", authLimiter, requireAuthCookieRequestSecurity, logoutAuthSession);
-router.post("/logout-all", authLimiter, protect, requireAuthCookieRequestSecurity, logoutAllAuthSessions);
+router.post(
+  "/logout-all",
+  protect,
+  securityMutationLimiter,
+  requireAuthCookieRequestSecurity,
+  logoutAllAuthSessions
+);
 
 export default router;

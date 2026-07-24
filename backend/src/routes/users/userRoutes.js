@@ -7,15 +7,20 @@ import {
   verifyEmailController,
 } from "../../controllers/users/userController.js";
 import { protect } from "../../middleware/authMiddleware.js";
-import { uploadLimiter } from "../../middleware/rateLimitMiddleware.js";
+import {
+  accountMutationLimiter,
+  emailVerificationLimiter,
+  securityMutationLimiter,
+  uploadLimiter,
+} from "../../middleware/rateLimitMiddleware.js";
 import { handleAvatarUpload } from "../../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
 router.get("/me", protect, getMyProfile);
-router.put("/me", protect, uploadLimiter, handleAvatarUpload, updateMyProfile);
-router.post("/me/email/verification", protect, sendEmailVerificationController);
-router.get("/me/email/verify", verifyEmailController);
+router.put("/me", protect, accountMutationLimiter, uploadLimiter, handleAvatarUpload, updateMyProfile);
+router.post("/me/email/verification", protect, securityMutationLimiter, sendEmailVerificationController);
+router.get("/me/email/verify", emailVerificationLimiter, verifyEmailController);
 router.get("/barbers", getBarbers);
 
 export default router;

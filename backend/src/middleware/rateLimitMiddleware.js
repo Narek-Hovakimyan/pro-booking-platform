@@ -119,6 +119,18 @@ const messageReadWindowMs = () =>
   getNumberEnv("RATE_LIMIT_MESSAGE_READ_WINDOW_MS", 15 * 60 * 1000);
 const messageReadMax = () =>
   getNumberEnv("RATE_LIMIT_MESSAGE_READ_MAX", isProduction() ? 180 : 1200);
+const accountMutationWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_ACCOUNT_MUTATION_WINDOW_MS", 15 * 60 * 1000);
+const accountMutationMax = () =>
+  getNumberEnv("RATE_LIMIT_ACCOUNT_MUTATION_MAX", isProduction() ? 20 : 160);
+const securityMutationWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_SECURITY_MUTATION_WINDOW_MS", 15 * 60 * 1000);
+const securityMutationMax = () =>
+  getNumberEnv("RATE_LIMIT_SECURITY_MUTATION_MAX", isProduction() ? 8 : 80);
+const emailVerificationWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_EMAIL_VERIFICATION_WINDOW_MS", 15 * 60 * 1000);
+const emailVerificationMax = () =>
+  getNumberEnv("RATE_LIMIT_EMAIL_VERIFICATION_MAX", isProduction() ? 30 : 240);
 
 export const authLimiter = createJsonRateLimiter({
   windowMs: authWindowMs(),
@@ -163,6 +175,24 @@ export const messageReadLimiter = createAuthenticatedJsonRateLimiter({
   namespace: "message-read",
   windowMs: messageReadWindowMs(),
   limit: messageReadMax(),
+});
+
+export const accountMutationLimiter = createAuthenticatedJsonRateLimiter({
+  namespace: "account-mutation",
+  windowMs: accountMutationWindowMs(),
+  limit: accountMutationMax(),
+});
+
+export const securityMutationLimiter = createAuthenticatedJsonRateLimiter({
+  namespace: "security-mutation",
+  windowMs: securityMutationWindowMs(),
+  limit: securityMutationMax(),
+});
+
+export const emailVerificationLimiter = createJsonRateLimiter({
+  windowMs: emailVerificationWindowMs(),
+  limit: emailVerificationMax(),
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
 export const uploadLimiter = createJsonRateLimiter({

@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  accountMutationLimiter,
   bookingMutationLimiter,
+  emailVerificationLimiter,
   messageMutationLimiter,
   messageReadLimiter,
   messageLimiter,
   paymentLimiter,
   promoValidationLimiter,
   publicBookingLimiter,
+  securityMutationLimiter,
   uploadLimiter,
   waitlistActionLimiter,
   webhookLimiter,
@@ -127,6 +130,33 @@ test("message read limiter is attached to protected message reads", () => {
     protect,
     messageReadLimiter,
     conversationRoute.stack[2].handle,
+  ]);
+});
+
+test("account and email verification limiters are attached to user routes", () => {
+  const updateProfileRoute = findRoute(userRoutes, "/me", "put");
+  const sendVerificationRoute = findRoute(userRoutes, "/me/email/verification", "post");
+  const verifyEmailRoute = findRoute(userRoutes, "/me/email/verify", "get");
+
+  assert.ok(updateProfileRoute, "expected PUT /api/users/me route");
+  assert.ok(sendVerificationRoute, "expected POST /api/users/me/email/verification route");
+  assert.ok(verifyEmailRoute, "expected GET /api/users/me/email/verify route");
+
+  assert.deepEqual(routeHandles(updateProfileRoute), [
+    protect,
+    accountMutationLimiter,
+    uploadLimiter,
+    updateProfileRoute.stack[3].handle,
+    updateProfileRoute.stack[4].handle,
+  ]);
+  assert.deepEqual(routeHandles(sendVerificationRoute), [
+    protect,
+    securityMutationLimiter,
+    sendVerificationRoute.stack[2].handle,
+  ]);
+  assert.deepEqual(routeHandles(verifyEmailRoute), [
+    emailVerificationLimiter,
+    verifyEmailRoute.stack[1].handle,
   ]);
 });
 

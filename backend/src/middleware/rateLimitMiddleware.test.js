@@ -4,9 +4,10 @@ import { test } from "node:test";
 import { ipKeyGenerator } from "express-rate-limit";
 
 import {
-  createAuthenticatedJsonRateLimiter,
   createAuthenticatedRateLimitKeyGenerator,
+  createAuthenticatedJsonRateLimiter,
   createJsonRateLimiter,
+  emailVerificationLimiter,
   rateLimitCode,
   rateLimitMessage,
 } from "./rateLimitMiddleware.js";
@@ -179,6 +180,84 @@ test("authenticated keying trusts only req.user identifiers", () => {
     keyGenerator(req),
     "auth:booking-mutation:user:trusted-user"
   );
+});
+
+test("security mutation limiter keeps authenticated users independent on one IP", async () => {
+  const limiter = createAuthenticatedJsonRateLimiter({
+    namespace: "security-mutation",
+    windowMs: 60 * 1000,
+    limit: 1,
+    enabled: true,
+  });
+  const sharedIp = "198.51.100.20";
+
+  const firstUser = await runLimiter(
+    limiter,
+    createRequest({ ip: sharedIp, user: { _id: "user-1" } })
+  );
+  const secondUser = await runLimiter(
+    limiter,
+    createRequest({ ip: sharedIp, user: { _id: "user-2" } })
+  );
+  const limitedFirstUser = await runLimiter(
+    limiter,
+    createRequest({ ip: sharedIp, user: { _id: "user-1" }, body: { email: "forged@example.com" } })
+  );
+
+  assert.equal(firstUser.nextCalled, true);
+  assert.equal(secondUser.nextCalled, true);
+  assert.equal(limitedFirstUser.nextCalled, false);
+  assert.deepEqual(limitedFirstUser.res.body, {
+    message: rateLimitMessage,
+    code: rateLimitCode,
+  });
+});
+
+test("public email verification limiter falls back to IPv6-safe IP keys", async () => {
+  const ipv6 = "2001:db8::8";
+  const first = await runLimiter(
+    emailVerificationLimiter,
+    createRequest({
+      ip: ipv6,
+      method: "GET",
+      originalUrl: "/api/users/me/email/verify?token=first",
+      query: { token: "first" },
+    })
+  );
+
+  assert.equal(first.nextCalled, true);
+
+  const limiter = createJsonRateLimiter({
+    windowMs: 60 * 1000,
+    limit: 1,
+    enabled: true,
+    keyGenerator: (req) => ipKeyGenerator(req.ip),
+  });
+  const limited = await runLimiter(
+    limiter,
+    createRequest({
+      ip: ipv6,
+      method: "GET",
+      originalUrl: "/api/users/me/email/verify?token=second",
+      query: { token: "second" },
+    })
+  );
+  const blocked = await runLimiter(
+    limiter,
+    createRequest({
+      ip: ipv6,
+      method: "GET",
+      originalUrl: "/api/users/me/email/verify?token=third",
+      query: { token: "third" },
+    })
+  );
+
+  assert.equal(limited.nextCalled, true);
+  assert.equal(blocked.nextCalled, false);
+  assert.deepEqual(blocked.res.body, {
+    message: rateLimitMessage,
+    code: rateLimitCode,
+  });
 });
 
 test("existing JSON limiter contract remains unchanged", async () => {
