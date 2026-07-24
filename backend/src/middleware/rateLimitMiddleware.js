@@ -1,7 +1,8 @@
-import { rateLimit } from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 
 export const rateLimitMessage = "Too many requests, please try again later.";
 export const rateLimitCode = "RATE_LIMITED";
+export const authenticatedRateLimitNamespace = "auth";
 
 const isProduction = () => process.env.NODE_ENV === "production";
 
@@ -31,10 +32,12 @@ export const createJsonRateLimiter = ({
   windowMs,
   enabled,
   skipSuccessfulRequests = false,
+  keyGenerator,
 }) =>
   rateLimit({
     windowMs,
     limit,
+    keyGenerator,
     skip: () => (enabled === undefined ? !isRateLimitEnabled() : !enabled),
     skipSuccessfulRequests,
     standardHeaders: true,
@@ -44,6 +47,44 @@ export const createJsonRateLimiter = ({
         message: rateLimitMessage,
         code: rateLimitCode,
       }),
+  });
+
+const normalizeUserRateLimitId = (value) => {
+  if (value === undefined || value === null) return "";
+
+  return String(value).trim();
+};
+
+export const getAuthenticatedRateLimitUserId = (req) => {
+  const objectId = normalizeUserRateLimitId(req?.user?._id);
+  if (objectId) return objectId;
+
+  return normalizeUserRateLimitId(req?.user?.id);
+};
+
+export const createAuthenticatedRateLimitKeyGenerator = (namespace) => (req) => {
+  const userId = getAuthenticatedRateLimitUserId(req);
+
+  if (userId) {
+    return `${authenticatedRateLimitNamespace}:${namespace}:user:${userId}`;
+  }
+
+  return `${authenticatedRateLimitNamespace}:${namespace}:ip:${ipKeyGenerator(req.ip)}`;
+};
+
+export const createAuthenticatedJsonRateLimiter = ({
+  namespace,
+  limit,
+  windowMs,
+  enabled,
+  skipSuccessfulRequests = false,
+}) =>
+  createJsonRateLimiter({
+    limit,
+    windowMs,
+    enabled,
+    skipSuccessfulRequests,
+    keyGenerator: createAuthenticatedRateLimitKeyGenerator(namespace),
   });
 
 const authWindowMs = () =>
@@ -62,6 +103,22 @@ const paymentWindowMs = () =>
   getNumberEnv("RATE_LIMIT_PAYMENT_WINDOW_MS", 15 * 60 * 1000);
 const paymentMax = () =>
   getNumberEnv("RATE_LIMIT_PAYMENT_MAX", isProduction() ? 60 : 500);
+const bookingMutationWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_BOOKING_MUTATION_WINDOW_MS", 15 * 60 * 1000);
+const bookingMutationMax = () =>
+  getNumberEnv("RATE_LIMIT_BOOKING_MUTATION_MAX", isProduction() ? 30 : 240);
+const waitlistActionWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_WAITLIST_ACTION_WINDOW_MS", 15 * 60 * 1000);
+const waitlistActionMax = () =>
+  getNumberEnv("RATE_LIMIT_WAITLIST_ACTION_MAX", isProduction() ? 40 : 300);
+const messageMutationWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_MESSAGE_MUTATION_WINDOW_MS", 15 * 60 * 1000);
+const messageMutationMax = () =>
+  getNumberEnv("RATE_LIMIT_MESSAGE_MUTATION_MAX", isProduction() ? 50 : 400);
+const messageReadWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_MESSAGE_READ_WINDOW_MS", 15 * 60 * 1000);
+const messageReadMax = () =>
+  getNumberEnv("RATE_LIMIT_MESSAGE_READ_MAX", isProduction() ? 180 : 1200);
 
 export const authLimiter = createJsonRateLimiter({
   windowMs: authWindowMs(),
@@ -82,6 +139,30 @@ export const promoValidationLimiter = createJsonRateLimiter({
 export const messageLimiter = createJsonRateLimiter({
   windowMs: publicWindowMs(),
   limit: publicMax(),
+});
+
+export const bookingMutationLimiter = createAuthenticatedJsonRateLimiter({
+  namespace: "booking-mutation",
+  windowMs: bookingMutationWindowMs(),
+  limit: bookingMutationMax(),
+});
+
+export const waitlistActionLimiter = createAuthenticatedJsonRateLimiter({
+  namespace: "waitlist-action",
+  windowMs: waitlistActionWindowMs(),
+  limit: waitlistActionMax(),
+});
+
+export const messageMutationLimiter = createAuthenticatedJsonRateLimiter({
+  namespace: "message-mutation",
+  windowMs: messageMutationWindowMs(),
+  limit: messageMutationMax(),
+});
+
+export const messageReadLimiter = createAuthenticatedJsonRateLimiter({
+  namespace: "message-read",
+  windowMs: messageReadWindowMs(),
+  limit: messageReadMax(),
 });
 
 export const uploadLimiter = createJsonRateLimiter({

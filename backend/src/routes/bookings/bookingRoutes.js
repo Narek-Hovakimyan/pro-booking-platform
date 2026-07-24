@@ -29,6 +29,7 @@ import {
 import { optionalAuth, protect } from "../../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 import {
+  bookingMutationLimiter,
   publicBookingLimiter,
   uploadLimiter,
 } from "../../middleware/rateLimitMiddleware.js";
@@ -42,14 +43,21 @@ router.get("/barber/:barberId", optionalAuth, getBarberBookings);
 router.post("/availability-debug", protect, debugBookingAvailability);
 router.post("/quote", protect, publicBookingLimiter, quoteBookingPrice);
 router.post("/", protect, publicBookingLimiter, uploadLimiter, handleReferenceImageUpload, createBooking);
-router.post("/:id/reschedule-request", protect, createRescheduleRequest);
-router.patch("/:id/reschedule-request/accept", protect, acceptRescheduleRequest);
-router.patch("/:id/reschedule-request/reject", protect, rejectRescheduleRequest);
-router.put("/:id", protect, requireBarberSubscription, updateBooking);
-router.patch("/:id/delay", protect, requireBarberSubscription, delayBooking);
+router.post("/:id/reschedule-request", protect, bookingMutationLimiter, createRescheduleRequest);
+router.patch("/:id/reschedule-request/accept", protect, bookingMutationLimiter, acceptRescheduleRequest);
+router.patch("/:id/reschedule-request/reject", protect, bookingMutationLimiter, rejectRescheduleRequest);
+router.put("/:id", protect, requireBarberSubscription, bookingMutationLimiter, updateBooking);
+router.patch("/:id/delay", protect, requireBarberSubscription, bookingMutationLimiter, delayBooking);
 router.get("/:bookingId/reference-images/:imageName", protect, getReferenceImage);
-router.patch("/:id/no-show", protect, requireBarberSubscription, markNoShow);
-router.patch("/:id/late-cancel", protect, requireBarberSubscription, markLateCancel);
-router.put("/:id/treatment-record", protect, requireBarberSubscription, uploadLimiter, updateTreatmentRecord);
+router.patch("/:id/no-show", protect, requireBarberSubscription, bookingMutationLimiter, markNoShow);
+router.patch("/:id/late-cancel", protect, requireBarberSubscription, bookingMutationLimiter, markLateCancel);
+router.put(
+  "/:id/treatment-record",
+  protect,
+  requireBarberSubscription,
+  bookingMutationLimiter,
+  uploadLimiter,
+  updateTreatmentRecord
+);
 
 export default router;
