@@ -33,6 +33,7 @@ export const createJsonRateLimiter = ({
   enabled,
   skipSuccessfulRequests = false,
   keyGenerator,
+  requestWasSuccessful,
 }) =>
   rateLimit({
     windowMs,
@@ -40,6 +41,7 @@ export const createJsonRateLimiter = ({
     keyGenerator,
     skip: () => (enabled === undefined ? !isRateLimitEnabled() : !enabled),
     skipSuccessfulRequests,
+    requestWasSuccessful,
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req, res) =>
@@ -103,6 +105,10 @@ const paymentWindowMs = () =>
   getNumberEnv("RATE_LIMIT_PAYMENT_WINDOW_MS", 15 * 60 * 1000);
 const paymentMax = () =>
   getNumberEnv("RATE_LIMIT_PAYMENT_MAX", isProduction() ? 60 : 500);
+const webhookFailureWindowMs = () =>
+  getNumberEnv("RATE_LIMIT_WEBHOOK_FAILURE_WINDOW_MS", 15 * 60 * 1000);
+const webhookFailureMax = () =>
+  getNumberEnv("RATE_LIMIT_WEBHOOK_FAILURE_MAX", isProduction() ? 180 : 1200);
 const bookingMutationWindowMs = () =>
   getNumberEnv("RATE_LIMIT_BOOKING_MUTATION_WINDOW_MS", 15 * 60 * 1000);
 const bookingMutationMax = () =>
@@ -205,9 +211,14 @@ export const paymentLimiter = createJsonRateLimiter({
   limit: paymentMax(),
 });
 
-export const webhookLimiter = createJsonRateLimiter({
-  windowMs: paymentWindowMs(),
-  limit: Math.max(paymentMax(), isProduction() ? 180 : 1000),
+export const createIpRateLimitKeyGenerator = (req) => ipKeyGenerator(req.ip);
+
+export const webhookFailureLimiter = createJsonRateLimiter({
+  windowMs: webhookFailureWindowMs(),
+  limit: webhookFailureMax(),
+  keyGenerator: createIpRateLimitKeyGenerator,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: (_req, res) => res.statusCode >= 200 && res.statusCode < 300,
 });
 
 export const loginRateLimiter = authLimiter;

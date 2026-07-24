@@ -14,7 +14,7 @@ import {
   securityMutationLimiter,
   uploadLimiter,
   waitlistActionLimiter,
-  webhookLimiter,
+  webhookFailureLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { requireBarberSubscription } from "../middleware/subscriptionMiddleware.js";
@@ -191,9 +191,9 @@ test("payment limiter is attached to payment attempt actions", () => {
   }
 });
 
-test("webhook limiter is attached to payment webhook", () => {
+test("webhook failure limiter is attached to payment webhook", () => {
   const route = findRoute(paymentRoutes, "/webhook", "post");
 
   assert.ok(route, "expected POST /api/payments/webhook route");
-  assert.ok(routeHandles(route).includes(webhookLimiter));
+  assert.ok(routeHandles(route).includes(webhookFailureLimiter));
 });

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { test } from "node:test";
 
 import { ipKeyGenerator } from "express-rate-limit";
 
 import {
+  createIpRateLimitKeyGenerator,
   createAuthenticatedRateLimitKeyGenerator,
   createAuthenticatedJsonRateLimiter,
   createJsonRateLimiter,
@@ -17,6 +19,7 @@ const createRequest = ({
   method = "POST",
   originalUrl = "/api/test",
   user,
+  headers = {},
   params = {},
   query = {},
   body = {},
@@ -27,7 +30,7 @@ const createRequest = ({
     },
   },
   body,
-  headers: {},
+  headers,
   ip,
   method,
   originalUrl,
@@ -36,25 +39,30 @@ const createRequest = ({
   user,
 });
 
-const createResponse = () => ({
-  body: undefined,
-  headers: {},
-  statusCode: 200,
-  getHeader(name) {
-    return this.headers[name.toLowerCase()];
-  },
-  setHeader(name, value) {
-    this.headers[name.toLowerCase()] = value;
-  },
-  status(code) {
-    this.statusCode = code;
-    return this;
-  },
-  json(payload) {
-    this.body = payload;
-    return this;
-  },
-});
+const createResponse = () => {
+  const response = new EventEmitter();
+
+  return Object.assign(response, {
+    body: undefined,
+    headers: {},
+    statusCode: 200,
+    getHeader(name) {
+      return this.headers[name.toLowerCase()];
+    },
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      this.emit("finish");
+      return this;
+    },
+  });
+};
 
 const runLimiter = async (limiter, req) => {
   const res = createResponse();
@@ -66,6 +74,16 @@ const runLimiter = async (limiter, req) => {
 
   return { nextCalled, res };
 };
+
+const createWebhookFailureLimiter = (limit = 2) =>
+  createJsonRateLimiter({
+    windowMs: 60 * 1000,
+    limit,
+    enabled: true,
+    keyGenerator: createIpRateLimitKeyGenerator,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.statusCode >= 200 && res.statusCode < 300,
+  });
 
 test("authenticated users on the same IP have independent counters", async () => {
   const limiter = createAuthenticatedJsonRateLimiter({
@@ -255,6 +273,140 @@ test("public email verification limiter falls back to IPv6-safe IP keys", async 
   assert.equal(limited.nextCalled, true);
   assert.equal(blocked.nextCalled, false);
   assert.deepEqual(blocked.res.body, {
+    message: rateLimitMessage,
+    code: rateLimitCode,
+  });
+});
+
+test("webhook failures reach 429 while successful retries do not consume quota", async () => {
+  const successOnlyLimiter = createWebhookFailureLimiter(1);
+  const successRequest = createRequest({
+    ip: "::ffff:203.0.113.10",
+    headers: { "x-signature": "sig-1", "x-event-id": "evt-1" },
+    body: { paymentId: "pay-1" },
+  });
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await runLimiter(successOnlyLimiter, successRequest);
+    assert.equal(result.nextCalled, true);
+    result.res.status(200).json({ ok: true });
+  }
+
+  const stillAllowed = await runLimiter(successOnlyLimiter, successRequest);
+  assert.equal(stillAllowed.nextCalled, true);
+  stillAllowed.res.status(204).json({ ok: true });
+
+  const failureLimiter = createWebhookFailureLimiter(2);
+  const firstFailure = await runLimiter(
+    failureLimiter,
+    createRequest({ ip: "::ffff:203.0.113.11" })
+  );
+  assert.equal(firstFailure.nextCalled, true);
+  firstFailure.res.status(400).json({ code: "BAD_WEBHOOK", message: "Invalid webhook" });
+
+  const secondFailure = await runLimiter(
+    failureLimiter,
+    createRequest({ ip: "::ffff:203.0.113.11" })
+  );
+  assert.equal(secondFailure.nextCalled, true);
+  secondFailure.res.status(500).json({ code: "BAD_WEBHOOK", message: "Invalid webhook" });
+
+  const blocked = await runLimiter(
+    failureLimiter,
+    createRequest({ ip: "::ffff:203.0.113.11" })
+  );
+
+  assert.equal(blocked.nextCalled, false);
+  assert.equal(blocked.res.statusCode, 429);
+  assert.deepEqual(blocked.res.body, {
+    message: rateLimitMessage,
+    code: rateLimitCode,
+  });
+});
+
+test("webhook failure counters ignore signature and payment identifiers", async () => {
+  const limiter = createWebhookFailureLimiter(2);
+
+  for (const request of [
+    createRequest({
+      ip: "198.51.100.25",
+      headers: {
+        "x-webhook-signature": "sig-a",
+        "x-event-id": "evt-a",
+        "x-payment-id": "pay-a",
+      },
+      params: { provider: "alpha" },
+      query: { eventId: "evt-a" },
+      body: { eventId: "evt-a", paymentId: "pay-a" },
+    }),
+    createRequest({
+      ip: "198.51.100.25",
+      headers: {
+        "x-webhook-signature": "sig-b",
+        "x-event-id": "evt-b",
+        "x-payment-id": "pay-b",
+      },
+      params: { provider: "beta" },
+      query: { eventId: "evt-b" },
+      body: { eventId: "evt-b", paymentId: "pay-b" },
+    }),
+  ]) {
+    const result = await runLimiter(limiter, request);
+    assert.equal(result.nextCalled, true);
+    result.res.status(400).json({ code: "BAD_WEBHOOK", message: "Invalid webhook" });
+  }
+
+  const blocked = await runLimiter(
+    limiter,
+    createRequest({
+      ip: "198.51.100.25",
+      headers: {
+        "x-webhook-signature": "sig-c",
+        "x-event-id": "evt-c",
+        "x-payment-id": "pay-c",
+      },
+      params: { provider: "gamma" },
+      query: { eventId: "evt-c" },
+      body: { eventId: "evt-c", paymentId: "pay-c" },
+    })
+  );
+
+  assert.equal(blocked.nextCalled, false);
+  assert.deepEqual(blocked.res.body, {
+    message: rateLimitMessage,
+    code: rateLimitCode,
+  });
+});
+
+test("webhook failure limiter keeps normalized IP counters independent and IPv6-safe", async () => {
+  const limiter = createWebhookFailureLimiter(1);
+  const firstIp = "::ffff:203.0.113.30";
+  const secondIp = "::ffff:203.0.113.31";
+  const ipv6 = "2001:db8::9";
+
+  assert.equal(
+    createIpRateLimitKeyGenerator(createRequest({ ip: ipv6 })),
+    ipKeyGenerator(ipv6)
+  );
+
+  const firstRequest = await runLimiter(limiter, createRequest({ ip: firstIp }));
+  assert.equal(firstRequest.nextCalled, true);
+  firstRequest.res.status(400).json({ code: "BAD_WEBHOOK", message: "Invalid webhook" });
+
+  const secondRequest = await runLimiter(limiter, createRequest({ ip: secondIp }));
+  assert.equal(secondRequest.nextCalled, true);
+  secondRequest.res.status(400).json({ code: "BAD_WEBHOOK", message: "Invalid webhook" });
+
+  const blockedFirst = await runLimiter(limiter, createRequest({ ip: firstIp }));
+  const blockedSecond = await runLimiter(limiter, createRequest({ ip: secondIp }));
+
+  assert.equal(blockedFirst.nextCalled, false);
+  assert.equal(blockedSecond.nextCalled, false);
+  assert.deepEqual(blockedFirst.res.body, {
+    message: rateLimitMessage,
+    code: rateLimitCode,
+  });
+  assert.deepEqual(blockedSecond.res.body, {
     message: rateLimitMessage,
     code: rateLimitCode,
   });
