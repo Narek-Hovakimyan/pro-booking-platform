@@ -5,6 +5,7 @@ import { createServer } from "http";
 import path from "path";
 import connectDB from "./config/db.js";
 import { createLogger } from "./config/logger.js";
+import { loadRuntimeConfig } from "./config/runtimeConfig.js";
 import {
   getSentryInitializationStatus,
   installSentryExpressErrorHandler,
@@ -51,10 +52,31 @@ import { startEventRemindersCron } from "../cron/eventReminders.js";
 
 dotenv.config();
 
+const loadStartupConfig = () => {
+  try {
+    return loadRuntimeConfig(process.env);
+  } catch (error) {
+    const failures = Array.isArray(error?.failures)
+      ? error.failures.map(({ variable, reason }) => ({ variable, reason }))
+      : [{ variable: "runtime", reason: "validation_failed" }];
+    const startupLogger = createLogger({ environment: "startup" });
+    startupLogger.fatal(
+      {
+        event: "runtime_config.invalid",
+        phase: "startup",
+        failures,
+      },
+      "Runtime configuration invalid"
+    );
+    process.exit(1);
+  }
+};
+
+const runtimeConfig = loadStartupConfig();
 const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 5000;
-const isProduction = process.env.NODE_ENV === "production";
+const isProduction = runtimeConfig.isProduction;
 
 const logger = createLogger();
 
@@ -67,21 +89,19 @@ if (getSentryInitializationStatus().failed) {
 
 app.disable("x-powered-by");
 
-if (process.env.TRUST_PROXY === "true") {
+if (runtimeConfig.trustProxy) {
   app.set("trust proxy", 1);
 }
 
-const clientOrigins = (process.env.CLIENT_URL || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
 const devOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ];
-const allowedOrigins = isProduction ? clientOrigins : [...clientOrigins, ...devOrigins];
+const allowedOrigins = isProduction
+  ? runtimeConfig.clientOrigins
+  : [...runtimeConfig.clientOrigins, ...devOrigins];
 const corsOptions = {
   credentials: true,
   origin(origin, callback) {
