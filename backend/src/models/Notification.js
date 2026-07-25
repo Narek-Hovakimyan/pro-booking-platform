@@ -63,35 +63,55 @@ const notificationDataSchema = new mongoose.Schema(
 
 const TTL_SECONDS = 60 * 60 * 24 * 180; // 180 days
 
-const notificationSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
+const stripInternalFields = (_doc, ret) => {
+  if (ret && typeof ret === "object") {
+    delete ret.internalHash;
+  }
+
+  return ret;
+};
+
+const notificationSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    type: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    message: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    isRead: {
+      type: Boolean,
+      default: false,
+    },
+    data: {
+      type: notificationDataSchema,
+      default: undefined,
+    },
+    internalHash: {
+      type: String,
+      trim: true,
+      default: undefined,
+      select: false,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  type: {
-    type: String,
-    required: true,
-    trim: true,
+  {
+    toJSON: { transform: stripInternalFields },
+    toObject: { transform: stripInternalFields },
   },
-  message: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  isRead: {
-    type: Boolean,
-    default: false,
-  },
-  data: {
-    type: notificationDataSchema,
-    default: undefined,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+);
 
 // TTL index: auto-delete documents 180 days after createdAt
 notificationSchema.index(
@@ -99,6 +119,7 @@ notificationSchema.index(
   { expireAfterSeconds: TTL_SECONDS }
 );
 notificationSchema.index({ userId: 1, createdAt: -1 });
+notificationSchema.index({ internalHash: 1 }, { unique: true, sparse: true });
 
 const Notification = mongoose.model("Notification", notificationSchema);
 

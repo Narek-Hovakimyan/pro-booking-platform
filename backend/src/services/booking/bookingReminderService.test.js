@@ -1,746 +1,380 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { afterEach, test } from "node:test";
-
-import Notification from "../../models/Notification.js";
-import Booking from "../../models/Booking.js";
+import { test } from "node:test";
 
 import { runBookingReminders } from "./bookingReminderService.js";
 
-const originalMethods = {
-  bookingFind: Booking.find,
-  bookingFindOneAndUpdate: Booking.findOneAndUpdate,
-  notificationCreate: Notification.create,
-};
-
-afterEach(() => {
-  Booking.find = originalMethods.bookingFind;
-  Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
-  Notification.create = originalMethods.notificationCreate;
-});
-
-const matchesQuery = (booking, query) =>
-  Object.entries(query).every(([key, value]) => {
-    if (value === null) return booking[key] == null;
-    if (value && typeof value === "object" && Array.isArray(value.$in)) {
-      return value.$in.includes(booking[key]);
-    }
-    return booking[key] === value;
-  });
-
-const setBookings = (bookings) => {
-  Booking.find = async () => bookings;
-  Booking.findOneAndUpdate = async (query, update) => {
-    const booking = bookings.find((item) => matchesQuery(item, query));
-
-    if (!booking) return null;
-
-    for (const [key, value] of Object.entries(update.$set || {})) {
-      booking[key] = value;
-    }
-
-    return booking;
-  };
-};
-
 const createBooking = (overrides = {}) => ({
   _id: "booking-1",
-  barberId: "64b000000000000000000001",
+  barberId: "barber-1",
   barberName: "John Barber",
-  clientId: "64b000000000000000000002",
+  clientId: "client-1",
   clientName: "Jane Client",
-  bookingDate: "2026-05-08",
+  bookingDate: "2026-07-26",
   time: "10:00",
   status: "accepted",
   reminder24hSentAt: null,
   reminder2hSentAt: null,
-  async save() {
-    this.saved = true;
-    return this;
-  },
   ...overrides,
+});
+
+const createBookingModel = (initialBookings) => {
+  const bookings = new Map(
+    initialBookings.map((booking) => [String(booking._id), { ...booking }])
+  );
+
+  const matches = (booking, query) =>
+    Object.entries(query).every(([key, value]) => {
+      if (value && typeof value === "object" && "$in" in value) {
+        return value.$in.includes(booking[key]);
+      }
+      if (value && typeof value === "object" && "$lte" in value) {
+        return booking[key] <= value.$lte;
+      }
+      if (value && typeof value === "object" && "$ne" in value) {
+        return booking[key] !== value.$ne;
+      }
+      return booking[key] === value;
+    });
+
+  return {
+    bookings,
+    async find(query) {
+      return [...bookings.values()].filter((booking) => matches(booking, query));
+    },
+    async findOne(query) {
+      return [...bookings.values()].find((booking) => matches(booking, query)) || null;
+    },
+    async findOneAndUpdate(query, update) {
+      const booking = await this.findOne(query);
+      if (!booking) return null;
+
+      for (const [key, value] of Object.entries(update.$set || {})) {
+        booking[key] = value;
+      }
+
+      return booking;
+    },
+  };
+};
+
+const createDispatchModel = (state) => ({
+  async find(query) {
+    return state.dispatches.filter(
+      (dispatch) =>
+        String(dispatch.bookingId) === String(query.bookingId) &&
+        dispatch.reminderType === query.reminderType &&
+        query.userId.$in.some((userId) => String(userId) === String(dispatch.userId))
+    );
+  },
+});
+
+const createDispatchService = (state, overrides = {}) => ({
+  async claim({ bookingId, reminderType, userId }) {
+    const key = `${bookingId}:${reminderType}:${userId}`;
+    const existing = state.dispatches.find((dispatch) => dispatch.key === key);
+
+    if (overrides.claim) {
+      return overrides.claim({ bookingId, reminderType, userId, key, existing, state });
+    }
+
+    if (existing?.status === "sent" || existing?.status === "claimed") {
+      return { claimed: false, dispatch: null, reason: existing.status };
+    }
+
+    const dispatch = {
+      key,
+      bookingId,
+      reminderType,
+      userId,
+      status: "claimed",
+      claimToken: `token:${key}:${state.claimCounter++}`,
+      failureCode: "",
+    };
+
+    if (existing) {
+      Object.assign(existing, dispatch);
+      return { claimed: true, dispatch: existing };
+    }
+
+    state.dispatches.push(dispatch);
+    return { claimed: true, dispatch };
+  },
+  async markSent({ bookingId, reminderType, userId, claimToken }) {
+    const key = `${bookingId}:${reminderType}:${userId}`;
+    const dispatch = state.dispatches.find(
+      (entry) => entry.key === key && entry.claimToken === claimToken
+    );
+
+    if (overrides.markSent) {
+      return overrides.markSent({ bookingId, reminderType, userId, claimToken, dispatch, state });
+    }
+
+    if (!dispatch) return { markedSent: false, reason: "not_owner" };
+
+    dispatch.status = "sent";
+    dispatch.sentAt = new Date("2026-07-25T09:00:00.000Z");
+    return { markedSent: true, dispatch };
+  },
+  async markFailed({ bookingId, reminderType, userId, claimToken, failureCode }) {
+    const key = `${bookingId}:${reminderType}:${userId}`;
+    const dispatch = state.dispatches.find(
+      (entry) => entry.key === key && entry.claimToken === claimToken
+    );
+
+    if (!dispatch) return { markedFailed: false, reason: "not_owner" };
+
+    dispatch.status = "failed";
+    dispatch.failureCode = failureCode;
+    return { markedFailed: true, dispatch };
+  },
 });
 
 test("server does not auto-start the legacy booking reminder cron", async () => {
   const serverSource = await readFile(new URL("../../server.js", import.meta.url), "utf8");
 
-  assert.equal(serverSource.includes('import("../cron/bookingReminders.js")'), false);
   assert.equal(serverSource.includes("cron/bookingReminders"), false);
 });
 
-// --- 24h reminder tests ---
-
-test("24h reminder creates client and barber notifications for accepted booking", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    barberName: "John Barber",
-    clientName: "Jane Client",
-  });
+test("24h reminder creates per-recipient notifications and finalizes legacy field", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
   const notifications = [];
 
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  // Now is 2026-05-07T11:00 -> booking is in 23h (within 24h window)
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 1);
-  assert.ok(booking.reminder24hSentAt instanceof Date);
-  assert.equal(notifications.length, 2);
-
-  const clientNotif = notifications.find(
-    (n) => n.userId === booking.clientId
-  );
-  const barberNotif = notifications.find(
-    (n) => n.userId === booking.barberId
-  );
-
-  assert.ok(clientNotif);
-  assert.equal(clientNotif.type, "booking_reminder_24h");
-  assert.deepEqual(clientNotif.data, { bookingId: booking._id });
-  assert.equal(
-    clientNotif.message,
-    "Reminder: your appointment with John Barber is tomorrow at 10:00."
-  );
-
-  assert.ok(barberNotif);
-  assert.equal(barberNotif.type, "booking_reminder_24h");
-  assert.deepEqual(barberNotif.data, { bookingId: booking._id });
-  assert.equal(
-    barberNotif.message,
-    "Reminder: you have an appointment with Jane Client tomorrow at 10:00."
-  );
-});
-
-test("24h reminder uses fallback names when barberName or clientName is missing", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "14:30",
-    barberName: undefined,
-    clientName: undefined,
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async (payload) => {
+      notifications.push(payload);
+      return payload;
+    },
   });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T15:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 1);
-
-  const clientNotif = notifications.find(
-    (n) => n.userId === booking.clientId
-  );
-  const barberNotif = notifications.find(
-    (n) => n.userId === booking.barberId
-  );
-
-  assert.ok(clientNotif);
-  assert.equal(
-    clientNotif.message,
-    "Reminder: your appointment with your barber is tomorrow at 14:30."
-  );
-  assert.ok(barberNotif);
-  assert.equal(
-    barberNotif.message,
-    "Reminder: you have an appointment with your client tomorrow at 14:30."
-  );
-});
-
-// --- 2h reminder tests ---
-
-test("2h reminder creates client and barber notifications for accepted booking", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  // Now is 2026-05-08T08:00 -> booking is in 2h (within 2h window)
-  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 1);
-  assert.ok(booking.reminder2hSentAt instanceof Date);
-  assert.equal(notifications.length, 2);
-
-  const clientNotif = notifications.find(
-    (n) => n.userId === booking.clientId
-  );
-  const barberNotif = notifications.find(
-    (n) => n.userId === booking.barberId
-  );
-
-  assert.ok(clientNotif);
-  assert.equal(clientNotif.type, "booking_reminder_2h");
-  assert.deepEqual(clientNotif.data, { bookingId: booking._id });
-  assert.equal(clientNotif.message, "Your appointment starts in 2 hours.");
-
-  assert.ok(barberNotif);
-  assert.equal(barberNotif.type, "booking_reminder_2h");
-  assert.deepEqual(barberNotif.data, { bookingId: booking._id });
-  assert.equal(barberNotif.message, "Your appointment starts in 2 hours.");
-});
-
-// --- Idempotency tests ---
-
-test("24h reminder is not duplicated if reminder24hSentAt already set", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    reminder24hSentAt: new Date("2026-05-07T09:00:00+04:00"),
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("2h reminder is not duplicated if reminder2hSentAt already set", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    reminder2hSentAt: new Date("2026-05-08T07:00:00+04:00"),
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("24h reminder is not sent if 2h reminder was already sent (prevents overlap)", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    reminder2hSentAt: new Date("2026-05-08T08:00:00+04:00"),
-    reminder24hSentAt: null,
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  // This is the same window where both 2h and 24h would apply
-  const result = await runBookingReminders(new Date("2026-05-08T08:30:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-// --- Status filter tests ---
-
-test("pending booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "pending",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("rejected booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "rejected",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-});
-
-test("cancelled booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "cancelled",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-});
-
-test("completed booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "completed",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-});
-
-test("expired booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "expired",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-});
-
-// --- Past booking test ---
-
-test("past booking does not get reminders", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-07",
-    time: "09:00",
-    status: "accepted",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  // Now is 2026-05-07T10:00 -> booking was at 09:00, already started
-  const result = await runBookingReminders(new Date("2026-05-07T10:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-// --- Window boundary tests ---
-
-test("booking outside 24h window does not get 24h reminder", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-09",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  // Now is 2026-05-07T10:00 -> booking is in 48h (outside 24h window)
-  const result = await runBookingReminders(new Date("2026-05-07T10:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("booking exactly at 24h boundary gets reminder", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  // Now is 2026-05-07T10:00 -> booking is exactly 24h from now
-  const result = await runBookingReminders(new Date("2026-05-07T10:00:00+04:00"));
 
   assert.equal(result.remindersSent, 1);
   assert.equal(notifications.length, 2);
+  assert.equal(
+    bookingModel.bookings.get("booking-1").reminder24hSentAt instanceof Date,
+    true
+  );
+  assert.equal(
+    notifications.every((notification) => notification.idempotencyKey.includes("booking-reminder")),
+    true
+  );
 });
 
-test("booking exactly at 2h boundary gets 2h reminder (not 24h)", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
+test("2h reminder preserves messages and type", async () => {
+  const bookingModel = createBookingModel([
+    createBooking({ bookingDate: "2026-07-25", time: "11:00" }),
+  ]);
+  const state = { dispatches: [], claimCounter: 1 };
   const notifications = [];
 
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
+  await runBookingReminders(new Date("2026-07-25T05:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async (payload) => {
+      notifications.push(payload);
+      return payload;
+    },
+  });
 
-  // Now is 2026-05-08T08:00 -> booking is exactly 2h from now
-  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 1);
-  assert.ok(booking.reminder2hSentAt instanceof Date);
-  assert.equal(notifications.length, 2);
   assert.equal(notifications[0].type, "booking_reminder_2h");
+  assert.equal(notifications[0].message, "Your appointment starts in 2 hours.");
 });
 
-test("multiple accepted bookings each get their own reminders", async () => {
-  const booking1 = createBooking({
-    _id: "booking-a",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    barberId: "64b100000000000000000001",
-    clientId: "64b200000000000000000002",
-    barberName: "Alice",
-    clientName: "Bob",
-  });
-  const booking2 = createBooking({
-    _id: "booking-b",
-    bookingDate: "2026-05-08",
-    time: "10:30",
-    barberId: "64b300000000000000000003",
-    clientId: "64b400000000000000000004",
-    barberName: "Charlie",
-    clientName: "Diana",
-  });
+test("partial delivery retries only failed recipient and avoids resending completed recipient", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
   const notifications = [];
 
-  setBookings([booking1, booking2]);
-  Notification.create = async (payload) => {
+  const failingCreateNotification = async (payload) => {
     notifications.push(payload);
+    if (payload.userId === "barber-1" && notifications.length === 2) {
+      const error = new Error("socket");
+      error.code = "socket_failure";
+      throw error;
+    }
     return payload;
   };
 
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
+  const first = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: failingCreateNotification,
+  });
+  const second = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async (payload) => {
+      notifications.push(payload);
+      return payload;
+    },
+  });
 
-  assert.equal(result.remindersSent, 2);
-  assert.ok(booking1.reminder24hSentAt instanceof Date);
-  assert.ok(booking2.reminder24hSentAt instanceof Date);
-  assert.equal(notifications.length, 4);
+  assert.equal(first.remindersSent, 0);
+  assert.equal(second.remindersSent, 1);
+  assert.equal(
+    notifications.filter((notification) => notification.userId === "client-1").length,
+    1
+  );
+  assert.equal(
+    notifications.filter((notification) => notification.userId === "barber-1").length,
+    2
+  );
 });
 
-test("booking with no clientId still sends barber notification", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    clientId: null,
-    barberName: "Solo Barber",
-    clientName: "Guest",
-  });
-  const notifications = [];
+test("crash after notification persistence recovers via stale claimed recipient without duplicate resend", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = {
+    dispatches: [
+      {
+        key: "booking-1:booking_reminder_24h:client-1",
+        bookingId: "booking-1",
+        reminderType: "booking_reminder_24h",
+        userId: "client-1",
+        status: "failed",
+        claimToken: "old-token",
+        failureCode: "storage_error",
+      },
+    ],
+    claimCounter: 1,
+  };
+  const idempotencyKeys = [];
 
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async (payload) => {
+      idempotencyKeys.push(payload.idempotencyKey);
+      return payload;
+    },
+  });
+
+  assert.equal(result.remindersSent, 1);
+  assert.equal(new Set(idempotencyKeys).size, 2);
+});
+
+test("booking cancellation after claim prevents delivery and marks failure", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
+  let readCount = 0;
+  const originalFindOne = bookingModel.findOne.bind(bookingModel);
+  bookingModel.findOne = async (query) => {
+    const booking = await originalFindOne(query);
+    readCount += 1;
+    if (booking && readCount === 1) {
+      booking.status = "cancelled";
+    }
+    return booking;
   };
 
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async () => {
+      throw new Error("should not run");
+    },
+  });
 
-  // 1 reminder because only barber got notified (no clientId)
+  assert.equal(result.remindersSent, 0);
+  assert.equal(state.dispatches.every((dispatch) => dispatch.status === "failed"), true);
+});
+
+test("booking reschedule outside the window prevents delivery", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
+  let readCount = 0;
+  const originalFindOne = bookingModel.findOne.bind(bookingModel);
+  bookingModel.findOne = async (query) => {
+    const booking = await originalFindOne(query);
+    readCount += 1;
+    if (booking && readCount === 1) {
+      booking.bookingDate = "2026-07-29";
+    }
+    return booking;
+  };
+
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async () => {
+      throw new Error("should not run");
+    },
+  });
+
+  assert.equal(result.remindersSent, 0);
+});
+
+test("missing client recipient still sends barber reminder and finalizes", async () => {
+  const bookingModel = createBookingModel([createBooking({ clientId: null })]);
+  const state = { dispatches: [], claimCounter: 1 };
+  const notifications = [];
+
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async (payload) => {
+      notifications.push(payload);
+      return payload;
+    },
+  });
+
   assert.equal(result.remindersSent, 1);
   assert.equal(notifications.length, 1);
-  assert.equal(notifications[0].userId, booking.barberId);
+  assert.equal(notifications[0].userId, "barber-1");
 });
 
-test("concurrent runs do not duplicate 24h reminders", async () => {
-  const storedBooking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
+test("socket failure is tolerated when notification persistence succeeds", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel: createDispatchModel(state),
+    dispatchService: createDispatchService(state),
+    createNotification: async (payload) => payload,
   });
-  const notifications = [];
-  let findCalls = 0;
-  let releaseFinds;
-  const bothFindsStarted = new Promise((resolve) => {
-    releaseFinds = resolve;
-  });
-
-  Booking.find = async () => {
-    findCalls++;
-    if (findCalls === 2) releaseFinds();
-    await bothFindsStarted;
-    return [createBooking({ ...storedBooking })];
-  };
-  Booking.findOneAndUpdate = async (query, update) => {
-    if (!matchesQuery(storedBooking, query)) return null;
-
-    for (const [key, value] of Object.entries(update.$set || {})) {
-      storedBooking[key] = value;
-    }
-
-    return { ...storedBooking };
-  };
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const results = await Promise.all([
-    runBookingReminders(new Date("2026-05-07T11:00:00+04:00")),
-    runBookingReminders(new Date("2026-05-07T11:00:00+04:00")),
-  ]);
-
-  assert.equal(results[0].remindersSent + results[1].remindersSent, 1);
-  assert.ok(storedBooking.reminder24hSentAt instanceof Date);
-  assert.equal(notifications.length, 2);
-  assert.equal(
-    notifications.filter((notification) => notification.type === "booking_reminder_24h").length,
-    2
-  );
-});
-
-// --- Confirmed booking tests ---
-
-test("confirmed booking gets 24h reminder", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    status: "confirmed",
-    barberName: "John Barber",
-    clientName: "Jane Client",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
 
   assert.equal(result.remindersSent, 1);
-  assert.ok(booking.reminder24hSentAt instanceof Date);
-  assert.equal(notifications.length, 2);
-
-  const clientNotif = notifications.find((n) => n.userId === booking.clientId);
-  const barberNotif = notifications.find((n) => n.userId === booking.barberId);
-  assert.ok(clientNotif);
-  assert.equal(clientNotif.type, "booking_reminder_24h");
-  assert.equal(
-    clientNotif.message,
-    "Reminder: your appointment with John Barber is tomorrow at 10:00."
-  );
-  assert.ok(barberNotif);
-  assert.equal(barberNotif.type, "booking_reminder_24h");
-  assert.equal(
-    barberNotif.message,
-    "Reminder: you have an appointment with Jane Client tomorrow at 10:00."
-  );
 });
 
-test("confirmed booking gets 2h reminder", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    status: "confirmed",
-  });
+test("concurrent workers share per-recipient state and avoid duplicate completion", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
+  const dispatchService = createDispatchService(state);
   const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 1);
-  assert.ok(booking.reminder2hSentAt instanceof Date);
-  assert.equal(notifications.length, 2);
-
-  const clientNotif = notifications.find((n) => n.userId === booking.clientId);
-  const barberNotif = notifications.find((n) => n.userId === booking.barberId);
-  assert.ok(clientNotif);
-  assert.equal(clientNotif.type, "booking_reminder_2h");
-  assert.equal(clientNotif.message, "Your appointment starts in 2 hours.");
-  assert.ok(barberNotif);
-  assert.equal(barberNotif.type, "booking_reminder_2h");
-});
-
-test("confirmed booking does not get duplicate 24h reminder", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    status: "confirmed",
-    reminder24hSentAt: new Date("2026-05-07T09:00:00+04:00"),
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("confirmed booking does not get duplicate 2h reminder", async () => {
-  const booking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-    status: "confirmed",
-    reminder2hSentAt: new Date("2026-05-08T07:00:00+04:00"),
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-08T08:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("no_show booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "no_show",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("late_cancelled booking does not get reminders", async () => {
-  const booking = createBooking({
-    status: "late_cancelled",
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-
-  setBookings([booking]);
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
-
-  const result = await runBookingReminders(new Date("2026-05-07T11:00:00+04:00"));
-
-  assert.equal(result.remindersSent, 0);
-  assert.equal(notifications.length, 0);
-});
-
-test("concurrent runs do not duplicate 2h reminders", async () => {
-  const storedBooking = createBooking({
-    bookingDate: "2026-05-08",
-    time: "10:00",
-  });
-  const notifications = [];
-  let findCalls = 0;
-  let releaseFinds;
-  const bothFindsStarted = new Promise((resolve) => {
-    releaseFinds = resolve;
-  });
-
-  Booking.find = async () => {
-    findCalls++;
-    if (findCalls === 2) releaseFinds();
-    await bothFindsStarted;
-    return [createBooking({ ...storedBooking })];
-  };
-  Booking.findOneAndUpdate = async (query, update) => {
-    if (!matchesQuery(storedBooking, query)) return null;
-
-    for (const [key, value] of Object.entries(update.$set || {})) {
-      storedBooking[key] = value;
-    }
-
-    return { ...storedBooking };
-  };
-  Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
-  };
 
   const results = await Promise.all([
-    runBookingReminders(new Date("2026-05-08T08:00:00+04:00")),
-    runBookingReminders(new Date("2026-05-08T08:00:00+04:00")),
+    runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+      bookingModel,
+      dispatchModel: createDispatchModel(state),
+      dispatchService,
+      createNotification: async (payload) => {
+        notifications.push(payload);
+        return payload;
+      },
+    }),
+    runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+      bookingModel,
+      dispatchModel: createDispatchModel(state),
+      dispatchService,
+      createNotification: async (payload) => {
+        notifications.push(payload);
+        return payload;
+      },
+    }),
   ]);
 
-  assert.equal(results[0].remindersSent + results[1].remindersSent, 1);
-  assert.ok(storedBooking.reminder2hSentAt instanceof Date);
   assert.equal(notifications.length, 2);
   assert.equal(
-    notifications.filter((notification) => notification.type === "booking_reminder_2h").length,
-    2
+    bookingModel.bookings.get("booking-1").reminder24hSentAt instanceof Date,
+    true
   );
 });

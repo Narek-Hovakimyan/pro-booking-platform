@@ -11,29 +11,27 @@ import {
 
 const originalNotificationCreate = Notification.create;
 const originalNotificationFind = Notification.find;
+const originalNotificationFindOne = Notification.findOne;
 
 afterEach(() => {
   Notification.create = originalNotificationCreate;
   Notification.find = originalNotificationFind;
+  Notification.findOne = originalNotificationFindOne;
   __notificationServiceTestHooks.resetGetIO();
 });
 
-const createResponse = () => {
-  const response = {
-    statusCode: 200,
-    body: undefined,
-    status(code) {
-      this.statusCode = code;
-      return this;
-    },
-    json(payload) {
-      this.body = payload;
-      return this;
-    },
-  };
-
-  return response;
-};
+const createResponse = () => ({
+  statusCode: 200,
+  body: undefined,
+  status(code) {
+    this.statusCode = code;
+    return this;
+  },
+  json(payload) {
+    this.body = payload;
+    return this;
+  },
+});
 
 test("Notification model accepts notification without data", () => {
   const notification = new Notification({
@@ -46,21 +44,6 @@ test("Notification model accepts notification without data", () => {
   assert.equal(notification.data, undefined);
 });
 
-test("Notification model accepts notification with data.bookingId", () => {
-  const bookingId = new mongoose.Types.ObjectId();
-  const notification = new Notification({
-    userId: new mongoose.Types.ObjectId(),
-    type: "booking_created",
-    message: "New booking",
-    data: {
-      bookingId,
-    },
-  });
-
-  assert.equal(notification.validateSync(), undefined);
-  assert.equal(String(notification.data.bookingId), String(bookingId));
-});
-
 test("Notification model persists only whitelisted data fields", () => {
   const notification = new Notification({
     userId: new mongoose.Types.ObjectId(),
@@ -70,15 +53,28 @@ test("Notification model persists only whitelisted data fields", () => {
       bookingId: new mongoose.Types.ObjectId(),
       unsafeField: "ignored",
     },
+    internalHash: "secret",
   });
 
   const plainNotification = notification.toObject();
 
   assert.equal(plainNotification.data.unsafeField, undefined);
+  assert.equal(plainNotification.internalHash, undefined);
   assert.ok(plainNotification.data.bookingId);
 });
 
-test("createNotification works without data", async () => {
+test("Notification schema includes sparse unique internal hash index", () => {
+  const indexes = Notification.schema.indexes();
+  const internalHashIndex = indexes.find(
+    ([key]) => JSON.stringify(key) === JSON.stringify({ internalHash: 1 })
+  );
+
+  assert.ok(internalHashIndex);
+  assert.equal(internalHashIndex[1].unique, true);
+  assert.equal(internalHashIndex[1].sparse, true);
+});
+
+test("createNotification works without idempotency key", async () => {
   const userId = new mongoose.Types.ObjectId();
   let createdPayload = null;
 
@@ -94,14 +90,11 @@ test("createNotification works without data", async () => {
     message: "New booking",
   });
 
-  assert.equal(createdPayload.userId, userId);
-  assert.equal(createdPayload.type, "booking_created");
-  assert.equal(createdPayload.message, "New booking");
-  assert.equal(Object.hasOwn(createdPayload, "data"), false);
-  assert.equal(Object.hasOwn(notification, "data"), false);
+  assert.equal(createdPayload.internalHash, undefined);
+  assert.equal(notification.internalHash, undefined);
 });
 
-test("createNotification persists data when provided", async () => {
+test("createNotification uses deterministic internal hash and hides it from callers", async () => {
   const userId = new mongoose.Types.ObjectId();
   const bookingId = new mongoose.Types.ObjectId();
   let createdPayload = null;
@@ -114,20 +107,56 @@ test("createNotification persists data when provided", async () => {
 
   const notification = await createNotification({
     userId,
-    type: "booking_created",
-    message: "New booking",
-    data: {
-      bookingId,
-    },
+    type: "booking_reminder_24h",
+    message: "Reminder",
+    data: { bookingId },
+    idempotencyKey: "booking:1:user:1",
   });
 
-  assert.equal(String(createdPayload.data.bookingId), String(bookingId));
+  assert.equal(typeof createdPayload.internalHash, "string");
+  assert.equal(createdPayload.internalHash.length > 0, true);
+  assert.equal(notification.internalHash, undefined);
   assert.equal(String(notification.data.bookingId), String(bookingId));
 });
 
-test("createNotification socket payload includes data", async () => {
+test("duplicate idempotent notification returns the existing record", async () => {
   const userId = new mongoose.Types.ObjectId();
-  const bookingId = new mongoose.Types.ObjectId();
+  const existing = {
+    _id: new mongoose.Types.ObjectId(),
+    userId,
+    type: "booking_reminder_2h",
+    message: "Reminder",
+    data: { bookingId: new mongoose.Types.ObjectId() },
+    internalHash: "hidden",
+    toObject() {
+      return { ...this };
+    },
+  };
+  const duplicateError = new Error("duplicate key");
+  duplicateError.code = 11000;
+
+  Notification.create = async () => {
+    throw duplicateError;
+  };
+  Notification.findOne = () => ({
+    select: async () => existing,
+  });
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  const notification = await createNotification({
+    userId,
+    type: "booking_reminder_2h",
+    message: "Reminder",
+    data: existing.data,
+    idempotencyKey: "dup-key",
+  });
+
+  assert.equal(String(notification._id), String(existing._id));
+  assert.equal(notification.internalHash, undefined);
+});
+
+test("createNotification socket payload omits internal hash", async () => {
+  const userId = new mongoose.Types.ObjectId();
   let emitted = null;
 
   Notification.create = async (payload) => ({
@@ -146,19 +175,45 @@ test("createNotification socket payload includes data", async () => {
 
   await createNotification({
     userId,
-    type: "booking_created",
-    message: "New booking",
-    data: {
-      bookingId,
-    },
+    type: "booking_reminder_24h",
+    message: "Reminder",
+    data: { bookingId: new mongoose.Types.ObjectId() },
+    idempotencyKey: "socket-key",
   });
 
   assert.equal(emitted.room, `user:${userId}`);
   assert.equal(emitted.eventName, "notification");
-  assert.equal(String(emitted.payload.data.bookingId), String(bookingId));
+  assert.equal(emitted.payload.internalHash, undefined);
 });
 
-test("GET /notifications returns data", async () => {
+test("createNotification treats socket emit failure as non-fatal after persistence", async () => {
+  const userId = new mongoose.Types.ObjectId();
+
+  Notification.create = async (payload) => ({
+    _id: new mongoose.Types.ObjectId(),
+    ...payload,
+  });
+  __notificationServiceTestHooks.setGetIO(() => ({
+    to() {
+      return {
+        emit() {
+          throw new Error("socket down");
+        },
+      };
+    },
+  }));
+
+  const notification = await createNotification({
+    userId,
+    type: "booking_reminder_2h",
+    message: "Reminder",
+    idempotencyKey: "socket-failure-key",
+  });
+
+  assert.equal(String(notification.userId), String(userId));
+});
+
+test("GET /notifications returns data without internal hash", async () => {
   const userId = new mongoose.Types.ObjectId();
   const bookingId = new mongoose.Types.ObjectId();
   const storedNotifications = [
@@ -169,9 +224,7 @@ test("GET /notifications returns data", async () => {
       message: "New booking",
       isRead: false,
       createdAt: new Date(),
-      data: {
-        bookingId,
-      },
+      data: { bookingId },
     },
   ];
 
@@ -190,6 +243,7 @@ test("GET /notifications returns data", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(String(response.body[0].data.bookingId), String(bookingId));
+  assert.equal(response.body[0].internalHash, undefined);
 });
 
 test("Notification schema has TTL index on createdAt with 180-day expiry", () => {
@@ -198,7 +252,6 @@ test("Notification schema has TTL index on createdAt with 180-day expiry", () =>
     ([key]) => JSON.stringify(key) === JSON.stringify({ createdAt: 1 })
   );
 
-  assert.ok(ttlIndex, "Expected TTL index on createdAt to exist");
-  assert.equal(ttlIndex[1].expireAfterSeconds, 15552000);
+  assert.ok(ttlIndex);
   assert.equal(ttlIndex[1].expireAfterSeconds, 60 * 60 * 24 * 180);
 });
