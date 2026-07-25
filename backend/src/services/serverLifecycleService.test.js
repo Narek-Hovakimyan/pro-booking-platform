@@ -284,3 +284,67 @@ test("shutdown timeout returns non-zero and does not run cleanup twice", async (
     )
   );
 });
+
+test("shutdown awaits async cron stop cleanup", async () => {
+  const calls = [];
+  const deferred = (() => {
+    let resolve;
+    const promise = new Promise((nextResolve) => {
+      resolve = nextResolve;
+    });
+    return { promise, resolve };
+  })();
+  const cronTask = {
+    async stop() {
+      calls.push("cron-stop-start");
+      await deferred.promise;
+      calls.push("cron-stop-finish");
+      return { stopped: true };
+    },
+  };
+  const service = createServerLifecycleService({
+    stopBookingReminderSchedulerFn: async () => {
+      calls.push("booking");
+    },
+    stopWaitlistExpirationSchedulerFn: async () => {
+      calls.push("waitlist");
+    },
+    stopSubscriptionExpirationSchedulerFn: async () => {
+      calls.push("subscription");
+    },
+    closeHttpServerFn: async () => {
+      calls.push("http");
+    },
+    closeSocketServerFn: async () => {
+      calls.push("socket");
+    },
+    disconnectDatabaseFn: async () => {
+      calls.push("db");
+    },
+  });
+
+  service.setCronTasks([cronTask]);
+
+  const shutdownPromise = service.shutdown("SIGTERM");
+  let settled = false;
+  void shutdownPromise.then(() => {
+    settled = true;
+  });
+
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  deferred.resolve();
+
+  assert.deepEqual(await shutdownPromise, { ok: true, exitCode: 0 });
+  assert.deepEqual(calls, [
+    "booking",
+    "waitlist",
+    "subscription",
+    "cron-stop-start",
+    "cron-stop-finish",
+    "http",
+    "socket",
+    "db",
+  ]);
+});

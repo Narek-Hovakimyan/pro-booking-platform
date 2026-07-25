@@ -26,7 +26,7 @@ const normalizeCronTasks = (cronTasks = []) =>
   cronTasks.filter((task) => task && typeof task.stop === "function");
 
 const stopCronTask = async (task) => {
-  task.stop();
+  await task.stop();
 };
 
 const stopHttpServer = async (server) => {

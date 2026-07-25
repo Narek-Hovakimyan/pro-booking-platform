@@ -1,14 +1,24 @@
-import cron from "node-cron";
 import { expirePendingBookings } from "../src/services/booking/bookingExpiration.js";
+import { createCronLeaseRunner } from "../src/services/cronLeaseRunner.js";
 
 export const EXPIRATION_CRON = "*/5 * * * *";
 
-export const startExpirePendingBookingsCron = () => {
-  return cron.schedule(EXPIRATION_CRON, async () => {
-    try {
-      await expirePendingBookings();
-    } catch (error) {
-      console.error("Pending booking expiration job error:", error);
-    }
-  });
-};
+export const startExpirePendingBookingsCron = ({
+  logger = console,
+  createRunner = createCronLeaseRunner,
+  expirePendingBookingsFn = expirePendingBookings,
+  ...runnerOptions
+} = {}) =>
+  createRunner({
+    jobKey: "expire-pending-bookings",
+    expression: EXPIRATION_CRON,
+    logger,
+    run: async () => {
+      try {
+        await expirePendingBookingsFn();
+      } catch (error) {
+        logger.error?.("Pending booking expiration job error:", error);
+      }
+    },
+    ...runnerOptions,
+  }).start();
