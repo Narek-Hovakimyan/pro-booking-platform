@@ -5,41 +5,33 @@ import { createHash } from "node:crypto";
 let getIOForNotifications = getIO;
 
 const DUPLICATE_KEY_CODE = 11000;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
-const normalizeData = (value) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+const normalizeIdempotencyKey = (idempotencyKey) => {
+  if (idempotencyKey === undefined) {
     return undefined;
   }
 
-  return Object.keys(value)
-    .sort()
-    .reduce((accumulator, key) => {
-      const nestedValue = value[key];
+  if (
+    typeof idempotencyKey !== "string" ||
+    idempotencyKey.trim().length === 0 ||
+    idempotencyKey.trim().length > 512 ||
+    !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey.trim())
+  ) {
+    throw new TypeError("idempotencyKey must be a valid non-empty token");
+  }
 
-      if (nestedValue && typeof nestedValue === "object" && !Array.isArray(nestedValue)) {
-        accumulator[key] = normalizeData(nestedValue);
-        return accumulator;
-      }
-
-      accumulator[key] = nestedValue;
-      return accumulator;
-    }, {});
+  return idempotencyKey.trim();
 };
 
-const buildInternalHash = ({ idempotencyKey, userId, type, message, data }) => {
-  if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length === 0) {
+const buildInternalHash = (idempotencyKey) => {
+  const normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+
+  if (normalizedKey === undefined) {
     return undefined;
   }
 
-  const normalizedPayload = JSON.stringify({
-    idempotencyKey: idempotencyKey.trim(),
-    userId: String(userId),
-    type,
-    message,
-    data: normalizeData(data),
-  });
-
-  return createHash("sha256").update(normalizedPayload).digest("hex");
+  return createHash("sha256").update(normalizedKey).digest("hex");
 };
 
 const sanitizeNotification = (notification) => {
@@ -92,13 +84,7 @@ export const createNotification = async ({
   idempotencyKey,
 }) => {
   const payload = { userId, type, message };
-  const internalHash = buildInternalHash({
-    idempotencyKey,
-    userId,
-    type,
-    message,
-    data,
-  });
+  const internalHash = buildInternalHash(idempotencyKey);
 
   if (data && typeof data === "object") {
     payload.data = data;

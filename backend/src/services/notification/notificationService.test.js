@@ -155,6 +155,133 @@ test("duplicate idempotent notification returns the existing record", async () =
   assert.equal(notification.internalHash, undefined);
 });
 
+test("duplicate idempotent notification does not emit again", async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const existing = {
+    _id: new mongoose.Types.ObjectId(),
+    userId,
+    type: "event_reminder",
+    message: "Reminder",
+    data: { eventRegistrationId: new mongoose.Types.ObjectId() },
+    internalHash: "hidden",
+    toObject() {
+      return { ...this };
+    },
+  };
+  const duplicateError = new Error("duplicate key");
+  duplicateError.code = 11000;
+  let emitCalls = 0;
+
+  Notification.create = async () => {
+    throw duplicateError;
+  };
+  Notification.findOne = () => ({
+    select: async () => existing,
+  });
+  __notificationServiceTestHooks.setGetIO(() => ({
+    to() {
+      return {
+        emit() {
+          emitCalls += 1;
+        },
+      };
+    },
+  }));
+
+  const notification = await createNotification({
+    userId,
+    type: "event_reminder_updated",
+    message: "Updated reminder after reschedule",
+    data: { eventRegistrationId: existing.data.eventRegistrationId, eventId: new mongoose.Types.ObjectId() },
+    idempotencyKey: "event-reminder:v2:registration-1:user-1",
+  });
+
+  assert.equal(String(notification._id), String(existing._id));
+  assert.equal(emitCalls, 0);
+});
+
+test("event reminder idempotency uses registration-specific durable keying", async () => {
+  const userId = new mongoose.Types.ObjectId();
+  let firstPayload = null;
+  let secondPayload = null;
+
+  Notification.create = async (payload) => {
+    if (!firstPayload) {
+      firstPayload = payload;
+    } else {
+      secondPayload = payload;
+    }
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  await createNotification({
+    userId,
+    type: "event_reminder",
+    message: "Original reminder",
+    data: { eventId: new mongoose.Types.ObjectId(), eventRegistrationId: new mongoose.Types.ObjectId() },
+    idempotencyKey: "  event-reminder:v2:registration-1:user-1  ",
+  });
+  await createNotification({
+    userId,
+    type: "event_reminder_after_reschedule",
+    message: "Updated reminder with new title and time",
+    data: { eventRegistrationId: firstPayload.data.eventRegistrationId, eventId: new mongoose.Types.ObjectId(), date: "2099-07-03", time: "15:00" },
+    idempotencyKey: "event-reminder:v2:registration-1:user-1",
+  });
+
+  assert.equal(firstPayload.internalHash, secondPayload.internalHash);
+});
+
+test("distinct explicit identities remain distinct", async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const hashes = [];
+
+  Notification.create = async (payload) => {
+    hashes.push(payload.internalHash);
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  await createNotification({
+    userId,
+    type: "event_reminder",
+    message: "Reminder",
+    idempotencyKey: "event-reminder:v2:registration-1:user-1",
+  });
+  await createNotification({
+    userId,
+    type: "event_reminder",
+    message: "Reminder",
+    idempotencyKey: "event-reminder:v2:registration-1:user-2",
+  });
+
+  assert.notEqual(hashes[0], hashes[1]);
+});
+
+test("malformed explicit idempotency keys fail closed", async () => {
+  let createCalls = 0;
+  Notification.create = async () => {
+    createCalls += 1;
+    return null;
+  };
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  for (const idempotencyKey of [null, "", "   ", 42, "event reminder"]) {
+    await assert.rejects(
+      createNotification({
+        userId: new mongoose.Types.ObjectId(),
+        type: "event_reminder",
+        message: "Reminder",
+        idempotencyKey,
+      }),
+      { name: "TypeError" }
+    );
+  }
+
+  assert.equal(createCalls, 0);
+});
+
 test("createNotification socket payload omits internal hash", async () => {
   const userId = new mongoose.Types.ObjectId();
   let emitted = null;
