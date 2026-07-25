@@ -22,267 +22,140 @@ const createLogger = () => ({
   },
 });
 
-afterEach(() => {
-  stopWaitlistExpirationScheduler();
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+};
+
+afterEach(async () => {
+  await stopWaitlistExpirationScheduler();
 });
 
 test("scheduler does not start when env is disabled", () => {
-  let intervalStarted = false;
+  let runnerCreated = false;
 
   const result = startWaitlistExpirationScheduler({
     env: { ENABLE_WAITLIST_EXPIRATION: "false" },
     logger: createLogger(),
-    setIntervalFn: () => {
-      intervalStarted = true;
+    createRunner: () => {
+      runnerCreated = true;
       return {};
     },
   });
 
   assert.deepEqual(result, { started: false, reason: "disabled" });
-  assert.equal(intervalStarted, false);
+  assert.equal(runnerCreated, false);
 });
 
-test("scheduler starts when env is enabled", () => {
-  const logger = createLogger();
-  let receivedIntervalMs = null;
-  let unrefCalled = false;
+test("scheduler starts with deterministic lease key and safe interval default", () => {
+  let runnerConfig = null;
 
   const result = startWaitlistExpirationScheduler({
-    env: {
-      ENABLE_WAITLIST_EXPIRATION: "true",
-      WAITLIST_EXPIRATION_INTERVAL_MS: "2500",
-    },
-    logger,
-    setIntervalFn: (_callback, intervalMs) => {
-      receivedIntervalMs = intervalMs;
-      return {
-        unref() {
-          unrefCalled = true;
-        },
-      };
-    },
-    clearIntervalFn: () => {},
-  });
-
-  assert.deepEqual(result, { started: true, intervalMs: 2500 });
-  assert.equal(receivedIntervalMs, 2500);
-  assert.equal(unrefCalled, true);
-  assert.equal(logger.infoMessages.length, 1);
-});
-
-test("invalid or missing interval uses safe default", () => {
-  const intervals = [];
-
-  const setIntervalFn = (_callback, intervalMs) => {
-    intervals.push(intervalMs);
-    return {};
-  };
-
-  const invalidResult = startWaitlistExpirationScheduler({
     env: {
       ENABLE_WAITLIST_EXPIRATION: "true",
       WAITLIST_EXPIRATION_INTERVAL_MS: "not-a-number",
     },
     logger: createLogger(),
-    setIntervalFn,
-    clearIntervalFn: () => {},
+    createRunner: (config) => {
+      runnerConfig = config;
+      return {
+        start: () => ({ started: true, intervalMs: config.intervalMs }),
+        stop: async () => ({ stopped: true }),
+      };
+    },
   });
 
-  assert.deepEqual(invalidResult, { started: true, intervalMs: 3600000 });
-  assert.equal(stopWaitlistExpirationScheduler().stopped, true);
-
-  const missingResult = startWaitlistExpirationScheduler({
-    env: { ENABLE_WAITLIST_EXPIRATION: "true" },
-    logger: createLogger(),
-    setIntervalFn,
-    clearIntervalFn: () => {},
-  });
-
-  assert.deepEqual(missingResult, { started: true, intervalMs: 3600000 });
-  assert.deepEqual(intervals, [3600000, 3600000]);
+  assert.deepEqual(result, { started: true, intervalMs: 3600000 });
+  assert.equal(runnerConfig.jobKey, "waitlist-expiration");
+  assert.equal(runnerConfig.intervalMs, 3600000);
 });
 
-test("multiple starts do not create duplicate intervals", () => {
-  let intervalStarts = 0;
+test("multiple starts do not create duplicate schedulers", () => {
+  let startCalls = 0;
 
   const firstResult = startWaitlistExpirationScheduler({
     env: { ENABLE_WAITLIST_EXPIRATION: "true" },
     logger: createLogger(),
-    setIntervalFn: () => {
-      intervalStarts++;
-      return {};
-    },
-    clearIntervalFn: () => {},
+    createRunner: () => ({
+      start: () => {
+        startCalls += 1;
+        return { started: true, intervalMs: 3600000 };
+      },
+      stop: async () => ({ stopped: true }),
+    }),
   });
 
   const secondResult = startWaitlistExpirationScheduler({
     env: { ENABLE_WAITLIST_EXPIRATION: "true" },
     logger: createLogger(),
-    setIntervalFn: () => {
-      intervalStarts++;
-      return {};
-    },
-    clearIntervalFn: () => {},
+    createRunner: () => ({
+      start: () => ({ started: true, intervalMs: 3600000 }),
+      stop: async () => ({ stopped: true }),
+    }),
   });
 
   assert.deepEqual(firstResult, { started: true, intervalMs: 3600000 });
   assert.deepEqual(secondResult, { started: false, reason: "already_started" });
-  assert.equal(intervalStarts, 1);
+  assert.equal(startCalls, 1);
 });
 
-test("overlapping runs are skipped", async () => {
-  const logger = createLogger();
-  let intervalCallback;
-  let runCount = 0;
-  let finishRun;
-  const runStarted = new Promise((resolve) => {
-    finishRun = resolve;
-  });
-
-  startWaitlistExpirationScheduler({
-    env: { ENABLE_WAITLIST_EXPIRATION: "true" },
-    logger,
-    expireEntries: async () => {
-      runCount++;
-      await runStarted;
-    },
-    setIntervalFn: (callback) => {
-      intervalCallback = callback;
-      return {};
-    },
-    clearIntervalFn: () => {},
-  });
-
-  const firstRun = intervalCallback();
-  const skippedRun = intervalCallback();
-
-  await skippedRun;
-
-  assert.equal(runCount, 1);
-  assert.equal(logger.warnMessages.length, 1);
-
-  finishRun();
-  await firstRun;
-});
-
-test("stop clears interval", () => {
-  const intervalId = {};
-  let clearedInterval = null;
+test("concurrent stop shares shutdown, blocks restart, and allows restart after completion", async () => {
+  const stopCalls = [];
+  const stopDeferred = createDeferred();
 
   startWaitlistExpirationScheduler({
     env: { ENABLE_WAITLIST_EXPIRATION: "true" },
     logger: createLogger(),
-    setIntervalFn: () => intervalId,
-    clearIntervalFn: (id) => {
-      clearedInterval = id;
-    },
+    createRunner: () => ({
+      start: () => ({ started: true, intervalMs: 3600000 }),
+      stop: async () => {
+        stopCalls.push("stop");
+        await stopDeferred.promise;
+        return { stopped: true };
+      },
+    }),
   });
 
-  const result = stopWaitlistExpirationScheduler();
+  const firstStopPromise = stopWaitlistExpirationScheduler();
+  const secondStopPromise = stopWaitlistExpirationScheduler();
 
-  assert.deepEqual(result, { stopped: true });
-  assert.equal(clearedInterval, intervalId);
-  assert.deepEqual(stopWaitlistExpirationScheduler(), { stopped: false });
-});
+  assert.equal(firstStopPromise, secondStopPromise);
+  assert.deepEqual(
+    startWaitlistExpirationScheduler({
+      env: { ENABLE_WAITLIST_EXPIRATION: "true" },
+      logger: createLogger(),
+      createRunner: () => ({
+        start: () => ({ started: true, intervalMs: 3600000 }),
+        stop: async () => ({ stopped: true }),
+      }),
+    }),
+    { started: false, reason: "already_started" }
+  );
 
-test("stop while run is in-flight then start again does not allow overlapping run", async () => {
-  const logger = createLogger();
-  const intervalCallbacks = [];
-  let runCount = 0;
-  let finishRun;
-  const inFlightRun = new Promise((resolve) => {
-    finishRun = resolve;
-  });
-
-  const setIntervalFn = (callback) => {
-    intervalCallbacks.push(callback);
-    return { id: intervalCallbacks.length };
-  };
-
-  startWaitlistExpirationScheduler({
-    env: { ENABLE_WAITLIST_EXPIRATION: "true" },
-    logger,
-    expireEntries: async () => {
-      runCount++;
-      await inFlightRun;
-    },
-    setIntervalFn,
-    clearIntervalFn: () => {},
-  });
-
-  const firstRun = intervalCallbacks[0]();
-
-  assert.equal(stopWaitlistExpirationScheduler().stopped, true);
+  stopDeferred.resolve();
+  assert.deepEqual(await firstStopPromise, { stopped: true });
+  assert.deepEqual(await stopWaitlistExpirationScheduler(), { stopped: false });
 
   const restartResult = startWaitlistExpirationScheduler({
     env: { ENABLE_WAITLIST_EXPIRATION: "true" },
-    logger,
-    expireEntries: async () => {
-      runCount++;
-    },
-    setIntervalFn,
-    clearIntervalFn: () => {},
+    logger: createLogger(),
+    createRunner: () => ({
+      start: () => ({ started: true, intervalMs: 3600000 }),
+      stop: async () => ({ stopped: true }),
+    }),
   });
 
   assert.deepEqual(restartResult, { started: true, intervalMs: 3600000 });
-
-  await intervalCallbacks[1]();
-
-  assert.equal(runCount, 1);
-  assert.equal(logger.warnMessages.length, 1);
-
-  finishRun();
-  await firstRun;
-
-  await intervalCallbacks[1]();
-
-  assert.equal(runCount, 2);
+  assert.deepEqual(stopCalls, ["stop"]);
 });
 
-test("errors are caught and do not crash", async () => {
-  const logger = createLogger();
-  let intervalCallback;
-
-  startWaitlistExpirationScheduler({
-    env: { ENABLE_WAITLIST_EXPIRATION: "true" },
-    logger,
-    expireEntries: async () => {
-      throw new Error("boom");
-    },
-    setIntervalFn: (callback) => {
-      intervalCallback = callback;
-      return {};
-    },
-    clearIntervalFn: () => {},
-  });
-
-  await assert.doesNotReject(() => intervalCallback());
-  assert.equal(logger.errorMessages.length, 1);
-});
-
-test("expirePastWaitlistEntries is called on tick", async () => {
-  let intervalCallback;
-  let expireCalls = 0;
-
-  startWaitlistExpirationScheduler({
-    env: { ENABLE_WAITLIST_EXPIRATION: "true" },
-    logger: createLogger(),
-    expireEntries: async () => {
-      expireCalls++;
-    },
-    setIntervalFn: (callback) => {
-      intervalCallback = callback;
-      return {};
-    },
-    clearIntervalFn: () => {},
-  });
-
-  await intervalCallback();
-
-  assert.equal(expireCalls, 1);
-});
-
-test("server still starts the booking reminder scheduler and has no legacy waitlist cron", async () => {
+test("server still starts scheduler flow and has no legacy waitlist cron", async () => {
   const serverSource = await readFile(new URL("../../server.js", import.meta.url), "utf8");
 
   assert.equal(serverSource.includes("startBookingReminderScheduler"), true);

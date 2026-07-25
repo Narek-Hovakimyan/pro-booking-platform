@@ -1,10 +1,11 @@
 import { runBookingReminders } from "./bookingReminderService.js";
+import { createSchedulerLeaseRunner } from "../schedulerLeaseRunner.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 1000;
+const JOB_KEY = "booking-reminders";
 
-let intervalId = null;
-let clearSchedulerInterval = clearInterval;
-let isRunning = false;
+let schedulerRunner = null;
+let schedulerStopPromise = null;
 
 const getIntervalMs = (value) => {
   const intervalMs = Number(value);
@@ -18,10 +19,10 @@ export const startBookingReminderScheduler = ({
   env = process.env,
   logger = console,
   runReminders = runBookingReminders,
-  setIntervalFn = setInterval,
-  clearIntervalFn = clearInterval,
+  createRunner = createSchedulerLeaseRunner,
+  ...runnerOptions
 } = {}) => {
-  if (intervalId) {
+  if (schedulerRunner || schedulerStopPromise) {
     return { started: false, reason: "already_started" };
   }
 
@@ -30,41 +31,46 @@ export const startBookingReminderScheduler = ({
   }
 
   const intervalMs = getIntervalMs(env.BOOKING_REMINDER_INTERVAL_MS);
+  schedulerRunner = createRunner({
+    jobKey: JOB_KEY,
+    intervalMs,
+    logger,
+    run: runReminders,
+    ...runnerOptions,
+  });
 
-  const runTick = async () => {
-    if (isRunning) {
-      logger.warn?.("Booking reminder scheduler skipped overlapping run");
-      return;
-    }
-
-    isRunning = true;
-
-    try {
-      await runReminders();
-    } catch (error) {
-      logger.error?.("Booking reminder scheduler error:", error);
-    } finally {
-      isRunning = false;
-    }
-  };
-
-  intervalId = setIntervalFn(runTick, intervalMs);
-  clearSchedulerInterval = clearIntervalFn;
-  intervalId?.unref?.();
+  const result = schedulerRunner.start();
+  if (!result.started) {
+    schedulerRunner = null;
+    return result;
+  }
 
   logger.info?.(`Booking reminder scheduler started with ${intervalMs}ms interval`);
 
-  return { started: true, intervalMs };
+  return result;
 };
 
 export const stopBookingReminderScheduler = () => {
-  if (!intervalId) {
-    return { stopped: false };
+  if (!schedulerRunner) {
+    return schedulerStopPromise ?? { stopped: false };
   }
 
-  clearSchedulerInterval(intervalId);
-  intervalId = null;
-  clearSchedulerInterval = clearInterval;
+  const activeRunner = schedulerRunner;
+  if (schedulerStopPromise) {
+    return schedulerStopPromise;
+  }
 
-  return { stopped: true };
+  const stopPromise = (async () => {
+    try {
+      return await activeRunner.stop();
+    } finally {
+      if (schedulerRunner === activeRunner && schedulerStopPromise === stopPromise) {
+        schedulerRunner = null;
+        schedulerStopPromise = null;
+      }
+    }
+  })();
+
+  schedulerStopPromise = stopPromise;
+  return stopPromise;
 };

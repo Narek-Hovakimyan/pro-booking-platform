@@ -1,10 +1,11 @@
+import { createSchedulerLeaseRunner } from "./schedulerLeaseRunner.js";
 import { expireSubscriptions } from "./subscriptionService.js";
 
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const JOB_KEY = "subscription-expiration";
 
-let intervalId = null;
-let clearSchedulerInterval = clearInterval;
-let isRunning = false;
+let schedulerRunner = null;
+let schedulerStopPromise = null;
 
 const getIntervalMs = (value) => {
   const intervalMs = Number(value);
@@ -18,10 +19,10 @@ export const startSubscriptionExpirationScheduler = ({
   env = process.env,
   logger = console,
   expireFn = expireSubscriptions,
-  setIntervalFn = setInterval,
-  clearIntervalFn = clearInterval,
+  createRunner = createSchedulerLeaseRunner,
+  ...runnerOptions
 } = {}) => {
-  if (intervalId) {
+  if (schedulerRunner || schedulerStopPromise) {
     return { started: false, reason: "already_started" };
   }
 
@@ -30,42 +31,53 @@ export const startSubscriptionExpirationScheduler = ({
   }
 
   const intervalMs = getIntervalMs(env.SUBSCRIPTION_EXPIRATION_INTERVAL_MS);
+  schedulerRunner = createRunner({
+    jobKey: JOB_KEY,
+    intervalMs,
+    logger,
+    run: async () => {
+      try {
+        const summary = await expireFn();
+        logger.info?.("Subscription expiration summary", summary);
+      } catch (error) {
+        logger.error?.("Subscription expiration scheduler error:", error);
+      }
+    },
+    ...runnerOptions,
+  });
 
-  const runTick = async () => {
-    if (isRunning) {
-      logger.warn?.("Subscription expiration scheduler skipped overlapping run");
-      return;
-    }
-
-    isRunning = true;
-
-    try {
-      const summary = await expireFn();
-      logger.info?.("Subscription expiration summary", summary);
-    } catch (error) {
-      logger.error?.("Subscription expiration scheduler error:", error);
-    } finally {
-      isRunning = false;
-    }
-  };
-
-  intervalId = setIntervalFn(runTick, intervalMs);
-  clearSchedulerInterval = clearIntervalFn;
-  intervalId?.unref?.();
+  const result = schedulerRunner.start();
+  if (!result.started) {
+    schedulerRunner = null;
+    return result;
+  }
 
   logger.info?.(`Subscription expiration scheduler started with ${intervalMs}ms interval`);
 
-  return { started: true, intervalMs };
+  return result;
 };
 
 export const stopSubscriptionExpirationScheduler = () => {
-  if (!intervalId) {
-    return { stopped: false };
+  if (!schedulerRunner) {
+    return schedulerStopPromise ?? { stopped: false };
   }
 
-  clearSchedulerInterval(intervalId);
-  intervalId = null;
-  clearSchedulerInterval = clearInterval;
+  const activeRunner = schedulerRunner;
+  if (schedulerStopPromise) {
+    return schedulerStopPromise;
+  }
 
-  return { stopped: true };
+  const stopPromise = (async () => {
+    try {
+      return await activeRunner.stop();
+    } finally {
+      if (schedulerRunner === activeRunner && schedulerStopPromise === stopPromise) {
+        schedulerRunner = null;
+        schedulerStopPromise = null;
+      }
+    }
+  })();
+
+  schedulerStopPromise = stopPromise;
+  return stopPromise;
 };

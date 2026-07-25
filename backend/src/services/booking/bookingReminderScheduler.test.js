@@ -22,30 +22,40 @@ const createLogger = () => ({
   },
 });
 
-afterEach(() => {
-  stopBookingReminderScheduler();
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+};
+
+afterEach(async () => {
+  await stopBookingReminderScheduler();
 });
 
 test("scheduler does not start when env is disabled", () => {
-  let intervalStarted = false;
+  let runnerCreated = false;
 
   const result = startBookingReminderScheduler({
     env: { ENABLE_BOOKING_REMINDERS: "false" },
     logger: createLogger(),
-    setIntervalFn: () => {
-      intervalStarted = true;
+    createRunner: () => {
+      runnerCreated = true;
       return {};
     },
   });
 
   assert.deepEqual(result, { started: false, reason: "disabled" });
-  assert.equal(intervalStarted, false);
+  assert.equal(runnerCreated, false);
 });
 
-test("scheduler starts when env is enabled", () => {
+test("scheduler starts with deterministic lease key and interval", () => {
   const logger = createLogger();
-  let receivedIntervalMs = null;
-  let unrefCalled = false;
+  let runnerConfig = null;
 
   const result = startBookingReminderScheduler({
     env: {
@@ -53,179 +63,99 @@ test("scheduler starts when env is enabled", () => {
       BOOKING_REMINDER_INTERVAL_MS: "2500",
     },
     logger,
-    setIntervalFn: (_callback, intervalMs) => {
-      receivedIntervalMs = intervalMs;
+    createRunner: (config) => {
+      runnerConfig = config;
       return {
-        unref() {
-          unrefCalled = true;
-        },
+        start: () => ({ started: true, intervalMs: config.intervalMs }),
+        stop: async () => ({ stopped: true }),
       };
     },
-    clearIntervalFn: () => {},
   });
 
   assert.deepEqual(result, { started: true, intervalMs: 2500 });
-  assert.equal(receivedIntervalMs, 2500);
-  assert.equal(unrefCalled, true);
+  assert.equal(runnerConfig.jobKey, "booking-reminders");
+  assert.equal(runnerConfig.intervalMs, 2500);
+  assert.equal(typeof runnerConfig.run, "function");
   assert.equal(logger.infoMessages.length, 1);
 });
 
-test("multiple starts do not create duplicate intervals", () => {
-  let intervalStarts = 0;
+test("multiple starts do not create duplicate schedulers", () => {
+  let startCalls = 0;
 
   const firstResult = startBookingReminderScheduler({
     env: { ENABLE_BOOKING_REMINDERS: "true" },
     logger: createLogger(),
-    setIntervalFn: () => {
-      intervalStarts++;
-      return {};
-    },
-    clearIntervalFn: () => {},
+    createRunner: () => ({
+      start: () => {
+        startCalls += 1;
+        return { started: true, intervalMs: 60000 };
+      },
+      stop: async () => ({ stopped: true }),
+    }),
   });
 
   const secondResult = startBookingReminderScheduler({
     env: { ENABLE_BOOKING_REMINDERS: "true" },
     logger: createLogger(),
-    setIntervalFn: () => {
-      intervalStarts++;
-      return {};
-    },
-    clearIntervalFn: () => {},
+    createRunner: () => ({
+      start: () => ({ started: true, intervalMs: 60000 }),
+      stop: async () => ({ stopped: true }),
+    }),
   });
 
   assert.deepEqual(firstResult, { started: true, intervalMs: 60000 });
   assert.deepEqual(secondResult, { started: false, reason: "already_started" });
-  assert.equal(intervalStarts, 1);
+  assert.equal(startCalls, 1);
 });
 
-test("scheduler skips overlapping runs", async () => {
-  const logger = createLogger();
-  let intervalCallback;
-  let runCount = 0;
-  let finishRun;
-  const runStarted = new Promise((resolve) => {
-    finishRun = resolve;
-  });
-
-  startBookingReminderScheduler({
-    env: { ENABLE_BOOKING_REMINDERS: "true" },
-    logger,
-    runReminders: async () => {
-      runCount++;
-      await runStarted;
-    },
-    setIntervalFn: (callback) => {
-      intervalCallback = callback;
-      return {};
-    },
-    clearIntervalFn: () => {},
-  });
-
-  const firstRun = intervalCallback();
-  const skippedRun = intervalCallback();
-
-  await skippedRun;
-
-  assert.equal(runCount, 1);
-  assert.equal(logger.warnMessages.length, 1);
-
-  finishRun();
-  await firstRun;
-});
-
-test("scheduler catches errors without throwing", async () => {
-  const logger = createLogger();
-  let intervalCallback;
-
-  startBookingReminderScheduler({
-    env: { ENABLE_BOOKING_REMINDERS: "true" },
-    logger,
-    runReminders: async () => {
-      throw new Error("boom");
-    },
-    setIntervalFn: (callback) => {
-      intervalCallback = callback;
-      return {};
-    },
-    clearIntervalFn: () => {},
-  });
-
-  await assert.doesNotReject(() => intervalCallback());
-  assert.equal(logger.errorMessages.length, 1);
-});
-
-test("stop function clears the active interval", () => {
-  const intervalId = {};
-  let clearedInterval = null;
+test("concurrent stop shares shutdown, blocks restart, and allows restart after completion", async () => {
+  const stopCalls = [];
+  const stopDeferred = createDeferred();
 
   startBookingReminderScheduler({
     env: { ENABLE_BOOKING_REMINDERS: "true" },
     logger: createLogger(),
-    setIntervalFn: () => intervalId,
-    clearIntervalFn: (id) => {
-      clearedInterval = id;
-    },
+    createRunner: () => ({
+      start: () => ({ started: true, intervalMs: 60000 }),
+      stop: async () => {
+        stopCalls.push("stop");
+        await stopDeferred.promise;
+        return { stopped: true };
+      },
+    }),
   });
 
-  const result = stopBookingReminderScheduler();
+  const firstStopPromise = stopBookingReminderScheduler();
+  const secondStopPromise = stopBookingReminderScheduler();
 
-  assert.deepEqual(result, { stopped: true });
-  assert.equal(clearedInterval, intervalId);
-  assert.deepEqual(stopBookingReminderScheduler(), { stopped: false });
-});
+  assert.equal(firstStopPromise, secondStopPromise);
+  assert.deepEqual(
+    startBookingReminderScheduler({
+      env: { ENABLE_BOOKING_REMINDERS: "true" },
+      logger: createLogger(),
+      createRunner: () => ({
+        start: () => ({ started: true, intervalMs: 60000 }),
+        stop: async () => ({ stopped: true }),
+      }),
+    }),
+    { started: false, reason: "already_started" }
+  );
 
-test("stop while run is in flight does not allow overlapping run after restart", async () => {
-  const logger = createLogger();
-  const intervalCallbacks = [];
-  let runCount = 0;
-  let finishRun;
-  const inFlightRun = new Promise((resolve) => {
-    finishRun = resolve;
-  });
-
-  const setIntervalFn = (callback) => {
-    intervalCallbacks.push(callback);
-    return { id: intervalCallbacks.length };
-  };
-
-  startBookingReminderScheduler({
-    env: { ENABLE_BOOKING_REMINDERS: "true" },
-    logger,
-    runReminders: async () => {
-      runCount++;
-      await inFlightRun;
-    },
-    setIntervalFn,
-    clearIntervalFn: () => {},
-  });
-
-  const firstRun = intervalCallbacks[0]();
-
-  assert.equal(stopBookingReminderScheduler().stopped, true);
+  stopDeferred.resolve();
+  assert.deepEqual(await firstStopPromise, { stopped: true });
+  assert.deepEqual(await stopBookingReminderScheduler(), { stopped: false });
 
   const restartResult = startBookingReminderScheduler({
     env: { ENABLE_BOOKING_REMINDERS: "true" },
-    logger,
-    runReminders: async () => {
-      runCount++;
-    },
-    setIntervalFn,
-    clearIntervalFn: () => {},
+    logger: createLogger(),
+    createRunner: () => ({
+      start: () => ({ started: true, intervalMs: 60000 }),
+      stop: async () => ({ stopped: true }),
+    }),
   });
 
   assert.deepEqual(restartResult, { started: true, intervalMs: 60000 });
-
-  await intervalCallbacks[1]();
-
-  assert.equal(runCount, 1);
-  assert.equal(logger.warnMessages.length, 1);
-
-  finishRun();
-  await firstRun;
-
-  await intervalCallbacks[1]();
-
-  assert.equal(runCount, 2);
+  assert.deepEqual(stopCalls, ["stop"]);
 });
 
 test("server still does not import the legacy booking reminder cron", async () => {
