@@ -12,11 +12,18 @@ import {
 const originalNotificationCreate = Notification.create;
 const originalNotificationFind = Notification.find;
 const originalNotificationFindOne = Notification.findOne;
+const originalNotificationCollectionUpdateOne = Notification.collection.updateOne;
+const originalNotificationCollectionFindOneAndUpdate =
+  Notification.collection.findOneAndUpdate;
+const originalNotificationCollectionReplaceOne = Notification.collection.replaceOne;
 
 afterEach(() => {
   Notification.create = originalNotificationCreate;
   Notification.find = originalNotificationFind;
   Notification.findOne = originalNotificationFindOne;
+  Notification.collection.updateOne = originalNotificationCollectionUpdateOne;
+  Notification.collection.findOneAndUpdate = originalNotificationCollectionFindOneAndUpdate;
+  Notification.collection.replaceOne = originalNotificationCollectionReplaceOne;
   __notificationServiceTestHooks.resetGetIO();
 });
 
@@ -72,6 +79,115 @@ test("Notification schema includes sparse unique internal hash index", () => {
   assert.ok(internalHashIndex);
   assert.equal(internalHashIndex[1].unique, true);
   assert.equal(internalHashIndex[1].sparse, true);
+});
+
+test("Notification internalHash stays immutable and select:false", () => {
+  const internalHashPath = Notification.schema.path("internalHash");
+
+  assert.equal(internalHashPath.options.immutable, true);
+  assert.equal(internalHashPath.options.select, false);
+});
+
+test("Notification update queries cannot replace or unset internalHash", async () => {
+  const notificationId = new mongoose.Types.ObjectId();
+  let updateOneUpdate = null;
+  let findOneAndUpdateUpdate = null;
+
+  Notification.collection.updateOne = async (_filter, update) => {
+    updateOneUpdate = update;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  Notification.collection.findOneAndUpdate = async (_filter, update) => {
+    findOneAndUpdateUpdate = update;
+    return {
+      value: {
+        _id: notificationId,
+        userId: new mongoose.Types.ObjectId(),
+        type: "booking_reminder_24h",
+        message: "Reminder",
+        internalHash: "persisted-hash",
+      },
+    };
+  };
+
+  await Notification.updateOne(
+    { _id: notificationId },
+    {
+      $set: { internalHash: "replacement-hash", message: "Updated reminder" },
+      $unset: { internalHash: 1 },
+    }
+  );
+  await Notification.findOneAndUpdate(
+    { _id: notificationId },
+    {
+      $set: { internalHash: "replacement-hash", message: "Updated reminder" },
+      $unset: { internalHash: 1 },
+    },
+    { returnDocument: "after" }
+  );
+
+  assert.deepEqual(updateOneUpdate, {
+    $set: { message: "Updated reminder" },
+  });
+  assert.deepEqual(findOneAndUpdateUpdate, {
+    $set: { message: "Updated reminder" },
+  });
+});
+
+test("Notification update queries strip unsafe $rename entries", async () => {
+  const capturedUpdates = [];
+
+  Notification.collection.updateOne = async (_filter, update) => {
+    capturedUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  await Notification.updateOne({ _id: new mongoose.Types.ObjectId() }, {
+    $rename: {
+      message: "type",
+      type: "internalHash",
+      "data.bookingId": "internalHash.value",
+      internalHash: "message",
+      "internalHash.legacy": "data.barberId",
+      "data.barberId": "data.salonId",
+    },
+  });
+  await Notification.updateOne({ _id: new mongoose.Types.ObjectId() }, {
+    $rename: { message: "internalHash", internalHash: "type" },
+  });
+
+  assert.deepEqual(capturedUpdates[0], {
+    $rename: { message: "type", "data.barberId": "data.salonId" },
+  });
+  assert.equal(capturedUpdates.length, 1);
+});
+
+test("Notification replacements preserve an existing internalHash", async () => {
+  const notificationId = new mongoose.Types.ObjectId();
+  let replaceOneUpdate = null;
+
+  Notification.findOne = () => ({
+    select() {
+      return {
+        lean: async () => ({ internalHash: "persisted-hash" }),
+      };
+    },
+  });
+  Notification.collection.replaceOne = async (_filter, replacement) => {
+    replaceOneUpdate = replacement;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  await Notification.replaceOne(
+    { _id: notificationId },
+    {
+      userId: new mongoose.Types.ObjectId(),
+      type: "booking_reminder_24h",
+      message: "Reminder",
+    }
+  );
+
+  assert.equal(replaceOneUpdate.internalHash, "persisted-hash");
 });
 
 test("createNotification works without idempotency key", async () => {

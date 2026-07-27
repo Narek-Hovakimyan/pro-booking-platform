@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
+import { createBookingReminderDispatchService } from "./bookingReminderDispatchService.js";
 import { runBookingReminders } from "./bookingReminderService.js";
 
 const createBooking = (overrides = {}) => ({
@@ -68,6 +69,113 @@ const createDispatchModel = (state) => ({
     );
   },
 });
+
+const createProductionShapeDispatchModel = (state) => {
+  const matches = (dispatch, filter) =>
+    Object.entries(filter).every(([key, value]) => {
+      if (key === "$or") {
+        return value.some((entry) => matches(dispatch, entry));
+      }
+      if (value && typeof value === "object" && "$lte" in value) {
+        return dispatch[key] <= value.$lte;
+      }
+      return String(dispatch[key]) === String(value);
+    });
+
+  const applyUpdate = (dispatch, update, isInsert) => {
+    for (const [key, value] of Object.entries(update.$setOnInsert || {})) {
+      if (isInsert) {
+        dispatch[key] = value;
+      }
+    }
+    for (const [key, value] of Object.entries(update.$set || {})) {
+      dispatch[key] = value;
+    }
+    for (const [key, value] of Object.entries(update.$inc || {})) {
+      dispatch[key] = (dispatch[key] || 0) + value;
+    }
+
+    dispatch.updatedAt = new Date("2026-07-25T07:00:00.000Z");
+    return dispatch;
+  };
+
+  const wrapResult = (operation) => ({
+    select(selection) {
+      return {
+        then(resolve, reject) {
+          Promise.resolve()
+            .then(operation)
+            .then((document) => {
+              if (!document) {
+                return resolve(document);
+              }
+
+              if (selection !== "+claimToken") {
+                return resolve({ ...document, claimToken: undefined });
+              }
+
+              return resolve({ ...document });
+            }, reject);
+        },
+      };
+    },
+    then(resolve, reject) {
+      Promise.resolve()
+        .then(operation)
+        .then((document) => {
+          resolve(document ? { ...document, claimToken: undefined } : document);
+        }, reject);
+    },
+  });
+
+  return {
+    async find(query) {
+      return state.dispatches.filter(
+        (dispatch) =>
+          String(dispatch.bookingId) === String(query.bookingId) &&
+          dispatch.reminderType === query.reminderType &&
+          query.userId.$in.some((userId) => String(userId) === String(dispatch.userId))
+      );
+    },
+    async findOne(filter) {
+      return state.dispatches.find((dispatch) => matches(dispatch, filter)) || null;
+    },
+    findOneAndUpdate(filter, update, options = {}) {
+      return wrapResult(() => {
+        const existing = state.dispatches.find((dispatch) => matches(dispatch, filter));
+
+        if (existing) {
+          return applyUpdate(existing, update, false);
+        }
+
+        if (!options.upsert) {
+          return null;
+        }
+
+        const created = applyUpdate(
+          {
+            key: `${filter.bookingId}:${filter.reminderType}:${filter.userId}`,
+            bookingId: filter.bookingId,
+            reminderType: filter.reminderType,
+            userId: filter.userId,
+            status: "claimed",
+            claimToken: "",
+            claimedAt: null,
+            sentAt: null,
+            attempts: 0,
+            failureCode: "",
+            createdAt: new Date("2026-07-25T07:00:00.000Z"),
+            updatedAt: new Date("2026-07-25T07:00:00.000Z"),
+          },
+          update,
+          true
+        );
+        state.dispatches.push(created);
+        return created;
+      });
+    },
+  };
+};
 
 const createDispatchService = (state, overrides = {}) => ({
   async claim({ bookingId, reminderType, userId }) {
@@ -160,6 +268,49 @@ test("24h reminder creates per-recipient notifications and finalizes legacy fiel
   assert.equal(
     notifications.every((notification) => notification.idempotencyKey.includes("booking-reminder")),
     true
+  );
+});
+
+test("production-shaped claim queries can deliver and finalize reminders end to end", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [] };
+  const dispatchModel = createProductionShapeDispatchModel(state);
+  const dispatchService = createBookingReminderDispatchService({
+    model: dispatchModel,
+    now: () => new Date("2026-07-25T07:00:00.000Z"),
+    claimTokenFactory: (() => {
+      let counter = 0;
+      return () => `claim-${++counter}`;
+    })(),
+  });
+  const notifications = [];
+
+  const result = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel,
+    dispatchService,
+    createNotification: async (payload) => {
+      notifications.push(payload);
+      return payload;
+    },
+  });
+
+  assert.equal(result.remindersSent, 1);
+  assert.equal(notifications.length, 2);
+  assert.equal(
+    bookingModel.bookings.get("booking-1").reminder24hSentAt instanceof Date,
+    true
+  );
+  assert.deepEqual(
+    state.dispatches.map((dispatch) => ({
+      userId: dispatch.userId,
+      status: dispatch.status,
+      claimToken: dispatch.claimToken,
+    })),
+    [
+      { userId: "client-1", status: "sent", claimToken: "claim-1" },
+      { userId: "barber-1", status: "sent", claimToken: "claim-2" },
+    ]
   );
 });
 

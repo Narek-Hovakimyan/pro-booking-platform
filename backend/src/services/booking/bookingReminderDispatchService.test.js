@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import BookingReminderDispatch from "../../models/BookingReminderDispatch.js";
 import {
   createBookingReminderDispatchService,
   DEFAULT_BOOKING_REMINDER_STALE_CLAIM_TIMEOUT_MS,
@@ -92,8 +93,80 @@ const createInMemoryModel = (initialDispatches = []) => {
   };
 };
 
+const createQueryLikeModel = (
+  initialDispatches = [],
+  { selectResult = (document) => document } = {}
+) => {
+  const baseModel = createInMemoryModel(initialDispatches);
+
+  const wrapResult = (operation) => ({
+    select(selection) {
+      return {
+        then(resolve, reject) {
+          Promise.resolve()
+            .then(operation)
+            .then((document) => {
+              if (!document) {
+                return resolve(document);
+              }
+
+              if (selection !== "+claimToken") {
+                return resolve({ ...document, claimToken: undefined });
+              }
+
+              return resolve(selectResult({ ...document }));
+            }, reject);
+        },
+      };
+    },
+    then(resolve, reject) {
+      Promise.resolve()
+        .then(operation)
+        .then((document) => {
+          resolve(document ? { ...document, claimToken: undefined } : document);
+        }, reject);
+    },
+  });
+
+  return {
+    async findOne(filter) {
+      return baseModel.findOne(filter);
+    },
+    findOneAndUpdate(filter, update, options) {
+      return wrapResult(() => baseModel.findOneAndUpdate(filter, update, options));
+    },
+  };
+};
+
 test("default stale-claim timeout stays positive", () => {
   assert.equal(DEFAULT_BOOKING_REMINDER_STALE_CLAIM_TIMEOUT_MS > 0, true);
+});
+
+test("mongoose queries keep claimToken hidden unless explicitly selected", () => {
+  const defaultQuery = BookingReminderDispatch.findOneAndUpdate(
+    {
+      bookingId: "booking-1",
+      reminderType: "booking_reminder_24h",
+      userId: "user-1",
+    },
+    { $set: { claimToken: "claim-default" } },
+    { new: true }
+  );
+  defaultQuery._applyPaths();
+
+  const selectedQuery = BookingReminderDispatch.findOneAndUpdate(
+    {
+      bookingId: "booking-1",
+      reminderType: "booking_reminder_24h",
+      userId: "user-1",
+    },
+    { $set: { claimToken: "claim-selected" } },
+    { new: true }
+  ).select("+claimToken");
+  selectedQuery._applyPaths();
+
+  assert.equal(defaultQuery._fields.claimToken, 0);
+  assert.equal("claimToken" in (selectedQuery._fields || {}), false);
 });
 
 test("claim inserts missing dispatch", async () => {
@@ -113,6 +186,24 @@ test("claim inserts missing dispatch", async () => {
   assert.equal(result.claimed, true);
   assert.equal(result.dispatch.claimToken, "claim-a");
   assert.equal(result.dispatch.attempts, 1);
+});
+
+test("claim explicitly selects claimToken on query-like results", async () => {
+  const model = createQueryLikeModel();
+  const service = createBookingReminderDispatchService({
+    model,
+    now: () => new Date("2026-07-25T08:05:00.000Z"),
+    claimTokenFactory: () => "claim-query",
+  });
+
+  const result = await service.claim({
+    bookingId: "booking-1",
+    reminderType: "booking_reminder_24h",
+    userId: "user-1",
+  });
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.dispatch.claimToken, "claim-query");
 });
 
 test("active claim fails closed", async () => {
@@ -243,6 +334,40 @@ test("markSent requires exact ownership tuple", async () => {
   assert.equal(second.dispatch.status, "sent");
 });
 
+test("markSent fails closed when returned claimToken is hidden or mismatched", async () => {
+  const hiddenTokenModel = createQueryLikeModel([createDispatch({ claimToken: "claim-i" })], {
+    selectResult: (document) => ({ ...document, claimToken: undefined }),
+  });
+  const mismatchedTokenModel = createQueryLikeModel(
+    [createDispatch({ claimToken: "claim-j" })],
+    {
+      selectResult: (document) => ({ ...document, claimToken: "wrong-token" }),
+    }
+  );
+  const hiddenTokenService = createBookingReminderDispatchService({ model: hiddenTokenModel });
+  const mismatchedTokenService = createBookingReminderDispatchService({
+    model: mismatchedTokenModel,
+  });
+
+  const hiddenResult = await hiddenTokenService.markSent({
+    bookingId: "booking-1",
+    reminderType: "booking_reminder_24h",
+    userId: "user-1",
+    claimToken: "claim-i",
+  });
+  const mismatchedResult = await mismatchedTokenService.markSent({
+    bookingId: "booking-1",
+    reminderType: "booking_reminder_24h",
+    userId: "user-1",
+    claimToken: "claim-j",
+  });
+
+  assert.equal(hiddenResult.markedSent, false);
+  assert.equal(hiddenResult.reason, "not_owner");
+  assert.equal(mismatchedResult.markedSent, false);
+  assert.equal(mismatchedResult.reason, "not_owner");
+});
+
 test("markFailed sanitizes failure code and requires exact token", async () => {
   const model = createInMemoryModel([createDispatch({ claimToken: "claim-h" })]);
   const service = createBookingReminderDispatchService({ model });
@@ -257,4 +382,40 @@ test("markFailed sanitizes failure code and requires exact token", async () => {
 
   assert.equal(first.markedFailed, true);
   assert.equal(first.dispatch.failureCode, "unknown_error");
+});
+
+test("markFailed fails closed when returned claimToken is hidden or malformed", async () => {
+  const hiddenTokenModel = createQueryLikeModel([createDispatch({ claimToken: "claim-k" })], {
+    selectResult: (document) => ({ ...document, claimToken: undefined }),
+  });
+  const malformedTokenModel = createQueryLikeModel(
+    [createDispatch({ claimToken: "claim-l" })],
+    {
+      selectResult: (document) => ({ ...document, claimToken: "" }),
+    }
+  );
+  const hiddenTokenService = createBookingReminderDispatchService({ model: hiddenTokenModel });
+  const malformedTokenService = createBookingReminderDispatchService({
+    model: malformedTokenModel,
+  });
+
+  const hiddenResult = await hiddenTokenService.markFailed({
+    bookingId: "booking-1",
+    reminderType: "booking_reminder_24h",
+    userId: "user-1",
+    claimToken: "claim-k",
+    failureCode: "socket_failure",
+  });
+  const malformedResult = await malformedTokenService.markFailed({
+    bookingId: "booking-1",
+    reminderType: "booking_reminder_24h",
+    userId: "user-1",
+    claimToken: "claim-l",
+    failureCode: "socket_failure",
+  });
+
+  assert.equal(hiddenResult.markedFailed, false);
+  assert.equal(hiddenResult.reason, "not_owner");
+  assert.equal(malformedResult.markedFailed, false);
+  assert.equal(malformedResult.reason, "not_owner");
 });

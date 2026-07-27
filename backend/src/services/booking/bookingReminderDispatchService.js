@@ -10,6 +10,7 @@ const FAILED_STATUS = "failed";
 const DUPLICATE_KEY_CODE = 11000;
 const VALID_REMINDER_TYPES = new Set(["booking_reminder_24h", "booking_reminder_2h"]);
 const FAILURE_CODE_PATTERN = /^[a-z0-9_]+$/;
+const CLAIM_TOKEN_SELECTION = "+claimToken";
 
 const notClaimed = (reason = "not_claimed") => ({
   claimed: false,
@@ -83,6 +84,17 @@ const sanitizeFailureCode = (value) => {
   return "unknown_error";
 };
 
+const withClaimTokenSelection = (operationResult) =>
+  operationResult && typeof operationResult.select === "function"
+    ? operationResult.select(CLAIM_TOKEN_SELECTION)
+    : operationResult;
+
+const hasExactClaimToken = (dispatch, expectedClaimToken) =>
+  Boolean(dispatch) &&
+  typeof dispatch.claimToken === "string" &&
+  dispatch.claimToken.trim().length > 0 &&
+  dispatch.claimToken === expectedClaimToken;
+
 const normalizeDispatch = (document) => {
   const source =
     document && typeof document.toObject === "function" ? document.toObject() : document;
@@ -153,63 +165,67 @@ export const createBookingReminderDispatchService = ({
     const staleBefore = new Date(currentTime.getTime() - validatedTimeoutMs);
 
     try {
-      const claimedDocument = await model.findOneAndUpdate(
-        {
-          bookingId: normalizedBookingId,
-          reminderType: normalizedReminderType,
-          userId: normalizedUserId,
-          $or: [
-            { status: FAILED_STATUS },
-            { status: CLAIMED_STATUS, claimedAt: { $lte: staleBefore } },
-          ],
-        },
-        {
-          $set: {
-            status: CLAIMED_STATUS,
-            claimToken,
-            claimedAt: currentTime,
-            sentAt: null,
-            failureCode: "",
-          },
-          $inc: { attempts: 1 },
-        },
-        { new: true, returnDocument: "after", runValidators: true }
-      );
-
-      const claimedDispatch = normalizeDispatch(claimedDocument);
-      if (claimedDispatch?.claimToken === claimToken) {
-        return claimed(claimedDispatch);
-      }
-
-      const insertedDocument = await model.findOneAndUpdate(
-        {
-          bookingId: normalizedBookingId,
-          reminderType: normalizedReminderType,
-          userId: normalizedUserId,
-        },
-        {
-          $setOnInsert: {
+      const claimedDocument = await withClaimTokenSelection(
+        model.findOneAndUpdate(
+          {
             bookingId: normalizedBookingId,
             reminderType: normalizedReminderType,
             userId: normalizedUserId,
-            status: CLAIMED_STATUS,
-            claimToken,
-            claimedAt: currentTime,
-            sentAt: null,
-            attempts: 1,
-            failureCode: "",
+            $or: [
+              { status: FAILED_STATUS },
+              { status: CLAIMED_STATUS, claimedAt: { $lte: staleBefore } },
+            ],
           },
-        },
-        {
-          upsert: true,
-          new: true,
-          returnDocument: "after",
-          runValidators: true,
-        }
+          {
+            $set: {
+              status: CLAIMED_STATUS,
+              claimToken,
+              claimedAt: currentTime,
+              sentAt: null,
+              failureCode: "",
+            },
+            $inc: { attempts: 1 },
+          },
+          { new: true, returnDocument: "after", runValidators: true }
+        )
+      );
+
+      const claimedDispatch = normalizeDispatch(claimedDocument);
+      if (hasExactClaimToken(claimedDispatch, claimToken)) {
+        return claimed(claimedDispatch);
+      }
+
+      const insertedDocument = await withClaimTokenSelection(
+        model.findOneAndUpdate(
+          {
+            bookingId: normalizedBookingId,
+            reminderType: normalizedReminderType,
+            userId: normalizedUserId,
+          },
+          {
+            $setOnInsert: {
+              bookingId: normalizedBookingId,
+              reminderType: normalizedReminderType,
+              userId: normalizedUserId,
+              status: CLAIMED_STATUS,
+              claimToken,
+              claimedAt: currentTime,
+              sentAt: null,
+              attempts: 1,
+              failureCode: "",
+            },
+          },
+          {
+            upsert: true,
+            new: true,
+            returnDocument: "after",
+            runValidators: true,
+          }
+        )
       );
 
       const insertedDispatch = normalizeDispatch(insertedDocument);
-      if (insertedDispatch?.claimToken === claimToken) {
+      if (hasExactClaimToken(insertedDispatch, claimToken)) {
         return claimed(insertedDispatch);
       }
 
@@ -248,26 +264,32 @@ export const createBookingReminderDispatchService = ({
     const currentTime = validateDate("now", now());
 
     try {
-      const updatedDocument = await model.findOneAndUpdate(
-        {
-          bookingId: normalizedBookingId,
-          reminderType: normalizedReminderType,
-          userId: normalizedUserId,
-          status: CLAIMED_STATUS,
-          claimToken: normalizedClaimToken,
-        },
-        {
-          $set: {
-            status: SENT_STATUS,
-            sentAt: currentTime,
-            failureCode: "",
+      const updatedDocument = await withClaimTokenSelection(
+        model.findOneAndUpdate(
+          {
+            bookingId: normalizedBookingId,
+            reminderType: normalizedReminderType,
+            userId: normalizedUserId,
+            status: CLAIMED_STATUS,
+            claimToken: normalizedClaimToken,
           },
-        },
-        { new: true, returnDocument: "after", runValidators: true }
+          {
+            $set: {
+              status: SENT_STATUS,
+              sentAt: currentTime,
+              failureCode: "",
+            },
+          },
+          { new: true, returnDocument: "after", runValidators: true }
+        )
       );
 
       const dispatch = normalizeDispatch(updatedDocument);
-      if (!dispatch || dispatch.status !== SENT_STATUS) {
+      if (
+        !dispatch ||
+        dispatch.status !== SENT_STATUS ||
+        !hasExactClaimToken(dispatch, normalizedClaimToken)
+      ) {
         return notUpdated("markedSent", "not_owner");
       }
 
@@ -291,25 +313,31 @@ export const createBookingReminderDispatchService = ({
     const normalizedFailureCode = sanitizeFailureCode(failureCode);
 
     try {
-      const updatedDocument = await model.findOneAndUpdate(
-        {
-          bookingId: normalizedBookingId,
-          reminderType: normalizedReminderType,
-          userId: normalizedUserId,
-          status: CLAIMED_STATUS,
-          claimToken: normalizedClaimToken,
-        },
-        {
-          $set: {
-            status: FAILED_STATUS,
-            failureCode: normalizedFailureCode,
+      const updatedDocument = await withClaimTokenSelection(
+        model.findOneAndUpdate(
+          {
+            bookingId: normalizedBookingId,
+            reminderType: normalizedReminderType,
+            userId: normalizedUserId,
+            status: CLAIMED_STATUS,
+            claimToken: normalizedClaimToken,
           },
-        },
-        { new: true, returnDocument: "after", runValidators: true }
+          {
+            $set: {
+              status: FAILED_STATUS,
+              failureCode: normalizedFailureCode,
+            },
+          },
+          { new: true, returnDocument: "after", runValidators: true }
+        )
       );
 
       const dispatch = normalizeDispatch(updatedDocument);
-      if (!dispatch || dispatch.status !== FAILED_STATUS) {
+      if (
+        !dispatch ||
+        dispatch.status !== FAILED_STATUS ||
+        !hasExactClaimToken(dispatch, normalizedClaimToken)
+      ) {
         return notUpdated("markedFailed", "not_owner");
       }
 
