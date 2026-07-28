@@ -643,11 +643,55 @@ test("stale claimed dispatch recovers after notification already persisted", asy
   assert.equal(dispatchModel.dispatches[0].attempts, 2);
 });
 
+test("lease loss before first recipient claim aborts immediately and leaves later registrations untouched", async () => {
+  const now = new Date("2099-07-01T09:55:00Z");
+  const registrations = [
+    createRegistration({ _id: "registration-first" }),
+    createRegistration({ _id: "registration-second", userId: "64b000000000000000000002" }),
+  ];
+  const registrationModel = createRegistrationModel(registrations);
+  const dispatchModel = createDispatchModel();
+  const dispatchService = createDispatchService({ dispatchModel, now: () => now });
+  const leaseContext = createLeaseContext({ failAfter: 0 });
+  let notificationCalls = 0;
+
+  await assert.rejects(
+    sendEventReminders(now, {
+      registrationModel,
+      dispatchModel,
+      dispatchService,
+      leaseContext,
+      createNotification: async () => {
+        notificationCalls += 1;
+        return null;
+      },
+    }),
+    (error) => error?.code === "scheduler_lease_lost"
+  );
+
+  assert.equal(notificationCalls, 0);
+  assert.equal(dispatchModel.dispatches.length, 0);
+  assert.equal(registrationModel.registrations[0].reminderSentAt, null);
+  assert.equal(registrationModel.registrations[1].reminderSentAt, null);
+});
+
 test("takeover during execution stops stale owner writes and recovers without duplicate reminder emission", async () => {
   const firstNow = new Date("2099-07-01T09:55:00Z");
   const secondNow = new Date("2099-07-01T09:57:00Z");
-  const registration = createRegistration();
-  const registrationModel = createRegistrationModel([registration]);
+  const registrationModel = createRegistrationModel([
+    createRegistration({ _id: "registration-primary" }),
+    createRegistration({
+      _id: "registration-secondary",
+      userId: "64b000000000000000000099",
+      eventId: {
+        _id: "64b000000000000000000011",
+        title: "Second Masterclass",
+        date: "2099-07-02",
+        time: "14:00",
+        status: "upcoming",
+      },
+    }),
+  ]);
   const dispatchModel = createDispatchModel();
   const notificationStore = createDurableNotificationStore();
   const oldOwnerDispatchService = createDispatchService({
@@ -669,25 +713,33 @@ test("takeover during execution stops stale owner writes and recovers without du
     })(),
   });
 
-  const first = await sendEventReminders(firstNow, {
-    registrationModel,
-    dispatchModel,
-    dispatchService: oldOwnerDispatchService,
-    leaseContext: createLeaseContext({ loseBeforeCommitWriteNumber: 2 }),
-    createNotification: async (payload) => notificationStore.create(payload),
-    findNotificationByIdentity: async (identity) => notificationStore.findByIdentity(identity),
-  });
+  await assert.rejects(
+    sendEventReminders(firstNow, {
+      registrationModel,
+      dispatchModel,
+      dispatchService: oldOwnerDispatchService,
+      leaseContext: createLeaseContext({ loseBeforeCommitWriteNumber: 2 }),
+      createNotification: async (payload) => notificationStore.create(payload),
+      findNotificationByIdentity: async (identity) => notificationStore.findByIdentity(identity),
+    }),
+    (error) => error?.code === "scheduler_lease_lost"
+  );
 
-  assert.equal(first, 0);
   assert.equal(notificationStore.notifications.size, 0);
   assert.equal(notificationStore.emittedCount, 0);
   assert.deepEqual(
     dispatchModel.dispatches.map((dispatch) => ({
+      eventRegistrationId: dispatch.eventRegistrationId,
       status: dispatch.status,
       claimToken: dispatch.claimToken,
     })),
-    [{ status: "claimed", claimToken: "old-claim-1" }]
+    [{
+      eventRegistrationId: "registration-primary",
+      status: "claimed",
+      claimToken: "old-claim-1",
+    }]
   );
+  assert.equal(registrationModel.registrations[1].reminderSentAt, null);
 
   const second = await sendEventReminders(secondNow, {
     registrationModel,
@@ -698,13 +750,14 @@ test("takeover during execution stops stale owner writes and recovers without du
     findNotificationByIdentity: async (identity) => notificationStore.findByIdentity(identity),
   });
 
-  assert.equal(second, 1);
-  assert.equal(notificationStore.notifications.size, 1);
-  assert.equal(notificationStore.emittedCount, 1);
-  assert.equal(notificationStore.calls.length, 2);
+  assert.equal(second, 2);
+  assert.equal(notificationStore.notifications.size, 2);
+  assert.equal(notificationStore.emittedCount, 2);
+  assert.equal(notificationStore.calls.length, 3);
   assert.equal(dispatchModel.dispatches[0].status, "sent");
   assert.equal(dispatchModel.dispatches[0].attempts, 2);
   assert.equal(registrationModel.registrations[0].reminderSentAt instanceof Date, true);
+  assert.equal(registrationModel.registrations[1].reminderSentAt instanceof Date, true);
 });
 
 test("stale retry reuses existing durable notification after title and time edits", async () => {
@@ -828,7 +881,7 @@ test("notification failure marks dispatch failed without finalizing legacy times
   const dispatchModel = createDispatchModel();
   const dispatchService = createDispatchService({ dispatchModel, now: () => now });
 
-  const error = new Error("socket not relevant");
+  const error = new Error("transaction session network write conflict wording");
   error.code = "provider_down";
 
   const sentCount = await sendEventReminders(now, {
@@ -844,6 +897,53 @@ test("notification failure marks dispatch failed without finalizing legacy times
   assert.equal(dispatchModel.dispatches[0].status, "failed");
   assert.equal(dispatchModel.dispatches[0].failureCode, "provider_down");
   assert.equal(registrationModel.registrations[0].reminderSentAt, null);
+});
+
+test("post-claim structured transaction errors propagate unchanged and stop later registrations", async () => {
+  const now = new Date("2099-07-01T09:55:00Z");
+  const error = new Error("generic failure");
+  error.cause = { codeName: "WriteConflict" };
+  const registrationModel = createRegistrationModel([
+    createRegistration({ _id: "registration-first" }),
+    createRegistration({ _id: "registration-later", userId: "64b000000000000000000099" }),
+  ]);
+  const dispatchModel = createDispatchModel();
+  const dispatchService = createDispatchService({ dispatchModel, now: () => now });
+  await assert.rejects(
+    sendEventReminders(now, {
+      registrationModel,
+      dispatchModel,
+      dispatchService,
+      createNotification: async () => { throw error; },
+    }),
+    (actual) => actual === error
+  );
+  assert.equal(dispatchModel.dispatches.filter((dispatch) => dispatch.eventRegistrationId === "registration-later").length, 0);
+});
+
+test("markFailed infrastructure errors propagate unchanged after ordinary delivery failure", async () => {
+  const now = new Date("2099-07-01T09:55:00Z");
+  const error = new Error("neutral");
+  error.errorLabels = ["TransientTransactionError"];
+  const registrationModel = createRegistrationModel([createRegistration()]);
+  const dispatchModel = createDispatchModel();
+  const base = createDispatchService({ dispatchModel, now: () => now });
+  await assert.rejects(
+    sendEventReminders(now, {
+      registrationModel,
+      dispatchModel,
+      dispatchService: {
+        ...base,
+        async markFailed() { throw error; },
+      },
+      createNotification: async () => {
+        const ordinary = new Error("session transaction network write conflict wording");
+        ordinary.code = "provider_down";
+        throw ordinary;
+      },
+    }),
+    (actual) => actual === error
+  );
 });
 
 test("sent-dispatch recovery fails closed when registration is no longer valid", async () => {

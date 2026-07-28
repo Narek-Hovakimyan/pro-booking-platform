@@ -23,6 +23,7 @@ export const startEventRemindersCron = ({
         await sendEventRemindersFn(undefined, { leaseContext });
       } catch (error) {
         logger.error?.("Event reminder job error:", error);
+        throw error;
       }
     },
     ...runnerOptions,

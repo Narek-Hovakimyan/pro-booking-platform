@@ -9,6 +9,66 @@ export const REMINDER_LEAD_MINUTES = 24 * 60;
 export const REMINDER_WINDOW_MINUTES = 10;
 const EVENT_REMINDER_IDEMPOTENCY_NAMESPACE = "event-reminder:v2";
 const LEASE_LOST_ERROR_CODE = "scheduler_lease_lost";
+const FENCED_INFRA_ERROR_NAMES = new Set([
+  "MongoExpiredSessionError",
+  "MongoNetworkError",
+  "MongoNotConnectedError",
+  "MongoRuntimeError",
+  "MongoServerClosedError",
+  "MongoSystemError",
+  "MongoTopologyClosedError",
+  "MongoTransactionError",
+  "MongooseServerSelectionError",
+]);
+const FENCED_INFRA_ERROR_CODES = new Set([
+  91, 112, 189, 251, 10107, 11600, 11602, 13435, 13436,
+]);
+const FENCED_INFRA_ERROR_CODE_NAMES = new Set([
+  "InterruptedAtShutdown",
+  "InterruptedDueToReplStateChange",
+  "LockTimeout",
+  "NoSuchTransaction",
+  "NotWritablePrimary",
+  "PrimarySteppedDown",
+  "ShutdownInProgress",
+  "WriteConflict",
+]);
+const FENCED_INFRA_LABELS = new Set([
+  "RetryableWriteError",
+  "TransientTransactionError",
+  "UnknownTransactionCommitResult",
+]);
+
+const getStructuredErrorCandidates = (error) => {
+  const seen = new Set();
+  const queue = [error];
+  const candidates = [];
+
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+    if (!candidate || typeof candidate !== "object" || seen.has(candidate)) continue;
+    seen.add(candidate);
+    candidates.push(candidate);
+    for (const key of ["cause", "error", "originalError", "reason"]) {
+      if (candidate[key] && typeof candidate[key] === "object") queue.push(candidate[key]);
+    }
+  }
+  return candidates;
+};
+
+const isFencedInfrastructureError = (error) =>
+  getStructuredErrorCandidates(error).some((candidate) => {
+    if (candidate.code === LEASE_LOST_ERROR_CODE) return true;
+    if (typeof candidate.code === "number" && FENCED_INFRA_ERROR_CODES.has(candidate.code)) return true;
+    if (typeof candidate.codeName === "string" && FENCED_INFRA_ERROR_CODE_NAMES.has(candidate.codeName)) return true;
+    if (typeof candidate.hasErrorLabel === "function") {
+      for (const label of FENCED_INFRA_LABELS) {
+        if (candidate.hasErrorLabel(label)) return true;
+      }
+    }
+    if (Array.isArray(candidate.errorLabels) && candidate.errorLabels.some((label) => FENCED_INFRA_LABELS.has(label))) return true;
+    return typeof candidate.name === "string" && FENCED_INFRA_ERROR_NAMES.has(candidate.name);
+  });
 
 export const getEventStart = (event) => {
   if (!event?.date || !event?.time) return null;
@@ -123,7 +183,9 @@ const getFailureCode = (error) => {
   return "notification_error";
 };
 
-const isLeaseFenceError = (error) => error?.code === LEASE_LOST_ERROR_CODE;
+const throwIfLeaseFenceError = (error) => {
+  if (isFencedInfrastructureError(error)) throw error;
+};
 
 const createAssertOwned = (leaseContext) =>
   typeof leaseContext?.assertOwned === "function"
@@ -232,10 +294,7 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
         })
       );
     } catch (error) {
-      if (isLeaseFenceError(error)) {
-        break;
-      }
-
+      throwIfLeaseFenceError(error);
       throw error;
     }
 
@@ -252,10 +311,7 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
             withFencedWrite,
           });
         } catch (error) {
-          if (isLeaseFenceError(error)) {
-            break;
-          }
-
+          throwIfLeaseFenceError(error);
           throw error;
         }
 
@@ -362,17 +418,12 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
         sentCount += 1;
       }
     } catch (error) {
-      if (isLeaseFenceError(error)) {
-        break registrationLoop;
-      }
+      throwIfLeaseFenceError(error);
 
       try {
         await assertOwned();
       } catch (assertError) {
-        if (isLeaseFenceError(assertError)) {
-          break registrationLoop;
-        }
-
+        throwIfLeaseFenceError(assertError);
         throw assertError;
       }
 

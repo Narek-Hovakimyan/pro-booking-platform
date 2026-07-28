@@ -65,3 +65,30 @@ test("event reminder cron keeps lease key, expression, and business behavior", a
   await capturedConfig.run();
   assert.deepEqual(logger.errorMessages.at(-1), ["Event reminder job error:", failure]);
 });
+
+test("event reminder cron logs and rethrows thrown service errors unchanged", async () => {
+  const logger = {
+    errorMessages: [],
+    error(...args) {
+      this.errorMessages.push(args);
+    },
+  };
+  const failure = new Error("lease lost");
+  failure.code = "scheduler_lease_lost";
+  failure.cause = { stage: "claim" };
+  let capturedConfig;
+
+  startEventRemindersCron({
+    logger,
+    sendEventRemindersFn: async () => {
+      throw failure;
+    },
+    createRunner: (config) => {
+      capturedConfig = config;
+      return { start() { return { stop() {} }; } };
+    },
+  });
+
+  await assert.rejects(capturedConfig.run(), (error) => error === failure);
+  assert.deepEqual(logger.errorMessages.at(-1), ["Event reminder job error:", failure]);
+});

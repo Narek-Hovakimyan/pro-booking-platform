@@ -592,8 +592,51 @@ test("crash after notification persistence recovers via stale claimed recipient 
   assert.equal(new Set(idempotencyKeys).size, 2);
 });
 
+test("lease loss before first recipient claim aborts immediately and leaves later bookings untouched", async () => {
+  const bookingModel = createBookingModel([
+    createBooking({ _id: "booking-1" }),
+    createBooking({
+      _id: "booking-2",
+      clientId: "client-2",
+      barberId: "barber-2",
+      clientName: "Second Client",
+      barberName: "Second Barber",
+    }),
+  ]);
+  const state = { dispatches: [], claimCounter: 1 };
+  let notificationCalls = 0;
+
+  await assert.rejects(
+    runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+      bookingModel,
+      dispatchModel: createDispatchModel(state),
+      dispatchService: createDispatchService(state),
+      leaseContext: createLeaseContext({ failAfter: 0 }),
+      createNotification: async () => {
+        notificationCalls += 1;
+        return null;
+      },
+    }),
+    (error) => error?.code === "scheduler_lease_lost"
+  );
+
+  assert.equal(notificationCalls, 0);
+  assert.equal(state.dispatches.length, 0);
+  assert.equal(bookingModel.bookings.get("booking-1").reminder24hSentAt, null);
+  assert.equal(bookingModel.bookings.get("booking-2").reminder24hSentAt, null);
+});
+
 test("takeover during execution stops stale owner writes and recovers without duplicate reminder emission", async () => {
-  const bookingModel = createBookingModel([createBooking()]);
+  const bookingModel = createBookingModel([
+    createBooking({ _id: "booking-1" }),
+    createBooking({
+      _id: "booking-2",
+      clientId: "client-2",
+      barberId: "barber-2",
+      clientName: "Second Client",
+      barberName: "Second Barber",
+    }),
+  ]);
   const notificationStore = createDurableNotificationStore();
   const state = { dispatches: [] };
   const dispatchModel = createProductionShapeDispatchModel(state);
@@ -616,24 +659,28 @@ test("takeover during execution stops stale owner writes and recovers without du
     })(),
   });
 
-  const first = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
-    bookingModel,
-    dispatchModel,
-    dispatchService: oldOwnerDispatchService,
-    leaseContext: createLeaseContext({ loseBeforeCommitWriteNumber: 2 }),
-    createNotification: async (payload) => notificationStore.create(payload),
-  });
+  await assert.rejects(
+    runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+      bookingModel,
+      dispatchModel,
+      dispatchService: oldOwnerDispatchService,
+      leaseContext: createLeaseContext({ loseBeforeCommitWriteNumber: 2 }),
+      createNotification: async (payload) => notificationStore.create(payload),
+    }),
+    (error) => error?.code === "scheduler_lease_lost"
+  );
 
-  assert.equal(first.remindersSent, 0);
   assert.equal(notificationStore.notifications.size, 0);
   assert.equal(notificationStore.emittedCount, 0);
   assert.deepEqual(
     state.dispatches.map((dispatch) => ({
+      bookingId: dispatch.bookingId,
       userId: dispatch.userId,
       status: dispatch.status,
     })),
-    [{ userId: "client-1", status: "claimed" }]
+    [{ bookingId: "booking-1", userId: "client-1", status: "claimed" }]
   );
+  assert.equal(bookingModel.bookings.get("booking-2").reminder24hSentAt, null);
 
   const second = await runBookingReminders(new Date("2026-07-25T07:06:00.000Z"), {
     bookingModel,
@@ -643,17 +690,20 @@ test("takeover during execution stops stale owner writes and recovers without du
     createNotification: async (payload) => notificationStore.create(payload),
   });
 
-  assert.equal(second.remindersSent, 1);
-  assert.equal(notificationStore.notifications.size, 2);
-  assert.equal(notificationStore.emittedCount, 2);
+  assert.equal(second.remindersSent, 2);
+  assert.equal(notificationStore.notifications.size, 4);
+  assert.equal(notificationStore.emittedCount, 4);
   assert.deepEqual(
     state.dispatches.map((dispatch) => ({
+      bookingId: dispatch.bookingId,
       userId: dispatch.userId,
       status: dispatch.status,
     })),
     [
-      { userId: "client-1", status: "sent" },
-      { userId: "barber-1", status: "sent" },
+      { bookingId: "booking-1", userId: "client-1", status: "sent" },
+      { bookingId: "booking-1", userId: "barber-1", status: "sent" },
+      { bookingId: "booking-2", userId: "client-2", status: "sent" },
+      { bookingId: "booking-2", userId: "barber-2", status: "sent" },
     ]
   );
   assert.equal(
@@ -662,6 +712,10 @@ test("takeover during execution stops stale owner writes and recovers without du
   );
   assert.equal(
     bookingModel.bookings.get("booking-1").reminder24hSentAt instanceof Date,
+    true
+  );
+  assert.equal(
+    bookingModel.bookings.get("booking-2").reminder24hSentAt instanceof Date,
     true
   );
 });
@@ -783,5 +837,49 @@ test("concurrent workers share per-recipient state and avoid duplicate completio
   assert.equal(
     bookingModel.bookings.get("booking-1").reminder24hSentAt instanceof Date,
     true
+  );
+});
+
+test("post-claim structured transaction errors propagate unchanged and stop later bookings", async () => {
+  const error = new Error("generic failure");
+  error.name = "MongoTransactionError";
+  const bookingModel = createBookingModel([
+    createBooking({ _id: "booking-first" }),
+    createBooking({ _id: "booking-later", clientId: "client-later", barberId: "barber-later" }),
+  ]);
+  const state = { dispatches: [], claimCounter: 1 };
+  await assert.rejects(
+    runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+      bookingModel,
+      dispatchModel: createDispatchModel(state),
+      dispatchService: createDispatchService(state),
+      createNotification: async () => { throw error; },
+    }),
+    (actual) => actual === error
+  );
+  assert.equal(state.dispatches.filter((dispatch) => dispatch.bookingId === "booking-later").length, 0);
+});
+
+test("markFailed infrastructure errors propagate unchanged after an ordinary delivery failure", async () => {
+  const error = new Error("neutral");
+  error.codeName = "WriteConflict";
+  const bookingModel = createBookingModel([createBooking()]);
+  const state = { dispatches: [], claimCounter: 1 };
+  const base = createDispatchService(state);
+  await assert.rejects(
+    runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+      bookingModel,
+      dispatchModel: createDispatchModel(state),
+      dispatchService: {
+        ...base,
+        async markFailed() { throw error; },
+      },
+      createNotification: async () => {
+        const ordinary = new Error("transaction session network write conflict wording");
+        ordinary.code = "provider_down";
+        throw ordinary;
+      },
+    }),
+    (actual) => actual === error
   );
 });
