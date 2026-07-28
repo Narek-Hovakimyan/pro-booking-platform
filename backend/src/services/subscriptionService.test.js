@@ -44,6 +44,7 @@ import {
 const originalPlanFindOne = SubscriptionPlan.findOne;
 const originalPlanCreate = SubscriptionPlan.create;
 const originalSubFindOne = Subscription.findOne;
+const originalSubFindOneAndUpdate = Subscription.findOneAndUpdate;
 const originalSubFindById = Subscription.findById;
 const originalSubFind = Subscription.find;
 const originalSubCreate = Subscription.create;
@@ -87,6 +88,7 @@ afterEach(() => {
   SubscriptionPlan.findOne = originalPlanFindOne;
   SubscriptionPlan.create = originalPlanCreate;
   Subscription.findOne = originalSubFindOne;
+  Subscription.findOneAndUpdate = originalSubFindOneAndUpdate;
   Subscription.findById = originalSubFindById;
   Subscription.find = originalSubFind;
   Subscription.create = originalSubCreate;
@@ -2011,20 +2013,292 @@ test("expireSubscriptions expires trialing subscription after trial end", async 
     trialEndsAt: new Date("2026-06-03T00:00:00.000Z"),
     currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
   });
-  let savedStatus = null;
+  let updateCall = null;
 
-  subscription.save = async function save() {
-    savedStatus = this.status;
-    return this;
-  };
   Subscription.find = async () => [subscription];
+  Subscription.findOneAndUpdate = async (query, update, options) => {
+    updateCall = { query, update, options };
+    subscription.status = update.$set.status;
+    return subscription;
+  };
 
   const summary = await expireSubscriptions({ now });
 
   assert.equal(summary.checkedCount, 1);
   assert.equal(summary.expiredCount, 1);
   assert.equal(summary.errorsCount, 0);
-  assert.equal(savedStatus, "expired");
+  assert.equal(updateCall.query._id, subscription._id);
+  assert.deepEqual(updateCall.query.status, { $in: ["trialing", "active"] });
+  assert.deepEqual(updateCall.query.$or, [
+    { currentPeriodEnd: { $lt: now } },
+    { trialEndsAt: { $lt: now } },
+  ]);
+  assert.equal(updateCall.update.$set.status, "expired");
+});
+
+test("expireSubscriptions propagates fenced session to CAS update", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const session = { id: "lease-session" };
+  const subscription = makeSubDoc({
+    status: "active",
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  let receivedSession = null;
+
+  Subscription.find = async () => [subscription];
+  Subscription.findOneAndUpdate = async (_query, update, options) => {
+    receivedSession = options.session;
+    return { ...subscription, status: update.$set.status };
+  };
+
+  const summary = await expireSubscriptions({
+    now,
+    leaseContext: {
+      withFencedWrite: (write) => write({ session }),
+    },
+  });
+
+  assert.equal(summary.checkedCount, 1);
+  assert.equal(summary.expiredCount, 1);
+  assert.equal(summary.errorsCount, 0);
+  assert.equal(receivedSession, session);
+});
+
+test("expireSubscriptions skips subscriptions changed concurrently", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    status: "active",
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+
+  Subscription.find = async () => [subscription];
+  Subscription.findOneAndUpdate = async () => null;
+
+  const summary = await expireSubscriptions({ now });
+
+  assert.equal(summary.checkedCount, 1);
+  assert.equal(summary.expiredCount, 0);
+  assert.equal(summary.errorsCount, 0);
+});
+
+test("expireSubscriptions stops immediately on lease loss", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const firstSubscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const secondSubscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const error = new Error("lease lost");
+  error.code = "scheduler_lease_lost";
+  let calls = 0;
+
+  Subscription.find = async () => [firstSubscription, secondSubscription];
+
+  await assert.rejects(
+    () =>
+      expireSubscriptions({
+        now,
+        leaseContext: {
+          withFencedWrite: async () => {
+            calls += 1;
+            throw error;
+          },
+        },
+      }),
+    error
+  );
+
+  assert.equal(calls, 1);
+});
+
+test("expireSubscriptions rethrows fenced transaction failures and leaves later items untouched", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const firstSubscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const secondSubscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const error = new Error("ordinary failure");
+  error.codeName = "WriteConflict";
+  let calls = 0;
+
+  Subscription.find = async () => [firstSubscription, secondSubscription];
+
+  await assert.rejects(
+    () =>
+      expireSubscriptions({
+        now,
+        leaseContext: {
+          withFencedWrite: async () => {
+            calls += 1;
+            throw error;
+          },
+        },
+      }),
+    error
+  );
+
+  assert.equal(calls, 1);
+});
+
+test("expireSubscriptions rethrows fenced storage failures", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const error = new Error("storage engine unavailable");
+  error.name = "MongoRuntimeError";
+
+  Subscription.find = async () => [subscription];
+
+  await assert.rejects(
+    () =>
+      expireSubscriptions({
+        now,
+        leaseContext: {
+          withFencedWrite: async () => {
+            throw error;
+          },
+        },
+      }),
+    error
+  );
+});
+
+test("expireSubscriptions rethrows structured infrastructure causes with neutral messages", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const cause = new Error("neutral");
+  cause.errorLabels = ["TransientTransactionError"];
+  const wrapped = new Error("operation failed");
+  wrapped.cause = cause;
+
+  Subscription.find = async () => [subscription];
+
+  await assert.rejects(
+    () =>
+      expireSubscriptions({
+        now,
+        leaseContext: {
+          withFencedWrite: async () => {
+            throw wrapped;
+          },
+        },
+      }),
+    wrapped
+  );
+});
+
+test("expireSubscriptions preserves ordinary item failure summary", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+
+  Subscription.find = async () => [subscription];
+  Subscription.findOneAndUpdate = async () => {
+    throw new Error("write failed");
+  };
+
+  const summary = await expireSubscriptions({
+    now,
+    leaseContext: {
+      withFencedWrite: (write) => write({ session: { id: "lease-session" } }),
+    },
+  });
+
+  assert.equal(summary.checkedCount, 1);
+  assert.equal(summary.expiredCount, 0);
+  assert.equal(summary.errorsCount, 1);
+  assert.deepEqual(summary.errors, [
+    { subscriptionId: String(subscription._id), message: "write failed" },
+  ]);
+});
+
+test("expireSubscriptions keeps misleading ordinary error messages in per-item summary", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const firstSubscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const secondSubscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const ordinaryError = new Error(
+    "validation failed after transaction session network write conflict text"
+  );
+  let calls = 0;
+
+  Subscription.find = async () => [firstSubscription, secondSubscription];
+  Subscription.findOneAndUpdate = async ({ _id }, update) => {
+    calls += 1;
+    if (String(_id) === String(firstSubscription._id)) {
+      throw ordinaryError;
+    }
+    secondSubscription.status = update.$set.status;
+    return secondSubscription;
+  };
+
+  const summary = await expireSubscriptions({
+    now,
+    leaseContext: {
+      withFencedWrite: (write) => write({ session: { id: "lease-session" } }),
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(summary.checkedCount, 2);
+  assert.equal(summary.expiredCount, 1);
+  assert.equal(summary.errorsCount, 1);
+  assert.deepEqual(summary.errors, [
+    {
+      subscriptionId: String(firstSubscription._id),
+      message: ordinaryError.message,
+    },
+  ]);
+});
+
+test("expireSubscriptions lets a new owner recover after stale owner rejection", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const subscription = makeSubDoc({
+    currentPeriodEnd: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const staleError = new Error("lease lost");
+  staleError.code = "scheduler_lease_lost";
+
+  Subscription.find = async () => [subscription];
+
+  await assert.rejects(
+    () =>
+      expireSubscriptions({
+        now,
+        leaseContext: {
+          withFencedWrite: async () => {
+            throw staleError;
+          },
+        },
+      }),
+    staleError
+  );
+
+  Subscription.findOneAndUpdate = async (_query, update) => {
+    subscription.status = update.$set.status;
+    return subscription;
+  };
+
+  const recovered = await expireSubscriptions({
+    now,
+    leaseContext: {
+      withFencedWrite: (write) => write({ session: { owner: "new" } }),
+    },
+  });
+
+  assert.equal(recovered.checkedCount, 1);
+  assert.equal(recovered.expiredCount, 1);
+  assert.equal(subscription.status, "expired");
 });
 
 test("expired subscription no longer grants barber access", async () => {

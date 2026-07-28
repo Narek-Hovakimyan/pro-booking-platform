@@ -418,6 +418,7 @@ test("concurrent notifyMatchingWaitlistEntries calls only notify once", async ()
 
 test("expirePastWaitlistEntries expires past active entries", async () => {
   const pastEntry = createMockEntry({ _id: "past-active-entry", date: pastDate });
+  mockFindOneAndUpdateForEntries([pastEntry]);
 
   WaitlistEntry.find = async (query) => {
     assert.deepEqual(query.status, {
@@ -440,6 +441,7 @@ test("expirePastWaitlistEntries expires past notified entries", async () => {
     date: pastDate,
     status: "notified",
   });
+  mockFindOneAndUpdateForEntries([pastEntry]);
 
   WaitlistEntry.find = async (query) => {
     assert.deepEqual(query.status, {
@@ -462,6 +464,7 @@ test("expirePastWaitlistEntries expires past offered entries", async () => {
     date: pastDate,
     status: "offered",
   });
+  mockFindOneAndUpdateForEntries([pastEntry]);
 
   WaitlistEntry.find = async (query) => {
     assert.deepEqual(query.status, {
@@ -517,6 +520,106 @@ test("expirePastWaitlistEntries does not query closed statuses", async () => {
 
   const entries = await expirePastWaitlistEntries(new Date("2099-06-01"));
   assert.equal(entries.length, 0);
+});
+
+test("expirePastWaitlistEntries propagates fenced session and uses CAS eligibility", async () => {
+  const pastEntry = createMockEntry({ _id: "past-session-entry", date: pastDate });
+  const session = { id: "lease-session" };
+  const calls = [];
+
+  WaitlistEntry.find = async () => [pastEntry];
+  WaitlistEntry.findOneAndUpdate = async (query, update, options) => {
+    calls.push({ query, update, options });
+    Object.assign(pastEntry, update.$set);
+    return pastEntry;
+  };
+
+  const entries = await expirePastWaitlistEntries({
+    now: new Date("2099-06-01"),
+    leaseContext: {
+      withFencedWrite: (write) => write({ session }),
+    },
+  });
+
+  assert.equal(entries.length, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.session, session);
+  assert.deepEqual(calls[0].query.status, { $in: ["active", "notified", "offered"] });
+  assert.equal(calls[0].query.date.$lt, "2099-06-01");
+  assert.equal(pastEntry.status, "expired");
+});
+
+test("expirePastWaitlistEntries skips entries changed concurrently", async () => {
+  const pastEntry = createMockEntry({ _id: "past-concurrent-entry", date: pastDate });
+
+  WaitlistEntry.find = async () => [pastEntry];
+  WaitlistEntry.findOneAndUpdate = async () => null;
+
+  const entries = await expirePastWaitlistEntries(new Date("2099-06-01"));
+
+  assert.equal(entries.length, 0);
+  assert.equal(pastEntry.status, "active");
+});
+
+test("expirePastWaitlistEntries stops immediately on lease loss", async () => {
+  const firstEntry = createMockEntry({ _id: "past-first-entry", date: pastDate });
+  const secondEntry = createMockEntry({ _id: "past-second-entry", date: pastDate });
+  const error = new Error("lease lost");
+  error.code = "scheduler_lease_lost";
+  let calls = 0;
+
+  WaitlistEntry.find = async () => [firstEntry, secondEntry];
+
+  await assert.rejects(
+    () =>
+      expirePastWaitlistEntries({
+        now: new Date("2099-06-01"),
+        leaseContext: {
+          withFencedWrite: async () => {
+            calls += 1;
+            throw error;
+          },
+        },
+      }),
+    error
+  );
+
+  assert.equal(calls, 1);
+});
+
+test("expirePastWaitlistEntries lets a new owner recover an abandoned entry", async () => {
+  const pastEntry = createMockEntry({ _id: "past-recovery-entry", date: pastDate });
+  const staleError = new Error("lease lost");
+  staleError.code = "scheduler_lease_lost";
+  let staleCalls = 0;
+
+  WaitlistEntry.find = async () => [pastEntry];
+
+  await assert.rejects(
+    () =>
+      expirePastWaitlistEntries({
+        now: new Date("2099-06-01"),
+        leaseContext: {
+          withFencedWrite: async () => {
+            staleCalls += 1;
+            throw staleError;
+          },
+        },
+      }),
+    staleError
+  );
+
+  mockFindOneAndUpdateForEntries([pastEntry]);
+  const recovered = await expirePastWaitlistEntries({
+    now: new Date("2099-06-01"),
+    leaseContext: {
+      withFencedWrite: (write) => write({ session: { owner: "new" } }),
+    },
+  });
+
+  assert.equal(staleCalls, 1);
+  assert.equal(recovered.length, 1);
+  assert.equal(pastEntry.status, "expired");
 });
 
 test("no matching active entries returns 0", async () => {

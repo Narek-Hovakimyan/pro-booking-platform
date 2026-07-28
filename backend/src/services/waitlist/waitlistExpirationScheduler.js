@@ -35,7 +35,7 @@ export const startWaitlistExpirationScheduler = ({
     jobKey: JOB_KEY,
     intervalMs,
     logger,
-    run: expireEntries,
+    run: (leaseContext) => expireEntries({ leaseContext }),
     ...runnerOptions,
   });
 

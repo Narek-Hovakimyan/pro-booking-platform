@@ -35,12 +35,13 @@ export const startSubscriptionExpirationScheduler = ({
     jobKey: JOB_KEY,
     intervalMs,
     logger,
-    run: async () => {
+    run: async (leaseContext) => {
       try {
-        const summary = await expireFn();
+        const summary = await expireFn({ leaseContext });
         logger.info?.("Subscription expiration summary", summary);
       } catch (error) {
         logger.error?.("Subscription expiration scheduler error:", error);
+        throw error;
       }
     },
     ...runnerOptions,

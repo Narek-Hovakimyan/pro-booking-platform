@@ -78,11 +78,20 @@ test("subscription expiration cron starts with deterministic lease key", () => {
 test("subscription expiration cron logs summary through the leased runner", async () => {
   const logger = createLogger();
   let capturedRun;
+  const leaseContext = { withFencedWrite: async () => null };
+  let receivedContext = null;
 
   startSubscriptionExpirationScheduler({
     env: { ENABLE_SUBSCRIPTION_EXPIRATION_CRON: "true" },
     logger,
-    expireFn: async () => ({ expiredCount: 2, errorsCount: 0 }),
+    expireFn: async ({ leaseContext: context }) => {
+      receivedContext = context;
+      return {
+        expiredCount: 1,
+        errorsCount: 1,
+        errors: [{ subscriptionId: "ordinary", message: "validation failed" }],
+      };
+    },
     createRunner: ({ run, intervalMs }) => {
       capturedRun = run;
       return {
@@ -92,15 +101,20 @@ test("subscription expiration cron logs summary through the leased runner", asyn
     },
   });
 
-  await capturedRun();
+  await capturedRun(leaseContext);
 
   assert.deepEqual(logger.infoMessages.at(-1), [
     "Subscription expiration summary",
-    { expiredCount: 2, errorsCount: 0 },
+    {
+      expiredCount: 1,
+      errorsCount: 1,
+      errors: [{ subscriptionId: "ordinary", message: "validation failed" }],
+    },
   ]);
+  assert.equal(receivedContext, leaseContext);
 });
 
-test("subscription expiration cron preserves legacy error logging", async () => {
+test("subscription expiration cron logs and rethrows thrown errors unchanged", async () => {
   const logger = createLogger();
   const error = new Error("expire failed");
   let capturedRun;
@@ -120,8 +134,65 @@ test("subscription expiration cron preserves legacy error logging", async () => 
     },
   });
 
-  await capturedRun();
+  await assert.rejects(() => capturedRun(), error);
 
+  assert.deepEqual(logger.errorMessages.at(-1), [
+    "Subscription expiration scheduler error:",
+    error,
+  ]);
+});
+
+test("subscription expiration cron does not inspect or mutate misleading error messages", async () => {
+  const logger = createLogger();
+  const error = new Error("ordinary validation transaction session network write conflict");
+  const originalMessage = error.message;
+  let capturedRun;
+
+  startSubscriptionExpirationScheduler({
+    env: { ENABLE_SUBSCRIPTION_EXPIRATION_CRON: "true" },
+    logger,
+    expireFn: async () => {
+      throw error;
+    },
+    createRunner: ({ run, intervalMs }) => {
+      capturedRun = run;
+      return {
+        start: () => ({ started: true, intervalMs }),
+        stop: async () => ({ stopped: true }),
+      };
+    },
+  });
+
+  await assert.rejects(() => capturedRun({}), error);
+  assert.equal(error.message, originalMessage);
+  assert.deepEqual(logger.errorMessages.at(-1), [
+    "Subscription expiration scheduler error:",
+    error,
+  ]);
+});
+
+test("subscription expiration cron logs and propagates lease loss", async () => {
+  const logger = createLogger();
+  const error = new Error("lease lost");
+  error.code = "scheduler_lease_lost";
+  let capturedRun;
+
+  startSubscriptionExpirationScheduler({
+    env: { ENABLE_SUBSCRIPTION_EXPIRATION_CRON: "true" },
+    logger,
+    expireFn: async () => {
+      throw error;
+    },
+    createRunner: ({ run, intervalMs }) => {
+      capturedRun = run;
+      return {
+        start: () => ({ started: true, intervalMs }),
+        stop: async () => ({ stopped: true }),
+      };
+    },
+  });
+
+  await assert.rejects(() => capturedRun({}), error);
   assert.deepEqual(logger.errorMessages.at(-1), [
     "Subscription expiration scheduler error:",
     error,

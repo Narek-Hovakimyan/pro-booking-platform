@@ -76,6 +76,32 @@ test("scheduler starts with deterministic lease key and safe interval default", 
   assert.equal(runnerConfig.intervalMs, 3600000);
 });
 
+test("scheduler forwards lease context to expiration service", async () => {
+  const leaseContext = { withFencedWrite: async () => null };
+  let receivedContext = null;
+  let capturedRun;
+
+  startWaitlistExpirationScheduler({
+    env: { ENABLE_WAITLIST_EXPIRATION: "true" },
+    logger: createLogger(),
+    expireEntries: async ({ leaseContext: context }) => {
+      receivedContext = context;
+      return [];
+    },
+    createRunner: ({ run, intervalMs }) => {
+      capturedRun = run;
+      return {
+        start: () => ({ started: true, intervalMs }),
+        stop: async () => ({ stopped: true }),
+      };
+    },
+  });
+
+  await capturedRun(leaseContext);
+
+  assert.equal(receivedContext, leaseContext);
+});
+
 test("multiple starts do not create duplicate schedulers", () => {
   let startCalls = 0;
 
