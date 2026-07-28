@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 
 import multer from "multer";
 
@@ -19,6 +20,10 @@ const allowedCertificateTypes = new Set([
 ]);
 const allowedCertificateExtensions = new Set([".pdf", ".jpg", ".jpeg", ".png", ".webp"]);
 
+const createUuidUploadFilename = (prefix, originalname) => {
+  const extension = path.extname(originalname).toLowerCase();
+  return `${prefix}${randomUUID()}${extension}`;
+};
 
 fs.mkdirSync(avatarUploadDir, { recursive: true });
 fs.mkdirSync(certificationUploadDir, { recursive: true });
@@ -32,10 +37,7 @@ const avatarStorage = multer.diskStorage({
     callback(null, avatarUploadDir);
   },
   filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const safeName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
-
-    callback(null, safeName);
+    callback(null, createUuidUploadFilename("", file.originalname));
   },
 });
 
@@ -44,10 +46,7 @@ const certificationStorage = multer.diskStorage({
     callback(null, certificationUploadDir);
   },
   filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const safeName = `cert-${Date.now()}${extension}`;
-
-    callback(null, safeName);
+    callback(null, createUuidUploadFilename("cert-", file.originalname));
   },
 });
 
@@ -56,10 +55,7 @@ const eventImageStorage = multer.diskStorage({
     callback(null, eventUploadDir);
   },
   filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const safeName = `event-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
-
-    callback(null, safeName);
+    callback(null, createUuidUploadFilename("event-", file.originalname));
   },
 });
 
@@ -68,10 +64,7 @@ const certificateFileStorage = multer.diskStorage({
     callback(null, certificateFileUploadDir);
   },
   filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const safeName = `certfile-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
-
-    callback(null, safeName);
+    callback(null, createUuidUploadFilename("certfile-", file.originalname));
   },
 });
 
@@ -80,8 +73,7 @@ const portfolioStorage = multer.diskStorage({
     callback(null, portfolioUploadDir);
   },
   filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const safeName = `portfolio-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+    const safeName = createUuidUploadFilename("portfolio-", file.originalname);
     callback(null, safeName);
   },
 });
@@ -91,8 +83,7 @@ const bookingReferenceStorage = multer.diskStorage({
     callback(null, bookingReferenceUploadDir);
   },
   filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const safeName = `ref-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+    const safeName = createUuidUploadFilename("ref-", file.originalname);
     callback(null, safeName);
   },
 });

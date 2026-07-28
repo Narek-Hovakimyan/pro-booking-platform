@@ -1,8 +1,16 @@
 import fs from "fs";
 import path from "path";
-import { describe, it, before, after } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { deleteUploadedFile } from "./uploadMiddleware.js";
+import {
+  deleteUploadedFile,
+  uploadAvatar,
+  uploadCertificateFile,
+  uploadCertificationImage,
+  uploadEventImage,
+  uploadPortfolioImages,
+  uploadReferenceImages,
+} from "./uploadMiddleware.js";
 
 const uploadsDir = path.resolve(process.cwd(), "uploads");
 
@@ -74,7 +82,9 @@ describe("deleteUploadedFile", () => {
   });
 
   it("rejects uploads/../../package.json traversal", () => {
-    const pkgPath = path.resolve(process.cwd(), "package.json");
+    const pkgPath = fs.existsSync(path.resolve(process.cwd(), "package.json"))
+      ? path.resolve(process.cwd(), "package.json")
+      : path.resolve(process.cwd(), "backend", "package.json");
     const originalContent = fs.readFileSync(pkgPath, "utf8");
 
     deleteUploadedFile("uploads/../../package.json");
@@ -87,5 +97,38 @@ describe("deleteUploadedFile", () => {
     deleteUploadedFile("");
     deleteUploadedFile(null);
     deleteUploadedFile(undefined);
+  });
+});
+
+describe("upload filename compatibility", () => {
+  const getFilename = (upload, originalname) =>
+    new Promise((resolve, reject) => {
+      upload.storage.getFilename({}, { originalname }, (error, filename) => {
+        if (error) reject(error);
+        else resolve(filename);
+      });
+    });
+
+  it("keeps legacy prefixes and extensions with UUID names", async () => {
+    const cases = [
+      [uploadAvatar, "avatar.JPG", /^[0-9a-f-]{36}\.jpg$/],
+      [uploadCertificationImage, "cert.PNG", /^cert-[0-9a-f-]{36}\.png$/],
+      [uploadEventImage, "event.WEBP", /^event-[0-9a-f-]{36}\.webp$/],
+      [uploadCertificateFile, "certificate.PDF", /^certfile-[0-9a-f-]{36}\.pdf$/],
+      [uploadPortfolioImages, "portfolio.JPEG", /^portfolio-[0-9a-f-]{36}\.jpeg$/],
+      [uploadReferenceImages, "reference.PNG", /^ref-[0-9a-f-]{36}\.png$/],
+    ];
+
+    for (const [upload, originalname, pattern] of cases) {
+      assert.match(await getFilename(upload, originalname), pattern);
+    }
+  });
+
+  it("does not collide across repeated generated names", async () => {
+    const names = await Promise.all(
+      Array.from({ length: 200 }, () => getFilename(uploadCertificationImage, "cert.jpg"))
+    );
+
+    assert.equal(new Set(names).size, names.length);
   });
 });
