@@ -39,6 +39,21 @@ const waitlistDisplayPopulate = [
   { path: "convertedBooking", select: "bookingDate time status" },
 ];
 
+const exactFieldPredicate = (document, field) =>
+  document?.[field] === undefined ? { $exists: false } : document[field];
+
+const exactWaitlistNotificationPredicate = (entry) => ({
+  _id: entry._id,
+  status: "active",
+  clientId: exactFieldPredicate(entry, "clientId"),
+  barberId: exactFieldPredicate(entry, "barberId"),
+  salonId: exactFieldPredicate(entry, "salonId"),
+  serviceId: exactFieldPredicate(entry, "serviceId"),
+  date: exactFieldPredicate(entry, "date"),
+  preferredStartTime: exactFieldPredicate(entry, "preferredStartTime"),
+  preferredEndTime: exactFieldPredicate(entry, "preferredEndTime"),
+});
+
 /**
  * Populate display fields on a single waitlist entry so action responses
  * match the same shape returned by getClientWaitlistEntries / getBarberWaitlistEntries.
@@ -692,12 +707,15 @@ export const notifyMatchingWaitlistEntries = async ({
   date,
   serviceId,
   time,
+  session,
+  afterCommit,
+  now = new Date(),
 }) => {
   if (!barberId || !date) {
     return 0;
   }
 
-  if (date < getArmeniaDateKey(new Date())) {
+  if (date < getArmeniaDateKey(now)) {
     return 0;
   }
 
@@ -708,7 +726,11 @@ export const notifyMatchingWaitlistEntries = async ({
     status: "active",
   };
 
-  const matchingEntries = await WaitlistEntry.find(query);
+  const matchingEntries = await WaitlistEntry.find(
+    query,
+    null,
+    session ? { session } : undefined
+  );
 
   if (matchingEntries.length === 0) {
     return 0;
@@ -751,22 +773,29 @@ export const notifyMatchingWaitlistEntries = async ({
   }
 
   // Get barber name for notification message
-  const barber = await User.findById(barberId).select("name");
+  const barberQuery = User.findById(
+    barberId,
+    null,
+    session ? { session } : undefined
+  );
+  const barber = typeof barberQuery?.select === "function"
+    ? await barberQuery.select("name")
+    : await barberQuery;
   const barberName = barber?.name || "Barber";
 
   let notificationsSent = 0;
 
   for (const entry of matchingEligibleEntries) {
-    const notifiedAt = new Date();
+    const notifiedAt = new Date(now);
     const claimedEntry = await WaitlistEntry.findOneAndUpdate(
-      { _id: entry._id, status: "active" },
+      exactWaitlistNotificationPredicate(entry),
       {
         $set: {
           status: "notified",
           notifiedAt,
         },
       },
-      { returnDocument: "after" }
+      { returnDocument: "after", session }
     );
 
     if (!claimedEntry) {
@@ -784,6 +813,9 @@ export const notifyMatchingWaitlistEntries = async ({
         salonId: claimedEntry.salonId || undefined,
         serviceId: claimedEntry.serviceId,
       },
+      idempotencyKey: `waitlist-slot-available:${String(claimedEntry._id)}:${date}:${time || "any"}`,
+      session,
+      afterCommit,
     });
 
     notificationsSent += 1;

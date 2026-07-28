@@ -358,11 +358,12 @@ test("missing booking fields use exists-false CAS predicates", async () => {
   assert.equal(expiredBookings.length, 1);
 });
 
-test("waitlist notification runs once after successful commit without blocking the result", async () => {
+test("waitlist processing is awaited inside the fenced expiration transaction", async () => {
   const booking = createBooking({ time: "09:00" });
   let waitlistCalls = 0;
-  let retryCount = 0;
   let createNotificationCalls = 0;
+  const session = { id: "expiration-waitlist-session" };
+  let afterCommitCalls = 0;
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => ({ ...booking });
@@ -372,8 +373,13 @@ test("waitlist notification runs once after successful commit without blocking t
     createNotificationCalls += 1;
     return payload;
   };
-  __bookingExpirationTestHooks.setNotifyMatchingWaitlistEntries(async () => {
+  __bookingExpirationTestHooks.setNotifyMatchingWaitlistEntries(async (payload) => {
     waitlistCalls += 1;
+    assert.equal(payload.session, session);
+    assert.equal(typeof payload.afterCommit, "function");
+    assert.equal(payload.now.toISOString(), "2026-05-07T06:00:00.000Z");
+    assert.equal(payload.date, booking.bookingDate);
+    assert.equal(payload.serviceId, booking.serviceId);
     return 1;
   });
 
@@ -381,48 +387,43 @@ test("waitlist notification runs once after successful commit without blocking t
     now: new Date("2026-05-07T10:00:00+04:00"),
     leaseContext: {
       withFencedWrite: async (write) => {
-        retryCount += 1;
-        return write({ session: { id: "retry-session" }, afterCommit() {} });
+        const result = await write({
+          session,
+          afterCommit() {
+            afterCommitCalls += 1;
+          },
+        });
+        assert.equal(waitlistCalls, 1);
+        return result;
       },
     },
   });
 
-  await new Promise((resolve) => setImmediate(resolve));
-
   assert.equal(expiredBookings.length, 1);
-  assert.equal(retryCount, 1);
   assert.equal(createNotificationCalls, 2);
   assert.equal(waitlistCalls, 1);
+  assert.equal(afterCommitCalls, 2);
 });
 
-test("waitlist rejection is contained and does not fail booking expiration", async () => {
+test("waitlist failure aborts booking expiration and propagates", async () => {
   const booking = createBooking({ time: "09:00" });
-  const originalConsoleError = console.error;
-  const consoleErrors = [];
+  const error = new Error("waitlist failed");
+  let updateCalls = 0;
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => ({ ...booking });
-  Booking.findOneAndUpdate = async (query, update) =>
-    ({ ...booking, ...(update.$set || {}) });
+  Booking.findOneAndUpdate = async (query, update) => {
+    updateCalls += 1;
+    return { ...booking, ...(update.$set || {}) };
+  };
   Notification.create = async (payload) => payload;
   __bookingExpirationTestHooks.setNotifyMatchingWaitlistEntries(async () => {
-    throw new Error("waitlist failed");
+    throw error;
   });
-  console.error = (...args) => {
-    consoleErrors.push(args);
-  };
 
-  try {
-    const expiredBookings = await expirePendingBookings(
-      new Date("2026-05-07T10:00:00+04:00")
-    );
-    await new Promise((resolve) => setImmediate(resolve));
-
-    assert.equal(expiredBookings.length, 1);
-    assert.equal(consoleErrors.length, 1);
-    assert.equal(consoleErrors[0][0], "Waitlist notification error:");
-    assert.match(String(consoleErrors[0][1]), /waitlist failed/);
-  } finally {
-    console.error = originalConsoleError;
-  }
+  await assert.rejects(
+    () => expirePendingBookings(new Date("2026-05-07T10:00:00+04:00")),
+    error
+  );
+  assert.equal(updateCalls, 1);
 });

@@ -98,22 +98,6 @@ export const shouldExpireBooking = (booking, now = new Date()) => {
   return bookingMinutes < nowMinutes;
 };
 
-const notifyWaitlistForExpiredBooking = (booking) => {
-  const dateKey = getBookingDateKey(booking);
-
-  void Promise.resolve().then(() =>
-    notifyMatchingWaitlistEntriesForBookingExpiration({
-      barberId: booking.barberId,
-      salonId: booking.salonId,
-      date: dateKey,
-      serviceId: booking.serviceId,
-      time: booking.time,
-    })
-  ).catch((error) => {
-    console.error("Waitlist notification error:", error);
-  });
-};
-
 export const expirePendingBookings = async (nowOrOptions = new Date()) => {
   const hasOptions = nowOrOptions && typeof nowOrOptions === "object" &&
     !(nowOrOptions instanceof Date) && ("now" in nowOrOptions || "leaseContext" in nowOrOptions);
@@ -182,6 +166,17 @@ export const expirePendingBookings = async (nowOrOptions = new Date()) => {
             ...notificationOptions,
           });
         }
+
+        await notifyMatchingWaitlistEntriesForBookingExpiration({
+          barberId: claimedBooking.barberId,
+          salonId: claimedBooking.salonId,
+          date: dateKey,
+          serviceId: claimedBooking.serviceId,
+          time,
+          session,
+          afterCommit,
+          now: stableNow,
+        });
         return claimedBooking;
       });
 
@@ -189,7 +184,6 @@ export const expirePendingBookings = async (nowOrOptions = new Date()) => {
       if (!claimedBooking) continue;
       expiredBookings.push(claimedBooking);
       expiredInBatch += 1;
-      notifyWaitlistForExpiredBooking(claimedBooking);
     }
 
     if (

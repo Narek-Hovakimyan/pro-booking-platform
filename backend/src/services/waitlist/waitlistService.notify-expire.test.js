@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { afterEach, test } from "node:test";
 
 import WaitlistEntry from "../../models/WaitlistEntry.js";
@@ -414,6 +415,128 @@ test("concurrent notifyMatchingWaitlistEntries calls only notify once", async ()
   assert.equal(counts[0] + counts[1], 1);
   assert.equal(notificationCount, 1);
   assert.equal(mockEntry.status, "notified");
+});
+
+test("notifyMatchingWaitlistEntries forwards session and afterCommit through all writes", async () => {
+  const mockEntry = createMockEntry({ _id: "entry-session-notify" });
+  const session = { id: "waitlist-session" };
+  const afterCommit = (callback) => {
+    calls.afterCommitCallback = callback;
+  };
+  const stableNow = new Date("2026-08-01T08:00:00.000Z");
+  const calls = {};
+
+  WaitlistEntry.find = async (query, projection, options) => {
+    calls.findOptions = options;
+    return [mockEntry];
+  };
+  WaitlistEntry.findOneAndUpdate = async (query, update, options) => {
+    calls.claimQuery = query;
+    calls.claimOptions = options;
+    Object.assign(mockEntry, update.$set || {});
+    return mockEntry;
+  };
+  User.findById = (id, projection, options) => {
+    calls.userOptions = options;
+    return {
+      select: async () => ({ name: "Jane Barber" }),
+    };
+  };
+  Notification.create = async (payload, options) => {
+    calls.notificationPayload = payload;
+    calls.notificationOptions = options;
+    return payload;
+  };
+
+  const count = await notifyMatchingWaitlistEntries({
+    barberId,
+    date: futureDate,
+    serviceId,
+    time: "10:00",
+    session,
+    afterCommit,
+    now: stableNow,
+  });
+
+  assert.equal(count, 1);
+  assert.equal(mockEntry.notifiedAt.toISOString(), stableNow.toISOString());
+  assert.equal(calls.findOptions.session, session);
+  assert.equal(calls.userOptions.session, session);
+  assert.equal(calls.claimOptions.session, session);
+  assert.equal(calls.notificationOptions.session, session);
+  assert.equal(typeof calls.afterCommitCallback, "function");
+  assert.equal(
+    calls.notificationPayload.internalHash,
+    createHash("sha256")
+      .update(`waitlist-slot-available:${mockEntry._id}:${futureDate}:10:00`)
+      .digest("hex")
+  );
+});
+
+test("notifyMatchingWaitlistEntries claim rechecks matching fields and preserves concurrent cancellation", async () => {
+  const mockEntry = createMockEntry({
+    _id: "entry-cancelled-before-claim",
+    preferredStartTime: "09:00",
+    preferredEndTime: "12:00",
+  });
+  let notificationCalls = 0;
+
+  WaitlistEntry.find = async () => [mockEntry];
+  WaitlistEntry.findOneAndUpdate = async (query) => {
+    assert.equal(query.status, "active");
+    assert.equal(query.clientId, mockEntry.clientId);
+    assert.equal(query.barberId, mockEntry.barberId);
+    assert.equal(query.salonId, mockEntry.salonId);
+    assert.equal(query.serviceId, mockEntry.serviceId);
+    assert.equal(query.date, mockEntry.date);
+    assert.equal(query.preferredStartTime, "09:00");
+    assert.equal(query.preferredEndTime, "12:00");
+    mockEntry.status = "cancelled";
+    return null;
+  };
+  User.findById = () => ({
+    select: async () => ({ name: "Jane Barber" }),
+  });
+  Notification.create = async () => {
+    notificationCalls += 1;
+  };
+
+  const count = await notifyMatchingWaitlistEntries({
+    barberId,
+    date: futureDate,
+    serviceId,
+    time: "10:00",
+  });
+
+  assert.equal(count, 0);
+  assert.equal(notificationCalls, 0);
+  assert.equal(mockEntry.status, "cancelled");
+});
+
+test("notifyMatchingWaitlistEntries propagates notification failures for transactional callers", async () => {
+  const mockEntry = createMockEntry({ _id: "entry-notification-fails" });
+  const error = new Error("storage failure");
+
+  WaitlistEntry.find = async () => [mockEntry];
+  mockFindOneAndUpdateForEntries([mockEntry]);
+  User.findById = () => ({
+    select: async () => ({ name: "Jane Barber" }),
+  });
+  Notification.create = async () => {
+    throw error;
+  };
+
+  await assert.rejects(
+    () => notifyMatchingWaitlistEntries({
+      barberId,
+      date: futureDate,
+      serviceId,
+      time: "10:00",
+      session: { id: "transaction" },
+      afterCommit() {},
+    }),
+    error
+  );
 });
 
 test("expirePastWaitlistEntries expires past active entries", async () => {
