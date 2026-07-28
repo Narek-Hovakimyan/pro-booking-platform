@@ -13,9 +13,14 @@ export const startEventRemindersCron = ({
     jobKey: "event-reminders",
     expression: EVENT_REMINDERS_CRON,
     logger,
-    run: async () => {
+    run: async (leaseContext) => {
       try {
-        await sendEventRemindersFn();
+        if (leaseContext === undefined) {
+          await sendEventRemindersFn();
+          return;
+        }
+
+        await sendEventRemindersFn(undefined, { leaseContext });
       } catch (error) {
         logger.error?.("Event reminder job error:", error);
       }

@@ -46,14 +46,14 @@ const sanitizeNotification = (notification) => {
   return plainNotification;
 };
 
-const persistNotification = async (payload, internalHash) => {
+const persistNotification = async (payload, internalHash, session) => {
   const notificationPayload = internalHash
     ? { ...payload, internalHash }
     : payload;
 
   try {
     return {
-      notification: await Notification.create(notificationPayload),
+      notification: await Notification.create(notificationPayload, session ? { session } : undefined),
       created: true,
     };
   } catch (error) {
@@ -61,9 +61,11 @@ const persistNotification = async (payload, internalHash) => {
       throw error;
     }
 
-    const existingNotification = await Notification.findOne({ internalHash }).select(
-      "+internalHash"
-    );
+    const existingNotification = await Notification.findOne(
+      { internalHash },
+      null,
+      session ? { session } : undefined
+    ).select("+internalHash");
 
     if (!existingNotification) {
       throw error;
@@ -82,6 +84,8 @@ export const createNotification = async ({
   message,
   data,
   idempotencyKey,
+  session,
+  afterCommit,
 }) => {
   const payload = { userId, type, message };
   const internalHash = buildInternalHash(idempotencyKey);
@@ -90,16 +94,31 @@ export const createNotification = async ({
     payload.data = data;
   }
 
-  const { notification, created } = await persistNotification(payload, internalHash);
+  const { notification, created } = await persistNotification(
+    payload,
+    internalHash,
+    session
+  );
   const publicNotification = sanitizeNotification(notification);
-  const io = getIOForNotifications();
 
-  if (io && created) {
+  const emitNotification = () => {
+    const io = getIOForNotifications();
+
+    if (!io || !created) {
+      return;
+    }
+
     try {
       io.to(`user:${userId}`).emit("notification", publicNotification);
     } catch {
       // Durable notification creation succeeded, so socket fan-out failures stay non-fatal.
     }
+  };
+
+  if (session && typeof afterCommit === "function") {
+    afterCommit(emitNotification);
+  } else if (!session) {
+    emitNotification();
   }
 
   return publicNotification;

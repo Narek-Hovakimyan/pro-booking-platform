@@ -13,14 +13,14 @@ test("event reminder cron keeps lease key, expression, and business behavior", a
       this.errorMessages.push(args);
     },
   };
-  let runs = 0;
+  const runCalls = [];
   let capturedConfig;
   const handle = { async stop() { return { stopped: true }; } };
 
   const startedHandle = startEventRemindersCron({
     logger,
-    sendEventRemindersFn: async () => {
-      runs += 1;
+    sendEventRemindersFn: async (...args) => {
+      runCalls.push(args);
     },
     createRunner: (config) => {
       capturedConfig = config;
@@ -35,10 +35,20 @@ test("event reminder cron keeps lease key, expression, and business behavior", a
   assert.equal(startedHandle, handle);
   assert.equal(capturedConfig.jobKey, "event-reminders");
   assert.equal(capturedConfig.expression, EVENT_REMINDERS_CRON);
-  assert.equal(runs, 0);
+  assert.equal(runCalls.length, 0);
 
+  const leaseContext = {
+    jobKey: "event-reminders",
+    ownerToken: "owner-1",
+    fencingToken: 4,
+    signal: new AbortController().signal,
+    assertOwned: async () => {},
+  };
+
+  await capturedConfig.run(leaseContext);
   await capturedConfig.run();
-  assert.equal(runs, 1);
+  assert.deepEqual(runCalls[0], [undefined, { leaseContext }]);
+  assert.deepEqual(runCalls[1], []);
 
   const failure = new Error("boom");
   startEventRemindersCron({

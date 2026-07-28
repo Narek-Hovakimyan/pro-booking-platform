@@ -316,6 +316,84 @@ test("duplicate idempotent notification does not emit again", async () => {
   assert.equal(emitCalls, 0);
 });
 
+test("transactional notification emission waits for commit", async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const afterCommitCallbacks = [];
+  let emitCalls = 0;
+
+  Notification.create = async (payload, options) => {
+    assert.equal(options.session.id, "session-1");
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+  __notificationServiceTestHooks.setGetIO(() => ({
+    to() {
+      return {
+        emit() {
+          emitCalls += 1;
+        },
+      };
+    },
+  }));
+
+  await createNotification({
+    userId,
+    type: "event_reminder",
+    message: "Reminder",
+    idempotencyKey: "event-reminder:v2:registration-1:user-1",
+    session: { id: "session-1" },
+    afterCommit(callback) {
+      afterCommitCallbacks.push(callback);
+    },
+  });
+
+  assert.equal(emitCalls, 0);
+  await afterCommitCallbacks[0]();
+  assert.equal(emitCalls, 1);
+});
+
+test("duplicate transactional notification does not queue another emit", async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const existing = {
+    _id: new mongoose.Types.ObjectId(),
+    userId,
+    type: "event_reminder",
+    message: "Reminder",
+    data: { eventRegistrationId: new mongoose.Types.ObjectId() },
+    internalHash: "hidden",
+    toObject() {
+      return { ...this };
+    },
+  };
+  const duplicateError = new Error("duplicate key");
+  duplicateError.code = 11000;
+  const afterCommitCallbacks = [];
+
+  Notification.create = async () => {
+    throw duplicateError;
+  };
+  Notification.findOne = (_filter, _projection, options) => ({
+    select: async () => {
+      assert.equal(options.session.id, "session-2");
+      return existing;
+    },
+  });
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  await createNotification({
+    userId,
+    type: "event_reminder",
+    message: "Reminder",
+    idempotencyKey: "event-reminder:v2:registration-1:user-1",
+    session: { id: "session-2" },
+    afterCommit(callback) {
+      afterCommitCallbacks.push(callback);
+    },
+  });
+
+  assert.equal(afterCommitCallbacks.length, 1);
+  await afterCommitCallbacks[0]();
+});
+
 test("event reminder idempotency uses registration-specific durable keying", async () => {
   const userId = new mongoose.Types.ObjectId();
   let firstPayload = null;

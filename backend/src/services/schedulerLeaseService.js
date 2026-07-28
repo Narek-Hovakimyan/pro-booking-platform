@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import SchedulerLease from "../models/SchedulerLease.js";
 
 export const DEFAULT_SCHEDULER_LEASE_TTL_MS = 60 * 1000;
+export const SCHEDULER_LEASE_LOST_ERROR_CODE = "scheduler_lease_lost";
 const MAX_TOKEN_LENGTH = 200;
 
 const notAcquired = (reason = "not_acquired") => ({
@@ -20,6 +21,13 @@ const notReleased = (reason = "not_released") => ({
   released: false,
   reason,
 });
+
+const createLeaseLostError = (reason = "not_owner") => {
+  const error = new Error("Scheduler lease ownership lost");
+  error.code = SCHEDULER_LEASE_LOST_ERROR_CODE;
+  error.reason = reason;
+  return error;
+};
 
 const validateToken = (name, value) => {
   if (
@@ -74,6 +82,8 @@ const getLeaseExpiry = (now, ttlMs) => {
 };
 
 const isDuplicateKeyError = (error) => error?.code === 11000;
+const isValidWriteSequence = (value) =>
+  Number.isSafeInteger(value) && value >= 0;
 
 const getDocumentValue = (document) =>
   document && typeof document.toObject === "function"
@@ -90,12 +100,23 @@ const normalizeLease = (document) => {
     const ownerToken = validateOwnerToken(source.ownerToken);
     const leaseExpiresAt = validateDate("leaseExpiresAt", source.leaseExpiresAt);
     const fencingToken = validateFencingToken(source.fencingToken);
+    const writeSequence =
+      source.writeSequence === undefined
+        ? 0
+        : isValidWriteSequence(source.writeSequence)
+          ? source.writeSequence
+          : null;
+
+    if (writeSequence === null) {
+      return null;
+    }
 
     return {
       jobKey,
       ownerToken,
       leaseExpiresAt: new Date(leaseExpiresAt),
       fencingToken,
+      writeSequence,
       ...(source._id ? { _id: source._id } : {}),
       ...(source.createdAt ? { createdAt: new Date(source.createdAt) } : {}),
       ...(source.updatedAt ? { updatedAt: new Date(source.updatedAt) } : {}),
@@ -117,6 +138,7 @@ export const createSchedulerLeaseService = ({
   model = SchedulerLease,
   now = () => new Date(),
   ownerTokenFactory = randomUUID,
+  startSession = null,
 } = {}) => {
   if (
     !model ||
@@ -132,6 +154,12 @@ export const createSchedulerLeaseService = ({
   if (typeof ownerTokenFactory !== "function") {
     throw new TypeError("ownerTokenFactory must be a function");
   }
+
+  const startSessionFn =
+    startSession ||
+    (typeof model?.db?.startSession === "function"
+      ? model.db.startSession.bind(model.db)
+      : null);
 
   const acquire = async ({
     jobKey,
@@ -282,7 +310,97 @@ export const createSchedulerLeaseService = ({
     }
   };
 
-  return { acquire, renew, release };
+  const withFencedWrite = async ({
+    jobKey,
+    ownerToken,
+    fencingToken,
+    write,
+  } = {}) => {
+    const normalizedJobKey = validateJobKey(jobKey);
+    const normalizedOwnerToken = validateOwnerToken(ownerToken);
+    const validatedFencingToken = validateFencingToken(fencingToken);
+
+    if (typeof write !== "function") {
+      throw new TypeError("write must be a function");
+    }
+    if (typeof startSessionFn !== "function") {
+      throw createLeaseLostError("transactions_unavailable");
+    }
+
+    const session = await startSessionFn();
+    if (
+      !session ||
+      typeof session.withTransaction !== "function" ||
+      typeof session.endSession !== "function"
+    ) {
+      throw createLeaseLostError("transactions_unavailable");
+    }
+
+    try {
+      const transactionResult = await session.withTransaction(async () => {
+        const afterCommitCallbacks = [];
+        const currentTime = getNow(now);
+        const updatedDocument = await model.findOneAndUpdate(
+          {
+            jobKey: normalizedJobKey,
+            ownerToken: normalizedOwnerToken,
+            fencingToken: validatedFencingToken,
+            leaseExpiresAt: { $gt: currentTime },
+          },
+          { $inc: { writeSequence: 1 } },
+          {
+            new: true,
+            returnDocument: "after",
+            runValidators: true,
+            session,
+          }
+        );
+        const lease = normalizeLease(updatedDocument);
+
+        if (
+          !isExactLease(lease, {
+            jobKey: normalizedJobKey,
+            ownerToken: normalizedOwnerToken,
+            fencingToken: validatedFencingToken,
+          }) ||
+          lease.writeSequence <= 0 ||
+          lease.leaseExpiresAt.getTime() <= currentTime.getTime()
+        ) {
+          throw createLeaseLostError("not_owner");
+        }
+
+        const result = await write({
+          session,
+          lease,
+          writeSequence: lease.writeSequence,
+          afterCommit(callback) {
+            if (typeof callback === "function") {
+              afterCommitCallbacks.push(callback);
+            }
+          },
+        });
+
+        return { result, afterCommitCallbacks };
+      });
+
+      if (
+        !transactionResult ||
+        !Array.isArray(transactionResult.afterCommitCallbacks)
+      ) {
+        throw createLeaseLostError("invalid_transaction_result");
+      }
+
+      for (const callback of transactionResult.afterCommitCallbacks) {
+        await callback();
+      }
+
+      return transactionResult.result;
+    } finally {
+      await session.endSession();
+    }
+  };
+
+  return { acquire, renew, release, withFencedWrite };
 };
 
 export const schedulerLeaseService = createSchedulerLeaseService();
@@ -292,3 +410,5 @@ export const renewSchedulerLease = (...args) =>
   schedulerLeaseService.renew(...args);
 export const releaseSchedulerLease = (...args) =>
   schedulerLeaseService.release(...args);
+export const withFencedSchedulerWrite = (...args) =>
+  schedulerLeaseService.withFencedWrite(...args);

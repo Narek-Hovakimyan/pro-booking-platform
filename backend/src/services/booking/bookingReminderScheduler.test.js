@@ -56,6 +56,7 @@ test("scheduler does not start when env is disabled", () => {
 test("scheduler starts with deterministic lease key and interval", () => {
   const logger = createLogger();
   let runnerConfig = null;
+  const runCalls = [];
 
   const result = startBookingReminderScheduler({
     env: {
@@ -63,6 +64,9 @@ test("scheduler starts with deterministic lease key and interval", () => {
       BOOKING_REMINDER_INTERVAL_MS: "2500",
     },
     logger,
+    runReminders: async (...args) => {
+      runCalls.push(args);
+    },
     createRunner: (config) => {
       runnerConfig = config;
       return {
@@ -77,6 +81,20 @@ test("scheduler starts with deterministic lease key and interval", () => {
   assert.equal(runnerConfig.intervalMs, 2500);
   assert.equal(typeof runnerConfig.run, "function");
   assert.equal(logger.infoMessages.length, 1);
+
+  const leaseContext = {
+    jobKey: "booking-reminders",
+    ownerToken: "owner-1",
+    fencingToken: 3,
+    signal: new AbortController().signal,
+    assertOwned: async () => {},
+  };
+
+  return runnerConfig.run(leaseContext).then(async () => {
+    await runnerConfig.run();
+    assert.deepEqual(runCalls[0], [undefined, { leaseContext }]);
+    assert.deepEqual(runCalls[1], []);
+  });
 });
 
 test("multiple starts do not create duplicate schedulers", () => {

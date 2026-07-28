@@ -19,6 +19,137 @@ const createBooking = (overrides = {}) => ({
   ...overrides,
 });
 
+const createLeaseContext = ({
+  failAfter = Number.POSITIVE_INFINITY,
+  reason = "not_owner",
+  loseBeforeCommitWriteNumber = null,
+} = {}) => {
+  let calls = 0;
+  let writeCalls = 0;
+  const controller = new AbortController();
+  const loseLease = () => {
+    const error = new Error("lease lost");
+    error.code = "scheduler_lease_lost";
+    error.reason = reason;
+    controller.abort(error);
+    return error;
+  };
+
+  return {
+    signal: controller.signal,
+    async assertOwned() {
+      if (controller.signal.aborted) {
+        throw controller.signal.reason;
+      }
+      calls += 1;
+      if (calls > failAfter) {
+        throw loseLease();
+      }
+    },
+    async withFencedWrite(write) {
+      writeCalls += 1;
+      await this.assertOwned();
+      const session = {};
+      const afterCommitCallbacks = [];
+      const result = await write({
+        session,
+        afterCommit(callback) {
+          if (typeof callback === "function") {
+            afterCommitCallbacks.push(callback);
+          }
+        },
+      });
+      if (writeCalls === loseBeforeCommitWriteNumber) {
+        loseLease();
+      }
+      await this.assertOwned();
+
+      for (const commit of session.__committers || []) {
+        commit();
+      }
+      for (const callback of afterCommitCallbacks) {
+        await callback();
+      }
+
+      return result;
+    },
+    get calls() {
+      return calls;
+    },
+    get writeCalls() {
+      return writeCalls;
+    },
+  };
+};
+
+const cloneDispatch = (dispatch) => ({
+  ...dispatch,
+  claimedAt: dispatch.claimedAt ? new Date(dispatch.claimedAt) : dispatch.claimedAt,
+  sentAt: dispatch.sentAt ? new Date(dispatch.sentAt) : dispatch.sentAt,
+  createdAt: dispatch.createdAt ? new Date(dispatch.createdAt) : dispatch.createdAt,
+  updatedAt: dispatch.updatedAt ? new Date(dispatch.updatedAt) : dispatch.updatedAt,
+});
+
+const getSessionState = (session, key, createState, commitState) => {
+  if (!session) {
+    return null;
+  }
+  if (!session[key]) {
+    const state = createState();
+    session[key] = state;
+    session.__committers = session.__committers || [];
+    session.__committers.push(() => commitState(state));
+  }
+
+  return session[key];
+};
+
+const createDurableNotificationStore = () => {
+  const notifications = new Map();
+  const calls = [];
+  let emittedCount = 0;
+
+  return {
+    notifications,
+    calls,
+    get emittedCount() {
+      return emittedCount;
+    },
+    async create(payload) {
+      calls.push(payload.idempotencyKey);
+      const sessionNotifications =
+        getSessionState(
+          payload.session,
+          "__notificationState",
+          () => new Map([...notifications.entries()].map(([key, value]) => [key, { ...value }])),
+          (nextNotifications) => {
+            notifications.clear();
+            for (const [key, value] of nextNotifications.entries()) {
+              notifications.set(key, value);
+            }
+          }
+        ) || notifications;
+      if (sessionNotifications.has(payload.idempotencyKey)) {
+        return sessionNotifications.get(payload.idempotencyKey);
+      }
+
+      const created = {
+        _id: `notification-${sessionNotifications.size + 1}`,
+        ...payload,
+      };
+      sessionNotifications.set(payload.idempotencyKey, created);
+      if (typeof payload.afterCommit === "function") {
+        payload.afterCommit(() => {
+          emittedCount += 1;
+        });
+      } else {
+        emittedCount += 1;
+      }
+      return created;
+    },
+  };
+};
+
 const createBookingModel = (initialBookings) => {
   const bookings = new Map(
     initialBookings.map((booking) => [String(booking._id), { ...booking }])
@@ -40,14 +171,38 @@ const createBookingModel = (initialBookings) => {
 
   return {
     bookings,
-    async find(query) {
-      return [...bookings.values()].filter((booking) => matches(booking, query));
+    async find(query, _projection, options = {}) {
+      const activeBookings =
+        getSessionState(
+          options.session,
+          "__bookingState",
+          () => new Map([...bookings.entries()].map(([key, value]) => [key, { ...value }])),
+          (nextBookings) => {
+            bookings.clear();
+            for (const [key, value] of nextBookings.entries()) {
+              bookings.set(key, value);
+            }
+          }
+        ) || bookings;
+      return [...activeBookings.values()].filter((booking) => matches(booking, query));
     },
-    async findOne(query) {
-      return [...bookings.values()].find((booking) => matches(booking, query)) || null;
+    async findOne(query, _projection, options = {}) {
+      const activeBookings =
+        getSessionState(
+          options.session,
+          "__bookingState",
+          () => new Map([...bookings.entries()].map(([key, value]) => [key, { ...value }])),
+          (nextBookings) => {
+            bookings.clear();
+            for (const [key, value] of nextBookings.entries()) {
+              bookings.set(key, value);
+            }
+          }
+        ) || bookings;
+      return [...activeBookings.values()].find((booking) => matches(booking, query)) || null;
     },
-    async findOneAndUpdate(query, update) {
-      const booking = await this.findOne(query);
+    async findOneAndUpdate(query, update, options = {}) {
+      const booking = await this.findOne(query, null, options);
       if (!booking) return null;
 
       for (const [key, value] of Object.entries(update.$set || {})) {
@@ -129,20 +284,47 @@ const createProductionShapeDispatchModel = (state) => {
   });
 
   return {
-    async find(query) {
-      return state.dispatches.filter(
+    async find(query, _projection, options = {}) {
+      const dispatches =
+        getSessionState(
+          options.session,
+          "__dispatchState",
+          () => state.dispatches.map((dispatch) => cloneDispatch(dispatch)),
+          (nextDispatches) => {
+            state.dispatches.splice(0, state.dispatches.length, ...nextDispatches);
+          }
+        ) || state.dispatches;
+      return dispatches.filter(
         (dispatch) =>
           String(dispatch.bookingId) === String(query.bookingId) &&
           dispatch.reminderType === query.reminderType &&
           query.userId.$in.some((userId) => String(userId) === String(dispatch.userId))
       );
     },
-    async findOne(filter) {
-      return state.dispatches.find((dispatch) => matches(dispatch, filter)) || null;
+    async findOne(filter, _projection, options = {}) {
+      const dispatches =
+        getSessionState(
+          options.session,
+          "__dispatchState",
+          () => state.dispatches.map((dispatch) => cloneDispatch(dispatch)),
+          (nextDispatches) => {
+            state.dispatches.splice(0, state.dispatches.length, ...nextDispatches);
+          }
+        ) || state.dispatches;
+      return dispatches.find((dispatch) => matches(dispatch, filter)) || null;
     },
     findOneAndUpdate(filter, update, options = {}) {
       return wrapResult(() => {
-        const existing = state.dispatches.find((dispatch) => matches(dispatch, filter));
+        const dispatches =
+          getSessionState(
+            options.session,
+            "__dispatchState",
+            () => state.dispatches.map((dispatch) => cloneDispatch(dispatch)),
+            (nextDispatches) => {
+              state.dispatches.splice(0, state.dispatches.length, ...nextDispatches);
+            }
+          ) || state.dispatches;
+        const existing = dispatches.find((dispatch) => matches(dispatch, filter));
 
         if (existing) {
           return applyUpdate(existing, update, false);
@@ -170,7 +352,7 @@ const createProductionShapeDispatchModel = (state) => {
           update,
           true
         );
-        state.dispatches.push(created);
+        dispatches.push(created);
         return created;
       });
     },
@@ -408,6 +590,80 @@ test("crash after notification persistence recovers via stale claimed recipient 
 
   assert.equal(result.remindersSent, 1);
   assert.equal(new Set(idempotencyKeys).size, 2);
+});
+
+test("takeover during execution stops stale owner writes and recovers without duplicate reminder emission", async () => {
+  const bookingModel = createBookingModel([createBooking()]);
+  const notificationStore = createDurableNotificationStore();
+  const state = { dispatches: [] };
+  const dispatchModel = createProductionShapeDispatchModel(state);
+  const oldOwnerDispatchService = createBookingReminderDispatchService({
+    model: dispatchModel,
+    now: () => new Date("2026-07-25T07:00:00.000Z"),
+    staleClaimTimeoutMs: 60 * 1000,
+    claimTokenFactory: (() => {
+      let counter = 0;
+      return () => `old-claim-${++counter}`;
+    })(),
+  });
+  const newOwnerDispatchService = createBookingReminderDispatchService({
+    model: dispatchModel,
+    now: () => new Date("2026-07-25T07:06:00.000Z"),
+    staleClaimTimeoutMs: 60 * 1000,
+    claimTokenFactory: (() => {
+      let counter = 0;
+      return () => `new-claim-${++counter}`;
+    })(),
+  });
+
+  const first = await runBookingReminders(new Date("2026-07-25T07:00:00.000Z"), {
+    bookingModel,
+    dispatchModel,
+    dispatchService: oldOwnerDispatchService,
+    leaseContext: createLeaseContext({ loseBeforeCommitWriteNumber: 2 }),
+    createNotification: async (payload) => notificationStore.create(payload),
+  });
+
+  assert.equal(first.remindersSent, 0);
+  assert.equal(notificationStore.notifications.size, 0);
+  assert.equal(notificationStore.emittedCount, 0);
+  assert.deepEqual(
+    state.dispatches.map((dispatch) => ({
+      userId: dispatch.userId,
+      status: dispatch.status,
+    })),
+    [{ userId: "client-1", status: "claimed" }]
+  );
+
+  const second = await runBookingReminders(new Date("2026-07-25T07:06:00.000Z"), {
+    bookingModel,
+    dispatchModel,
+    dispatchService: newOwnerDispatchService,
+    leaseContext: createLeaseContext(),
+    createNotification: async (payload) => notificationStore.create(payload),
+  });
+
+  assert.equal(second.remindersSent, 1);
+  assert.equal(notificationStore.notifications.size, 2);
+  assert.equal(notificationStore.emittedCount, 2);
+  assert.deepEqual(
+    state.dispatches.map((dispatch) => ({
+      userId: dispatch.userId,
+      status: dispatch.status,
+    })),
+    [
+      { userId: "client-1", status: "sent" },
+      { userId: "barber-1", status: "sent" },
+    ]
+  );
+  assert.equal(
+    notificationStore.calls.filter((key) => key.includes(":client-1")).length,
+    2
+  );
+  assert.equal(
+    bookingModel.bookings.get("booking-1").reminder24hSentAt instanceof Date,
+    true
+  );
 });
 
 test("booking cancellation after claim prevents delivery and marks failure", async () => {

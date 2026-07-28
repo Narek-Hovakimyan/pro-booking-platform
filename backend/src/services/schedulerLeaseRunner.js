@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import SchedulerLease from "../models/SchedulerLease.js";
 import {
   DEFAULT_SCHEDULER_LEASE_TTL_MS,
   schedulerLeaseService,
@@ -7,6 +8,7 @@ import {
 
 const DEFAULT_RENEWAL_LEAD_MS = 5 * 1000;
 const DEFAULT_RENEWAL_MIN_DELAY_MS = 1 * 1000;
+const LEASE_LOST_ERROR_CODE = "scheduler_lease_lost";
 
 const toDelayMs = (ttlMs, renewalLeadMs) =>
   Math.max(
@@ -14,26 +16,33 @@ const toDelayMs = (ttlMs, renewalLeadMs) =>
     Math.min(ttlMs - 1, ttlMs - renewalLeadMs)
   );
 
-const normalizeErrorCode = (error) => {
-  if (typeof error?.code === "string" && error.code.length > 0) {
-    return error.code;
-  }
-
-  return "unknown_error";
-};
+  const normalizeErrorCode = (error) => {
+    if (typeof error?.code === "string" && error.code.length > 0) {
+      return error.code;
+    }
+    return "unknown_error";
+  };
 
 const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+
+const isValidDate = (value) => value instanceof Date && !Number.isNaN(value.getTime());
 
 const isPositiveSafeInteger = (value) => Number.isSafeInteger(value) && value > 0;
 
 const isRecord = (value) => value !== null && typeof value === "object";
 
-const isValidAcquiredLease = ({ lease, expectedJobKey, expectedOwnerToken }) =>
+const isValidAcquiredLease = ({
+  lease,
+  expectedJobKey,
+  expectedOwnerToken,
+  currentTime,
+}) =>
   isRecord(lease) &&
   lease.jobKey === expectedJobKey &&
   lease.ownerToken === expectedOwnerToken &&
   isPositiveSafeInteger(lease.fencingToken) &&
-  lease.leaseExpiresAt instanceof Date;
+  isValidDate(lease.leaseExpiresAt) &&
+  (!currentTime || lease.leaseExpiresAt.getTime() > currentTime.getTime());
 
 const getFailureReason = (result, fallbackReason) =>
   isNonEmptyString(result?.reason) ? result.reason : fallbackReason;
@@ -43,7 +52,16 @@ const createNoopLease = () => ({
   current: null,
   timerId: null,
   renewalPromise: null,
+  abortController: null,
+  lostError: null,
 });
+
+const createLeaseLostError = (reason = "not_owner") => {
+  const error = new Error("Scheduler lease ownership lost");
+  error.code = LEASE_LOST_ERROR_CODE;
+  error.reason = reason;
+  return error;
+};
 
 export const createSchedulerLeaseRunner = ({
   jobKey,
@@ -51,12 +69,14 @@ export const createSchedulerLeaseRunner = ({
   run,
   logger = console,
   leaseService = schedulerLeaseService,
+  leaseModel = SchedulerLease,
   leaseTtlMs = DEFAULT_SCHEDULER_LEASE_TTL_MS,
   ownerTokenFactory = randomUUID,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
+  now = () => new Date(),
 } = {}) => {
   if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {
     throw new TypeError("intervalMs must be a positive safe integer");
@@ -73,11 +93,20 @@ export const createSchedulerLeaseRunner = ({
   if (typeof leaseService.release !== "function") {
     throw new TypeError("leaseService.release must be a function");
   }
+  if (typeof leaseService.withFencedWrite !== "function") {
+    throw new TypeError("leaseService.withFencedWrite must be a function");
+  }
+  if (!leaseModel || typeof leaseModel.findOne !== "function") {
+    throw new TypeError("leaseModel.findOne must be a function");
+  }
   if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs <= 1) {
     throw new TypeError("leaseTtlMs must be a safe integer greater than 1");
   }
   if (typeof ownerTokenFactory !== "function") {
     throw new TypeError("ownerTokenFactory must be a function");
+  }
+  if (typeof now !== "function") {
+    throw new TypeError("now must be a function");
   }
 
   const ownerToken = ownerTokenFactory();
@@ -101,10 +130,21 @@ export const createSchedulerLeaseRunner = ({
     state.lease.timerId = null;
   };
 
+  const abortLease = (reason = "not_owner") => {
+    if (!state.lease.lostError) {
+      state.lease.lostError = createLeaseLostError(reason);
+    }
+    state.lease.active = false;
+    clearRenewalTimer();
+    if (!state.lease.abortController?.signal.aborted) {
+      state.lease.abortController?.abort(state.lease.lostError);
+    }
+    return state.lease.lostError;
+  };
+
   const stopRenewalLoop = async () => {
     state.lease.active = false;
     clearRenewalTimer();
-
     if (state.lease.renewalPromise) {
       await state.lease.renewalPromise;
     }
@@ -112,7 +152,6 @@ export const createSchedulerLeaseRunner = ({
 
   const scheduleRenewal = () => {
     if (!state.lease.active || !state.lease.current) return;
-
     const delayMs = toDelayMs(leaseTtlMs, DEFAULT_RENEWAL_LEAD_MS);
     state.lease.timerId = setTimeoutFn(async () => {
       state.lease.timerId = null;
@@ -125,11 +164,50 @@ export const createSchedulerLeaseRunner = ({
             ttlMs: leaseTtlMs,
           });
 
+          if (!isRecord(result) || typeof result.renewed !== "boolean") {
+            abortLease("invalid_result");
+            logger.error?.(
+              {
+                event: "scheduler_lease_runner.renew_invalid",
+                jobKey,
+                reason: "invalid_result",
+              },
+              "Scheduler lease renewal returned an invalid result"
+            );
+            return;
+          }
+
           if (!result.renewed) {
-            state.lease.active = false;
+            abortLease(getFailureReason(result, "not_renewed"));
             logger.warn?.(
-              { event: "scheduler_lease_runner.renew_skipped", jobKey, reason: result.reason },
+              {
+                event: "scheduler_lease_runner.renew_skipped",
+                jobKey,
+                reason: getFailureReason(result, "not_renewed"),
+              },
               "Scheduler lease renewal skipped"
+            );
+            return;
+          }
+
+          const currentTime = now();
+          if (
+            !isValidDate(currentTime) ||
+            !isValidAcquiredLease({
+              lease: result.lease,
+              expectedJobKey: jobKey,
+              expectedOwnerToken: ownerToken,
+              currentTime,
+            })
+          ) {
+            abortLease("invalid_lease");
+            logger.error?.(
+              {
+                event: "scheduler_lease_runner.renew_invalid",
+                jobKey,
+                reason: "invalid_lease",
+              },
+              "Scheduler lease renewal returned an invalid lease"
             );
             return;
           }
@@ -137,7 +215,7 @@ export const createSchedulerLeaseRunner = ({
           state.lease.current = result.lease;
           scheduleRenewal();
         } catch (error) {
-          state.lease.active = false;
+          abortLease(normalizeErrorCode(error));
           logger.error?.(
             {
               event: "scheduler_lease_runner.renew_failed",
@@ -159,7 +237,6 @@ export const createSchedulerLeaseRunner = ({
 
   const releaseLease = async () => {
     if (!state.lease.current) return;
-
     const leaseToRelease = state.lease.current;
     state.lease.current = null;
 
@@ -188,9 +265,124 @@ export const createSchedulerLeaseRunner = ({
     }
   };
 
+  const createLeaseExecutionContext = (lease) => {
+    const abortController = new AbortController();
+    state.lease.abortController = abortController;
+    state.lease.lostError = null;
+    const assertOwned = async () => {
+      if (abortController.signal.aborted) {
+        throw state.lease.lostError || createLeaseLostError("not_owner");
+      }
+
+      const currentTime = now();
+      if (!isValidDate(currentTime)) {
+        logger.error?.(
+          {
+            event: "scheduler_lease_runner.assert_failed",
+            jobKey,
+            reason: "invalid_now",
+          },
+          "Scheduler lease ownership check failed"
+        );
+        throw abortLease("invalid_now");
+      }
+
+      try {
+        const ownedLease = await leaseModel.findOne({
+          jobKey: lease.jobKey,
+          ownerToken: lease.ownerToken,
+          fencingToken: lease.fencingToken,
+          leaseExpiresAt: { $gt: currentTime },
+        });
+
+        if (!ownedLease) {
+          throw abortLease("not_owner");
+        }
+      } catch (error) {
+        if (error?.code === LEASE_LOST_ERROR_CODE) {
+          throw error;
+        }
+
+        logger.error?.(
+          {
+            event: "scheduler_lease_runner.assert_failed",
+            jobKey,
+            reason: normalizeErrorCode(error),
+          },
+          "Scheduler lease ownership check failed"
+        );
+        throw abortLease("storage_error");
+      }
+
+      if (abortController.signal.aborted) {
+        throw state.lease.lostError || createLeaseLostError("not_owner");
+      }
+    };
+
+    const withFencedWrite = async (write) => {
+      if (typeof write !== "function") {
+        throw new TypeError("write must be a function");
+      }
+      if (abortController.signal.aborted) {
+        throw state.lease.lostError || createLeaseLostError("not_owner");
+      }
+
+      try {
+        return await leaseService.withFencedWrite({
+          jobKey: lease.jobKey,
+          ownerToken: lease.ownerToken,
+          fencingToken: lease.fencingToken,
+          write: async ({ session, lease: updatedLease, writeSequence, afterCommit }) => {
+            const currentTime = now();
+
+            if (
+              !isValidDate(currentTime) ||
+              !isValidAcquiredLease({
+                lease: updatedLease,
+                expectedJobKey: jobKey,
+                expectedOwnerToken: ownerToken,
+                currentTime,
+              })
+            ) {
+              throw abortLease("invalid_lease");
+            }
+            state.lease.current = updatedLease;
+            if (abortController.signal.aborted) {
+              throw state.lease.lostError || createLeaseLostError("not_owner");
+            }
+            return write({
+              session,
+              jobKey,
+              ownerToken: updatedLease.ownerToken,
+              fencingToken: updatedLease.fencingToken,
+              writeSequence,
+              signal: abortController.signal,
+              assertOwned,
+              withFencedWrite,
+              afterCommit,
+            });
+          },
+        });
+      } catch (error) {
+        if (error?.code === LEASE_LOST_ERROR_CODE) {
+          throw abortLease(error.reason || "not_owner");
+        }
+        throw error;
+      }
+    };
+
+    return {
+      jobKey,
+      ownerToken: lease.ownerToken,
+      fencingToken: lease.fencingToken,
+      signal: abortController.signal,
+      assertOwned,
+      withFencedWrite,
+    };
+  };
+
   const runTick = async () => {
     if (!state.active || state.stopping) return;
-
     if (state.isRunning) {
       logger.warn?.(
         { event: "scheduler_lease_runner.overlap_skipped", jobKey },
@@ -198,9 +390,7 @@ export const createSchedulerLeaseRunner = ({
       );
       return;
     }
-
     state.isRunning = true;
-
     const tickPromise = (async () => {
       let leaseResult;
 
@@ -254,11 +444,14 @@ export const createSchedulerLeaseRunner = ({
         return;
       }
 
+      const currentTime = now();
       if (
+        !isValidDate(currentTime) ||
         !isValidAcquiredLease({
           lease: leaseResult.lease,
           expectedJobKey: jobKey,
           expectedOwnerToken: ownerToken,
+          currentTime,
         })
       ) {
         logger.error?.(
@@ -274,27 +467,27 @@ export const createSchedulerLeaseRunner = ({
 
       state.lease.active = true;
       state.lease.current = leaseResult.lease;
+      const executionContext = createLeaseExecutionContext(leaseResult.lease);
       scheduleRenewal();
-
       try {
-        await run();
+        await run(executionContext);
       } catch (error) {
-        logger.error?.(
-          {
-            event: "scheduler_lease_runner.run_failed",
-            jobKey,
-            reason: normalizeErrorCode(error),
-          },
-          "Scheduler job failed"
-        );
+        if (error?.code !== LEASE_LOST_ERROR_CODE) {
+          logger.error?.(
+            {
+              event: "scheduler_lease_runner.run_failed",
+              jobKey,
+              reason: normalizeErrorCode(error),
+            },
+            "Scheduler job failed"
+          );
+        }
       } finally {
         await stopRenewalLoop();
         await releaseLease();
       }
     })();
-
     state.activeTickPromise = tickPromise;
-
     try {
       await tickPromise;
     } finally {
@@ -307,13 +500,11 @@ export const createSchedulerLeaseRunner = ({
     if (state.intervalId) {
       return { started: false, reason: "already_started" };
     }
-
     state.active = true;
     state.stopping = false;
     state.stopPromise = null;
     state.intervalId = setIntervalFn(runTick, intervalMs);
     state.intervalId?.unref?.();
-
     return { started: true, intervalMs };
   };
 
@@ -324,7 +515,6 @@ export const createSchedulerLeaseRunner = ({
     if (!state.intervalId) {
       return { stopped: false };
     }
-
     state.stopping = true;
     state.active = false;
     clearIntervalFn(state.intervalId);
@@ -342,10 +532,8 @@ export const createSchedulerLeaseRunner = ({
         state.stopping = false;
         state.stopPromise = null;
       }
-
       return { stopped: true };
     })();
-
     return state.stopPromise;
   };
 

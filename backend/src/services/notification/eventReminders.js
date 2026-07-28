@@ -8,6 +8,7 @@ import { eventReminderDispatchService } from "./eventReminderDispatchService.js"
 export const REMINDER_LEAD_MINUTES = 24 * 60;
 export const REMINDER_WINDOW_MINUTES = 10;
 const EVENT_REMINDER_IDEMPOTENCY_NAMESPACE = "event-reminder:v2";
+const LEASE_LOST_ERROR_CODE = "scheduler_lease_lost";
 
 export const getEventStart = (event) => {
   if (!event?.date || !event?.time) return null;
@@ -79,29 +80,39 @@ const finalizeLegacyReminder = async ({
   registrationId,
   expectedUserId,
   now,
+  withFencedWrite,
 }) => {
-  const currentRegistration = await loadCurrentRegistration(registrationModel, registrationId);
-  const currentContext = getReminderContext(currentRegistration, now);
+  return withFencedWrite(async ({ session }) => {
+    const currentRegistration = await registrationModel
+      .findOne(
+        { _id: registrationId },
+        null,
+        session ? { session } : undefined
+      )
+      .populate("eventId", "title date time status")
+      .lean();
+    const currentContext = getReminderContext(currentRegistration, now);
 
-  if (
-    !currentContext ||
-    String(currentContext.recipientId) !== String(expectedUserId)
-  ) {
-    return false;
-  }
+    if (
+      !currentContext ||
+      String(currentContext.recipientId) !== String(expectedUserId)
+    ) {
+      return false;
+    }
 
-  const updatedRegistration = await registrationModel.findOneAndUpdate(
-    {
-      _id: registrationId,
-      status: "approved",
-      reminderSentAt: null,
-      $or: [{ userId: expectedUserId }, { userId: null, barberId: expectedUserId }],
-    },
-    { $set: { reminderSentAt: new Date(now) } },
-    { returnDocument: "after" }
-  );
+    const updatedRegistration = await registrationModel.findOneAndUpdate(
+      {
+        _id: registrationId,
+        status: "approved",
+        reminderSentAt: null,
+        $or: [{ userId: expectedUserId }, { userId: null, barberId: expectedUserId }],
+      },
+      { $set: { reminderSentAt: new Date(now) } },
+      { returnDocument: "after", session }
+    );
 
-  return Boolean(updatedRegistration);
+    return Boolean(updatedRegistration);
+  });
 };
 
 const getFailureCode = (error) => {
@@ -111,6 +122,18 @@ const getFailureCode = (error) => {
 
   return "notification_error";
 };
+
+const isLeaseFenceError = (error) => error?.code === LEASE_LOST_ERROR_CODE;
+
+const createAssertOwned = (leaseContext) =>
+  typeof leaseContext?.assertOwned === "function"
+    ? async () => leaseContext.assertOwned()
+    : async () => {};
+
+const createWithFencedWrite = (leaseContext) =>
+  typeof leaseContext?.withFencedWrite === "function"
+    ? async (write) => leaseContext.withFencedWrite(write)
+    : async (write) => write({});
 
 const hasValidClaimToken = (value) =>
   typeof value === "string" && value.trim().length > 0;
@@ -172,6 +195,8 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
     (createNotificationFn === createNotification
       ? defaultFindNotificationByIdentity
       : async () => null);
+  const assertOwned = createAssertOwned(deps.leaseContext);
+  const withFencedWrite = createWithFencedWrite(deps.leaseContext);
 
   const registrations = await registrationModel.find({
     status: "approved",
@@ -182,7 +207,7 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
 
   let sentCount = 0;
 
-  for (const registration of registrations) {
+  registrationLoop: for (const registration of registrations) {
     const context = getReminderContext(registration, now);
     if (!context) {
       continue;
@@ -196,19 +221,43 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
       continue;
     }
 
-    const claimResult = await dispatchService.claim({
-      eventRegistrationId: reminderIdentity.eventRegistrationId,
-      userId: reminderIdentity.userId,
-    });
+    let claimResult;
+
+    try {
+      claimResult = await withFencedWrite(({ session }) =>
+        dispatchService.claim({
+          eventRegistrationId: reminderIdentity.eventRegistrationId,
+          userId: reminderIdentity.userId,
+          session,
+        })
+      );
+    } catch (error) {
+      if (isLeaseFenceError(error)) {
+        break;
+      }
+
+      throw error;
+    }
 
     if (!claimResult.claimed) {
       if (claimResult.reason === "sent") {
-        const finalized = await finalizeLegacyReminder({
-          registrationModel,
-          registrationId: reminderIdentity.eventRegistrationId,
-          expectedUserId: reminderIdentity.userId,
-          now,
-        });
+        let finalized;
+
+        try {
+          finalized = await finalizeLegacyReminder({
+            registrationModel,
+            registrationId: reminderIdentity.eventRegistrationId,
+            expectedUserId: reminderIdentity.userId,
+            now,
+            withFencedWrite,
+          });
+        } catch (error) {
+          if (isLeaseFenceError(error)) {
+            break;
+          }
+
+          throw error;
+        }
 
         if (finalized) {
           sentCount += 1;
@@ -238,12 +287,15 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
           })
         )
       ) {
-        await dispatchService.markFailed({
-          eventRegistrationId: reminderIdentity.eventRegistrationId,
-          userId: reminderIdentity.userId,
-          claimToken: claimResult.dispatch.claimToken,
-          failureCode: "registration_invalid",
-        });
+        await withFencedWrite(({ session }) =>
+          dispatchService.markFailed({
+            eventRegistrationId: reminderIdentity.eventRegistrationId,
+            userId: reminderIdentity.userId,
+            claimToken: claimResult.dispatch.claimToken,
+            failureCode: "registration_invalid",
+            session,
+          })
+        );
         continue;
       }
 
@@ -252,12 +304,15 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
         userId: currentContext.recipientId,
       });
       if (!currentReminderIdentity) {
-        await dispatchService.markFailed({
-          eventRegistrationId: reminderIdentity.eventRegistrationId,
-          userId: reminderIdentity.userId,
-          claimToken: claimResult.dispatch.claimToken,
-          failureCode: "registration_invalid",
-        });
+        await withFencedWrite(({ session }) =>
+          dispatchService.markFailed({
+            eventRegistrationId: reminderIdentity.eventRegistrationId,
+            userId: reminderIdentity.userId,
+            claimToken: claimResult.dispatch.claimToken,
+            failureCode: "registration_invalid",
+            session,
+          })
+        );
         continue;
       }
 
@@ -266,23 +321,30 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
       );
 
       if (!existingNotification) {
-        await createNotificationFn({
-          userId: currentContext.recipientId,
-          type: "event_reminder",
-          message: currentContext.message,
-          data: getEventReminderNotificationData(
-            currentContext.event,
-            currentRegistration
-          ),
-          idempotencyKey: createReminderIdempotencyKey(currentReminderIdentity),
-        });
+        await withFencedWrite(({ session, afterCommit }) =>
+          createNotificationFn({
+            userId: currentContext.recipientId,
+            type: "event_reminder",
+            message: currentContext.message,
+            data: getEventReminderNotificationData(
+              currentContext.event,
+              currentRegistration
+            ),
+            idempotencyKey: createReminderIdempotencyKey(currentReminderIdentity),
+            session,
+            afterCommit,
+          })
+        );
       }
 
-      const markSentResult = await dispatchService.markSent({
-        eventRegistrationId: currentReminderIdentity.eventRegistrationId,
-        userId: currentReminderIdentity.userId,
-        claimToken: claimResult.dispatch.claimToken,
-      });
+      const markSentResult = await withFencedWrite(({ session }) =>
+        dispatchService.markSent({
+          eventRegistrationId: currentReminderIdentity.eventRegistrationId,
+          userId: currentReminderIdentity.userId,
+          claimToken: claimResult.dispatch.claimToken,
+          session,
+        })
+      );
 
       if (!markSentResult.markedSent) {
         continue;
@@ -293,18 +355,36 @@ export const sendEventReminders = async (now = new Date(), deps = {}) => {
         registrationId: currentReminderIdentity.eventRegistrationId,
         expectedUserId: currentReminderIdentity.userId,
         now,
+        withFencedWrite,
       });
 
       if (finalized) {
         sentCount += 1;
       }
     } catch (error) {
-      await dispatchService.markFailed({
-        eventRegistrationId: reminderIdentity.eventRegistrationId,
-        userId: reminderIdentity.userId,
-        claimToken: claimResult.dispatch.claimToken,
-        failureCode: getFailureCode(error),
-      });
+      if (isLeaseFenceError(error)) {
+        break registrationLoop;
+      }
+
+      try {
+        await assertOwned();
+      } catch (assertError) {
+        if (isLeaseFenceError(assertError)) {
+          break registrationLoop;
+        }
+
+        throw assertError;
+      }
+
+      await withFencedWrite(({ session }) =>
+        dispatchService.markFailed({
+          eventRegistrationId: reminderIdentity.eventRegistrationId,
+          userId: reminderIdentity.userId,
+          claimToken: claimResult.dispatch.claimToken,
+          failureCode: getFailureCode(error),
+          session,
+        })
+      );
     }
   }
 

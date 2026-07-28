@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import cron from "node-cron";
 
+import SchedulerLease from "../models/SchedulerLease.js";
 import {
   DEFAULT_SCHEDULER_LEASE_TTL_MS,
   schedulerLeaseService,
@@ -8,6 +9,7 @@ import {
 
 const DEFAULT_RENEWAL_LEAD_MS = 5 * 1000;
 const DEFAULT_RENEWAL_MIN_DELAY_MS = 1 * 1000;
+const LEASE_LOST_ERROR_CODE = "scheduler_lease_lost";
 
 const toDelayMs = (ttlMs, renewalLeadMs) =>
   Math.max(
@@ -19,20 +21,41 @@ const normalizeErrorCode = (error) =>
   typeof error?.code === "string" && error.code.length > 0 ? error.code : "unknown_error";
 
 const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+const isValidDate = (value) => value instanceof Date && !Number.isNaN(value.getTime());
 const isPositiveSafeInteger = (value) => Number.isSafeInteger(value) && value > 0;
 const isRecord = (value) => value !== null && typeof value === "object";
 
-const isValidAcquiredLease = ({ lease, expectedJobKey, expectedOwnerToken }) =>
+const isValidAcquiredLease = ({
+  lease,
+  expectedJobKey,
+  expectedOwnerToken,
+  currentTime,
+}) =>
   isRecord(lease) &&
   lease.jobKey === expectedJobKey &&
   lease.ownerToken === expectedOwnerToken &&
   isPositiveSafeInteger(lease.fencingToken) &&
-  lease.leaseExpiresAt instanceof Date;
+  isValidDate(lease.leaseExpiresAt) &&
+  (!currentTime || lease.leaseExpiresAt.getTime() > currentTime.getTime());
 
 const getFailureReason = (result, fallbackReason) =>
   isNonEmptyString(result?.reason) ? result.reason : fallbackReason;
 
-const createNoopLease = () => ({ active: false, current: null, timerId: null, renewalPromise: null });
+const createNoopLease = () => ({
+  active: false,
+  current: null,
+  timerId: null,
+  renewalPromise: null,
+  abortController: null,
+  lostError: null,
+});
+
+const createLeaseLostError = (reason = "not_owner") => {
+  const error = new Error("Cron lease ownership lost");
+  error.code = LEASE_LOST_ERROR_CODE;
+  error.reason = reason;
+  return error;
+};
 
 export const createCronLeaseRunner = ({
   jobKey,
@@ -40,11 +63,13 @@ export const createCronLeaseRunner = ({
   run,
   logger = console,
   leaseService = schedulerLeaseService,
+  leaseModel = SchedulerLease,
   leaseTtlMs = DEFAULT_SCHEDULER_LEASE_TTL_MS,
   ownerTokenFactory = randomUUID,
   scheduleFn = cron.schedule,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
+  now = () => new Date(),
 } = {}) => {
   if (!isNonEmptyString(jobKey)) throw new TypeError("jobKey must be a non-empty string");
   if (!isNonEmptyString(expression)) throw new TypeError("expression must be a non-empty string");
@@ -58,11 +83,18 @@ export const createCronLeaseRunner = ({
   if (typeof leaseService.release !== "function") {
     throw new TypeError("leaseService.release must be a function");
   }
+  if (typeof leaseService.withFencedWrite !== "function") {
+    throw new TypeError("leaseService.withFencedWrite must be a function");
+  }
+  if (!leaseModel || typeof leaseModel.findOne !== "function") {
+    throw new TypeError("leaseModel.findOne must be a function");
+  }
   if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs <= 1) {
     throw new TypeError("leaseTtlMs must be a safe integer greater than 1");
   }
   if (typeof ownerTokenFactory !== "function") throw new TypeError("ownerTokenFactory must be a function");
   if (typeof scheduleFn !== "function") throw new TypeError("scheduleFn must be a function");
+  if (typeof now !== "function") throw new TypeError("now must be a function");
 
   const ownerToken = ownerTokenFactory();
   if (!isNonEmptyString(ownerToken)) throw new TypeError("ownerTokenFactory must return a non-empty string");
@@ -85,10 +117,21 @@ export const createCronLeaseRunner = ({
     state.lease.timerId = null;
   };
 
+  const abortLease = (reason = "not_owner") => {
+    if (!state.lease.lostError) {
+      state.lease.lostError = createLeaseLostError(reason);
+    }
+    state.lease.active = false;
+    clearRenewalTimer();
+    if (!state.lease.abortController?.signal.aborted) {
+      state.lease.abortController?.abort(state.lease.lostError);
+    }
+    return state.lease.lostError;
+  };
+
   const stopRenewalLoop = async () => {
     state.lease.active = false;
     clearRenewalTimer();
-
     if (state.lease.renewalPromise) {
       await state.lease.renewalPromise;
     }
@@ -96,7 +139,6 @@ export const createCronLeaseRunner = ({
 
   const scheduleRenewal = () => {
     if (!state.lease.active || !state.lease.current) return;
-
     const delayMs = toDelayMs(leaseTtlMs, DEFAULT_RENEWAL_LEAD_MS);
     state.lease.timerId = setTimeoutFn(async () => {
       state.lease.timerId = null;
@@ -109,11 +151,50 @@ export const createCronLeaseRunner = ({
             ttlMs: leaseTtlMs,
           });
 
+          if (!isRecord(result) || typeof result.renewed !== "boolean") {
+            abortLease("invalid_result");
+            logger.error?.(
+              {
+                event: "cron_lease_runner.renew_invalid",
+                jobKey,
+                reason: "invalid_result",
+              },
+              "Cron lease renewal returned an invalid result"
+            );
+            return;
+          }
+
           if (!result.renewed) {
-            state.lease.active = false;
+            abortLease(getFailureReason(result, "not_renewed"));
             logger.warn?.(
-              { event: "cron_lease_runner.renew_skipped", jobKey, reason: result.reason },
+              {
+                event: "cron_lease_runner.renew_skipped",
+                jobKey,
+                reason: getFailureReason(result, "not_renewed"),
+              },
               "Cron lease renewal skipped"
+            );
+            return;
+          }
+
+          const currentTime = now();
+          if (
+            !isValidDate(currentTime) ||
+            !isValidAcquiredLease({
+              lease: result.lease,
+              expectedJobKey: jobKey,
+              expectedOwnerToken: ownerToken,
+              currentTime,
+            })
+          ) {
+            abortLease("invalid_lease");
+            logger.error?.(
+              {
+                event: "cron_lease_runner.renew_invalid",
+                jobKey,
+                reason: "invalid_lease",
+              },
+              "Cron lease renewal returned an invalid lease"
             );
             return;
           }
@@ -121,7 +202,7 @@ export const createCronLeaseRunner = ({
           state.lease.current = result.lease;
           scheduleRenewal();
         } catch (error) {
-          state.lease.active = false;
+          abortLease(normalizeErrorCode(error));
           logger.error?.(
             {
               event: "cron_lease_runner.renew_failed",
@@ -143,7 +224,6 @@ export const createCronLeaseRunner = ({
 
   const releaseLease = async () => {
     if (!state.lease.current) return;
-
     const leaseToRelease = state.lease.current;
     state.lease.current = null;
 
@@ -172,9 +252,124 @@ export const createCronLeaseRunner = ({
     }
   };
 
+  const createLeaseExecutionContext = (lease) => {
+    const abortController = new AbortController();
+    state.lease.abortController = abortController;
+    state.lease.lostError = null;
+    const assertOwned = async () => {
+      if (abortController.signal.aborted) {
+        throw state.lease.lostError || createLeaseLostError("not_owner");
+      }
+
+      const currentTime = now();
+      if (!isValidDate(currentTime)) {
+        logger.error?.(
+          {
+            event: "cron_lease_runner.assert_failed",
+            jobKey,
+            reason: "invalid_now",
+          },
+          "Cron lease ownership check failed"
+        );
+        throw abortLease("invalid_now");
+      }
+
+      try {
+        const ownedLease = await leaseModel.findOne({
+          jobKey: lease.jobKey,
+          ownerToken: lease.ownerToken,
+          fencingToken: lease.fencingToken,
+          leaseExpiresAt: { $gt: currentTime },
+        });
+
+        if (!ownedLease) {
+          throw abortLease("not_owner");
+        }
+      } catch (error) {
+        if (error?.code === LEASE_LOST_ERROR_CODE) {
+          throw error;
+        }
+
+        logger.error?.(
+          {
+            event: "cron_lease_runner.assert_failed",
+            jobKey,
+            reason: normalizeErrorCode(error),
+          },
+          "Cron lease ownership check failed"
+        );
+        throw abortLease("storage_error");
+      }
+
+      if (abortController.signal.aborted) {
+        throw state.lease.lostError || createLeaseLostError("not_owner");
+      }
+    };
+
+    const withFencedWrite = async (write) => {
+      if (typeof write !== "function") {
+        throw new TypeError("write must be a function");
+      }
+      if (abortController.signal.aborted) {
+        throw state.lease.lostError || createLeaseLostError("not_owner");
+      }
+
+      try {
+        return await leaseService.withFencedWrite({
+          jobKey: lease.jobKey,
+          ownerToken: lease.ownerToken,
+          fencingToken: lease.fencingToken,
+          write: async ({ session, lease: updatedLease, writeSequence, afterCommit }) => {
+            const currentTime = now();
+
+            if (
+              !isValidDate(currentTime) ||
+              !isValidAcquiredLease({
+                lease: updatedLease,
+                expectedJobKey: jobKey,
+                expectedOwnerToken: ownerToken,
+                currentTime,
+              })
+            ) {
+              throw abortLease("invalid_lease");
+            }
+            state.lease.current = updatedLease;
+            if (abortController.signal.aborted) {
+              throw state.lease.lostError || createLeaseLostError("not_owner");
+            }
+            return write({
+              session,
+              jobKey,
+              ownerToken: updatedLease.ownerToken,
+              fencingToken: updatedLease.fencingToken,
+              writeSequence,
+              signal: abortController.signal,
+              assertOwned,
+              withFencedWrite,
+              afterCommit,
+            });
+          },
+        });
+      } catch (error) {
+        if (error?.code === LEASE_LOST_ERROR_CODE) {
+          throw abortLease(error.reason || "not_owner");
+        }
+        throw error;
+      }
+    };
+
+    return {
+      jobKey,
+      ownerToken: lease.ownerToken,
+      fencingToken: lease.fencingToken,
+      signal: abortController.signal,
+      assertOwned,
+      withFencedWrite,
+    };
+  };
+
   const runTick = async () => {
     if (!state.active || state.stopping) return;
-
     if (state.isRunning) {
       logger.warn?.(
         { event: "cron_lease_runner.overlap_skipped", jobKey },
@@ -182,9 +377,7 @@ export const createCronLeaseRunner = ({
       );
       return;
     }
-
     state.isRunning = true;
-
     const tickPromise = (async () => {
       let leaseResult;
 
@@ -222,11 +415,14 @@ export const createCronLeaseRunner = ({
         return;
       }
 
+      const currentTime = now();
       if (
+        !isValidDate(currentTime) ||
         !isValidAcquiredLease({
           lease: leaseResult.lease,
           expectedJobKey: jobKey,
           expectedOwnerToken: ownerToken,
+          currentTime,
         })
       ) {
         logger.error?.(
@@ -238,27 +434,27 @@ export const createCronLeaseRunner = ({
 
       state.lease.active = true;
       state.lease.current = leaseResult.lease;
+      const executionContext = createLeaseExecutionContext(leaseResult.lease);
       scheduleRenewal();
-
       try {
-        await run();
+        await run(executionContext);
       } catch (error) {
-        logger.error?.(
-          {
-            event: "cron_lease_runner.run_failed",
-            jobKey,
-            reason: normalizeErrorCode(error),
-          },
-          "Cron job failed"
-        );
+        if (error?.code !== LEASE_LOST_ERROR_CODE) {
+          logger.error?.(
+            {
+              event: "cron_lease_runner.run_failed",
+              jobKey,
+              reason: normalizeErrorCode(error),
+            },
+            "Cron job failed"
+          );
+        }
       } finally {
         await stopRenewalLoop();
         await releaseLease();
       }
     })();
-
     state.activeTickPromise = tickPromise;
-
     try {
       await tickPromise;
     } finally {
@@ -274,13 +470,10 @@ export const createCronLeaseRunner = ({
     if (!state.task) {
       return { stopped: false };
     }
-
     state.stopping = true;
     state.active = false;
-
     const activeTask = state.task;
     const activeHandle = state.handle;
-
     const stopPromise = (async () => {
       let stopError = null;
 
@@ -324,10 +517,8 @@ export const createCronLeaseRunner = ({
       if (stopError) {
         throw stopError;
       }
-
       return { stopped: true };
     })();
-
     state.stopPromise = stopPromise;
     return stopPromise;
   };
@@ -336,21 +527,16 @@ export const createCronLeaseRunner = ({
     if (state.handle) {
       return state.handle;
     }
-
     state.active = true;
     state.stopping = false;
-
     const task = scheduleFn(expression, () => {
       void runTick();
     });
     const handle = task;
-
     state.task = task;
     state.handle = handle;
     state.taskStopFn = typeof task.stop === "function" ? task.stop.bind(task) : null;
-
     handle.stop = stop;
-
     return handle;
   };
 

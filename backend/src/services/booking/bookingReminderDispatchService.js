@@ -156,7 +156,7 @@ export const createBookingReminderDispatchService = ({
     staleClaimTimeoutMs
   );
 
-  const claim = async ({ bookingId, reminderType, userId } = {}) => {
+  const claim = async ({ bookingId, reminderType, userId, session } = {}) => {
     const normalizedBookingId = validateIdentity("bookingId", bookingId);
     const normalizedReminderType = validateReminderType(reminderType);
     const normalizedUserId = validateIdentity("userId", userId);
@@ -186,7 +186,7 @@ export const createBookingReminderDispatchService = ({
             },
             $inc: { attempts: 1 },
           },
-          { new: true, returnDocument: "after", runValidators: true }
+          { new: true, returnDocument: "after", runValidators: true, session }
         )
       );
 
@@ -220,6 +220,7 @@ export const createBookingReminderDispatchService = ({
             new: true,
             returnDocument: "after",
             runValidators: true,
+            session,
           }
         )
       );
@@ -229,11 +230,15 @@ export const createBookingReminderDispatchService = ({
         return claimed(insertedDispatch);
       }
 
-      const existingDocument = await model.findOne({
-        bookingId: normalizedBookingId,
-        reminderType: normalizedReminderType,
-        userId: normalizedUserId,
-      });
+      const existingDocument = await model.findOne(
+        {
+          bookingId: normalizedBookingId,
+          reminderType: normalizedReminderType,
+          userId: normalizedUserId,
+        },
+        null,
+        { session }
+      );
       const existingDispatch = normalizeDispatch(existingDocument);
 
       if (!existingDispatch) {
@@ -256,7 +261,13 @@ export const createBookingReminderDispatchService = ({
     }
   };
 
-  const markSent = async ({ bookingId, reminderType, userId, claimToken } = {}) => {
+  const markSent = async ({
+    bookingId,
+    reminderType,
+    userId,
+    claimToken,
+    session,
+  } = {}) => {
     const normalizedBookingId = validateIdentity("bookingId", bookingId);
     const normalizedReminderType = validateReminderType(reminderType);
     const normalizedUserId = validateIdentity("userId", userId);
@@ -280,7 +291,7 @@ export const createBookingReminderDispatchService = ({
               failureCode: "",
             },
           },
-          { new: true, returnDocument: "after", runValidators: true }
+          { new: true, returnDocument: "after", runValidators: true, session }
         )
       );
 
@@ -305,6 +316,7 @@ export const createBookingReminderDispatchService = ({
     userId,
     claimToken,
     failureCode,
+    session,
   } = {}) => {
     const normalizedBookingId = validateIdentity("bookingId", bookingId);
     const normalizedReminderType = validateReminderType(reminderType);
@@ -328,7 +340,7 @@ export const createBookingReminderDispatchService = ({
               failureCode: normalizedFailureCode,
             },
           },
-          { new: true, returnDocument: "after", runValidators: true }
+          { new: true, returnDocument: "after", runValidators: true, session }
         )
       );
 

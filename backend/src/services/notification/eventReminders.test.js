@@ -38,6 +38,144 @@ const createRegistration = (overrides = {}) => ({
   ...overrides,
 });
 
+const createLeaseContext = ({
+  failAfter = Number.POSITIVE_INFINITY,
+  reason = "not_owner",
+  loseBeforeCommitWriteNumber = null,
+} = {}) => {
+  let calls = 0;
+  let writeCalls = 0;
+  const controller = new AbortController();
+  const loseLease = () => {
+    const error = new Error("lease lost");
+    error.code = "scheduler_lease_lost";
+    error.reason = reason;
+    controller.abort(error);
+    return error;
+  };
+
+  return {
+    signal: controller.signal,
+    async assertOwned() {
+      if (controller.signal.aborted) {
+        throw controller.signal.reason;
+      }
+      calls += 1;
+      if (calls > failAfter) {
+        throw loseLease();
+      }
+    },
+    async withFencedWrite(write) {
+      writeCalls += 1;
+      await this.assertOwned();
+      const session = {};
+      const afterCommitCallbacks = [];
+      const result = await write({
+        session,
+        afterCommit(callback) {
+          if (typeof callback === "function") {
+            afterCommitCallbacks.push(callback);
+          }
+        },
+      });
+      if (writeCalls === loseBeforeCommitWriteNumber) {
+        loseLease();
+      }
+      await this.assertOwned();
+
+      for (const commit of session.__committers || []) {
+        commit();
+      }
+      for (const callback of afterCommitCallbacks) {
+        await callback();
+      }
+
+      return result;
+    },
+    get calls() {
+      return calls;
+    },
+    get writeCalls() {
+      return writeCalls;
+    },
+  };
+};
+
+const cloneDispatch = (dispatch) => ({
+  ...dispatch,
+  claimedAt: dispatch.claimedAt ? new Date(dispatch.claimedAt) : dispatch.claimedAt,
+  sentAt: dispatch.sentAt ? new Date(dispatch.sentAt) : dispatch.sentAt,
+  createdAt: dispatch.createdAt ? new Date(dispatch.createdAt) : dispatch.createdAt,
+  updatedAt: dispatch.updatedAt ? new Date(dispatch.updatedAt) : dispatch.updatedAt,
+});
+
+const getSessionState = (session, key, createState, commitState) => {
+  if (!session) {
+    return null;
+  }
+  if (!session[key]) {
+    const state = createState();
+    session[key] = state;
+    session.__committers = session.__committers || [];
+    session.__committers.push(() => commitState(state));
+  }
+
+  return session[key];
+};
+
+const createDurableNotificationStore = () => {
+  const notifications = new Map();
+  const calls = [];
+  let emittedCount = 0;
+
+  return {
+    notifications,
+    calls,
+    get emittedCount() {
+      return emittedCount;
+    },
+    async create(payload) {
+      calls.push(payload.idempotencyKey);
+      const sessionNotifications =
+        getSessionState(
+          payload.session,
+          "__notificationState",
+          () => new Map([...notifications.entries()].map(([key, value]) => [key, { ...value }])),
+          (nextNotifications) => {
+            notifications.clear();
+            for (const [key, value] of nextNotifications.entries()) {
+              notifications.set(key, value);
+            }
+          }
+        ) || notifications;
+      if (sessionNotifications.has(payload.idempotencyKey)) {
+        return sessionNotifications.get(payload.idempotencyKey);
+      }
+
+      const created = {
+        _id: `notification-${sessionNotifications.size + 1}`,
+        ...payload,
+      };
+      sessionNotifications.set(payload.idempotencyKey, created);
+      if (typeof payload.afterCommit === "function") {
+        payload.afterCommit(() => {
+          emittedCount += 1;
+        });
+      } else {
+        emittedCount += 1;
+      }
+      return created;
+    },
+    async findByIdentity(identity) {
+      return (
+        notifications.get(
+          `event-reminder:v2:${identity.eventRegistrationId}:${identity.userId}`
+        ) || null
+      );
+    },
+  };
+};
+
 const cloneRegistration = (registration) => ({
   ...registration,
   eventId: registration.eventId ? { ...registration.eventId } : registration.eventId,
@@ -66,16 +204,45 @@ const createRegistrationModel = (initialRegistrations = []) => {
 
   return {
     registrations,
-    find(query) {
-      return createQuery(registrations.filter((registration) => matches(registration, query)));
-    },
-    findOne(query) {
+    find(query, _projection, options = {}) {
+      const activeRegistrations =
+        getSessionState(
+          options.session,
+          "__registrationState",
+          () => registrations.map(cloneRegistration),
+          (nextRegistrations) => {
+            registrations.splice(0, registrations.length, ...nextRegistrations);
+          }
+        ) || registrations;
       return createQuery(
-        registrations.find((registration) => matches(registration, query)) || null
+        activeRegistrations.filter((registration) => matches(registration, query))
       );
     },
-    async findOneAndUpdate(query, update) {
-      const registration = registrations.find((entry) => matches(entry, query));
+    findOne(query, _projection, options = {}) {
+      const activeRegistrations =
+        getSessionState(
+          options.session,
+          "__registrationState",
+          () => registrations.map(cloneRegistration),
+          (nextRegistrations) => {
+            registrations.splice(0, registrations.length, ...nextRegistrations);
+          }
+        ) || registrations;
+      return createQuery(
+        activeRegistrations.find((registration) => matches(registration, query)) || null
+      );
+    },
+    async findOneAndUpdate(query, update, options = {}) {
+      const activeRegistrations =
+        getSessionState(
+          options.session,
+          "__registrationState",
+          () => registrations.map(cloneRegistration),
+          (nextRegistrations) => {
+            registrations.splice(0, registrations.length, ...nextRegistrations);
+          }
+        ) || registrations;
+      const registration = activeRegistrations.find((entry) => matches(entry, query));
       if (!registration) return null;
 
       for (const [key, value] of Object.entries(update.$set || {})) {
@@ -124,11 +291,29 @@ const createDispatchModel = (initialDispatches = []) => {
     setDuplicateOnUpsert(value) {
       duplicateOnUpsert = value;
     },
-    async findOne(filter) {
-      return dispatches.find((dispatch) => matches(dispatch, filter)) || null;
+    async findOne(filter, _projection, options = {}) {
+      const activeDispatches =
+        getSessionState(
+          options.session,
+          "__eventDispatchState",
+          () => dispatches.map((dispatch) => cloneDispatch(dispatch)),
+          (nextDispatches) => {
+            dispatches.splice(0, dispatches.length, ...nextDispatches);
+          }
+        ) || dispatches;
+      return activeDispatches.find((dispatch) => matches(dispatch, filter)) || null;
     },
     async findOneAndUpdate(filter, update, options = {}) {
-      const existing = dispatches.find((dispatch) => matches(dispatch, filter));
+      const activeDispatches =
+        getSessionState(
+          options.session,
+          "__eventDispatchState",
+          () => dispatches.map((dispatch) => cloneDispatch(dispatch)),
+          (nextDispatches) => {
+            dispatches.splice(0, dispatches.length, ...nextDispatches);
+          }
+        ) || dispatches;
+      const existing = activeDispatches.find((dispatch) => matches(dispatch, filter));
 
       if (existing) {
         return applyUpdate(existing, update, false);
@@ -160,7 +345,7 @@ const createDispatchModel = (initialDispatches = []) => {
         true
       );
 
-      dispatches.push(created);
+      activeDispatches.push(created);
       return created;
     },
   };
@@ -456,6 +641,70 @@ test("stale claimed dispatch recovers after notification already persisted", asy
   assert.equal(notifications.length, 1);
   assert.equal(dispatchModel.dispatches[0].status, "sent");
   assert.equal(dispatchModel.dispatches[0].attempts, 2);
+});
+
+test("takeover during execution stops stale owner writes and recovers without duplicate reminder emission", async () => {
+  const firstNow = new Date("2099-07-01T09:55:00Z");
+  const secondNow = new Date("2099-07-01T09:57:00Z");
+  const registration = createRegistration();
+  const registrationModel = createRegistrationModel([registration]);
+  const dispatchModel = createDispatchModel();
+  const notificationStore = createDurableNotificationStore();
+  const oldOwnerDispatchService = createDispatchService({
+    dispatchModel,
+    now: () => firstNow,
+    staleClaimTimeoutMs: 60 * 1000,
+    claimTokenFactory: (() => {
+      let count = 0;
+      return () => `old-claim-${++count}`;
+    })(),
+  });
+  const newOwnerDispatchService = createDispatchService({
+    dispatchModel,
+    now: () => secondNow,
+    staleClaimTimeoutMs: 60 * 1000,
+    claimTokenFactory: (() => {
+      let count = 0;
+      return () => `new-claim-${++count}`;
+    })(),
+  });
+
+  const first = await sendEventReminders(firstNow, {
+    registrationModel,
+    dispatchModel,
+    dispatchService: oldOwnerDispatchService,
+    leaseContext: createLeaseContext({ loseBeforeCommitWriteNumber: 2 }),
+    createNotification: async (payload) => notificationStore.create(payload),
+    findNotificationByIdentity: async (identity) => notificationStore.findByIdentity(identity),
+  });
+
+  assert.equal(first, 0);
+  assert.equal(notificationStore.notifications.size, 0);
+  assert.equal(notificationStore.emittedCount, 0);
+  assert.deepEqual(
+    dispatchModel.dispatches.map((dispatch) => ({
+      status: dispatch.status,
+      claimToken: dispatch.claimToken,
+    })),
+    [{ status: "claimed", claimToken: "old-claim-1" }]
+  );
+
+  const second = await sendEventReminders(secondNow, {
+    registrationModel,
+    dispatchModel,
+    dispatchService: newOwnerDispatchService,
+    leaseContext: createLeaseContext(),
+    createNotification: async (payload) => notificationStore.create(payload),
+    findNotificationByIdentity: async (identity) => notificationStore.findByIdentity(identity),
+  });
+
+  assert.equal(second, 1);
+  assert.equal(notificationStore.notifications.size, 1);
+  assert.equal(notificationStore.emittedCount, 1);
+  assert.equal(notificationStore.calls.length, 2);
+  assert.equal(dispatchModel.dispatches[0].status, "sent");
+  assert.equal(dispatchModel.dispatches[0].attempts, 2);
+  assert.equal(registrationModel.registrations[0].reminderSentAt instanceof Date, true);
 });
 
 test("stale retry reuses existing durable notification after title and time edits", async () => {

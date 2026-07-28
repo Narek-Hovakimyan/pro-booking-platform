@@ -35,7 +35,10 @@ export const startBookingReminderScheduler = ({
     jobKey: JOB_KEY,
     intervalMs,
     logger,
-    run: runReminders,
+    run: (leaseContext) =>
+      leaseContext === undefined
+        ? runReminders()
+        : runReminders(undefined, { leaseContext }),
     ...runnerOptions,
   });
 

@@ -143,7 +143,7 @@ export const createEventReminderDispatchService = ({
     staleClaimTimeoutMs
   );
 
-  const claim = async ({ eventRegistrationId, userId } = {}) => {
+  const claim = async ({ eventRegistrationId, userId, session } = {}) => {
     const normalizedRegistrationId = validateIdentity(
       "eventRegistrationId",
       eventRegistrationId
@@ -174,7 +174,7 @@ export const createEventReminderDispatchService = ({
             },
             $inc: { attempts: 1 },
           },
-          { new: true, returnDocument: "after", runValidators: true }
+          { new: true, returnDocument: "after", runValidators: true, session }
         )
       );
 
@@ -206,6 +206,7 @@ export const createEventReminderDispatchService = ({
             new: true,
             returnDocument: "after",
             runValidators: true,
+            session,
           }
         )
       );
@@ -215,10 +216,14 @@ export const createEventReminderDispatchService = ({
         return claimed(insertedDispatch);
       }
 
-      const existingDocument = await model.findOne({
-        eventRegistrationId: normalizedRegistrationId,
-        userId: normalizedUserId,
-      });
+      const existingDocument = await model.findOne(
+        {
+          eventRegistrationId: normalizedRegistrationId,
+          userId: normalizedUserId,
+        },
+        null,
+        { session }
+      );
       const existingDispatch = normalizeDispatch(existingDocument);
 
       if (!existingDispatch) {
@@ -241,7 +246,12 @@ export const createEventReminderDispatchService = ({
     }
   };
 
-  const markSent = async ({ eventRegistrationId, userId, claimToken } = {}) => {
+  const markSent = async ({
+    eventRegistrationId,
+    userId,
+    claimToken,
+    session,
+  } = {}) => {
     const normalizedRegistrationId = validateIdentity(
       "eventRegistrationId",
       eventRegistrationId
@@ -266,7 +276,7 @@ export const createEventReminderDispatchService = ({
               failureCode: "",
             },
           },
-          { new: true, returnDocument: "after", runValidators: true }
+          { new: true, returnDocument: "after", runValidators: true, session }
         )
       );
 
@@ -290,6 +300,7 @@ export const createEventReminderDispatchService = ({
     userId,
     claimToken,
     failureCode,
+    session,
   } = {}) => {
     const normalizedRegistrationId = validateIdentity(
       "eventRegistrationId",
@@ -314,7 +325,7 @@ export const createEventReminderDispatchService = ({
               failureCode: normalizedFailureCode,
             },
           },
-          { new: true, returnDocument: "after", runValidators: true }
+          { new: true, returnDocument: "after", runValidators: true, session }
         )
       );
 

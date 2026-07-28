@@ -42,6 +42,15 @@ const schedulerLeaseSchema = new mongoose.Schema(
         message: "Fencing token must be a positive safe integer",
       },
     },
+    writeSequence: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: (value) => Number.isSafeInteger(value) && value >= 0,
+        message: "Write sequence must be a non-negative safe integer",
+      },
+    },
   },
   { timestamps: true }
 );
