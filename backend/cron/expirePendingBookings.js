@@ -13,11 +13,12 @@ export const startExpirePendingBookingsCron = ({
     jobKey: "expire-pending-bookings",
     expression: EXPIRATION_CRON,
     logger,
-    run: async () => {
+    run: async (leaseContext) => {
       try {
-        await expirePendingBookingsFn();
+        await expirePendingBookingsFn({ leaseContext });
       } catch (error) {
         logger.error?.("Pending booking expiration job error:", error);
+        throw error;
       }
     },
     ...runnerOptions,

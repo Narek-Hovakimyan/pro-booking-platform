@@ -14,13 +14,15 @@ test("pending booking cron keeps lease key, expression, and business behavior", 
     },
   };
   let runs = 0;
+  let receivedOptions;
   let capturedConfig;
   const handle = { async stop() { return { stopped: true }; } };
 
   const startedHandle = startExpirePendingBookingsCron({
     logger,
-    expirePendingBookingsFn: async () => {
+    expirePendingBookingsFn: async (options) => {
       runs += 1;
+      receivedOptions = options;
     },
     createRunner: (config) => {
       capturedConfig = config;
@@ -37,8 +39,10 @@ test("pending booking cron keeps lease key, expression, and business behavior", 
   assert.equal(capturedConfig.expression, EXPIRATION_CRON);
   assert.equal(runs, 0);
 
-  await capturedConfig.run();
+  const leaseContext = { fencingToken: 7 };
+  await capturedConfig.run(leaseContext);
   assert.equal(runs, 1);
+  assert.equal(receivedOptions.leaseContext, leaseContext);
 
   const failure = new Error("boom");
   startExpirePendingBookingsCron({
@@ -52,7 +56,7 @@ test("pending booking cron keeps lease key, expression, and business behavior", 
     },
   });
 
-  await capturedConfig.run();
+  await assert.rejects(() => capturedConfig.run(), (error) => error === failure);
   assert.deepEqual(logger.errorMessages.at(-1), [
     "Pending booking expiration job error:",
     failure,

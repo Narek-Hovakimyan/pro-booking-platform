@@ -26,6 +26,16 @@ const getBookingDateKey = (booking) => {
 const getBookingNotificationData = (booking) =>
   booking?._id ? { bookingId: booking._id } : undefined;
 
+const exactPendingSnapshotPredicate = (booking) => {
+  const predicate = { _id: booking._id, status: "pending" };
+  for (const field of ["bookingDate", "dayKey", "time"]) {
+    predicate[field] = booking[field] === undefined
+      ? { $exists: false }
+      : booking[field];
+  }
+  return predicate;
+};
+
 const getPendingExpirationQuery = (now) => {
   const todayKey = getArmeniaDateKey(now);
 
@@ -88,70 +98,98 @@ export const shouldExpireBooking = (booking, now = new Date()) => {
   return bookingMinutes < nowMinutes;
 };
 
-export const expirePendingBookings = async (now = new Date()) => {
+const notifyWaitlistForExpiredBooking = (booking) => {
+  const dateKey = getBookingDateKey(booking);
+
+  void Promise.resolve().then(() =>
+    notifyMatchingWaitlistEntriesForBookingExpiration({
+      barberId: booking.barberId,
+      salonId: booking.salonId,
+      date: dateKey,
+      serviceId: booking.serviceId,
+      time: booking.time,
+    })
+  ).catch((error) => {
+    console.error("Waitlist notification error:", error);
+  });
+};
+
+export const expirePendingBookings = async (nowOrOptions = new Date()) => {
+  const hasOptions = nowOrOptions && typeof nowOrOptions === "object" &&
+    !(nowOrOptions instanceof Date) && ("now" in nowOrOptions || "leaseContext" in nowOrOptions);
+  const now = hasOptions ? nowOrOptions.now || new Date() : nowOrOptions;
+  const stableNow = new Date(now);
+  const leaseContext = hasOptions ? nowOrOptions.leaseContext : undefined;
+  const withFencedWrite = typeof leaseContext?.withFencedWrite === "function"
+    ? (write) => leaseContext.withFencedWrite(write)
+    : (write) => write({});
   const expiredBookings = [];
 
   while (true) {
     const { bookings: pendingBookings, isLimited } =
-      await findPendingExpirationCandidates(now);
+      await findPendingExpirationCandidates(stableNow);
     let expiredInBatch = 0;
 
     for (const booking of pendingBookings) {
-      if (!shouldExpireBooking(booking, now)) {
+      if (!shouldExpireBooking(booking, stableNow)) {
         continue;
       }
 
-      // Atomically claim this booking — only one instance wins
-      const claimedBooking = await Booking.findOneAndUpdate(
-        {
-          _id: booking._id,
-          status: "pending",
-        },
-        {
-          $set: {
-            status: "expired",
-            expiredAt: new Date(now),
-            expiredReason: EXPIRED_REASON,
-          },
-        },
-        { returnDocument: "after" }
-      );
+      const transactionResult = await withFencedWrite(async ({ session, afterCommit } = {}) => {
+        const currentBooking = await Booking.findOne(
+          { _id: booking._id },
+          null,
+          session ? { session } : undefined
+        );
 
+        if (!shouldExpireBooking(currentBooking, stableNow)) {
+          return null;
+        }
+
+        const claimedBooking = await Booking.findOneAndUpdate(
+          exactPendingSnapshotPredicate(currentBooking),
+          {
+            $set: {
+              status: "expired",
+              expiredAt: new Date(stableNow),
+              expiredReason: EXPIRED_REASON,
+            },
+          },
+          { returnDocument: "after", session }
+        );
+        if (!claimedBooking) return null;
+
+        const dateKey = getBookingDateKey(claimedBooking);
+        const time = claimedBooking?.time || "";
+        const notificationOptions = { session, afterCommit };
+        if (claimedBooking.clientId) {
+          await createNotification({
+            userId: claimedBooking.clientId,
+            type: "booking_expired",
+            message: `Your booking on ${dateKey} at ${time} expired because the barber did not confirm it in time.`,
+            data: getBookingNotificationData(claimedBooking),
+            idempotencyKey: `booking-expired:${String(claimedBooking._id)}:client`,
+            ...notificationOptions,
+          });
+        }
+        if (claimedBooking.barberId) {
+          await createNotification({
+            userId: claimedBooking.barberId,
+            type: "booking_expired_missed",
+            message: `You missed a pending booking confirmation for ${dateKey} at ${time}.`,
+            data: getBookingNotificationData(claimedBooking),
+            idempotencyKey: `booking-expired:${String(claimedBooking._id)}:barber`,
+            ...notificationOptions,
+          });
+        }
+        return claimedBooking;
+      });
+
+      const claimedBooking = transactionResult;
       if (!claimedBooking) continue;
       expiredBookings.push(claimedBooking);
       expiredInBatch += 1;
-
-      const dateKey = getBookingDateKey(claimedBooking);
-      const time = claimedBooking?.time || "";
-
-      if (claimedBooking.clientId) {
-        await createNotification({
-          userId: claimedBooking.clientId,
-          type: "booking_expired",
-          message: `Your booking on ${dateKey} at ${time} expired because the barber did not confirm it in time.`,
-          data: getBookingNotificationData(claimedBooking),
-        });
-      }
-
-      // Notify waitlist entries that a slot may be available
-      notifyMatchingWaitlistEntriesForBookingExpiration({
-        barberId: claimedBooking.barberId,
-        salonId: claimedBooking.salonId,
-        date: dateKey,
-        serviceId: claimedBooking.serviceId,
-        time: claimedBooking.time,
-      }).catch((err) => {
-        console.error("Waitlist notification error:", err.message);
-      });
-
-      if (claimedBooking.barberId) {
-        await createNotification({
-          userId: claimedBooking.barberId,
-          type: "booking_expired_missed",
-          message: `You missed a pending booking confirmation for ${dateKey} at ${time}.`,
-          data: getBookingNotificationData(claimedBooking),
-        });
-      }
+      notifyWaitlistForExpiredBooking(claimedBooking);
     }
 
     if (
