@@ -38,10 +38,22 @@ const portfolioPhotoSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    beforeMediaObjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MediaObject",
+      default: null,
+      select: false,
+    },
     afterUrl: {
       type: String,
       required: true,
       trim: true,
+    },
+    afterMediaObjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MediaObject",
+      default: null,
+      select: false,
     },
     caption: {
       type: String,

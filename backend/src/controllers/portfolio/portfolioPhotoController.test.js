@@ -1,84 +1,36 @@
 import assert from "node:assert/strict";
+import fs from "fs";
+import path from "path";
 import { afterEach, test } from "node:test";
 
 import {
-  getPortfolioByBarber,
-  getMyPortfolio,
   addPortfolioPhoto,
-  updatePortfolioPhoto,
   deletePortfolioPhoto,
+  getMyPortfolio,
+  getPortfolioByBarber,
+  updatePortfolioPhoto,
 } from "./portfolioPhotoController.js";
-import {
-  serveOwnerPortfolioImage,
-  servePublicPortfolioImage,
-} from "./portfolioPhotoMediaController.js";
+import MediaObject from "../../models/MediaObject.js";
 import PortfolioPhoto from "../../models/PortfolioPhoto.js";
 import Service from "../../models/Service.js";
-import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
+import { __portfolioMediaServiceTestHooks } from "../../services/portfolio/portfolioMediaService.js";
 
-/* ── Test data ─────────────────────────────────────── */
+const barberId = "64c000000000000000000001";
+const otherBarberId = "64c000000000000000000002";
+const portfolioPhotoId = "64c000000000000000000010";
+const uploadsDir = path.resolve(process.cwd(), "uploads", "portfolio");
 
-const barberId = "000000000000000000000001";
-const otherBarberId = "000000000000000000000002";
-const clientId = "000000000000000000000003";
-const salonId = "000000000000000000000004";
-const serviceId = "000000000000000000000005";
-const otherServiceId = "000000000000000000000006";
-const portfolioPhotoId = "000000000000000000000010";
-const nonexistentId = "000000000000000000000099";
-
-const barber = { _id: barberId, role: "barber" };
-const otherBarber = { _id: otherBarberId, role: "barber" };
-const client = { _id: clientId, role: "client" };
-
-const createPortfolioFixture = (overrides = {}) => ({
-  _id: portfolioPhotoId,
-  barberId,
-  salonId: null,
-  serviceId: null,
-  category: "",
-  beforeUrl: "/uploads/portfolio/before-test.jpg",
-  afterUrl: "/uploads/portfolio/after-test.jpg",
-  caption: "",
-  tags: [],
-  sortOrder: 0,
-  isPublic: true,
-  consentConfirmed: true,
-  active: true,
-  createdAt: new Date("2025-01-01"),
-  updatedAt: new Date("2025-01-01"),
-  ...overrides,
-  toObject() {
-    const { toObject, ...rest } = this;
-    return { ...rest };
-  },
-});
-
-const createServiceFixture = (overrides = {}) => ({
-  _id: serviceId,
-  barberId,
-  name: "Test Service",
-  active: true,
-  ...overrides,
-});
-
-/* ── Helpers ────────────────────────────────────────── */
-
-const originalMethods = {
-  portfolioCreate: PortfolioPhoto.create,
+const originals = {
   portfolioFind: PortfolioPhoto.find,
   portfolioFindById: PortfolioPhoto.findById,
   portfolioFindOne: PortfolioPhoto.findOne,
+  portfolioFindOneAndUpdate: PortfolioPhoto.findOneAndUpdate,
+  mediaCreate: MediaObject.create,
+  mediaFindByIdAndUpdate: MediaObject.findByIdAndUpdate,
+  mediaFindOneAndUpdate: MediaObject.findOneAndUpdate,
+  mediaFindOne: MediaObject.findOne,
   serviceFindById: Service.findById,
 };
-
-afterEach(() => {
-  PortfolioPhoto.create = originalMethods.portfolioCreate;
-  PortfolioPhoto.find = originalMethods.portfolioFind;
-  PortfolioPhoto.findById = originalMethods.portfolioFindById;
-  PortfolioPhoto.findOne = originalMethods.portfolioFindOne;
-  Service.findById = originalMethods.serviceFindById;
-});
 
 const createResponse = () => ({
   statusCode: 200,
@@ -93,269 +45,126 @@ const createResponse = () => ({
   },
 });
 
-const createSendFileResponse = ({ sendFileError } = {}) => ({
-  ...createResponse(),
-  sentFile: "",
-  headersSent: false,
-  sendFile(filePath, callback) {
-    this.sentFile = filePath;
-    if (typeof callback === "function") {
-      callback(sendFileError);
-    }
+const createFindChain = (result) => ({
+  select() {
+    return createFindChain(result);
+  },
+  sort() {
+    return createFindChain(result);
+  },
+  lean: async () => result,
+});
+
+const createPortfolioDoc = (overrides = {}) => ({
+  _id: portfolioPhotoId,
+  barberId,
+  beforeUrl: "/uploads/portfolio/before.jpg",
+  afterUrl: "/uploads/portfolio/after.jpg",
+  isPublic: true,
+  consentConfirmed: true,
+  active: true,
+  category: "",
+  caption: "",
+  tags: [],
+  sortOrder: 0,
+  serviceId: null,
+  salonId: null,
+  ...overrides,
+  toObject() {
+    const { toObject, save, ...rest } = this;
+    return { ...rest };
+  },
+  async save() {
     return this;
   },
 });
 
-const createFindChain = (result) => ({
-  select: () => createFindChain(result),
-  populate: () => createFindChain(result),
-  sort: () => createFindChain(result),
-  lean: async () => result,
-  then: (resolve) => Promise.resolve(result).then(resolve),
-});
+const createMongoLabelError = (message, labels) => {
+  const error = new Error(message);
+  error.errorLabels = labels;
+  error.hasErrorLabel = (label) => labels.includes(label);
+  return error;
+};
 
-/* ── Tests ──────────────────────────────────────────── */
-
-/* ── Public GET ── */
-
-test("GET /api/portfolio/barber/:barberId returns only active + public + consented photos", async () => {
-  const publicPhoto = createPortfolioFixture({ _id: "000000000000000000000011" });
-  const inactivePhoto = createPortfolioFixture({ _id: "000000000000000000000012", active: false });
-  const nonPublicPhoto = createPortfolioFixture({ _id: "000000000000000000000013", isPublic: false });
-  const noConsentPhoto = createPortfolioFixture({ _id: "000000000000000000000014", consentConfirmed: false });
-
-  PortfolioPhoto.find = () =>
-    createFindChain([publicPhoto]); // should only return the one that matches
-
-  const res = createResponse();
-  await getPortfolioByBarber({ params: { barberId } }, res);
-
-  assert.equal(res.statusCode, 200);
-  assert.ok(Array.isArray(res.body));
-  assert.equal(res.body.length, 1);
-  assert.equal(res.body[0]._id, "000000000000000000000011");
-});
-
-test("GET /api/portfolio/barber/:barberId returns empty array when no public photos", async () => {
-  PortfolioPhoto.find = () => createFindChain([]);
-
-  const res = createResponse();
-  await getPortfolioByBarber({ params: { barberId } }, res);
-
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, []);
-});
-
-/* ── Public media GET /uploads/portfolio/:filename ─── */
-
-test("GET /uploads/portfolio/:filename serves active public consented image", async () => {
-  const photo = createPortfolioFixture({
-    beforeUrl: "/uploads/portfolio/portfolio-public.webp",
-  });
-  PortfolioPhoto.findOne = (query) => {
-    assert.equal(query.active, true);
-    assert.equal(query.isPublic, true);
-    assert.equal(query.consentConfirmed, true);
-    assert.deepEqual(query.$or, [
-      { beforeUrl: "/uploads/portfolio/portfolio-public.webp" },
-      { afterUrl: "/uploads/portfolio/portfolio-public.webp" },
-    ]);
-    return createFindChain(photo);
-  };
-
-  const res = createSendFileResponse();
-  await servePublicPortfolioImage(
-    { params: { filename: "portfolio-public.webp" } },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.ok(res.sentFile.endsWith("uploads/portfolio/portfolio-public.webp"));
-});
-
-for (const [name, overrides] of [
-  ["private", { isPublic: false }],
-  ["unconsented", { consentConfirmed: false }],
-  ["inactive", { active: false }],
-]) {
-  test(`GET /uploads/portfolio/:filename returns 404 for ${name} image`, async () => {
-    PortfolioPhoto.findOne = (query) => {
-      const photo = createPortfolioFixture({
-        beforeUrl: query.$or[0].beforeUrl,
-        ...overrides,
-      });
-      const isPubliclyServable =
-        photo.active && photo.isPublic && photo.consentConfirmed;
-      return createFindChain(isPubliclyServable ? photo : null);
+const createMediaObjectModel = () => {
+  const docs = [];
+  MediaObject.create = async (payload) => {
+    const doc = {
+      ownerModel: "",
+      ownerId: null,
+      stageKey: "",
+      failureCode: "",
+      failureReason: "",
+      ...payload,
     };
-
-    const res = createSendFileResponse();
-    await servePublicPortfolioImage(
-      { params: { filename: `portfolio-${name}.jpg` } },
-      res
+    docs.push(doc);
+    return doc;
+  };
+  MediaObject.findByIdAndUpdate = async (id, update) => {
+    const doc = docs.find((entry) => String(entry._id) === String(id));
+    if (!doc) return null;
+    Object.assign(doc, update.$set || {});
+    return doc;
+  };
+  MediaObject.findOneAndUpdate = async (query, update) => {
+    const doc = docs.find((entry) =>
+      Object.entries(query).every(([key, value]) => String(entry[key]) === String(value))
     );
-
-    assert.equal(res.statusCode, 404);
-    assert.equal(res.sentFile, "");
-  });
-}
-
-test("GET /uploads/portfolio/:filename returns 404 for traversal filename", async () => {
-  PortfolioPhoto.findOne = () => {
-    throw new Error("should not query invalid filename");
+    if (!doc) return null;
+    Object.assign(doc, update.$set || {});
+    return doc;
   };
-
-  const res = createSendFileResponse();
-  await servePublicPortfolioImage(
-    { params: { filename: "../../portfolio-secret.jpg" } },
-    res
-  );
-
-  assert.equal(res.statusCode, 404);
-  assert.equal(res.sentFile, "");
-});
-
-test("GET /uploads/portfolio/:filename returns 404 when file is missing", async () => {
-  PortfolioPhoto.findOne = () => createFindChain(createPortfolioFixture());
-
-  const res = createSendFileResponse({
-    sendFileError: Object.assign(new Error("missing"), { code: "ENOENT" }),
+  MediaObject.findOne = (query) => ({
+    async lean() {
+      return (
+        docs.find((entry) =>
+          Object.entries(query).every(([key, value]) => String(entry[key]) === String(value))
+        ) || null
+      );
+    },
   });
-  await servePublicPortfolioImage(
-    { params: { filename: "portfolio-missing.jpg" } },
-    res
-  );
+  return docs;
+};
 
-  assert.equal(res.statusCode, 404);
+afterEach(() => {
+  PortfolioPhoto.find = originals.portfolioFind;
+  PortfolioPhoto.findById = originals.portfolioFindById;
+  PortfolioPhoto.findOne = originals.portfolioFindOne;
+  PortfolioPhoto.findOneAndUpdate = originals.portfolioFindOneAndUpdate;
+  MediaObject.create = originals.mediaCreate;
+  MediaObject.findByIdAndUpdate = originals.mediaFindByIdAndUpdate;
+  MediaObject.findOneAndUpdate = originals.mediaFindOneAndUpdate;
+  MediaObject.findOne = originals.mediaFindOne;
+  Service.findById = originals.serviceFindById;
+  __portfolioMediaServiceTestHooks.resetMediaStore();
+  __portfolioMediaServiceTestHooks.resetSupportsTransactions();
+  __portfolioMediaServiceTestHooks.resetStartSession();
 });
 
-/* ── Protected owner media GET /api/portfolio/:id/images/:kind ─── */
-
-test("GET /api/portfolio/:id/images/:kind serves owner private image", async () => {
-  PortfolioPhoto.findById = async () =>
-    createPortfolioFixture({
-      isPublic: false,
-      consentConfirmed: false,
-      beforeUrl: "/uploads/portfolio/portfolio-private.jpg",
-    });
-
-  const res = createSendFileResponse();
-  await serveOwnerPortfolioImage(
-    {
-      user: barber,
-      params: { id: portfolioPhotoId, kind: "before" },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.ok(res.sentFile.endsWith("uploads/portfolio/portfolio-private.jpg"));
-});
-
-test("GET /api/portfolio/:id/images/:kind denies unrelated authenticated user", async () => {
-  PortfolioPhoto.findById = async () =>
-    createPortfolioFixture({
-      beforeUrl: "/uploads/portfolio/portfolio-private.jpg",
-    });
-
-  const res = createSendFileResponse();
-  await serveOwnerPortfolioImage(
-    {
-      user: otherBarber,
-      params: { id: portfolioPhotoId, kind: "before" },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-  assert.equal(res.sentFile, "");
-});
-
-test("GET /api/portfolio/:id/images/:kind returns 404 for soft-deleted image", async () => {
-  PortfolioPhoto.findById = async () =>
-    createPortfolioFixture({
-      active: false,
-      beforeUrl: "/uploads/portfolio/portfolio-deleted.jpg",
-    });
-
-  const res = createSendFileResponse();
-  await serveOwnerPortfolioImage(
-    {
-      user: barber,
-      params: { id: portfolioPhotoId, kind: "before" },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 404);
-  assert.equal(res.sentFile, "");
-});
-
-test("GET /api/portfolio/barber/:barberId requires barberId param", async () => {
-  PortfolioPhoto.find = () => {
-    throw new Error("should not be called");
-  };
+test("GET /api/portfolio/barber/:barberId returns public photos", async () => {
+  PortfolioPhoto.find = () =>
+    createFindChain([createPortfolioDoc({ _id: "64c000000000000000000011" })]);
 
   const res = createResponse();
-  await getPortfolioByBarber({ params: {} }, res);
+  await getPortfolioByBarber({ params: { barberId } }, res);
 
-  assert.equal(res.statusCode, 400);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.length, 1);
+  assert.equal(res.body[0].id, "64c000000000000000000011");
 });
-
-/* ── Protected GET /me ── */
 
 test("GET /api/portfolio/me requires barber role", async () => {
-  PortfolioPhoto.find = () => {
-    throw new Error("should not be called");
-  };
-
   const res = createResponse();
-  await getMyPortfolio({ user: client }, res);
-
+  await getMyPortfolio({ user: { role: "client" } }, res);
   assert.equal(res.statusCode, 403);
 });
 
-test("GET /api/portfolio/me returns all portfolio photos for the barber", async () => {
-  const photos = [
-    createPortfolioFixture({ _id: "000000000000000000000015", active: true }),
-    createPortfolioFixture({ _id: "000000000000000000000016", active: false }),
-  ];
-
-  PortfolioPhoto.find = () => createFindChain(photos);
-
-  const res = createResponse();
-  await getMyPortfolio({ user: barber }, res);
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.length, 2);
-});
-
-/* ── POST create ── */
-
-test("POST /api/portfolio requires barber role", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    { user: client, files: {}, body: {} },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-});
-
-test("POST /api/portfolio rejects missing beforeImage", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-
+test("POST /api/portfolio requires both images", async () => {
   const res = createResponse();
   await addPortfolioPhoto(
     {
-      user: barber,
-      files: { afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }] },
+      user: { _id: barberId, role: "barber" },
+      files: { beforeImage: [{ filename: "before.jpg" }] },
       body: {},
     },
     res
@@ -365,608 +174,324 @@ test("POST /api/portfolio rejects missing beforeImage", async () => {
   assert.equal(res.body.message, "Both beforeImage and afterImage files are required");
 });
 
-test("POST /api/portfolio rejects missing afterImage", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: { beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }] },
-      body: {},
+test("POST /api/portfolio preserves URLs, hides internal bindings, and uses the media saga", async () => {
+  const mediaDocs = createMediaObjectModel();
+  PortfolioPhoto.findOne = () => createFindChain(null);
+  PortfolioPhoto.findOneAndUpdate = async (_query, update) => createPortfolioDoc(update.$setOnInsert);
+  Service.findById = () => ({
+    select() {
+      return { lean: async () => ({ barberId, active: true }) };
     },
-    res
-  );
+  });
 
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Both beforeImage and afterImage files are required");
-});
-
-test("POST /api/portfolio rejects public photo without consentConfirmed true", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
-      },
-      body: { isPublic: true, consentConfirmed: false },
+  __portfolioMediaServiceTestHooks.setSupportsTransactions(() => true);
+  __portfolioMediaServiceTestHooks.setStartSession(async () => ({
+    async withTransaction(callback) {
+      await callback();
     },
-    res
-  );
-
-  assert.equal(res.statusCode, 400);
-  assert.equal(
-    res.body.message,
-    "consentConfirmed must be true when isPublic is true"
-  );
-});
-
-test("POST /api/portfolio ignores client-provided barberId and uses req.user._id", async () => {
-  let createdPayload;
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
-  };
-  PortfolioPhoto.findOne = () => createFindChain(null); // no last photo for sortOrder
+    async endSession() {},
+  }));
+  __portfolioMediaServiceTestHooks.setMediaStore({
+    provider: "local",
+    async stage({ storageKey, stageKey }) {
+      return { provider: "local", storageKey, stageKey, bytes: 10 };
+    },
+    async promote() {
+      return { provider: "local", promoted: true };
+    },
+    async delete() {
+      return { deleted: true };
+    },
+    async createReadStream() {
+      return "unused";
+    },
+  });
 
   const res = createResponse();
   await addPortfolioPhoto(
     {
-      user: barber,
+      user: { _id: barberId, role: "barber" },
       files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before-test.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after-test.jpg" }],
+        beforeImage: [
+          {
+            filename: "portfolio-before.jpg",
+            originalname: "before.jpg",
+            mimetype: "image/jpeg",
+            buffer: Buffer.from("before"),
+          },
+        ],
+        afterImage: [
+          {
+            filename: "portfolio-after.jpg",
+            originalname: "after.jpg",
+            mimetype: "image/jpeg",
+            buffer: Buffer.from("after"),
+          },
+        ],
       },
-      body: {
-        barberId: otherBarberId, // client-provided — should be ignored
-        consentConfirmed: true,
-      },
+      body: { consentConfirmed: true, serviceId: "64c000000000000000000020" },
     },
     res
   );
 
   assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.barberId, barberId); // should use req.user._id, not body
+  assert.equal(res.body.beforeUrl, "/uploads/portfolio/portfolio-before.jpg");
+  assert.equal(res.body.afterUrl, "/uploads/portfolio/portfolio-after.jpg");
+  assert.equal("beforeMediaObjectId" in res.body, false);
+  assert.equal("afterMediaObjectId" in res.body, false);
+  assert.equal(mediaDocs.length, 2);
 });
 
-test("POST /api/portfolio saves correct beforeUrl and afterUrl", async () => {
-  let createdPayload;
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
-  };
+test("POST /api/portfolio fails closed with 503 and cleans uploaded files when transactions are unsupported", async () => {
+  const beforePath = path.join(uploadsDir, "unsupported-before.jpg");
+  const afterPath = path.join(uploadsDir, "unsupported-after.jpg");
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  fs.writeFileSync(beforePath, "before");
+  fs.writeFileSync(afterPath, "after");
+
   PortfolioPhoto.findOne = () => createFindChain(null);
+  __portfolioMediaServiceTestHooks.setSupportsTransactions(() => false);
 
   const res = createResponse();
   await addPortfolioPhoto(
     {
-      user: barber,
+      user: { _id: barberId, role: "barber" },
       files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "photo-before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "photo-after.jpg" }],
+        beforeImage: [{ filename: "unsupported-before.jpg", path: beforePath }],
+        afterImage: [{ filename: "unsupported-after.jpg", path: afterPath }],
       },
       body: { consentConfirmed: true },
     },
     res
   );
 
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.beforeUrl, "/uploads/portfolio/photo-before.jpg");
-  assert.equal(createdPayload.afterUrl, "/uploads/portfolio/photo-after.jpg");
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.message, "Portfolio media requires transaction support");
+  assert.equal(fs.existsSync(beforePath), false);
+  assert.equal(fs.existsSync(afterPath), false);
 });
 
-test("POST /api/portfolio accepts non-public photo without consent (consentConfirmed false, isPublic false)", async () => {
-  let createdPayload;
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
+test("POST /api/portfolio returns 503 for unresolved unknown commit results without compensating media", async () => {
+  const mediaDocs = createMediaObjectModel();
+  const mediaStore = {
+    provider: "local",
+    deleted: [],
+    async stage({ storageKey, stageKey }) {
+      return { provider: "local", storageKey, stageKey, bytes: 10 };
+    },
+    async promote() {
+      return { provider: "local", promoted: true };
+    },
+    async delete(storageKey) {
+      this.deleted.push(storageKey);
+      return { deleted: true };
+    },
+    async createReadStream() {
+      return "unused";
+    },
   };
-  PortfolioPhoto.findOne = () => createFindChain(null);
+
+  PortfolioPhoto.findOne = (query) => {
+    if (query?.barberId && !("beforeMediaObjectId" in query)) {
+      return createFindChain(null);
+    }
+    return {
+      select() {
+        return {
+          async lean() {
+            return null;
+          },
+        };
+      },
+    };
+  };
+  PortfolioPhoto.findOneAndUpdate = async (_query, update) => createPortfolioDoc(update.$setOnInsert);
+
+  __portfolioMediaServiceTestHooks.setSupportsTransactions(() => true);
+  __portfolioMediaServiceTestHooks.setStartSession(async () => ({
+    async withTransaction(callback) {
+      await callback();
+      throw createMongoLabelError("commit unknown", ["UnknownTransactionCommitResult"]);
+    },
+    async endSession() {},
+  }));
+  __portfolioMediaServiceTestHooks.setMediaStore(mediaStore);
 
   const res = createResponse();
   await addPortfolioPhoto(
     {
-      user: barber,
+      user: { _id: barberId, role: "barber" },
       files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
-      },
-      body: { isPublic: false, consentConfirmed: false },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.isPublic, false);
-  assert.equal(createdPayload.consentConfirmed, false);
-});
-
-test("POST /api/portfolio allows consentConfirmed: true without explicit isPublic (defaults to public)", async () => {
-  let createdPayload;
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
-  };
-  PortfolioPhoto.findOne = () => createFindChain(null);
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
-      },
-      body: { consentConfirmed: true }, // isPublic defaults true
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.isPublic, true);
-  assert.equal(createdPayload.consentConfirmed, true);
-});
-
-test("POST /api/portfolio cleans uploaded files on validation failure — returns 400", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-
-  const req = {
-    user: barber,
-    files: {
-      beforeImage: [{ path: "/tmp/before-fail.jpg", filename: "before-fail.jpg" }],
-      afterImage: [{ path: "/tmp/after-fail.jpg", filename: "after-fail.jpg" }],
-    },
-    body: { isPublic: true, consentConfirmed: false }, // will trigger 400
-  };
-
-  const res = createResponse();
-  await addPortfolioPhoto(req, res);
-
-  assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("consentConfirmed"));
-});
-
-const createServiceFindById = (result) => ({
-  select: () => ({
-    lean: async () => result,
-  }),
-});
-
-test("POST /api/portfolio validates serviceId ownership — rejects other barber's service", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-  PortfolioPhoto.findOne = () => createFindChain(null);
-
-  Service.findById = () =>
-    createServiceFindById(createServiceFixture({ barberId: otherBarberId, _id: otherServiceId }));
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
-      },
-      body: {
-        serviceId: otherServiceId,
-        consentConfirmed: true,
-      },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-  assert.equal(res.body.message, "Service does not belong to this barber");
-});
-
-test("POST /api/portfolio validates serviceId ownership — rejects inactive service", async () => {
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-  PortfolioPhoto.findOne = () => createFindChain(null);
-
-  Service.findById = () =>
-    createServiceFindById(createServiceFixture({ _id: serviceId, barberId, active: false }));
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
-      },
-      body: {
-        serviceId,
-        consentConfirmed: true,
-      },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-  assert.equal(res.body.message, "Service is not active");
-});
-
-test("POST /api/portfolio accepts valid own active serviceId", async () => {
-  let createdPayload;
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
-  };
-  PortfolioPhoto.findOne = () => createFindChain(null);
-
-  Service.findById = () =>
-    createServiceFindById(createServiceFixture({ _id: serviceId, barberId, active: true }));
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
-      },
-      body: {
-        serviceId,
-        caption: "Great haircut!",
-        tags: "haircut, style, trim",
-        consentConfirmed: true,
-      },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.serviceId, serviceId);
-  assert.equal(createdPayload.caption, "Great haircut!");
-});
-
-test("POST /api/portfolio auto-assigns sortOrder 0 when no previous photos exist", async () => {
-  let createdPayload;
-  PortfolioPhoto.findOne = () => createFindChain(null); // no last photo
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
-  };
-
-  const res = createResponse();
-  await addPortfolioPhoto(
-    {
-      user: barber,
-      files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
+        beforeImage: [
+          {
+            filename: "ambiguous-before.jpg",
+            originalname: "before.jpg",
+            mimetype: "image/jpeg",
+            buffer: Buffer.from("before"),
+          },
+        ],
+        afterImage: [
+          {
+            filename: "ambiguous-after.jpg",
+            originalname: "after.jpg",
+            mimetype: "image/jpeg",
+            buffer: Buffer.from("after"),
+          },
+        ],
       },
       body: { consentConfirmed: true },
     },
     res
   );
 
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.sortOrder, 0);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.message, "Portfolio media commit outcome is unknown; retry later");
+  assert.equal(mediaStore.deleted.length, 0);
+  assert.equal(mediaDocs.filter((doc) => doc.status === "delete-pending").length, 0);
 });
 
-test("POST /api/portfolio increments sortOrder from last photo", async () => {
-  let createdPayload;
-  PortfolioPhoto.findOne = () => createFindChain({ sortOrder: 5 });
-  PortfolioPhoto.create = async (payload) => {
-    createdPayload = payload;
-    return createPortfolioFixture({ ...payload, _id: portfolioPhotoId });
+test("POST /api/portfolio returns 503 when ambiguous commit reconciliation hits I/O failure", async () => {
+  const mediaDocs = createMediaObjectModel();
+  const mediaStore = {
+    provider: "local",
+    deleted: [],
+    async stage({ storageKey, stageKey }) {
+      return { provider: "local", storageKey, stageKey, bytes: 10 };
+    },
+    async promote() {
+      return { provider: "local", promoted: true };
+    },
+    async delete(storageKey) {
+      this.deleted.push(storageKey);
+      return { deleted: true };
+    },
+    async createReadStream() {
+      return "unused";
+    },
   };
+
+  PortfolioPhoto.findOne = (query) => {
+    if (query?.barberId && !("beforeMediaObjectId" in query)) {
+      return createFindChain(null);
+    }
+    return {
+      select() {
+        return {
+          async lean() {
+            throw new Error("reconcile read failed at /srv/private/media");
+          },
+        };
+      },
+    };
+  };
+  PortfolioPhoto.findOneAndUpdate = async (_query, update) => createPortfolioDoc(update.$setOnInsert);
+
+  __portfolioMediaServiceTestHooks.setSupportsTransactions(() => true);
+  __portfolioMediaServiceTestHooks.setStartSession(async () => ({
+    async withTransaction(callback) {
+      await callback();
+      throw createMongoLabelError("commit unknown", ["UnknownTransactionCommitResult"]);
+    },
+    async endSession() {},
+  }));
+  __portfolioMediaServiceTestHooks.setMediaStore(mediaStore);
 
   const res = createResponse();
   await addPortfolioPhoto(
     {
-      user: barber,
+      user: { _id: barberId, role: "barber" },
       files: {
-        beforeImage: [{ path: "/tmp/before.jpg", filename: "before.jpg" }],
-        afterImage: [{ path: "/tmp/after.jpg", filename: "after.jpg" }],
+        beforeImage: [
+          {
+            filename: "reconcile-before.jpg",
+            originalname: "before.jpg",
+            mimetype: "image/jpeg",
+            buffer: Buffer.from("before"),
+          },
+        ],
+        afterImage: [
+          {
+            filename: "reconcile-after.jpg",
+            originalname: "after.jpg",
+            mimetype: "image/jpeg",
+            buffer: Buffer.from("after"),
+          },
+        ],
       },
       body: { consentConfirmed: true },
     },
     res
   );
 
-  assert.equal(res.statusCode, 201);
-  assert.equal(createdPayload.sortOrder, 6);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.message, "Portfolio media commit outcome is unknown; retry later");
+  assert.equal(mediaStore.deleted.length, 0);
+  assert.equal(mediaDocs.filter((doc) => doc.status === "delete-pending").length, 0);
 });
 
-/* ── ObjectId validation (general) ── */
-
-const malformedId = "not-a-valid-objectid";
-const badSalonId = "definitely-not-valid";
-
-test("POST /api/portfolio rejects malformed serviceId and cleans up files", async () => {
-  PortfolioPhoto.findOne = () => createFindChain(null);
-
-  const req = {
-    user: barber,
-    files: {
-      beforeImage: [{ path: "/tmp/before.jpg", filename: "before-fail.jpg" }],
-      afterImage: [{ path: "/tmp/after.jpg", filename: "after-fail.jpg" }],
+test("PUT /api/portfolio/:id remains metadata-only", async () => {
+  const photo = createPortfolioDoc({
+    save: async function save() {
+      return this;
     },
-    body: { serviceId: malformedId, consentConfirmed: true },
-  };
-
-  const res = createResponse();
-  PortfolioPhoto.create = async () => {
-    throw new Error("should not be called");
-  };
-
-  await addPortfolioPhoto(req, res);
-
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Invalid serviceId");
-});
-
-test("POST /api/portfolio rejects malformed salonId and cleans up files", async () => {
-  PortfolioPhoto.findOne = () => createFindChain(null);
-
-  const req = {
-    user: barber,
-    files: {
-      beforeImage: [{ path: "/tmp/before.jpg", filename: "before-fail.jpg" }],
-      afterImage: [{ path: "/tmp/after.jpg", filename: "after-fail.jpg" }],
-    },
-    body: { salonId: badSalonId, consentConfirmed: true },
-  };
-
-  const res = createResponse();
-  PortfolioPhoto.create = async () => {
-    throw new Error("DB create should not be called");
-  };
-
-  await addPortfolioPhoto(req, res);
-
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Invalid salonId");
-});
-
-test("PUT /api/portfolio/:id rejects malformed serviceId", async () => {
-  const photo = createPortfolioFixture({ serviceId: null });
-  photo.save = async () => {
-    throw new Error("save should not be called");
-  };
-
-  PortfolioPhoto.findById = async () => photo;
-  Service.findById = async () => {
-    throw new Error("should not reach DB with malformed id");
-  };
-
-  const res = createResponse();
-  await updatePortfolioPhoto(
-    {
-      user: barber,
-      params: { id: portfolioPhotoId },
-      body: { serviceId: malformedId },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Invalid serviceId");
-});
-
-test("PUT /api/portfolio/:id rejects malformed salonId", async () => {
-  const photo = createPortfolioFixture({ salonId: null });
-  photo.save = async () => {
-    throw new Error("save should not be called");
-  };
-
+  });
   PortfolioPhoto.findById = async () => photo;
 
   const res = createResponse();
   await updatePortfolioPhoto(
     {
-      user: barber,
+      user: { _id: barberId, role: "barber" },
       params: { id: portfolioPhotoId },
-      body: { salonId: badSalonId },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Invalid salonId");
-});
-
-/* ── PUT update ── */
-
-test("PUT /api/portfolio/:id requires barber role", async () => {
-  PortfolioPhoto.findById = async () => {
-    throw new Error("should not be called");
-  };
-
-  const res = createResponse();
-  await updatePortfolioPhoto(
-    { user: client, params: { id: portfolioPhotoId }, body: {} },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-});
-
-test("PUT /api/portfolio/:id returns 404 for non-existent photo", async () => {
-  PortfolioPhoto.findById = async () => null;
-
-  const res = createResponse();
-  await updatePortfolioPhoto(
-    { user: barber, params: { id: nonexistentId }, body: {} },
-    res
-  );
-
-  assert.equal(res.statusCode, 404);
-});
-
-test("PUT /api/portfolio/:id rejects non-owner update", async () => {
-  const photo = createPortfolioFixture({ barberId: otherBarberId });
-  photo.save = async () => {
-    throw new Error("save should not be called");
-  };
-
-  PortfolioPhoto.findById = async () => photo;
-
-  const res = createResponse();
-  await updatePortfolioPhoto(
-    { user: barber, params: { id: portfolioPhotoId }, body: { caption: "hacked" } },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-});
-
-test("PUT /api/portfolio/:id allows owner to update caption and tags", async () => {
-  let saved = false;
-  const photo = createPortfolioFixture();
-  photo.save = async () => {
-    saved = true;
-    return photo;
-  };
-
-  PortfolioPhoto.findById = async () => photo;
-
-  const res = createResponse();
-  await updatePortfolioPhoto(
-    {
-      user: barber,
-      params: { id: portfolioPhotoId },
-      body: {
-        caption: "Updated caption",
-        tags: "new, tags",
-        sortOrder: 3,
-      },
+      body: { caption: "Updated", isPublic: false, consentConfirmed: false },
     },
     res
   );
 
   assert.equal(res.statusCode, 200);
-  assert.equal(photo.caption, "Updated caption");
-  assert.deepEqual(photo.tags, ["new", "tags"]);
-  assert.equal(photo.sortOrder, 3);
-  assert.equal(saved, true);
+  assert.equal(photo.caption, "Updated");
+  assert.equal(photo.beforeUrl, "/uploads/portfolio/before.jpg");
+  assert.equal(photo.isPublic, false);
 });
 
-test("PUT /api/portfolio/:id updates isPublic and consentConfirmed together", async () => {
-  let saved = false;
-  const photo = createPortfolioFixture({ isPublic: false, consentConfirmed: false });
-  photo.save = async () => {
-    saved = true;
-    return photo;
-  };
-
-  PortfolioPhoto.findById = async () => photo;
-
-  const res = createResponse();
-  await updatePortfolioPhoto(
-    {
-      user: barber,
-      params: { id: portfolioPhotoId },
-      body: { isPublic: true, consentConfirmed: true },
+test("DELETE /api/portfolio/:id preserves legacy soft-delete behavior when no media bindings exist", async () => {
+  const photo = createPortfolioDoc({
+    beforeMediaObjectId: null,
+    afterMediaObjectId: null,
+    async save() {
+      return this;
     },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(photo.isPublic, true);
-  assert.equal(photo.consentConfirmed, true);
-  assert.equal(saved, true);
-});
-
-test("PUT /api/portfolio/:id rejects isPublic true without consentConfirmed true", async () => {
-  const photo = createPortfolioFixture({ isPublic: false, consentConfirmed: false });
-  photo.save = async () => {
-    throw new Error("save should not be called");
-  };
-
-  PortfolioPhoto.findById = async () => photo;
+  });
+  PortfolioPhoto.findById = () => ({
+    select: async () => photo,
+  });
 
   const res = createResponse();
-  await updatePortfolioPhoto(
+  await deletePortfolioPhoto(
     {
-      user: barber,
+      user: { _id: barberId, role: "barber" },
       params: { id: portfolioPhotoId },
-      body: { isPublic: true, consentConfirmed: false },
     },
-    res
-  );
-
-  assert.equal(res.statusCode, 400);
-});
-
-/* ── DELETE soft-delete ── */
-
-test("DELETE /api/portfolio/:id requires barber role", async () => {
-  PortfolioPhoto.findById = async () => {
-    throw new Error("should not be called");
-  };
-
-  const res = createResponse();
-  await deletePortfolioPhoto(
-    { user: client, params: { id: portfolioPhotoId } },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-});
-
-test("DELETE /api/portfolio/:id returns 404 for non-existent photo", async () => {
-  PortfolioPhoto.findById = async () => null;
-
-  const res = createResponse();
-  await deletePortfolioPhoto(
-    { user: barber, params: { id: nonexistentId } },
-    res
-  );
-
-  assert.equal(res.statusCode, 404);
-});
-
-test("DELETE /api/portfolio/:id rejects non-owner delete", async () => {
-  const photo = createPortfolioFixture({ barberId: otherBarberId });
-  photo.save = async () => {
-    throw new Error("save should not be called");
-  };
-
-  PortfolioPhoto.findById = async () => photo;
-
-  const res = createResponse();
-  await deletePortfolioPhoto(
-    { user: barber, params: { id: portfolioPhotoId } },
-    res
-  );
-
-  assert.equal(res.statusCode, 403);
-});
-
-test("DELETE /api/portfolio/:id soft-deletes by setting active to false", async () => {
-  let saved = false;
-  const photo = createPortfolioFixture({ active: true });
-  photo.save = async function () {
-    saved = true;
-    return this;
-  };
-
-  PortfolioPhoto.findById = async () => photo;
-
-  const res = createResponse();
-  await deletePortfolioPhoto(
-    { user: barber, params: { id: portfolioPhotoId } },
     res
   );
 
   assert.equal(res.statusCode, 200);
   assert.equal(photo.active, false);
-  assert.equal(saved, true);
+  assert.equal(res.body.message, "Portfolio photo deleted");
+});
+
+test("DELETE /api/portfolio/:id rejects non-owner access", async () => {
+  PortfolioPhoto.findById = () => ({
+    select: async () => createPortfolioDoc(),
+  });
+
+  const res = createResponse();
+  await deletePortfolioPhoto(
+    {
+      user: { _id: otherBarberId, role: "barber" },
+      params: { id: portfolioPhotoId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
 });

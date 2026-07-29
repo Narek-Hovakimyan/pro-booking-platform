@@ -1,32 +1,27 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Image, X } from "lucide-react";
 
 import {
   createPortfolioPhoto,
+  getPortfolioImageBlob,
   updatePortfolioPhoto,
 } from "@/shared/api/portfolio";
 import { Button } from "@/shared/components/ui/button";
-import { getMediaUrl } from "@/shared/utils/media";
+
+const getPortfolioId = (item) => item?._id || item?.id || "";
+const emptyCurrentPreviews = Object.freeze({ itemId: "", before: null, after: null });
+const revokeObjectUrl = (url) => url && URL.revokeObjectURL(url);
 
 function deriveForm(editingItem) {
-  if (editingItem) {
-    return {
-      caption: editingItem.caption || "",
-      category: editingItem.category || "",
-      tags: Array.isArray(editingItem.tags)
-        ? editingItem.tags.join(", ")
-        : "",
-      isPublic: editingItem.isPublic !== false,
-      consentConfirmed: editingItem.consentConfirmed === true,
-    };
-  }
-  return {
-    caption: "",
-    category: "",
-    tags: "",
-    isPublic: true,
-    consentConfirmed: false,
-  };
+  return editingItem
+    ? {
+        caption: editingItem.caption || "",
+        category: editingItem.category || "",
+        tags: Array.isArray(editingItem.tags) ? editingItem.tags.join(", ") : "",
+        isPublic: editingItem.isPublic !== false,
+        consentConfirmed: editingItem.consentConfirmed === true,
+      }
+    : { caption: "", category: "", tags: "", isPublic: true, consentConfirmed: false };
 }
 
 export default function PortfolioPhotoFormModal({
@@ -36,38 +31,116 @@ export default function PortfolioPhotoFormModal({
   onSaveComplete,
   onClose,
 }) {
-  /* ── Form state (initialized from props, key remount resets it) ── */
   const [form, setForm] = useState(() => deriveForm(editingItem));
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-
-  /* ── File upload state ── */
   const [beforeImage, setBeforeImage] = useState(null);
   const [afterImage, setAfterImage] = useState(null);
   const [beforePreview, setBeforePreview] = useState(null);
   const [afterPreview, setAfterPreview] = useState(null);
+  const [currentPreviews, setCurrentPreviews] = useState(emptyCurrentPreviews);
   const beforeFileInputRef = useRef(null);
   const afterFileInputRef = useRef(null);
+  const localPreviewUrlsRef = useRef({ before: null, after: null });
+  const currentPreviewUrlsRef = useRef({ before: null, after: null });
 
-  /* ── Internal close (guards isSaving) ── */
+  const setLocalPreviewState = (kind, nextUrl) => {
+    if (kind === "before") {
+      setBeforePreview(nextUrl);
+      return;
+    }
+    setAfterPreview(nextUrl);
+  };
+
+  const replaceLocalPreview = (kind, nextUrl, shouldUpdateState = true) => {
+    const currentUrl = localPreviewUrlsRef.current[kind];
+    if (currentUrl && currentUrl !== nextUrl) revokeObjectUrl(currentUrl);
+    localPreviewUrlsRef.current[kind] = nextUrl;
+    if (shouldUpdateState) setLocalPreviewState(kind, nextUrl);
+  };
+
+  const clearLocalPreviews = (shouldUpdateState = true) => {
+    replaceLocalPreview("before", null, shouldUpdateState);
+    replaceLocalPreview("after", null, shouldUpdateState);
+  };
+
+  const clearCurrentPreviews = (shouldUpdateState = true) => {
+    revokeObjectUrl(currentPreviewUrlsRef.current.before);
+    revokeObjectUrl(currentPreviewUrlsRef.current.after);
+    currentPreviewUrlsRef.current = { before: null, after: null };
+    if (shouldUpdateState) setCurrentPreviews({ ...emptyCurrentPreviews });
+  };
+
+  const replaceCurrentPreview = (itemId, kind, nextUrl) => {
+    revokeObjectUrl(currentPreviewUrlsRef.current[kind]);
+    currentPreviewUrlsRef.current[kind] = nextUrl;
+    setCurrentPreviews((prev) =>
+      prev.itemId === itemId && prev[kind] === nextUrl
+        ? prev
+        : { itemId, before: itemId === prev.itemId ? prev.before : null, after: itemId === prev.itemId ? prev.after : null, [kind]: nextUrl }
+    );
+  };
+
+  useEffect(() => {
+    if (!open || !editingItem) return undefined;
+    let cancelled = false;
+    const itemId = getPortfolioId(editingItem);
+
+    async function loadCurrentPreviews() {
+      if (!itemId) return;
+      await Promise.all(
+        ["before", "after"].map(async (kind) => {
+          if (!editingItem[`${kind}Url`]) {
+            replaceCurrentPreview(itemId, kind, null);
+            return;
+          }
+          try {
+            const blob = await getPortfolioImageBlob(itemId, kind);
+            const objectUrl = URL.createObjectURL(blob);
+            if (cancelled) {
+              revokeObjectUrl(objectUrl);
+              return;
+            }
+            replaceCurrentPreview(itemId, kind, objectUrl);
+          } catch {
+            if (!cancelled) replaceCurrentPreview(itemId, kind, null);
+          }
+        })
+      );
+    }
+    loadCurrentPreviews();
+    return () => {
+      cancelled = true;
+      clearCurrentPreviews(false);
+    };
+  }, [editingItem, open]);
+
+  useEffect(
+    () => () => {
+      revokeObjectUrl(localPreviewUrlsRef.current.before);
+      revokeObjectUrl(localPreviewUrlsRef.current.after);
+      localPreviewUrlsRef.current = { before: null, after: null };
+      revokeObjectUrl(currentPreviewUrlsRef.current.before);
+      revokeObjectUrl(currentPreviewUrlsRef.current.after);
+      currentPreviewUrlsRef.current = { before: null, after: null };
+    },
+    []
+  );
+
+  const currentItemId = getPortfolioId(editingItem);
+  const currentBeforePreview = currentPreviews.itemId === currentItemId ? currentPreviews.before : null;
+  const currentAfterPreview = currentPreviews.itemId === currentItemId ? currentPreviews.after : null;
+
   const handleClose = () => {
     if (isSaving || parentSaving) return;
-    revokePreviews();
+    clearLocalPreviews();
+    clearCurrentPreviews();
     onClose();
   };
-
-  const revokePreviews = () => {
-    if (beforePreview) URL.revokeObjectURL(beforePreview);
-    if (afterPreview) URL.revokeObjectURL(afterPreview);
-  };
-
-  /* ── Form field update ── */
   const updateForm = (field, value) => {
     setFormError("");
     setForm((prev) => ({ ...prev, [field]: value }));
   };
-
-  /* ── Image selection ── */
   const handleBeforeImageSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -84,8 +157,7 @@ export default function PortfolioPhotoFormModal({
     }
 
     setBeforeImage(file);
-    if (beforePreview) URL.revokeObjectURL(beforePreview);
-    setBeforePreview(URL.createObjectURL(file));
+    replaceLocalPreview("before", URL.createObjectURL(file));
     setFormError("");
   };
 
@@ -105,15 +177,13 @@ export default function PortfolioPhotoFormModal({
     }
 
     setAfterImage(file);
-    if (afterPreview) URL.revokeObjectURL(afterPreview);
-    setAfterPreview(URL.createObjectURL(file));
+    replaceLocalPreview("after", URL.createObjectURL(file));
     setFormError("");
   };
 
   const removeBeforeImage = () => {
     setBeforeImage(null);
-    if (beforePreview) URL.revokeObjectURL(beforePreview);
-    setBeforePreview(null);
+    replaceLocalPreview("before", null);
     if (beforeFileInputRef.current) {
       beforeFileInputRef.current.value = "";
     }
@@ -121,14 +191,12 @@ export default function PortfolioPhotoFormModal({
 
   const removeAfterImage = () => {
     setAfterImage(null);
-    if (afterPreview) URL.revokeObjectURL(afterPreview);
-    setAfterPreview(null);
+    replaceLocalPreview("after", null);
     if (afterFileInputRef.current) {
       afterFileInputRef.current.value = "";
     }
   };
 
-  /* ── Validation ── */
   const validateForm = () => {
     if (!editingItem) {
       if (!beforeImage) {
@@ -140,18 +208,12 @@ export default function PortfolioPhotoFormModal({
         return false;
       }
     }
-
     if (form.isPublic && !form.consentConfirmed) {
-      setFormError(
-        "Consent confirmation is required when making a photo public"
-      );
+      setFormError("Consent confirmation is required when making a photo public");
       return false;
     }
-
     return true;
   };
-
-  /* ── Save ── */
   const handleSave = async (e) => {
     e.preventDefault();
     if (isSaving || parentSaving) return;
@@ -172,16 +234,14 @@ export default function PortfolioPhotoFormModal({
         const payload = {
           caption: form.caption.trim(),
           category: form.category.trim(),
-          tags: form.tags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean),
+          tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
           isPublic: form.isPublic,
           consentConfirmed: form.consentConfirmed,
         };
 
         const updated = await updatePortfolioPhoto(editId, payload);
-        revokePreviews();
+        clearLocalPreviews();
+        clearCurrentPreviews();
         onSaveComplete(updated);
       } else {
         const formData = new FormData();
@@ -189,25 +249,17 @@ export default function PortfolioPhotoFormModal({
         formData.append("afterImage", afterImage);
         formData.append("caption", form.caption.trim());
         formData.append("category", form.category.trim());
-        formData.append(
-          "tags",
-          form.tags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean)
-            .join(",")
-        );
+        formData.append("tags", form.tags.split(",").map((t) => t.trim()).filter(Boolean).join(","));
         formData.append("isPublic", String(form.isPublic));
         formData.append("consentConfirmed", String(form.consentConfirmed));
 
         const created = await createPortfolioPhoto(formData);
-        revokePreviews();
+        clearLocalPreviews();
+        clearCurrentPreviews();
         onSaveComplete(created);
       }
     } catch (err) {
-      setFormError(
-        err.response?.data?.message || "Could not save portfolio item"
-      );
+      setFormError(err.response?.data?.message || "Could not save portfolio item");
     } finally {
       setIsSaving(false);
     }
@@ -224,9 +276,7 @@ export default function PortfolioPhotoFormModal({
               {editingItem ? "Edit Portfolio Item" : "Add Before / After"}
             </h3>
             <p className="mt-1 text-sm text-neutral-500">
-              {editingItem
-                ? "Update caption, tags, and visibility settings."
-                : "Upload a before and after photo pair."}
+              {editingItem ? "Update caption, tags, and visibility settings." : "Upload a before and after photo pair."}
             </p>
           </div>
           <Button
@@ -360,9 +410,9 @@ export default function PortfolioPhotoFormModal({
                   Current Before
                 </p>
                 <div className="aspect-square overflow-hidden rounded-xl bg-neutral-100">
-                  {editingItem.beforeUrl ? (
+                  {currentBeforePreview ? (
                     <img
-                      src={getMediaUrl(editingItem.beforeUrl)}
+                      src={currentBeforePreview}
                       alt="Current before"
                       className="h-full w-full object-cover"
                     />
@@ -378,9 +428,9 @@ export default function PortfolioPhotoFormModal({
                   Current After
                 </p>
                 <div className="aspect-square overflow-hidden rounded-xl bg-neutral-100">
-                  {editingItem.afterUrl ? (
+                  {currentAfterPreview ? (
                     <img
-                      src={getMediaUrl(editingItem.afterUrl)}
+                      src={currentAfterPreview}
                       alt="Current after"
                       className="h-full w-full object-cover"
                     />

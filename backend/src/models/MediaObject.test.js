@@ -117,6 +117,24 @@ describe("MediaObject", () => {
     assert.equal(String(media.ownerId), "64b000000000000000000111");
   });
 
+  test("accepts optional portfolio binding metadata for exact before/after ownership", async () => {
+    const media = new MediaObject({
+      storageKey: "13131313-1313-4131-8131-131313131313.jpg",
+      stageKey: "13131313-1313-4131-8131-131313131313.stage",
+      mediaClass: "portfolio-before",
+      access: "private",
+      ownerModel: "PortfolioPhoto",
+      ownerId: "64c000000000000000000222",
+      legacyUrl: "/uploads/portfolio/portfolio-before.jpg",
+    });
+
+    await media.validate();
+
+    assert.equal(media.mediaClass, "portfolio-before");
+    assert.equal(media.ownerModel, "PortfolioPhoto");
+    assert.equal(String(media.ownerId), "64c000000000000000000222");
+  });
+
   test("accepts every supported lifecycle state", async () => {
     await Promise.all(
       Object.values(MEDIA_OBJECT_STATES).map((status, index) =>

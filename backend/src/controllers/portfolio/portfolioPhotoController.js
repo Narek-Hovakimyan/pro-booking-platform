@@ -1,23 +1,26 @@
 import mongoose from "mongoose";
+
 import PortfolioPhoto from "../../models/PortfolioPhoto.js";
 import Service from "../../models/Service.js";
 import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
-
-/* ── Helpers ────────────────────────────────────────── */
+import {
+  createPortfolioPhotoWithMedia,
+  deletePortfolioPhotoWithMedia,
+  hasBoundPortfolioMedia,
+} from "../../services/portfolio/portfolioMediaService.js";
+import { isMediaStoreError } from "../../services/media/mediaStore.js";
 
 const isBarber = (user) => user?.role === "barber";
-
 const getId = (doc) => doc?._id ?? doc?.id ?? doc;
+const isValidObjectId = (id) => id && mongoose.Types.ObjectId.isValid(id);
 
-const getUserId = (user) => String(getId(user));
-
-const formatPhoto = (photo) => ({
-  ...photo.toObject(),
-  id: photo._id.toString(),
-});
-
-const isValidObjectId = (id) =>
-  id && mongoose.Types.ObjectId.isValid(id);
+const sanitizePortfolioPhoto = (photo) => {
+  const value = typeof photo?.toObject === "function" ? photo.toObject() : { ...photo };
+  delete value.beforeMediaObjectId;
+  delete value.afterMediaObjectId;
+  value.id = String(value._id ?? value.id);
+  return value;
+};
 
 const collectUploadedFiles = (req) => {
   const files = [];
@@ -26,12 +29,6 @@ const collectUploadedFiles = (req) => {
   return files;
 };
 
-/**
- * Clean up uploaded portfolio files.
- * Uses file.filename + known path prefix instead of multer's absolute
- * file.path, which is not compatible with deleteUploadedFile's
- * expected path format (uploads-relative or leading-slash relative).
- */
 const cleanupUploadedFiles = (req) => {
   for (const file of collectUploadedFiles(req)) {
     deleteUploadedFile(`/uploads/portfolio/${file.filename}`);
@@ -44,8 +41,6 @@ const buildPublicQuery = (barberId) => ({
   isPublic: true,
   consentConfirmed: true,
 });
-
-/* ── Helper: validate serviceId belongs to barber ───── */
 
 const validateServiceOwnership = async (serviceId, barberId) => {
   if (!serviceId) return null;
@@ -60,21 +55,59 @@ const validateServiceOwnership = async (serviceId, barberId) => {
   if (!service.active) {
     return { valid: false, message: "Service is not active" };
   }
-  return { valid: true, service };
+  return { valid: true };
 };
-
-/* ── Helper: sanitize tags ──────────────────────────── */
 
 const sanitizeTags = (raw) => {
   if (!raw) return [];
-  const arr = Array.isArray(raw) ? raw : String(raw).split(",").map((s) => s.trim());
+  const arr = Array.isArray(raw) ? raw : String(raw).split(",").map((tag) => tag.trim());
   return arr
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0 && s.length <= 50)
+    .map((tag) => tag.trim().toLowerCase())
+    .filter((tag) => tag.length > 0 && tag.length <= 50)
     .slice(0, 20);
 };
 
-/* ── 1. GET /api/portfolio/barber/:barberId ────────── */
+const resolveApprovedSalonId = (user, salonId) => {
+  if (!salonId) return null;
+
+  const approvedSalonIds = [
+    ...(Array.isArray(user?.salons)
+      ? user.salons
+          .filter((entry) => entry?.status === "approved")
+          .map((entry) => String(entry.salon))
+      : []),
+  ];
+  if (user?.salon && user?.salonStatus === "approved") {
+    approvedSalonIds.push(String(user.salon));
+  }
+  return approvedSalonIds.includes(String(salonId)) ? salonId : null;
+};
+
+const normalizeVisibility = ({ isPublic, consentConfirmed }, defaults = {}) => ({
+  isPublic:
+    isPublic === undefined
+      ? defaults.isPublic ?? true
+      : isPublic === true || isPublic === "true",
+  consentConfirmed:
+    consentConfirmed === undefined
+      ? defaults.consentConfirmed ?? false
+      : consentConfirmed === true || consentConfirmed === "true",
+});
+
+const respondMediaError = (res, error, fallbackMessage) => {
+  if (error?.transactionRequired) {
+    return res.status(error.statusCode || 503).json({ message: error.message });
+  }
+  if (Number.isInteger(error?.statusCode) && error.statusCode >= 400) {
+    return res.status(error.statusCode).json({ message: error.message || fallbackMessage });
+  }
+  if (isMediaStoreError(error)) {
+    return res
+      .status(error.status || 503)
+      .json({ message: error.message || fallbackMessage });
+  }
+  return res.status(500).json({ message: fallbackMessage });
+};
 
 export const getPortfolioByBarber = async (req, res) => {
   try {
@@ -90,13 +123,11 @@ export const getPortfolioByBarber = async (req, res) => {
       .sort({ sortOrder: 1, createdAt: -1 })
       .lean();
 
-    return res.json(photos.map((p) => ({ ...p, id: p._id.toString() })));
-  } catch (error) {
+    return res.json(photos.map((photo) => sanitizePortfolioPhoto(photo)));
+  } catch {
     return res.status(500).json({ message: "Could not fetch portfolio photos" });
   }
 };
-
-/* ── 2. GET /api/portfolio/me ───────────────────────── */
 
 export const getMyPortfolio = async (req, res) => {
   try {
@@ -108,13 +139,11 @@ export const getMyPortfolio = async (req, res) => {
       .sort({ sortOrder: 1, createdAt: -1 })
       .lean();
 
-    return res.json(photos.map((p) => ({ ...p, id: p._id.toString() })));
-  } catch (error) {
+    return res.json(photos.map((photo) => sanitizePortfolioPhoto(photo)));
+  } catch {
     return res.status(500).json({ message: "Could not fetch portfolio photos" });
   }
 };
-
-/* ── 3. POST /api/portfolio ─────────────────────────── */
 
 export const addPortfolioPhoto = async (req, res) => {
   try {
@@ -124,7 +153,6 @@ export const addPortfolioPhoto = async (req, res) => {
 
     const beforeFile = req.files?.beforeImage?.[0];
     const afterFile = req.files?.afterImage?.[0];
-
     if (!beforeFile || !afterFile) {
       cleanupUploadedFiles(req);
       return res.status(400).json({
@@ -141,25 +169,18 @@ export const addPortfolioPhoto = async (req, res) => {
       isPublic: rawIsPublic,
       consentConfirmed: rawConsentConfirmed,
     } = req.body;
-
-    // Default isPublic to true (matches mongoose schema default) when not provided
-    const isPublic =
-      rawIsPublic === undefined ? true : (rawIsPublic === true || rawIsPublic === "true");
-    const consentConfirmed =
-      rawConsentConfirmed === true || rawConsentConfirmed === "true";
-
-    // Enforce consent for public photos
-    if (isPublic && !consentConfirmed) {
+    const visibility = normalizeVisibility({
+      isPublic: rawIsPublic,
+      consentConfirmed: rawConsentConfirmed,
+    });
+    if (visibility.isPublic && !visibility.consentConfirmed) {
       cleanupUploadedFiles(req);
       return res.status(400).json({
-        message:
-          "consentConfirmed must be true when isPublic is true",
+        message: "consentConfirmed must be true when isPublic is true",
       });
     }
 
     const barberId = req.user._id;
-
-    // Validate serviceId if provided
     if (serviceId) {
       if (!isValidObjectId(serviceId)) {
         cleanupUploadedFiles(req);
@@ -168,74 +189,58 @@ export const addPortfolioPhoto = async (req, res) => {
       const validation = await validateServiceOwnership(serviceId, barberId);
       if (validation && !validation.valid) {
         cleanupUploadedFiles(req);
-        if (validation.message === "Service not found") {
-          return res.status(400).json({ message: validation.message });
-        }
-        return res.status(403).json({ message: validation.message });
+        return res
+          .status(validation.message === "Service not found" ? 400 : 403)
+          .json({ message: validation.message });
       }
     }
-
-    // Validate salonId format if provided
-    if (salonId) {
-      if (!isValidObjectId(salonId)) {
-        cleanupUploadedFiles(req);
-        return res.status(400).json({ message: "Invalid salonId" });
-      }
+    if (salonId && !isValidObjectId(salonId)) {
+      cleanupUploadedFiles(req);
+      return res.status(400).json({ message: "Invalid salonId" });
     }
 
-    // sanitize salonId — only allow if user is associated with that salon
-    let resolvedSalonId = null;
-    if (salonId) {
-      const userSalonIds = [
-        ...(Array.isArray(req.user.salons)
-          ? req.user.salons
-              .filter((entry) => entry?.status === "approved")
-              .map((entry) => String(entry.salon))
-          : []),
-      ];
-      // Also check legacy single salon field
-      if (req.user.salon && req.user.salonStatus === "approved") {
-        userSalonIds.push(String(req.user.salon));
-      }
-      if (userSalonIds.includes(String(salonId))) {
-        resolvedSalonId = salonId;
-      }
-      // If not associated, silently drop salonId (do not error — allow unassociated uploads)
-    }
-
-    // Auto-assign sortOrder
     const lastPhoto = await PortfolioPhoto.findOne({ barberId })
       .sort({ sortOrder: -1 })
       .select("sortOrder")
       .lean();
     const sortOrder = lastPhoto ? Number(lastPhoto.sortOrder || 0) + 1 : 0;
-
-    const beforeUrl = `/uploads/portfolio/${beforeFile.filename}`;
-    const afterUrl = `/uploads/portfolio/${afterFile.filename}`;
-
-    const photo = await PortfolioPhoto.create({
+    const photoId = new mongoose.Types.ObjectId();
+    const payload = {
+      _id: photoId,
       barberId,
-      salonId: resolvedSalonId,
+      salonId: resolveApprovedSalonId(req.user, salonId),
       serviceId: serviceId || null,
       category: String(category || "").trim(),
       caption: String(caption || "").trim(),
       tags: sanitizeTags(rawTags),
       sortOrder,
-      beforeUrl,
-      afterUrl,
-      isPublic,
-      consentConfirmed,
-    });
+      beforeUrl: `/uploads/portfolio/${beforeFile.filename}`,
+      afterUrl: `/uploads/portfolio/${afterFile.filename}`,
+      isPublic: visibility.isPublic,
+      consentConfirmed: visibility.consentConfirmed,
+    };
 
-    return res.status(201).json(formatPhoto(photo));
-  } catch (error) {
-    // Clean up files on any unexpected error
+    let photo;
+    try {
+      photo = await createPortfolioPhotoWithMedia({
+        payload,
+        filesByKind: {
+          before: beforeFile,
+          after: afterFile,
+        },
+      });
+    } catch (error) {
+      return respondMediaError(res, error, "Could not add portfolio photo");
+    } finally {
+      cleanupUploadedFiles(req);
+    }
+
+    return res.status(201).json(sanitizePortfolioPhoto(photo));
+  } catch {
     cleanupUploadedFiles(req);
     return res.status(500).json({ message: "Could not add portfolio photo" });
   }
 };
-
-/* ── 4. PUT /api/portfolio/:id ──────────────────────── */
 
 export const updatePortfolioPhoto = async (req, res) => {
   try {
@@ -252,7 +257,6 @@ export const updatePortfolioPhoto = async (req, res) => {
     if (!photo) {
       return res.status(404).json({ message: "Portfolio photo not found" });
     }
-
     if (String(photo.barberId) !== String(req.user._id)) {
       return res.status(403).json({ message: "You can only update your own portfolio photos" });
     }
@@ -267,88 +271,56 @@ export const updatePortfolioPhoto = async (req, res) => {
       isPublic: rawIsPublic,
       consentConfirmed: rawConsentConfirmed,
     } = req.body;
-
-    const isPublic =
-      rawIsPublic !== undefined
-        ? rawIsPublic === true || rawIsPublic === "true"
-        : photo.isPublic;
-    const consentConfirmed =
-      rawConsentConfirmed !== undefined
-        ? rawConsentConfirmed === true || rawConsentConfirmed === "true"
-        : photo.consentConfirmed;
-
-    // Enforce consent for public photos
-    if (isPublic && !consentConfirmed) {
+    const visibility = normalizeVisibility(
+      {
+        isPublic: rawIsPublic,
+        consentConfirmed: rawConsentConfirmed,
+      },
+      {
+        isPublic: photo.isPublic,
+        consentConfirmed: photo.consentConfirmed,
+      }
+    );
+    if (visibility.isPublic && !visibility.consentConfirmed) {
       return res.status(400).json({
         message: "consentConfirmed must be true when isPublic is true",
       });
     }
 
-    const barberId = req.user._id;
-
-    // Validate serviceId if changed
     if (serviceId !== undefined && String(serviceId) !== String(photo.serviceId || "")) {
       if (serviceId) {
         if (!isValidObjectId(serviceId)) {
           return res.status(400).json({ message: "Invalid serviceId" });
         }
-        const validation = await validateServiceOwnership(serviceId, barberId);
+        const validation = await validateServiceOwnership(serviceId, req.user._id);
         if (validation && !validation.valid) {
-          if (validation.message === "Service not found") {
-            return res.status(400).json({ message: validation.message });
-          }
-          return res.status(403).json({ message: validation.message });
+          return res
+            .status(validation.message === "Service not found" ? 400 : 403)
+            .json({ message: validation.message });
         }
       }
     }
-
-    // Validate salonId format if provided
-    if (salonId !== undefined && salonId) {
-      if (!isValidObjectId(salonId)) {
-        return res.status(400).json({ message: "Invalid salonId" });
-      }
+    if (salonId !== undefined && salonId && !isValidObjectId(salonId)) {
+      return res.status(400).json({ message: "Invalid salonId" });
     }
 
-    // salonId handling for update
     if (salonId !== undefined) {
-      if (salonId) {
-        const userSalonIds = [
-          ...(Array.isArray(req.user.salons)
-            ? req.user.salons
-                .filter((entry) => entry?.status === "approved")
-                .map((entry) => String(entry.salon))
-            : []),
-        ];
-        if (req.user.salon && req.user.salonStatus === "approved") {
-          userSalonIds.push(String(req.user.salon));
-        }
-        if (userSalonIds.includes(String(salonId))) {
-          photo.salonId = salonId;
-        } else {
-          photo.salonId = null;
-        }
-      } else {
-        photo.salonId = null;
-      }
+      photo.salonId = resolveApprovedSalonId(req.user, salonId);
     }
-
     if (category !== undefined) photo.category = String(category || "").trim();
     if (caption !== undefined) photo.caption = String(caption || "").trim();
     if (rawTags !== undefined) photo.tags = sanitizeTags(rawTags);
     if (sortOrder !== undefined) photo.sortOrder = Number(sortOrder) || 0;
     if (serviceId !== undefined) photo.serviceId = serviceId || null;
-    photo.isPublic = isPublic;
-    photo.consentConfirmed = consentConfirmed;
+    photo.isPublic = visibility.isPublic;
+    photo.consentConfirmed = visibility.consentConfirmed;
 
     await photo.save();
-
-    return res.json(formatPhoto(photo));
-  } catch (error) {
+    return res.json(sanitizePortfolioPhoto(photo));
+  } catch {
     return res.status(500).json({ message: "Could not update portfolio photo" });
   }
 };
-
-/* ── 5. DELETE /api/portfolio/:id (soft-delete) ─────── */
 
 export const deletePortfolioPhoto = async (req, res) => {
   try {
@@ -361,22 +333,33 @@ export const deletePortfolioPhoto = async (req, res) => {
       return res.status(400).json({ message: "Invalid portfolio photo id" });
     }
 
-    const photo = await PortfolioPhoto.findById(id);
+    const photo = await PortfolioPhoto.findById(id).select(
+      "+beforeMediaObjectId +afterMediaObjectId"
+    );
     if (!photo) {
       return res.status(404).json({ message: "Portfolio photo not found" });
     }
-
     if (String(photo.barberId) !== String(req.user._id)) {
       return res.status(403).json({ message: "You can only delete your own portfolio photos" });
     }
+    if (photo.active === false) {
+      return res.json({ message: "Portfolio photo deleted" });
+    }
 
-    // Soft-delete: set active to false
-    photo.active = false;
-    await photo.save();
+    if (!hasBoundPortfolioMedia(photo, "before") && !hasBoundPortfolioMedia(photo, "after")) {
+      photo.active = false;
+      await photo.save();
+      return res.json({ message: "Portfolio photo deleted" });
+    }
 
-    // Note: files are intentionally NOT deleted to allow rollback/audit.
+    try {
+      await deletePortfolioPhotoWithMedia({ photo });
+    } catch (error) {
+      return respondMediaError(res, error, "Could not delete portfolio photo");
+    }
+
     return res.json({ message: "Portfolio photo deleted" });
-  } catch (error) {
+  } catch {
     return res.status(500).json({ message: "Could not delete portfolio photo" });
   }
 };
