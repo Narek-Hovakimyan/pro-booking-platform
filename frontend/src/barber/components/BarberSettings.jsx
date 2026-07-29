@@ -75,6 +75,8 @@ export default function BarberSettings({
     pendingEntries,
     refreshSalonData,
     salonAdmins,
+    salonDataLoaded,
+    salonDataLoading,
     salonReadError,
     salonStaffById,
     salonStatus,
@@ -343,6 +345,9 @@ export default function BarberSettings({
         String(salon.id || salon._id || "") ===
         String(effectivePromotionSalonId || "")
     ) || managedSalons[0];
+  const isDefaultScheduleLoading = isLoading || salonDataLoading;
+  const showDefaultScheduleSection =
+    !isDefaultScheduleLoading && salonDataLoaded && !salonReadError;
   const {
     salonSchedules,
     savingSalonId,
@@ -507,9 +512,14 @@ export default function BarberSettings({
                 {error}
               </p>
             )}
-            {isLoading ? (
+            {!error && salonReadError && !showDefaultScheduleSection && (
+              <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {salonReadError}
+              </p>
+            )}
+            {isDefaultScheduleLoading ? (
               <p className="text-neutral-500">Loading...</p>
-            ) : (
+            ) : showDefaultScheduleSection ? (
               <DefaultScheduleSection
                 allSalonEntries={allSalonEntries}
                 salonSchedules={salonSchedules}
@@ -521,7 +531,7 @@ export default function BarberSettings({
                 onUpdateWeeklyDay={updateWeeklyDaySchedule}
                 onSaveSchedule={saveDefaultSchedule}
               />
-            )}
+            ) : null}
           </>
         )}
 

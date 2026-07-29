@@ -11,6 +11,10 @@ export default function useBarberSettingsData({
   const eventCertificateUserId = currentUser?.id;
   const [eventCertificates, setEventCertificates] = useState([]);
   const [salons, setSalons] = useState([]);
+  const [salonDataLoading, setSalonDataLoading] = useState(
+    Boolean(salonDataUserId)
+  );
+  const [salonDataLoaded, setSalonDataLoaded] = useState(false);
   const [salonStatus, setSalonStatus] = useState({
     salonStatus: currentUser?.salonStatus || "none",
     salon: null,
@@ -125,28 +129,52 @@ export default function useBarberSettingsData({
       salonDataRequestTokenRef.current === requestToken &&
       shouldContinue();
 
-    const [salonsResponse, statusResponse, requestsResponse] = await Promise.all([
-      api.get("/salons"),
-      api.get("/salons/me/status"),
-      api.get("/salons/owner/requests"),
-    ]);
-
     if (!isActiveRequest()) return;
 
-    setSalons(salonsResponse.data || []);
-    setSalonStatus(statusResponse.data || {});
-    setOwnerRequests(requestsResponse.data || []);
-    onCurrentUserSalonStatusChange({
-      salon:
-        statusResponse.data?.salon?._id ||
-        statusResponse.data?.salon?.id ||
-        null,
-      salonStatus: statusResponse.data?.salonStatus || "none",
-    });
+    setSalonDataLoading(true);
+    setSalonDataLoaded(false);
+    setSalonReadError("");
 
-    const nextManagedSalons =
-      statusResponse.data?.managedSalons || statusResponse.data?.ownedSalons || [];
-    await refreshManagedSalonData(nextManagedSalons, shouldContinue);
+    try {
+      const [salonsResponse, statusResponse, requestsResponse] = await Promise.all([
+        api.get("/salons"),
+        api.get("/salons/me/status"),
+        api.get("/salons/owner/requests"),
+      ]);
+
+      if (!isActiveRequest()) return;
+
+      setSalons(salonsResponse.data || []);
+      setSalonStatus(statusResponse.data || {});
+      setOwnerRequests(requestsResponse.data || []);
+      onCurrentUserSalonStatusChange({
+        salon:
+          statusResponse.data?.salon?._id ||
+          statusResponse.data?.salon?.id ||
+          null,
+        salonStatus: statusResponse.data?.salonStatus || "none",
+      });
+
+      const nextManagedSalons =
+        statusResponse.data?.managedSalons || statusResponse.data?.ownedSalons || [];
+      await refreshManagedSalonData(nextManagedSalons, shouldContinue);
+
+      if (isActiveRequest()) {
+        setSalonDataLoaded(true);
+      }
+    } catch (requestError) {
+      if (isActiveRequest()) {
+        setSalonReadError(
+          requestError.response?.data?.message ||
+            "Could not load salon settings. Please try again."
+        );
+      }
+      throw requestError;
+    } finally {
+      if (isActiveRequest()) {
+        setSalonDataLoading(false);
+      }
+    }
   };
 
   useEffect(() => {
@@ -158,6 +186,10 @@ export default function useBarberSettingsData({
       isMountedRef.current && salonDataRequestTokenRef.current === requestToken;
 
     async function fetchSalonData() {
+      if (!isActiveRequest()) return;
+
+      setSalonDataLoading(true);
+      setSalonDataLoaded(false);
       setSalonReadError("");
 
       try {
@@ -180,12 +212,17 @@ export default function useBarberSettingsData({
             null,
           salonStatus: statusResponse.data?.salonStatus || "none",
         });
+        setSalonDataLoaded(true);
       } catch (requestError) {
         if (isActiveRequest()) {
           setSalonReadError(
             requestError.response?.data?.message ||
               "Could not load salon settings. Please try again."
           );
+        }
+      } finally {
+        if (isActiveRequest()) {
+          setSalonDataLoading(false);
         }
       }
     }
@@ -273,6 +310,8 @@ export default function useBarberSettingsData({
     pendingEntries,
     refreshSalonData,
     salonAdmins,
+    salonDataLoaded,
+    salonDataLoading,
     salonReadError,
     salonStaffById,
     salonStatus,
