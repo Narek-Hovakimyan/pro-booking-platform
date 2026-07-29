@@ -11,6 +11,7 @@ import {
 import { getBarberBookings } from "./bookingReadController.js";
 import { serializeAvailabilityBooking } from "../../utils/bookingUtils.js";
 import Booking from "../../models/Booking.js";
+import MediaObject, { MEDIA_OBJECT_STATES } from "../../models/MediaObject.js";
 import Notification from "../../models/Notification.js";
 import Review from "../../models/Review.js";
 import LoyaltyProgram from "../../models/LoyaltyProgram.js";
@@ -23,6 +24,7 @@ import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import { protect } from "../../middleware/authMiddleware.js";
+import { __bookingReferenceMediaTestHooks } from "../../services/booking/bookingReferenceMediaService.js";
 import {
   barber,
   barberId,
@@ -38,6 +40,8 @@ import {
 } from "./bookingController.testUtils.js";
 
 const originalConsoleError = console.error;
+const originalMediaObjectFind = MediaObject.find;
+const originalMediaObjectFindOne = MediaObject.findOne;
 
 beforeEach(() => {
   Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
@@ -46,6 +50,21 @@ beforeEach(() => {
       lean: async () => [],
     }),
   });
+  MediaObject.find = () => ({
+    sort() {
+      return {
+        async lean() {
+          return [];
+        },
+      };
+    },
+  });
+  MediaObject.findOne = () => ({
+    async lean() {
+      return null;
+    },
+  });
+  __bookingReferenceMediaTestHooks.resetMediaStore();
 });
 
 afterEach(() => {
@@ -63,6 +82,9 @@ afterEach(() => {
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
+  MediaObject.find = originalMediaObjectFind;
+  MediaObject.findOne = originalMediaObjectFindOne;
+  __bookingReferenceMediaTestHooks.resetMediaStore();
   console.error = originalConsoleError;
 });
 
@@ -199,6 +221,99 @@ test("GET reference image by booking client returns 200", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.sentFile, path.join(bookingReferenceDir, imageName));
+});
+
+test("GET reference image streams active MediaStore media for authorized users", async () => {
+  const imageName = "ref-active.png";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  MediaObject.find = () => ({
+    sort() {
+      return {
+        async lean() {
+          return [{ _id: "media-1", status: MEDIA_OBJECT_STATES.ACTIVE }];
+        },
+      };
+    },
+  });
+  MediaObject.findOne = () => ({
+    async lean() {
+      return {
+        _id: "media-1",
+        status: MEDIA_OBJECT_STATES.ACTIVE,
+        mediaClass: "booking-reference",
+        access: "private",
+        storageKey: "active-storage-key.png",
+        contentType: "image/png",
+      };
+    },
+  });
+  __bookingReferenceMediaTestHooks.setMediaStore({
+    async createReadStream(storageKey) {
+      return {
+        on() {
+          return this;
+        },
+        pipe(res) {
+          res.streamedStorageKey = storageKey;
+          return res;
+        },
+      };
+    },
+  });
+  const res = {
+    ...createResponse(),
+    headers: {},
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+  };
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.headers["Content-Type"], "image/png");
+  assert.equal(res.streamedStorageKey, "active-storage-key.png");
+});
+
+test("GET reference image fails closed when a matching media object is inactive", async () => {
+  const imageName = "ref-delete-pending.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  MediaObject.find = () => ({
+    sort() {
+      return {
+        async lean() {
+          return [{ _id: "media-1", status: MEDIA_OBJECT_STATES.DELETE_PENDING }];
+        },
+      };
+    },
+  });
+  const res = createResponse();
+
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Image not found in booking");
 });
 
 test("GET reference image missing on disk returns 404 without leaking path", async () => {

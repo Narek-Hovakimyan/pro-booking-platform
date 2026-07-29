@@ -6,6 +6,7 @@ import {
   MediaStore,
   MediaStoreError,
   isMediaStoreError,
+  resolveMediaStageKeys,
 } from "./mediaStore.js";
 
 describe("MediaStore contract", () => {
@@ -84,5 +85,26 @@ describe("MediaStore contract", () => {
     assert.equal(serialized.includes("C:\\media\\private"), false);
     assert.equal(serialized.includes("/var/lib/media"), false);
     assert.equal(error.cause.self, "[redacted]");
+  });
+
+  test("supports caller-preallocated stage and storage keys", () => {
+    const generated = resolveMediaStageKeys({
+      extension: ".jpg",
+      uuidFactory: () => "11111111-1111-4111-8111-111111111111",
+    });
+    const preserved = resolveMediaStageKeys({
+      storageKey: "22222222-2222-4222-8222-222222222222.webp",
+      stageKey: "22222222-2222-4222-8222-222222222222.stage",
+      extension: ".webp",
+    });
+
+    assert.deepEqual(generated, {
+      storageKey: "11111111-1111-4111-8111-111111111111.jpg",
+      stageKey: "11111111-1111-4111-8111-111111111111.stage",
+    });
+    assert.deepEqual(preserved, {
+      storageKey: "22222222-2222-4222-8222-222222222222.webp",
+      stageKey: "22222222-2222-4222-8222-222222222222.stage",
+    });
   });
 });

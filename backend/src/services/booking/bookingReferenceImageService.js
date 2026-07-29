@@ -1,10 +1,20 @@
 import path from "path";
 import Booking from "../../models/Booking.js";
+import { MEDIA_OBJECT_STATES } from "../../models/MediaObject.js";
 import {
   isValidObjectId,
   sameId,
   canManageBookingPrivateData,
 } from "./bookingControllerHelpers.js";
+import {
+  buildBookingReferenceImagePath,
+  isSafeBookingReferenceImageName,
+} from "./bookingReferenceImageHelpers.js";
+import {
+  encodeMediaBindingToken,
+  isBookingReferencePathOwnedByBooking,
+  resolveBookingReferenceMedia,
+} from "./bookingReferenceMediaService.js";
 
 export const resolveReferenceImageRequest = async ({ bookingId, imageName, user }) => {
   if (!isValidObjectId(bookingId)) {
@@ -12,7 +22,7 @@ export const resolveReferenceImageRequest = async ({ bookingId, imageName, user 
   }
 
   // Prevent path traversal
-  if (imageName.includes("..") || imageName.includes("/") || imageName.includes("\\")) {
+  if (!isSafeBookingReferenceImageName(imageName)) {
     return { status: 400, error: "Invalid image name" };
   }
 
@@ -39,15 +49,36 @@ export const resolveReferenceImageRequest = async ({ bookingId, imageName, user 
     return { status: 403, error: "Not authorized to view these images" };
   }
 
-  // Verify the image is actually listed on this booking
-  const fullPath = `uploads/booking-references/${imageName}`;
-
-  if (!booking.referenceImages || !booking.referenceImages.includes(fullPath)) {
+  if (!isBookingReferencePathOwnedByBooking(booking, imageName)) {
     return { status: 404, error: "Image not found in booking" };
   }
 
-  // Resolve path and verify it's still inside uploads/booking-references
-  const absolutePath = path.resolve(process.cwd(), "uploads", "booking-references", imageName);
+  const mediaObjects = await resolveBookingReferenceMedia({
+    bookingId: booking._id,
+    imageName,
+  });
+  const activeMediaObject = mediaObjects.find(
+    (mediaObject) => mediaObject.status === MEDIA_OBJECT_STATES.ACTIVE
+  );
+
+  if (activeMediaObject) {
+    return {
+      kind: "media",
+      mediaObjectId: encodeMediaBindingToken({
+        mediaObjectId: activeMediaObject._id,
+        bookingId: booking._id,
+        legacyUrl: activeMediaObject.legacyUrl,
+      }),
+      contentType: activeMediaObject.contentType || "",
+    };
+  }
+
+  if (mediaObjects.length > 0) {
+    return { status: 404, error: "Image not found in booking" };
+  }
+
+  const relativePath = buildBookingReferenceImagePath(imageName);
+  const absolutePath = path.resolve(process.cwd(), relativePath);
   const uploadsDir = path.resolve(process.cwd(), "uploads", "booking-references");
   const relativeToDir = path.relative(uploadsDir, absolutePath);
 
@@ -55,5 +86,5 @@ export const resolveReferenceImageRequest = async ({ bookingId, imageName, user 
     return { status: 400, error: "Invalid image path" };
   }
 
-  return { absolutePath };
+  return { kind: "legacy", absolutePath };
 };

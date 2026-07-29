@@ -68,6 +68,23 @@ describe("LocalMediaStore", () => {
     assert.equal((await store.delete(staged.storageKey)).deleted, false);
   });
 
+  test("stages with caller-preallocated UUID keys", async () => {
+    const store = makeStore({ root: await makeTempRoot() });
+    const staged = await store.stage({
+      buffer: Buffer.from("hello"),
+      extension: ".jpg",
+      storageKey: "11111111-1111-4111-8111-111111111111.jpg",
+      stageKey: "11111111-1111-4111-8111-111111111111.stage",
+    });
+
+    assert.deepEqual(staged, {
+      provider: "local",
+      storageKey: "11111111-1111-4111-8111-111111111111.jpg",
+      stageKey: "11111111-1111-4111-8111-111111111111.stage",
+      bytes: 5,
+    });
+  });
+
   test("stages stream bodies with exclusive collision handling", async () => {
     const uuid = "11111111-1111-4111-8111-111111111111";
     const store = makeStore({

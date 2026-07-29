@@ -15,6 +15,8 @@ import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import { handleReferenceImageUploadError } from "../../middleware/uploadMiddleware.js";
+import { __bookingCreateServiceTestHooks } from "../../services/booking/bookingCreateService.js";
+import { MEDIA_STORE_ERROR_CODES, MediaStoreError } from "../../services/media/mediaStore.js";
 import { explicitAllDaysOffMarker } from "../../utils/scheduleUtils.js";
 
 import {
@@ -38,6 +40,18 @@ import {
 
 const originalConsoleError = console.error;
 const originalPaymentProvider = process.env.PAYMENT_PROVIDER;
+const originalFindByIdAndDelete = Booking.findByIdAndDelete;
+const originalStageBookingReferenceMedia =
+  __bookingCreateServiceTestHooks.stageBookingReferenceMedia;
+const originalPromoteBookingReferenceMedia =
+  __bookingCreateServiceTestHooks.promoteBookingReferenceMedia;
+const originalActivateBookingReferenceMedia =
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia;
+const originalCompensateBookingReferenceMediaFailure =
+  __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure;
+const originalSupportsTransactions =
+  __bookingCreateServiceTestHooks.supportsTransactions;
+const originalStartSession = __bookingCreateServiceTestHooks.startSession;
 
 const oldAutoClosedWeeklySchedule = {
   sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
@@ -66,13 +80,108 @@ afterEach(() => {
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
+  Booking.findByIdAndDelete = originalFindByIdAndDelete;
+  __bookingCreateServiceTestHooks.stageBookingReferenceMedia =
+    originalStageBookingReferenceMedia;
+  __bookingCreateServiceTestHooks.promoteBookingReferenceMedia =
+    originalPromoteBookingReferenceMedia;
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia =
+    originalActivateBookingReferenceMedia;
+  __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure =
+    originalCompensateBookingReferenceMediaFailure;
+  __bookingCreateServiceTestHooks.supportsTransactions =
+    originalSupportsTransactions;
+  __bookingCreateServiceTestHooks.startSession = originalStartSession;
   if (originalPaymentProvider === undefined) {
     delete process.env.PAYMENT_PROVIDER;
   } else {
     process.env.PAYMENT_PROVIDER = originalPaymentProvider;
   }
   console.error = originalConsoleError;
+  installReferenceMediaSuccessHooks();
 });
+
+const installReferenceMediaSuccessHooks = () => {
+  __bookingCreateServiceTestHooks.stageBookingReferenceMedia = async ({
+    files = [],
+  } = {}) =>
+    files.map((file, index) => ({
+      fileName: file.filename,
+      legacyUrl: `uploads/booking-references/${file.filename}`,
+      mediaObjectId: `media-${index + 1}`,
+      storageKey: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}.jpg`,
+      stageKey: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}.stage`,
+    }));
+  __bookingCreateServiceTestHooks.promoteBookingReferenceMedia = async ({
+    media = [],
+  } = {}) =>
+    media.map((entry) => ({
+      ...entry,
+      stageKey: "",
+    }));
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia = async ({
+    media = [],
+  } = {}) => media;
+  __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure = async () => {};
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => false;
+  __bookingCreateServiceTestHooks.startSession = async () => null;
+};
+
+installReferenceMediaSuccessHooks();
+
+const createTransactionSession = (withTransaction) => ({
+  async withTransaction(callback) {
+    return withTransaction ? withTransaction(callback) : callback();
+  },
+  async endSession() {},
+});
+
+const installTransactionalBookingCreate = ({
+  createdBookings,
+  withTransaction,
+  onFindOneAndUpdate,
+} = {}) => {
+  let pendingBookings = new Map();
+  const commitPendingBookings = () => {
+    for (const booking of pendingBookings.values()) {
+      const index = createdBookings.findIndex(
+        (entry) => String(entry._id) === String(booking._id)
+      );
+      if (index >= 0) {
+        createdBookings[index] = booking;
+      } else {
+        createdBookings.push(booking);
+      }
+    }
+  };
+  const session = createTransactionSession(async (callback) => {
+    const executeAttempt = async () => {
+      pendingBookings = new Map();
+      return callback();
+    };
+    const result = withTransaction
+      ? await withTransaction(executeAttempt)
+      : await executeAttempt();
+    commitPendingBookings();
+    return result;
+  });
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => true;
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  Booking.findOneAndUpdate = async (query, update, options = {}) => {
+    onFindOneAndUpdate?.(options.session);
+    const key = String(query._id);
+    const existing =
+      pendingBookings.get(key) ||
+      createdBookings.find(
+      (booking) => String(booking._id) === String(query._id)
+      );
+    if (existing) return existing;
+    const booking = { ...update.$setOnInsert, _id: query._id };
+    pendingBookings.set(key, booking);
+    return booking;
+  };
+  return session;
+};
 
 test("legacy booking schedule lookup excludes a personal null-salon schedule", async () => {
   let query;
@@ -1580,6 +1689,7 @@ test("simultaneous duplicate booking attempts create only one booking", async ()
 test("booking create with referenceImages saves internal upload paths", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
 
   const res = createResponse();
 
@@ -1669,8 +1779,9 @@ test("booking create cleans uploaded reference files on database error", async (
   const filePath = createReferenceUploadFile(filename);
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
   console.error = () => {};
-  Booking.create = async () => {
+  Booking.findOneAndUpdate = async () => {
     throw new Error("database unavailable");
   };
 
@@ -1696,6 +1807,320 @@ test("booking create cleans uploaded reference files on database error", async (
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not create booking");
   assert.equal(fs.existsSync(filePath), false);
+});
+
+test("booking create returns 503 and compensates promoted media when binding fails", async () => {
+  const filename = "ref-activation-failure.jpg";
+  const filePath = createReferenceUploadFile(filename);
+  const createdBookings = [];
+  let compensated = null;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia = async () => {
+    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.STORAGE_UNAVAILABLE, {
+      operation: "promote",
+    });
+  };
+  __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure = async (args) => {
+    compensated = args;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.message, "Media storage is unavailable");
+  assert.equal(createdBookings.length, 0);
+  assert.equal(fs.existsSync(filePath), false);
+  assert.equal(compensated.media.length, 1);
+  assert.equal(compensated.promotedMedia.length, 1);
+});
+
+test("booking create retries cleanly after a media activation failure", async () => {
+  const firstFilename = "ref-retry-first.jpg";
+  const secondFilename = "ref-retry-second.jpg";
+  createReferenceUploadFile(firstFilename);
+  createReferenceUploadFile(secondFilename);
+  const createdBookings = [];
+  let attempts = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia = async ({
+    media = [],
+  } = {}) => {
+    attempts += 1;
+    if (attempts === 1) {
+      throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.STORAGE_UNAVAILABLE, {
+        operation: "promote",
+      });
+    }
+    return media;
+  };
+
+  const firstRes = createResponse();
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename: firstFilename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    firstRes
+  );
+
+  const secondRes = createResponse();
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename: secondFilename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "11:30",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    secondRes
+  );
+
+  assert.equal(firstRes.statusCode, 503);
+  assert.equal(secondRes.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+});
+
+test("booking create with new reference media fails closed when transactions are unavailable", async () => {
+  const filename = "ref-no-transaction.jpg";
+  createReferenceUploadFile(filename);
+  const createdBookings = [];
+  let stageAttempts = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => false;
+  __bookingCreateServiceTestHooks.startSession = async () => null;
+  __bookingCreateServiceTestHooks.stageBookingReferenceMedia = async () => {
+    stageAttempts += 1;
+    return [];
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.message, "Booking reference media requires transaction support");
+  assert.equal(createdBookings.length, 0);
+  assert.equal(stageAttempts, 0);
+});
+
+test("media-free booking create preserves the original non-transaction path", async () => {
+  const createdBookings = [];
+  let startSessionAttempts = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => true;
+  __bookingCreateServiceTestHooks.startSession = async () => {
+    startSessionAttempts += 1;
+    return createTransactionSession();
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(startSessionAttempts, 0);
+});
+
+test("duplicate transaction callback execution does not create duplicate bookings", async () => {
+  const filename = "ref-duplicate-callback.jpg";
+  createReferenceUploadFile(filename);
+  const createdBookings = [];
+  let activationAttempts = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({
+    createdBookings,
+    withTransaction: async (callback) => {
+      await callback();
+      return callback();
+    },
+  });
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia = async ({ media = [] } = {}) => {
+    activationAttempts += 1;
+    return media;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(activationAttempts, 2);
+});
+
+test("transaction-capable booking create uses a Mongo session for booking and media activation", async () => {
+  const filename = "ref-transaction.jpg";
+  createReferenceUploadFile(filename);
+  const createdBookings = [];
+  const session = {
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  };
+  let bookingCreateSession = null;
+  let mediaActivationSession = null;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => true;
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  Booking.findOneAndUpdate = async (query, update, options = {}) => {
+    bookingCreateSession = options.session;
+    const booking = { ...update.$setOnInsert, _id: query._id };
+    createdBookings.push(booking);
+    return booking;
+  };
+  __bookingCreateServiceTestHooks.activateBookingReferenceMedia = async ({
+    media = [],
+    session: activationSession,
+  } = {}) => {
+    mediaActivationSession = activationSession;
+    return media;
+  };
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(bookingCreateSession, session);
+  assert.equal(mediaActivationSession, session);
+});
+
+test("transaction rollback compensates promoted booking reference media before returning 500", async () => {
+  const filename = "ref-transaction-rollback.jpg";
+  createReferenceUploadFile(filename);
+  const createdBookings = [];
+  let compensated = null;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({
+    createdBookings,
+    withTransaction: async (callback) => {
+      await callback();
+      throw new Error("transaction commit failed");
+    },
+  });
+  __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure = async (args) => {
+    compensated = args;
+  };
+
+  const res = createResponse();
+  console.error = () => {};
+
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create booking");
+  assert.equal(Array.isArray(compensated.promotedMedia), true);
+  assert.equal(compensated.promotedMedia.length, 1);
 });
 
 test("createBooking validation error returns 400", async () => {
@@ -1877,6 +2302,7 @@ test("client-provided consent.acceptedAt is ignored and replaced server-side", a
 test("existing reference image create tests still pass after consultation/consent changes", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
 
   const res = createResponse();
 
@@ -2097,6 +2523,7 @@ test("contract: consent without accepted defaults to false", async () => {
 test("contract: reference images + full consultation + consent still works", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
 
   const res = createResponse();
 
@@ -2154,6 +2581,7 @@ test("contract: reference images + full consultation + consent still works", asy
 test("FormData: JSON-stringified consultation + consent + referenceImages all persist correctly", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
 
   const res = createResponse();
 

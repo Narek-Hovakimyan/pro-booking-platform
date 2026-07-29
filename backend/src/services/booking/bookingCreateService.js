@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
 import { calculateDeposit } from "../../controllers/bookings/depositSettingsController.js";
@@ -34,11 +36,106 @@ import {
   normalizeScopedBookingReadinessIds,
   resolveScopedBookingReadiness,
 } from "./bookingReadinessService.js";
+import {
+  activateBookingReferenceMedia,
+  compensateBookingReferenceMediaFailure,
+  promoteBookingReferenceMedia,
+  stageBookingReferenceMedia,
+} from "./bookingReferenceMediaService.js";
+import { isMediaStoreError } from "../media/mediaStore.js";
+
+const TRANSACTION_CAPABLE_TOPOLOGIES = new Set([
+  "ReplicaSetWithPrimary",
+  "Sharded",
+  "LoadBalanced",
+]);
+
+const getLogicalSessionTimeoutMinutes = (description) => {
+  if (Number.isInteger(description?.logicalSessionTimeoutMinutes)) {
+    return description.logicalSessionTimeoutMinutes;
+  }
+
+  if (!description?.servers?.values) return null;
+
+  let timeout = null;
+  for (const server of description.servers.values()) {
+    if (!Number.isInteger(server?.logicalSessionTimeoutMinutes)) continue;
+    timeout =
+      timeout == null
+        ? server.logicalSessionTimeoutMinutes
+        : Math.min(timeout, server.logicalSessionTimeoutMinutes);
+  }
+  return timeout;
+};
+
+const connectionSupportsTransactions = (connection = mongoose.connection) => {
+  if (
+    connection?.readyState !== 1 ||
+    typeof connection?.startSession !== "function"
+  ) {
+    return false;
+  }
+
+  const description = connection?.client?.topology?.description;
+  if (!description?.type) return false;
+  if (!TRANSACTION_CAPABLE_TOPOLOGIES.has(description.type)) return false;
+
+  return Number.isInteger(getLogicalSessionTimeoutMinutes(description));
+};
+
+const bookingCreateHooks = {
+  activateBookingReferenceMedia,
+  compensateBookingReferenceMediaFailure,
+  promoteBookingReferenceMedia,
+  stageBookingReferenceMedia,
+  supportsTransactions() {
+    return connectionSupportsTransactions();
+  },
+  async startSession() {
+    if (!connectionSupportsTransactions()) {
+      return null;
+    }
+    const session = await mongoose.connection.startSession();
+    return typeof session?.withTransaction === "function" ? session : null;
+  },
+};
+
+export const __bookingCreateServiceTestHooks = bookingCreateHooks;
+
+const createBookingTransactionRequiredResponse = () => ({
+  status: 503,
+  body: {
+    message: "Booking reference media requires transaction support",
+  },
+});
+
+const createBookingRecord = async ({ payload, session }) => {
+  if (!session) {
+    return Booking.create(payload);
+  }
+
+  if (typeof Booking.findOneAndUpdate === "function" && payload?._id) {
+    return Booking.findOneAndUpdate(
+      { _id: payload._id },
+      { $setOnInsert: payload },
+      {
+        new: true,
+        upsert: true,
+        session,
+        setDefaultsOnInsert: true,
+      }
+    );
+  }
+
+  const created = await Booking.create([payload], { session });
+  return Array.isArray(created) ? created[0] : created;
+};
 
 export const createBookingService = async ({
   body,
   user,
   referenceImages,
+  referenceUploads = [],
   cleanupReferenceImagesOnError,
 }) => {
   const cleanup = cleanupReferenceImagesOnError;
@@ -175,6 +272,31 @@ export const createBookingService = async ({
     };
   }
 
+  const stageableReferenceUploads = referenceUploads.filter(
+    (file) => Boolean(file?.filename || Buffer.isBuffer(file?.buffer))
+  );
+  const hasNewReferenceMedia = stageableReferenceUploads.length > 0;
+  if (hasNewReferenceMedia && !(await bookingCreateHooks.supportsTransactions())) {
+    cleanup();
+    return createBookingTransactionRequiredResponse();
+  }
+  let stagedReferenceMedia = [];
+  try {
+    stagedReferenceMedia = await bookingCreateHooks.stageBookingReferenceMedia({
+      files: stageableReferenceUploads,
+    });
+    cleanup();
+  } catch (error) {
+    cleanup();
+    if (isMediaStoreError(error)) {
+      return {
+        status: error.status || 503,
+        body: { message: error.message || "Could not stage booking reference media" },
+      };
+    }
+    throw error;
+  }
+
   const lockKey = getBookingCreationLockKey({ barberId, bookingDate });
   const createResult = await withBookingCreationLock(lockKey, async () => {
     const latestSlotValidation = await validateBookingSlot({
@@ -190,7 +312,13 @@ export const createBookingService = async ({
     });
 
     if (latestSlotValidation.message) {
-      return { message: latestSlotValidation.message };
+      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
+        media: stagedReferenceMedia,
+      }).catch(() => {});
+      return {
+        status: 400,
+        body: { message: latestSlotValidation.message },
+      };
     }
 
     // ── Voucher claim ──
@@ -209,7 +337,14 @@ export const createBookingService = async ({
         claimVoucher: Boolean(rawVoucherCode),
       });
     } catch (pricingError) {
-      return { message: pricingError.message, cleanup: true };
+      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
+        media: stagedReferenceMedia,
+        error: pricingError,
+      }).catch(() => {});
+      return {
+        status: 400,
+        body: { message: pricingError.message },
+      };
     }
     const voucherClaim = pricing.voucherClaim;
     const loyaltyDiscount = pricing.loyaltyDiscount;
@@ -231,6 +366,9 @@ export const createBookingService = async ({
     const depositStatus = depositRequired ? "pending" : "not_required";
 
     let booking;
+    let session = null;
+    let promotedReferenceMedia = [];
+    const bookingId = hasNewReferenceMedia ? new mongoose.Types.ObjectId() : null;
     try {
       const payload = buildBookingCreatePayload({
         barberId,
@@ -263,16 +401,61 @@ export const createBookingService = async ({
         rawVoucherCode,
         pricing,
       });
-      booking = await Booking.create(payload);
+      if (bookingId) {
+        payload._id = bookingId;
+      }
+
+      if (hasNewReferenceMedia) {
+        session = await bookingCreateHooks.startSession();
+        if (!session) {
+          throw Object.assign(new Error("Booking reference media requires transaction support"), {
+            statusCode: 503,
+            transactionRequired: true,
+          });
+        }
+        promotedReferenceMedia = await bookingCreateHooks.promoteBookingReferenceMedia({
+          media: stagedReferenceMedia,
+        });
+        await session.withTransaction(async () => {
+          booking = await createBookingRecord({ payload, session });
+          await bookingCreateHooks.activateBookingReferenceMedia({
+            media: stagedReferenceMedia,
+            bookingId: booking._id,
+            session,
+          });
+        });
+      } else {
+        booking = await Booking.create(payload);
+      }
     } catch (createErr) {
-      // If voucher was claimed but Booking.create failed, roll back the claim
       if (voucherClaim) {
         await rollbackVoucherClaim(voucherClaim.voucher._id).catch(() => {});
       }
-      throw createErr; // rethrow so outer catch handles it
+      if (booking?._id && !session && !hasNewReferenceMedia) {
+        await Booking.findByIdAndDelete?.(booking._id).catch(() => {});
+      }
+      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
+        media: stagedReferenceMedia,
+        promotedMedia: promotedReferenceMedia.length
+          ? promotedReferenceMedia
+          : createErr?.promotedMedia || [],
+        bookingId: booking?._id || bookingId || null,
+        error: createErr,
+      }).catch(() => {});
+      if (isMediaStoreError(createErr)) {
+        return {
+          status: createErr.status || 503,
+          body: { message: createErr.message || "Could not promote booking reference media" },
+        };
+      }
+      if (createErr?.transactionRequired) {
+        return createBookingTransactionRequiredResponse();
+      }
+      throw createErr;
+    } finally {
+      await session?.endSession?.().catch(() => {});
     }
 
-    // Record redemption after successful booking creation
     if (voucherClaim) {
       await recordVoucherRedemption(voucherClaim.voucher._id, booking._id);
     }
@@ -294,16 +477,11 @@ export const createBookingService = async ({
       }
     }
 
-    return { booking, payment };
+    return { booking, payment, status: 201 };
   });
 
-  if (createResult.message) {
-    // Lock-level failure — cleanup uploaded files
-    cleanup();
-    return {
-      status: 400,
-      body: { message: createResult.message },
-    };
+  if (createResult?.body) {
+    return createResult;
   }
 
   const { booking, payment } = createResult;

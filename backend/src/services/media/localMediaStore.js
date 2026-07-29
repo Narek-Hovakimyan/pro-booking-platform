@@ -5,14 +5,12 @@ import path from "path";
 
 import {
   MEDIA_STORE_ERROR_CODES,
+  assertMatchingMediaKeys,
+  assertMediaStorageKey,
   MediaStore,
   MediaStoreError,
+  resolveMediaStageKeys,
 } from "./mediaStore.js";
-
-const UUID_PATTERN =
-  "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
-const STORAGE_KEY_PATTERN = new RegExp("^" + UUID_PATTERN + "(?:\\.[a-z0-9]{1,16})?$");
-const STAGE_KEY_PATTERN = new RegExp("^" + UUID_PATTERN + "\\.stage$");
 const UNAVAILABLE_CODES = new Set(["EACCES", "EISDIR", "ENOENT", "ENOSPC", "ENOTDIR", "EROFS"]);
 const DIRECTORY_FLAGS =
   fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
@@ -28,30 +26,6 @@ const sameIdentity = (left, right) => left.dev === right.dev && left.ino === rig
 const contained = (base, target) => {
   const relative = path.relative(base, target);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-};
-
-const normalizeExtension = (extension = "") => {
-  const normalized = String(extension || "").trim().toLowerCase();
-  if (!normalized) return "";
-  const value = normalized.startsWith(".") ? normalized : "." + normalized;
-  if (!/^\.[a-z0-9]{1,16}$/.test(value)) {
-    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation: "stage" });
-  }
-  return value;
-};
-
-const assertKey = (key, pattern, operation) => {
-  if (
-    typeof key !== "string" ||
-    !key ||
-    path.isAbsolute(key) ||
-    key.includes("/") ||
-    key.includes("\\") ||
-    !pattern.test(key)
-  ) {
-    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
-  }
-  return key;
 };
 
 const mapFsError = (error, operation, fallbackCode) => {
@@ -90,11 +64,15 @@ export class LocalMediaStore extends MediaStore {
     this.procFdRoot = "/proc/self/fd";
   }
 
-  async stage({ buffer, stream, extension = "" } = {}) {
+  async stage({ buffer, stream, extension = "", storageKey, stageKey } = {}) {
     const operation = "stage";
-    const storageKey = this.uuidFactory() + normalizeExtension(extension);
-    assertKey(storageKey, STORAGE_KEY_PATTERN, operation);
-    const stageKey = storageKey.slice(0, 36) + ".stage";
+    ({ storageKey, stageKey } = resolveMediaStageKeys({
+      extension,
+      storageKey,
+      stageKey,
+      uuidFactory: this.uuidFactory,
+      operation,
+    }));
     let handle;
     let roots;
     let created = false;
@@ -137,11 +115,7 @@ export class LocalMediaStore extends MediaStore {
     let published = false;
 
     try {
-      assertKey(stageKey, STAGE_KEY_PATTERN, operation);
-      assertKey(storageKey, STORAGE_KEY_PATTERN, operation);
-      if (stageKey.slice(0, 36) !== storageKey.split(".")[0]) {
-        throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
-      }
+      ({ stageKey, storageKey } = assertMatchingMediaKeys({ stageKey, storageKey }, operation));
 
       roots = await this.#roots(operation);
       stage = await this.#openExisting(roots.staging, stageKey);
@@ -182,7 +156,7 @@ export class LocalMediaStore extends MediaStore {
     const operation = "createReadStream";
     let handle;
     try {
-      assertKey(storageKey, STORAGE_KEY_PATTERN, operation);
+      storageKey = assertMediaStorageKey(storageKey, operation);
       const roots = await this.#roots(operation);
       handle = await this.#openExisting(roots.active, storageKey);
       await this.#regularFile(handle, operation);
@@ -205,7 +179,7 @@ export class LocalMediaStore extends MediaStore {
     let tombstoned = false;
 
     try {
-      assertKey(storageKey, STORAGE_KEY_PATTERN, operation);
+      storageKey = assertMediaStorageKey(storageKey, operation);
       roots = await this.#roots(operation);
       handle = await this.#openExisting(roots.active, storageKey, true);
       if (!handle) return { provider: this.provider, storageKey, deleted: false };

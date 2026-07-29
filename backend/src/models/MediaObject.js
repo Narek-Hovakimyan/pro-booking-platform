@@ -10,6 +10,16 @@ export const MEDIA_OBJECT_STATES = Object.freeze({
 
 const states = Object.values(MEDIA_OBJECT_STATES);
 
+export const buildMediaLifecycleTimestamps = (status, now = new Date()) => {
+  if (status === MEDIA_OBJECT_STATES.ACTIVE) return { activatedAt: now };
+  if (status === MEDIA_OBJECT_STATES.DELETE_PENDING) {
+    return { deletePendingAt: now };
+  }
+  if (status === MEDIA_OBJECT_STATES.DELETED) return { deletedAt: now };
+  if (status === MEDIA_OBJECT_STATES.FAILED) return { failedAt: now };
+  return {};
+};
+
 const storageKeyValidator = {
   validator(value) {
     return (
@@ -24,6 +34,18 @@ const storageKeyValidator = {
     );
   },
   message: "storageKey must be an opaque media storage key",
+};
+
+const stageKeyValidator = {
+  validator(value) {
+    return (
+      value === "" ||
+      (typeof value === "string" &&
+        value.trim() === value &&
+        /^[0-9a-f-]{36}\.stage$/.test(value))
+    );
+  },
+  message: "stageKey must identify a staged media object",
 };
 
 const mediaObjectSchema = new mongoose.Schema(
@@ -41,6 +63,12 @@ const mediaObjectSchema = new mongoose.Schema(
       trim: true,
       immutable: true,
       validate: storageKeyValidator,
+    },
+    stageKey: {
+      type: String,
+      default: "",
+      trim: true,
+      validate: stageKeyValidator,
     },
     status: {
       type: String,
@@ -77,6 +105,31 @@ const mediaObjectSchema = new mongoose.Schema(
       default: "",
       trim: true,
       maxlength: 1024,
+    },
+    mediaClass: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 64,
+      index: true,
+    },
+    access: {
+      type: String,
+      enum: ["private", "public"],
+      default: "private",
+      index: true,
+    },
+    ownerModel: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 64,
+      index: true,
+    },
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
     },
     stagedAt: {
       type: Date,
@@ -120,21 +173,15 @@ mediaObjectSchema.index(
 );
 mediaObjectSchema.index({ status: 1, createdAt: 1 });
 mediaObjectSchema.index({ deletePendingAt: 1 });
+mediaObjectSchema.index({ ownerModel: 1, ownerId: 1, mediaClass: 1, legacyUrl: 1 });
 
 mediaObjectSchema.pre("validate", function setLifecycleTimestamps() {
   const now = new Date();
   if (!this.stagedAt) this.stagedAt = now;
-  if (this.status === MEDIA_OBJECT_STATES.ACTIVE && !this.activatedAt) {
-    this.activatedAt = now;
-  }
-  if (this.status === MEDIA_OBJECT_STATES.DELETE_PENDING && !this.deletePendingAt) {
-    this.deletePendingAt = now;
-  }
-  if (this.status === MEDIA_OBJECT_STATES.DELETED && !this.deletedAt) {
-    this.deletedAt = now;
-  }
-  if (this.status === MEDIA_OBJECT_STATES.FAILED && !this.failedAt) {
-    this.failedAt = now;
+  for (const [field, value] of Object.entries(
+    buildMediaLifecycleTimestamps(this.status, now)
+  )) {
+    if (!this[field]) this[field] = value;
   }
 });
 

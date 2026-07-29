@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import Booking from "../../models/Booking.js";
+import MediaObject from "../../models/MediaObject.js";
 import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import { resolveReferenceImageRequest } from "./bookingReferenceImageService.js";
 import { updateBookingTreatmentRecord } from "./bookingTreatmentRecordService.js";
 
 const originalBookingFindById = Booking.findById;
+const originalMediaObjectFind = MediaObject.find;
 const originalSalonFindById = Salon.findById;
 const originalUserFindById = User.findById;
 
@@ -20,6 +22,7 @@ const imageName = "private-reference.jpg";
 
 afterEach(() => {
   Booking.findById = originalBookingFindById;
+  MediaObject.find = originalMediaObjectFind;
   Salon.findById = originalSalonFindById;
   User.findById = originalUserFindById;
 });
@@ -41,6 +44,15 @@ const createBooking = (overrides = {}) => ({
 
 const mockBooking = (booking) => {
   Booking.findById = async () => booking;
+  MediaObject.find = () => ({
+    sort() {
+      return {
+        async lean() {
+          return [];
+        },
+      };
+    },
+  });
 };
 
 const mockSalonOwner = () => {
@@ -248,6 +260,57 @@ test("assigned barber and booking client reference-image access remain valid", a
 
   assert.equal(barberResult.absolutePath.endsWith(imageName), true);
   assert.equal(clientResult.absolutePath.endsWith(imageName), true);
+});
+
+test("authorized media-backed reference access returns an exact binding token", async () => {
+  mockBooking(createBooking());
+  mockSalonOwner();
+  mockBarberMembership({ relationshipType: "staff", relationshipStatus: "accepted" });
+  MediaObject.find = () => ({
+    sort() {
+      return {
+        async lean() {
+          return [
+            {
+              _id: "media-1",
+              status: "active",
+              legacyUrl: `uploads/booking-references/${imageName}`,
+              contentType: "image/jpeg",
+            },
+          ];
+        },
+      };
+    },
+  });
+
+  const result = await resolveReferenceImageRequest({
+    bookingId,
+    imageName,
+    user: { _id: clientId, role: "client" },
+  });
+
+  assert.equal(result.kind, "media");
+  assert.equal(result.mediaObjectId.startsWith("booking-reference-media:"), true);
+  assert.equal(result.absolutePath, undefined);
+});
+
+test("legacy leading-slash booking reference paths remain readable after authorization", async () => {
+  mockBooking(
+    createBooking({
+      referenceImages: [`/uploads/booking-references/${imageName}`],
+    })
+  );
+  mockSalonOwner();
+  mockBarberMembership({ relationshipType: "staff", relationshipStatus: "accepted" });
+
+  const result = await resolveReferenceImageRequest({
+    bookingId,
+    imageName,
+    user: { _id: ownerId, role: "barber" },
+  });
+
+  assert.equal(result.kind, "legacy");
+  assert.equal(result.absolutePath.endsWith(imageName), true);
 });
 
 test("assigned barber treatment mutation remains valid for chair-renter booking", async () => {

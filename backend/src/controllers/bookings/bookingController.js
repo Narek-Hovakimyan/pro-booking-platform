@@ -5,6 +5,7 @@ import {
   sendControllerError,
 } from "../../services/booking/bookingControllerHelpers.js";
 import {
+  collectReferenceImageUploads,
   collectReferenceImagePaths,
   cleanupReferenceImages,
 } from "../../services/booking/bookingReferenceImageHelpers.js";
@@ -13,6 +14,7 @@ import { delayBookingService } from "../../services/booking/bookingDelayService.
 import { createBookingService } from "../../services/booking/bookingCreateService.js";
 import { executeBookingPriceQuote } from "../../services/booking/bookingQuoteService.js";
 import { resolveReferenceImageRequest } from "../../services/booking/bookingReferenceImageService.js";
+import { openBookingReferenceMediaStream } from "../../services/booking/bookingReferenceMediaService.js";
 import Notification from "../../models/Notification.js";
 import Review from "../../models/Review.js";
 import LoyaltyProgram from "../../models/LoyaltyProgram.js";
@@ -73,6 +75,7 @@ export const __bookingTestHooks = {
 
 export const createBooking = async (req, res) => {
   // Capture reference image paths before any validation returns
+  const referenceUploads = collectReferenceImageUploads(req);
   const referenceImages = collectReferenceImagePaths(req);
 
   const cleanup = () => cleanupReferenceImages(referenceImages);
@@ -82,6 +85,7 @@ export const createBooking = async (req, res) => {
       body: req.body,
       user: req.user,
       referenceImages,
+      referenceUploads,
       cleanupReferenceImagesOnError: cleanup,
     });
 
@@ -556,6 +560,30 @@ export const getReferenceImage = async (req, res, next) => {
 
     if (result.error) {
       return res.status(result.status).json({ message: result.error });
+    }
+
+    if (result.kind === "media") {
+      const media = await openBookingReferenceMediaStream({
+        mediaObjectId: result.mediaObjectId,
+      });
+
+      if (!media) {
+        return res.status(404).json({ message: "Image not found in booking" });
+      }
+
+      if (media.contentType) {
+        res.setHeader("Content-Type", media.contentType);
+      }
+
+      media.stream.on("error", (error) => {
+        console.error("Could not serve reference image", error);
+        if (!res.headersSent) {
+          res.status(500).json({ message: "Could not serve reference image" });
+        }
+      });
+
+      media.stream.pipe(res);
+      return res;
     }
 
     return res.sendFile(result.absolutePath, (error) => {

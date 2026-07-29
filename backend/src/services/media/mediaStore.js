@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+
 export const MEDIA_STORE_ERROR_CODES = Object.freeze({
   INVALID_KEY: "INVALID_KEY",
   KEY_COLLISION: "KEY_COLLISION",
@@ -47,6 +49,88 @@ const DEFAULT_STATUSES = Object.freeze({
   [MEDIA_STORE_ERROR_CODES.UNSUPPORTED_SAFETY]: 503,
   [MEDIA_STORE_ERROR_CODES.SYMLINK_DETECTED]: 400,
 });
+
+const UUID_PATTERN =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+export const MEDIA_STORE_STORAGE_KEY_PATTERN = new RegExp(
+  "^" + UUID_PATTERN + "(?:\\.[a-z0-9]{1,16})?$"
+);
+export const MEDIA_STORE_STAGE_KEY_PATTERN = new RegExp(
+  "^" + UUID_PATTERN + "\\.stage$"
+);
+
+const assertKeyShape = (key, pattern, operation) => {
+  if (
+    typeof key !== "string" ||
+    !key ||
+    key.trim() !== key ||
+    key.includes("/") ||
+    key.includes("\\") ||
+    key.includes("..") ||
+    /[\u0000-\u001f]/.test(key) ||
+    !pattern.test(key)
+  ) {
+    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
+  }
+  return key;
+};
+
+export const normalizeMediaStoreExtension = (extension = "", operation = "stage") => {
+  const normalized = String(extension || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const value = normalized.startsWith(".") ? normalized : "." + normalized;
+  if (!/^\.[a-z0-9]{1,16}$/.test(value)) {
+    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
+  }
+  return value;
+};
+
+export const assertMediaStorageKey = (key, operation = "storage") =>
+  assertKeyShape(key, MEDIA_STORE_STORAGE_KEY_PATTERN, operation);
+
+export const assertMediaStageKey = (key, operation = "storage") =>
+  assertKeyShape(key, MEDIA_STORE_STAGE_KEY_PATTERN, operation);
+
+export const assertMatchingMediaKeys = (
+  { storageKey, stageKey } = {},
+  operation = "storage"
+) => {
+  const safeStorageKey = assertMediaStorageKey(storageKey, operation);
+  const safeStageKey = assertMediaStageKey(stageKey, operation);
+
+  if (safeStageKey.slice(0, 36) !== safeStorageKey.split(".")[0]) {
+    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
+  }
+
+  return { storageKey: safeStorageKey, stageKey: safeStageKey };
+};
+
+export const resolveMediaStageKeys = ({
+  storageKey,
+  stageKey,
+  extension = "",
+  uuidFactory = randomUUID,
+  operation = "stage",
+} = {}) => {
+  const normalizedExtension = normalizeMediaStoreExtension(extension, operation);
+
+  if (storageKey == null && stageKey == null) {
+    const uuid = String(uuidFactory());
+    if (!MEDIA_STORE_STAGE_KEY_PATTERN.test(`${uuid}.stage`)) {
+      throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
+    }
+    return {
+      storageKey: `${uuid}${normalizedExtension}`,
+      stageKey: `${uuid}.stage`,
+    };
+  }
+
+  const resolved = assertMatchingMediaKeys({ storageKey, stageKey }, operation);
+  if (normalizedExtension && resolved.storageKey.slice(36) !== normalizedExtension) {
+    throw new MediaStoreError(MEDIA_STORE_ERROR_CODES.INVALID_KEY, { operation });
+  }
+  return resolved;
+};
 
 const redactString = (value) => String(value).replace(ABSOLUTE_PATH_PATTERN, "[redacted]");
 

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import MediaObject, { MEDIA_OBJECT_STATES } from "./MediaObject.js";
+import MediaObject, {
+  buildMediaLifecycleTimestamps,
+  MEDIA_OBJECT_STATES,
+} from "./MediaObject.js";
 
 describe("MediaObject", () => {
   test("declares immutable unique storage keys", () => {
@@ -18,6 +21,7 @@ describe("MediaObject", () => {
   test("defaults to staged lifecycle metadata", async () => {
     const media = new MediaObject({
       storageKey: "11111111-1111-4111-8111-111111111111.jpg",
+      stageKey: "11111111-1111-4111-8111-111111111111.stage",
       contentType: "image/jpeg",
       byteSize: 7,
     });
@@ -26,6 +30,7 @@ describe("MediaObject", () => {
 
     assert.equal(media.provider, "local");
     assert.equal(media.status, MEDIA_OBJECT_STATES.STAGED);
+    assert.equal(media.access, "private");
     assert.ok(media.stagedAt instanceof Date);
   });
 
@@ -75,6 +80,43 @@ describe("MediaObject", () => {
     assert.ok(failed.failedAt instanceof Date);
   });
 
+  test("builds lifecycle timestamp patches for query-based status transitions", () => {
+    const now = new Date("2026-07-29T12:00:00.000Z");
+
+    assert.deepEqual(buildMediaLifecycleTimestamps(MEDIA_OBJECT_STATES.STAGED, now), {});
+    assert.deepEqual(buildMediaLifecycleTimestamps(MEDIA_OBJECT_STATES.ACTIVE, now), {
+      activatedAt: now,
+    });
+    assert.deepEqual(
+      buildMediaLifecycleTimestamps(MEDIA_OBJECT_STATES.DELETE_PENDING, now),
+      { deletePendingAt: now }
+    );
+    assert.deepEqual(buildMediaLifecycleTimestamps(MEDIA_OBJECT_STATES.DELETED, now), {
+      deletedAt: now,
+    });
+    assert.deepEqual(buildMediaLifecycleTimestamps(MEDIA_OBJECT_STATES.FAILED, now), {
+      failedAt: now,
+    });
+  });
+
+  test("accepts optional booking binding metadata for private media", async () => {
+    const media = new MediaObject({
+      storageKey: "12121212-1212-4121-8121-121212121212.jpg",
+      stageKey: "12121212-1212-4121-8121-121212121212.stage",
+      mediaClass: "booking-reference",
+      access: "private",
+      ownerModel: "Booking",
+      ownerId: "64b000000000000000000111",
+      legacyUrl: "uploads/booking-references/ref-a.jpg",
+    });
+
+    await media.validate();
+
+    assert.equal(media.mediaClass, "booking-reference");
+    assert.equal(media.ownerModel, "Booking");
+    assert.equal(String(media.ownerId), "64b000000000000000000111");
+  });
+
   test("accepts every supported lifecycle state", async () => {
     await Promise.all(
       Object.values(MEDIA_OBJECT_STATES).map((status, index) =>
@@ -116,6 +158,16 @@ describe("MediaObject", () => {
     await assert.rejects(
       () => new MediaObject({
         storageKey: "../escape.jpg",
+      }).validate(),
+      /validation/i
+    );
+  });
+
+  test("rejects invalid stage keys", async () => {
+    await assert.rejects(
+      () => new MediaObject({
+        storageKey: "cccccccc-cccc-4ccc-8ccc-cccccccccccc.jpg",
+        stageKey: "../escape.stage",
       }).validate(),
       /validation/i
     );
