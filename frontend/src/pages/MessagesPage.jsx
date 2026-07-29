@@ -19,11 +19,11 @@ export default function MessagesPage() {
   const [selectedUser, setSelectedUser] = useState(null);
   const selectedUserRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const [messages, setMessages] = useState(() => {
-    if (!currentUserId || !userId) return [];
-
-    return messagesCacheByConversationKey.get(getConversationKey(currentUserId, userId)) || [];
-  });
+  const [messages, setMessages] = useState(() => (
+    !currentUserId || !userId
+      ? []
+      : messagesCacheByConversationKey.get(getConversationKey(currentUserId, userId)) || []
+  ));
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isContactsLoading, setIsContactsLoading] = useState(true);
@@ -34,10 +34,67 @@ export default function MessagesPage() {
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [showChatOnMobile, setShowChatOnMobile] = useState(Boolean(userId));
+  const currentUserIdRef = useRef(currentUserId);
+  const accountGenerationRef = useRef(0);
+  const contactsRequestIdRef = useRef(0);
+  const conversationRequestRef = useRef({ contactId: null, requestId: 0 });
+
+  const isCurrentAccount = useCallback((snapshot) => Boolean(snapshot)
+    && snapshot.accountGeneration === accountGenerationRef.current
+    && snapshot.accountId === currentUserIdRef.current, []);
+
+  const beginContactsRequest = useCallback(() => {
+    const snapshot = {
+      accountId: currentUserIdRef.current,
+      accountGeneration: accountGenerationRef.current,
+      requestId: contactsRequestIdRef.current + 1,
+    };
+    contactsRequestIdRef.current = snapshot.requestId;
+    return snapshot;
+  }, []);
+
+  const isCurrentContactsRequest = useCallback((snapshot) => (
+    isCurrentAccount(snapshot) && snapshot.requestId === contactsRequestIdRef.current
+  ), [isCurrentAccount]);
+
+  const beginConversationRequest = useCallback((contactId) => {
+    const snapshot = {
+      accountId: currentUserIdRef.current,
+      accountGeneration: accountGenerationRef.current,
+      contactId: contactId == null ? null : String(contactId),
+      requestId: conversationRequestRef.current.requestId + 1,
+    };
+    conversationRequestRef.current = {
+      contactId: snapshot.contactId,
+      requestId: snapshot.requestId,
+    };
+    return snapshot;
+  }, []);
+
+  const captureConversationRequest = useCallback((contactId) => {
+    const normalizedContactId = contactId == null ? null : String(contactId);
+    const activeRequest = conversationRequestRef.current;
+    return { accountId: currentUserIdRef.current, accountGeneration: accountGenerationRef.current, contactId: normalizedContactId, requestId: activeRequest.contactId === normalizedContactId ? activeRequest.requestId : null };
+  }, []);
+
+  const isCurrentConversationRequest = useCallback((snapshot) => (
+    isCurrentAccount(snapshot)
+    && snapshot.requestId != null
+    && snapshot.contactId === conversationRequestRef.current.contactId
+    && snapshot.requestId === conversationRequestRef.current.requestId
+  ), [isCurrentAccount]);
+
+  useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
 
   useEffect(() => {
-    selectedUserRef.current = selectedUser;
-  }, [selectedUser]);
+    currentUserIdRef.current = currentUserId;
+    accountGenerationRef.current += 1;
+    contactsRequestIdRef.current = 0;
+    conversationRequestRef.current = {
+      contactId: null,
+      requestId: conversationRequestRef.current.requestId + 1,
+    };
+  }, [currentUserId, userId]);
 
   const scrollToBottom = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -45,45 +102,34 @@ export default function MessagesPage() {
     });
   }, []);
 
-  useEffect(() => {
-    if (selectedUser) {
-      scrollToBottom();
-    }
-  }, [messages.length, scrollToBottom, selectedUser]);
+  useEffect(() => { if (selectedUser) scrollToBottom(); }, [messages.length, scrollToBottom, selectedUser]);
 
   const fetchMessages = useCallback(async (
     contactId,
-    { showLoading = false, showRefreshing = false } = {}
+    { showLoading = false, showRefreshing = false, requestSnapshot = captureConversationRequest(contactId) } = {}
   ) => {
-    if (!currentUserId) return [];
+    if (!currentUserId || !isCurrentConversationRequest(requestSnapshot)) return [];
 
     const cacheKey = getConversationKey(currentUserId, contactId);
     const cachedMessages = messagesCacheByConversationKey.get(cacheKey);
 
     if (showLoading) {
-      if (cachedMessages) {
-        setMessages(cachedMessages);
-      } else {
-        setMessages([]);
-      }
+      setMessages(cachedMessages || []);
       setIsMessagesLoading(true);
     }
-    if (showRefreshing) {
-      setIsMessagesRefreshing(true);
-    }
+    if (showRefreshing) setIsMessagesRefreshing(true);
 
     try {
       const { data } = await api.get(`/messages/${contactId}`);
+      if (!isCurrentConversationRequest(requestSnapshot)) return [];
       const normalizedMessages = (data || []).map(normalizeMessage);
-      const nextMessages = showLoading
-        ? normalizedMessages
-        : mergeMessages(messagesCacheByConversationKey.get(cacheKey) || [], normalizedMessages);
+      const nextMessages = showLoading ? normalizedMessages : mergeMessages(messagesCacheByConversationKey.get(cacheKey) || [], normalizedMessages);
 
       messagesCacheByConversationKey.set(cacheKey, nextMessages);
       setMessages(nextMessages);
       return nextMessages;
     } catch (requestError) {
-      if (showLoading) {
+      if (showLoading && isCurrentConversationRequest(requestSnapshot)) {
         setError(
           requestError.response?.data?.message ||
             "Could not load messages. Please try again."
@@ -91,54 +137,56 @@ export default function MessagesPage() {
       }
       return [];
     } finally {
-      if (showLoading) {
+      if (showLoading && isCurrentConversationRequest(requestSnapshot)) {
         setIsMessagesLoading(false);
       }
-      if (showRefreshing) {
+      if (showRefreshing && isCurrentConversationRequest(requestSnapshot)) {
         setIsMessagesRefreshing(false);
       }
     }
-  }, [currentUserId]);
+  }, [captureConversationRequest, currentUserId, isCurrentConversationRequest]);
 
-  const fetchConversations = useCallback(
-    async ({
-      showLoading = false,
-      showRefreshing = false,
-      clearError = true,
-      shouldUpdate = () => true,
-    } = {}) => {
-      if (!currentUserId) return [];
+  const fetchConversations = useCallback(async ({
+    showLoading = false,
+    showRefreshing = false,
+    clearError = true,
+    conversationSnapshot = null,
+    requestSnapshot = beginContactsRequest(),
+    shouldUpdate = () => true,
+  } = {}) => {
+      const canUpdate = () => shouldUpdate()
+        && isCurrentContactsRequest(requestSnapshot)
+        && (!conversationSnapshot || isCurrentConversationRequest(conversationSnapshot));
+
+      if (!currentUserId || !isCurrentAccount(requestSnapshot)) return [];
 
       const cachedContacts = contactsCacheByUserId.get(String(currentUserId));
 
-      if (showLoading && shouldUpdate()) {
+      if (showLoading && canUpdate()) {
         if (cachedContacts) {
           setContacts(cachedContacts);
         }
         setIsContactsLoading(!cachedContacts);
       }
-      if (showRefreshing && shouldUpdate()) {
+      if (showRefreshing && canUpdate()) {
         setIsContactsRefreshing(true);
       }
-      if (clearError && shouldUpdate()) {
+      if (clearError && canUpdate()) {
         setError("");
       }
 
       try {
         const { data } = await api.get("/messages");
         const normalizedMessages = (data || []).map(normalizeMessage);
-        const nextContacts = getConversationContacts(
-          normalizedMessages,
-          currentUserId
-        );
+        const nextContacts = getConversationContacts(normalizedMessages, currentUserId);
 
-        if (!shouldUpdate()) return nextContacts;
+        if (!canUpdate()) return nextContacts;
 
         contactsCacheByUserId.set(String(currentUserId), nextContacts);
         setContacts(nextContacts);
         return nextContacts;
       } catch (requestError) {
-        if (shouldUpdate() && clearError) {
+        if (canUpdate() && clearError) {
           setError(
             requestError.response?.data?.message ||
               "Could not load conversations. Please try again."
@@ -146,51 +194,39 @@ export default function MessagesPage() {
         }
         return cachedContacts || [];
       } finally {
-        if (shouldUpdate()) {
+        if (canUpdate()) {
           setIsContactsLoading(false);
           setIsContactsRefreshing(false);
         }
       }
-    },
-    [currentUserId]
-  );
+    }, [beginContactsRequest, currentUserId, isCurrentAccount, isCurrentContactsRequest, isCurrentConversationRequest]);
 
   const markConversationRead = useCallback(
-    async (contactId, sourceMessages = []) => {
-      if (!currentUserId) return;
+    async (contactId, sourceMessages = [], requestSnapshot = captureConversationRequest(contactId)) => {
+      if (!currentUserId || !isCurrentConversationRequest(requestSnapshot)) return;
 
       const readCount = countUnreadFrom(sourceMessages, currentUserId, contactId);
 
       try {
         const { data } = await api.put(`/messages/read/${contactId}`);
+        if (!isCurrentConversationRequest(requestSnapshot)) return;
         const changedCount = data.modifiedCount ?? readCount;
 
-        setMessages((currentMessages) =>
-          {
-            const nextMessages = currentMessages.map((message) =>
-              String(message.senderId) === String(contactId) &&
-              String(message.receiverId) === String(currentUserId)
-                ? { ...message, isRead: true }
-                : message
-            );
-
-            messagesCacheByConversationKey.set(
-              getConversationKey(currentUserId, contactId),
-              nextMessages
-            );
-
-            return nextMessages;
-          }
-        );
+        setMessages((currentMessages) => {
+          const nextMessages = currentMessages.map((message) => (
+            String(message.senderId) === String(contactId)
+            && String(message.receiverId) === String(currentUserId)
+              ? { ...message, isRead: true }
+              : message
+          ));
+          messagesCacheByConversationKey.set(getConversationKey(currentUserId, contactId), nextMessages);
+          return nextMessages;
+        });
         setContacts((currentContacts) => {
-          const nextContacts = currentContacts.map((contact) =>
-            String(contact.id) === String(contactId)
-              ? { ...contact, unreadCount: 0 }
-              : contact
-          );
-
+          const nextContacts = currentContacts.map((contact) => (
+            String(contact.id) === String(contactId) ? { ...contact, unreadCount: 0 } : contact
+          ));
           contactsCacheByUserId.set(String(currentUserId), nextContacts);
-
           return nextContacts;
         });
 
@@ -204,9 +240,7 @@ export default function MessagesPage() {
       } catch {
         // Keep chat usable even if the read marker fails.
       }
-    },
-    [currentUserId]
-  );
+    }, [captureConversationRequest, currentUserId, isCurrentConversationRequest]);
 
   const handleNewMessage = useCallback((rawMessage) => {
     const message = normalizeMessage(rawMessage);
@@ -303,39 +337,51 @@ export default function MessagesPage() {
   }, [currentUserId, markConversationRead]);
 
   useEffect(() => {
-    if (!currentUserId) return undefined;
-
     let isMounted = true;
     const shouldUpdate = () => isMounted;
 
     async function loadInitialData() {
+      selectedUserRef.current = null;
+      setSelectedUser(null);
+      setMessages([]);
+      setContacts(contactsCacheByUserId.get(String(currentUserId)) || []);
+      setText("");
+      setError("");
+      setIsContactsLoading(Boolean(currentUserId));
+      setIsContactsRefreshing(false);
+      setIsMessagesLoading(false);
+      setIsMessagesRefreshing(false);
+      setIsSending(false);
+      setShowChatOnMobile(Boolean(userId));
+
+      if (!currentUserId) return;
       if (!userId) {
-        setSelectedUser(null);
-        setMessages([]);
+        beginConversationRequest(null);
+        setIsMessagesRefreshing(false);
+        setIsSending(false);
       }
 
       const nextContacts = await fetchConversations({
         showLoading: true,
+        requestSnapshot: beginContactsRequest(),
         shouldUpdate,
       });
 
       if (!shouldUpdate() || !userId) return;
 
-      const directContact = nextContacts.find(
-        (contact) => String(contact.id) === String(userId)
-      );
+      const directContact = nextContacts.find((contact) => String(contact.id) === String(userId));
 
-      setSelectedUser(
-        directContact || getDirectContact(userId, location.state?.user)
-      );
+      const requestSnapshot = beginConversationRequest(userId);
+      setSelectedUser(directContact || getDirectContact(userId, location.state?.user));
       setShowChatOnMobile(true);
-      const loadedMessages = await fetchMessages(userId, { showLoading: true });
-      await markConversationRead(userId, loadedMessages);
+      const loadedMessages = await fetchMessages(userId, {
+        showLoading: true,
+        requestSnapshot,
+      });
+      await markConversationRead(userId, loadedMessages, requestSnapshot);
     }
 
-    const immediateFetchId = setTimeout(() => {
-      loadInitialData();
-    }, 0);
+    loadInitialData();
 
     let activeSocket = null;
     const updateSocketStatus = () => {
@@ -370,19 +416,10 @@ export default function MessagesPage() {
 
     return () => {
       isMounted = false;
-      clearTimeout(immediateFetchId);
       clearInterval(socketStatusIntervalId);
       detachSocket(activeSocket);
     };
-  }, [
-    currentUserId,
-    fetchConversations,
-    fetchMessages,
-    handleNewMessage,
-    location.state,
-    markConversationRead,
-    userId,
-  ]);
+  }, [beginContactsRequest, beginConversationRequest, currentUserId, fetchConversations, fetchMessages, handleNewMessage, location.state, markConversationRead, userId]);
 
   useEffect(() => {
     if (!currentUserId || socketConnected) return undefined;
@@ -391,19 +428,21 @@ export default function MessagesPage() {
     const shouldUpdate = () => isMounted;
 
     const pollMessages = async () => {
+      const activeSelectedUser = selectedUserRef.current;
+      const conversationSnapshot = activeSelectedUser?.id
+        ? captureConversationRequest(activeSelectedUser.id)
+        : null;
       const nextContacts = await fetchConversations({
         showRefreshing: true,
         clearError: false,
+        conversationSnapshot,
+        requestSnapshot: beginContactsRequest(),
         shouldUpdate,
       });
 
-      const activeSelectedUser = selectedUserRef.current;
+      if (!shouldUpdate() || !activeSelectedUser?.id || !isCurrentConversationRequest(conversationSnapshot)) return;
 
-      if (!shouldUpdate() || !activeSelectedUser?.id) return;
-
-      const refreshedSelectedUser = nextContacts.find(
-        (contact) => String(contact.id) === String(activeSelectedUser.id)
-      );
+      const refreshedSelectedUser = nextContacts.find((contact) => String(contact.id) === String(activeSelectedUser.id));
 
       if (refreshedSelectedUser) {
         setSelectedUser(refreshedSelectedUser);
@@ -411,10 +450,11 @@ export default function MessagesPage() {
 
       const loadedMessages = await fetchMessages(activeSelectedUser.id, {
         showRefreshing: true,
+        requestSnapshot: conversationSnapshot,
       });
 
-      if (shouldUpdate()) {
-        await markConversationRead(activeSelectedUser.id, loadedMessages);
+      if (shouldUpdate() && isCurrentConversationRequest(conversationSnapshot)) {
+        await markConversationRead(activeSelectedUser.id, loadedMessages, conversationSnapshot);
       }
     };
 
@@ -424,20 +464,17 @@ export default function MessagesPage() {
       isMounted = false;
       clearInterval(pollingIntervalId);
     };
-  }, [
-    currentUserId,
-    fetchConversations,
-    fetchMessages,
-    markConversationRead,
-    socketConnected,
-  ]);
+  }, [currentUserId, fetchConversations, fetchMessages, captureConversationRequest, beginContactsRequest, isCurrentConversationRequest, markConversationRead, socketConnected]);
 
   const selectUser = async (user) => {
+    const requestSnapshot = beginConversationRequest(user.id);
     setSelectedUser(user);
     setShowChatOnMobile(true);
     setError("");
-    const loadedMessages = await fetchMessages(user.id, { showLoading: true });
-    await markConversationRead(user.id, loadedMessages);
+    setIsMessagesRefreshing(false);
+    setIsSending(false);
+    const loadedMessages = await fetchMessages(user.id, { showLoading: true, requestSnapshot });
+    await markConversationRead(user.id, loadedMessages, requestSnapshot);
   };
 
   const sendMessage = async (event) => {
@@ -445,6 +482,8 @@ export default function MessagesPage() {
 
     if (!selectedUser || !text.trim()) return;
 
+    const requestSnapshot = captureConversationRequest(selectedUser.id);
+    if (!isCurrentConversationRequest(requestSnapshot)) return;
     setIsSending(true);
     setError("");
 
@@ -453,6 +492,7 @@ export default function MessagesPage() {
         receiverId: selectedUser.id,
         text: text.trim(),
       });
+      if (!isCurrentConversationRequest(requestSnapshot)) return;
       const normalizedMessage = normalizeMessage(data);
 
       setMessages((currentMessages) => {
@@ -467,16 +507,25 @@ export default function MessagesPage() {
       });
       setText("");
       await Promise.all([
-        fetchMessages(selectedUser.id, { showRefreshing: true }),
-        fetchConversations({ showRefreshing: true, clearError: false }),
+        fetchMessages(selectedUser.id, { showRefreshing: true, requestSnapshot }),
+        fetchConversations({
+          showRefreshing: true,
+          clearError: false,
+          conversationSnapshot: requestSnapshot,
+          requestSnapshot: beginContactsRequest(),
+        }),
       ]);
     } catch (requestError) {
-      setError(
-        requestError.response?.data?.message ||
-          "Could not send message. Please try again."
-      );
+      if (isCurrentConversationRequest(requestSnapshot)) {
+        setError(
+          requestError.response?.data?.message ||
+            "Could not send message. Please try again."
+        );
+      }
     } finally {
-      setIsSending(false);
+      if (isCurrentConversationRequest(requestSnapshot)) {
+        setIsSending(false);
+      }
     }
   };
 
@@ -491,7 +540,7 @@ export default function MessagesPage() {
   };
 
   const conversationListProps = { conversations: (contacts || []).filter((conversation) => (conversation?.name || "User").toLowerCase().includes(searchQuery.trim().toLowerCase())), selectedConversationId: selectedUser?.id, onSelectConversation: selectUser, searchQuery, onSearchChange: setSearchQuery, isLoading: isContactsLoading, isRefreshing: isContactsRefreshing, socketConnected, userRole: currentUser?.role, onFindBarber: () => navigate("/specialists"), onCheckBookings: () => navigate("/admin/bookings"), isCollapsed: showChatOnMobile && Boolean(selectedUser) };
-  const chatPanelProps = { selectedUser, messages: messages || [], currentUser, currentUserId, text, isSending, isMessagesLoading, isMessagesRefreshing, showChatOnMobile, onBackToList: () => setShowChatOnMobile(false), onTextChange: (value) => setText(value), onMessageKeyDown: handleMessageKeyDown, onSendMessage: sendMessage, messagesEndRef };
+  const chatPanelProps = { selectedUser, messages: messages || [], currentUser, currentUserId, text, isSending, isMessagesLoading, isMessagesRefreshing, showChatOnMobile, onBackToList: () => setShowChatOnMobile(false), onTextChange: setText, onMessageKeyDown: handleMessageKeyDown, onSendMessage: sendMessage, messagesEndRef };
 
   return <MessagesPageLayout chatPanelProps={chatPanelProps} conversationListProps={conversationListProps} error={error} />;
 }
