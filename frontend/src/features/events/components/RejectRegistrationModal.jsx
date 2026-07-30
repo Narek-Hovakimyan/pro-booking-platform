@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import { Button } from "@/shared/components/ui/button";
 
@@ -11,6 +12,21 @@ export default function RejectRegistrationModal({
   onClose,
   onSubmit,
 }) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) dialogRef.current?.querySelector("textarea:not([disabled])")?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isUpdatingRegistration) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isUpdatingRegistration, onClose]);
+
   if (!isOpen || !registrationToReject) return null;
 
   return (
@@ -19,17 +35,23 @@ export default function RejectRegistrationModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reject-registration-title"
         className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-bold">Reject Registration</h2>
+            <h2 id="reject-registration-title" className="text-xl font-bold">Reject Registration</h2>
             <p className="mt-1 text-sm text-neutral-500">
               Share an optional reason with {registrationToReject?.userName || "this user"}.
             </p>
           </div>
           <button
+            type="button"
+            aria-label="Close reject registration dialog"
             className="rounded-full p-1 hover:bg-neutral-100"
             onClick={onClose}
           >
@@ -38,6 +60,8 @@ export default function RejectRegistrationModal({
         </div>
 
         <textarea
+          id="rejection-reason"
+          aria-label="Reason for rejection"
           className="mt-4 min-h-28 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
           placeholder="Reason for rejection"
           value={rejectionReason}

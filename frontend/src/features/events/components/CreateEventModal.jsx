@@ -1,4 +1,5 @@
 import { MapPin, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import { EVENT_TYPE_OPTIONS } from "@/features/events/utils/eventFormatters";
 import { Button } from "@/shared/components/ui/button";
@@ -18,6 +19,21 @@ export default function CreateEventModal({
   onFileChange,
   onSalonSelect,
 }) {
+  const titleInputRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) titleInputRef.current?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSubmitting) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isSubmitting, onClose]);
+
   if (!isOpen) return null;
 
   return (
@@ -26,12 +42,17 @@ export default function CreateEventModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-event-title"
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
-          <h2 className="text-xl font-bold">Create Event</h2>
+          <h2 id="create-event-title" className="text-xl font-bold">Create Event</h2>
           <button
+            type="button"
+            aria-label="Close create event dialog"
             className="rounded-full p-1 hover:bg-neutral-100"
             onClick={onClose}
           >
@@ -47,24 +68,27 @@ export default function CreateEventModal({
 
         <div className="mt-4 space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-title-input" className="mb-1 block text-sm font-medium text-neutral-700">
               Title *
             </label>
             <input
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
               placeholder="Event title"
+              id="create-event-title-input"
+              ref={titleInputRef}
               value={eventForm.title}
               onChange={(e) => onFieldChange("title", e.target.value)}
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-description" className="mb-1 block text-sm font-medium text-neutral-700">
               Description
             </label>
             <textarea
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
               placeholder="Event description"
+              id="create-event-description"
               rows={3}
               value={eventForm.description}
               onChange={(e) => onFieldChange("description", e.target.value)}
@@ -73,11 +97,12 @@ export default function CreateEventModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-type" className="mb-1 block text-sm font-medium text-neutral-700">
                 Event type
               </label>
               <select
                 className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                id="create-event-type"
                 value={eventForm.type}
                 onChange={(e) => onFieldChange("type", e.target.value)}
               >
@@ -89,11 +114,12 @@ export default function CreateEventModal({
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-visibility" className="mb-1 block text-sm font-medium text-neutral-700">
                 Visibility
               </label>
               <select
                 className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                id="create-event-visibility"
                 value={eventForm.visibility}
                 onChange={(e) => onFieldChange("visibility", e.target.value)}
               >
@@ -104,24 +130,26 @@ export default function CreateEventModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-instructor" className="mb-1 block text-sm font-medium text-neutral-700">
               Instructor *
             </label>
             <input
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
               placeholder="Instructor name"
+              id="create-event-instructor"
               value={eventForm.instructor}
               onChange={(e) => onFieldChange("instructor", e.target.value)}
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-instructor-bio" className="mb-1 block text-sm font-medium text-neutral-700">
               Instructor Bio
             </label>
             <textarea
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
               placeholder="About the instructor"
+              id="create-event-instructor-bio"
               rows={2}
               value={eventForm.instructorBio}
               onChange={(e) => onFieldChange("instructorBio", e.target.value)}
@@ -130,24 +158,26 @@ export default function CreateEventModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-date" className="mb-1 block text-sm font-medium text-neutral-700">
                 Date *
               </label>
               <input
                 className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                 type="date"
+                id="create-event-date"
                 value={eventForm.date}
                 onChange={(e) => onFieldChange("date", e.target.value)}
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-time" className="mb-1 block text-sm font-medium text-neutral-700">
                 Time * (HH:mm)
               </label>
               <input
                 className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                 type="text"
                 placeholder="e.g., 09:30"
+                id="create-event-time"
                 maxLength={5}
                 value={eventForm.time}
                 onChange={(e) => {
@@ -169,7 +199,7 @@ export default function CreateEventModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-duration" className="mb-1 block text-sm font-medium text-neutral-700">
                 Duration (min) *
               </label>
               <input
@@ -178,12 +208,13 @@ export default function CreateEventModal({
                 min="15"
                 step="15"
                 placeholder="120"
+                id="create-event-duration"
                 value={eventForm.duration}
                 onChange={(e) => onFieldChange("duration", e.target.value)}
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-price" className="mb-1 block text-sm font-medium text-neutral-700">
                 Price (AMD)
               </label>
               <input
@@ -191,6 +222,7 @@ export default function CreateEventModal({
                 type="number"
                 min="0"
                 placeholder="0 = Free"
+                id="create-event-price"
                 value={eventForm.price}
                 onChange={(e) => onFieldChange("price", e.target.value)}
               />
@@ -198,7 +230,7 @@ export default function CreateEventModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-max-participants" className="mb-1 block text-sm font-medium text-neutral-700">
               Max Participants
             </label>
             <input
@@ -206,13 +238,15 @@ export default function CreateEventModal({
               type="number"
               min="1"
               placeholder="20"
+              id="create-event-max-participants"
               value={eventForm.maxParticipants}
               onChange={(e) => onFieldChange("maxParticipants", e.target.value)}
             />
           </div>
 
-          <label className="flex items-center gap-3 rounded-xl border border-neutral-200 px-3 py-3 text-sm font-medium text-neutral-700">
+          <label htmlFor="create-event-certificates-enabled" className="flex items-center gap-3 rounded-xl border border-neutral-200 px-3 py-3 text-sm font-medium text-neutral-700">
             <input
+              id="create-event-certificates-enabled"
               checked={Boolean(eventForm.certificatesEnabled)}
               className="h-4 w-4"
               type="checkbox"
@@ -226,9 +260,9 @@ export default function CreateEventModal({
           <div>
             <div className="mb-1 flex items-center gap-2">
               <MapPin className="h-4 w-4 text-neutral-400" />
-              <label className="text-sm font-medium text-neutral-700">
+              <span id="create-event-location-label" className="text-sm font-medium text-neutral-700">
                 Location *
-              </label>
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -276,11 +310,12 @@ export default function CreateEventModal({
 
           {eventForm.locationType === "salon" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-salon" className="mb-1 block text-sm font-medium text-neutral-700">
                 Salon *
               </label>
               <select
                 className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                id="create-event-salon"
                 value={eventForm.salonId}
                 onChange={(e) => onSalonSelect(e.target.value)}
               >
@@ -296,12 +331,13 @@ export default function CreateEventModal({
 
           {eventForm.locationType === "other" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">
+              <label htmlFor="create-event-location" className="mb-1 block text-sm font-medium text-neutral-700">
                 Venue / Location *
               </label>
               <input
                 className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                 placeholder="e.g., Marriott Hotel, Conference Hall A"
+                id="create-event-location"
                 value={eventForm.location}
                 onChange={(e) => onFieldChange("location", e.target.value)}
               />
@@ -309,13 +345,14 @@ export default function CreateEventModal({
           )}
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-image" className="mb-1 block text-sm font-medium text-neutral-700">
               Event image
             </label>
             <input
               accept="image/jpeg,image/png,image/webp"
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
               type="file"
+              id="create-event-image"
               onChange={onFileChange}
             />
             {imagePreview && (
@@ -328,12 +365,13 @@ export default function CreateEventModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="create-event-image-url" className="mb-1 block text-sm font-medium text-neutral-700">
               Image URL fallback
             </label>
             <input
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
               placeholder="https://..."
+              id="create-event-image-url"
               value={eventForm.imageUrl}
               onChange={(e) => onFieldChange("imageUrl", e.target.value)}
             />

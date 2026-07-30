@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/shared/components/ui/button";
 
 export default function CertificateIssueModal({
@@ -11,6 +12,24 @@ export default function CertificateIssueModal({
   onSubmit,
   isSubmitting,
 }) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      const firstField = dialogRef.current?.querySelector("input:not([disabled])");
+      firstField?.focus();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSubmitting) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isSubmitting, onClose]);
+
   if (!isOpen) return null;
 
   return (
@@ -19,17 +38,23 @@ export default function CertificateIssueModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="issue-certificate-title"
         className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-bold">Issue Certificate</h2>
+            <h2 id="issue-certificate-title" className="text-xl font-bold">Issue Certificate</h2>
             <p className="mt-1 text-sm text-neutral-500">
               Choose how to issue this certificate.
             </p>
           </div>
           <button
+            type="button"
+            aria-label="Close issue certificate dialog"
             className="rounded-full p-1 hover:bg-neutral-100"
             onClick={onClose}
           >
@@ -40,7 +65,9 @@ export default function CertificateIssueModal({
         <div className="mt-4 space-y-3">
           <label className="flex items-center gap-3 rounded-xl border border-neutral-200 p-3 cursor-pointer hover:bg-neutral-50">
             <input
+              id="certificate-mode-auto"
               type="radio"
+              aria-label="Auto-generated certificate"
               name="certificateMode"
               className="h-4 w-4"
               checked={certificateMode === "auto"}
@@ -54,7 +81,9 @@ export default function CertificateIssueModal({
 
           <label className="flex items-start gap-3 rounded-xl border border-neutral-200 p-3 cursor-pointer hover:bg-neutral-50">
             <input
+              id="certificate-mode-uploaded"
               type="radio"
+              aria-label="Upload custom certificate"
               name="certificateMode"
               className="mt-1 h-4 w-4"
               checked={certificateMode === "uploaded"}
@@ -69,7 +98,9 @@ export default function CertificateIssueModal({
           {certificateMode === "uploaded" && (
             <div className="rounded-xl border border-neutral-200 p-3">
               <input
+                id="certificate-file"
                 type="file"
+                aria-label="Custom certificate file"
                 accept=".pdf,image/jpeg,image/png,image/webp"
                 className="w-full text-sm"
                 onChange={onFileChange}
