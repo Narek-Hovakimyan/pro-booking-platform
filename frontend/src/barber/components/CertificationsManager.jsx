@@ -56,6 +56,30 @@ export default function CertificationsManager() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const fileInputRef = useRef(null);
+  const localPreviewUrlRef = useRef(null);
+
+  const resetFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const revokeLocalPreviewUrl = () => {
+    if (!localPreviewUrlRef.current) return;
+    URL.revokeObjectURL(localPreviewUrlRef.current);
+    localPreviewUrlRef.current = null;
+  };
+
+  const clearLocalPreview = () => {
+    revokeLocalPreviewUrl();
+    setImagePreview(null);
+  };
+
+  const setLocalPreview = (nextPreviewUrl) => {
+    revokeLocalPreviewUrl();
+    localPreviewUrlRef.current = nextPreviewUrl;
+    setImagePreview(nextPreviewUrl);
+  };
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -91,13 +115,20 @@ export default function CertificationsManager() {
     };
   }, [currentUser?.id]);
 
+  useEffect(
+    () => () => {
+      revokeLocalPreviewUrl();
+    },
+    []
+  );
 
   const openAddModal = () => {
     setEditingCert(null);
     setForm(EMPTY_FORM);
     setFormError("");
     setSelectedImage(null);
-    setImagePreview(null);
+    clearLocalPreview();
+    resetFileInput();
     setIsModalOpen(true);
   };
 
@@ -112,7 +143,8 @@ export default function CertificationsManager() {
     });
     setFormError("");
     setSelectedImage(null);
-    setImagePreview(null);
+    clearLocalPreview();
+    resetFileInput();
     setIsModalOpen(true);
   };
 
@@ -123,7 +155,8 @@ export default function CertificationsManager() {
     setForm(EMPTY_FORM);
     setFormError("");
     setSelectedImage(null);
-    setImagePreview(null);
+    clearLocalPreview();
+    resetFileInput();
   };
 
   const updateForm = (field, value) => {
@@ -149,19 +182,14 @@ export default function CertificationsManager() {
     }
 
     setSelectedImage(file);
-    setImagePreview(URL.createObjectURL(file));
+    setLocalPreview(URL.createObjectURL(file));
     setFormError("");
   };
 
   const removeSelectedImage = () => {
     setSelectedImage(null);
-    if (imagePreview) {
-      URL.revokeObjectURL(imagePreview);
-    }
-    setImagePreview(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    clearLocalPreview();
+    resetFileInput();
   };
 
   const validateForm = () => {
