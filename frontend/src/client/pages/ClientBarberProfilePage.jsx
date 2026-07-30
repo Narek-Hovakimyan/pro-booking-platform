@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useParams } from "react-router-dom";
 
@@ -73,6 +73,17 @@ function formatMonthYear(date) {
   }).format(parsedDate);
 }
 
+function createInitialRouteState(routeId) {
+  return {
+    routeId,
+    isLoading: true,
+    error: "",
+    certifications: [],
+    eventCertifications: [],
+    salonRating: null,
+  };
+}
+
 export default function ClientBarberProfilePage() {
   const { barberId } = useParams();
   const dispatch = useDispatch();
@@ -81,11 +92,27 @@ export default function ClientBarberProfilePage() {
   const services = useSelector((state) => state.services);
   const reviews = useSelector((state) => state.reviews);
   const favorites = useSelector((state) => state.favorites);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [certifications, setCertifications] = useState([]);
-  const [eventCertifications, setEventCertifications] = useState([]);
-  const [salonRating, setSalonRating] = useState(null);
+  const [routeState, setRouteState] = useState(() =>
+    createInitialRouteState(barberId)
+  );
+  const requestIdRef = useRef(0);
+  const currentUserId = currentUser?.id || currentUser?._id || "";
+  const activeBarberIdRef = useRef(barberId);
+  const activeUserIdRef = useRef(currentUserId);
+  const isCurrentRouteState = routeState.routeId === barberId;
+  const isLoading = !isCurrentRouteState || routeState.isLoading;
+  const error = isCurrentRouteState ? routeState.error : "";
+  const certifications = isCurrentRouteState ? routeState.certifications : [];
+  const eventCertifications = isCurrentRouteState
+    ? routeState.eventCertifications
+    : [];
+  const salonRating = isCurrentRouteState ? routeState.salonRating : null;
+  activeBarberIdRef.current = barberId;
+  activeUserIdRef.current = currentUserId;
+
+  const isCurrentFavoriteMutation = (routeIdSnapshot, userIdSnapshot) =>
+    activeBarberIdRef.current === routeIdSnapshot &&
+    activeUserIdRef.current === userIdSnapshot;
 
   const barber = (users || []).find(
     (user) =>
@@ -154,58 +181,88 @@ export default function ClientBarberProfilePage() {
 
   useEffect(() => {
     let isMounted = true;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const isCurrentRequest = () =>
+      isMounted && requestIdRef.current === requestId;
 
     async function loadProfile() {
-      setIsLoading(true);
-      setError("");
+      setRouteState(createInitialRouteState(barberId));
 
       try {
+        const [barbersResponse, profileResponse] = await Promise.all([
+          api.get("/users/barbers"),
+          api.get(`/barbers/profile/${barberId}`),
+        ]);
+
+        if (!isCurrentRequest()) return;
+
+        dispatch(setBarbers(barbersResponse.data));
+        if (profileResponse.data) {
+          dispatch(
+            updateBarberProfile({
+              barberId,
+              profile: profileResponse.data,
+            })
+          );
+        }
+
+        const optionalRequests = [
+          api.get(`/services/${barberId}`),
+          api.get(`/reviews/${barberId}`),
+          currentUser?.id ? api.get("/favorites") : Promise.resolve(null),
+          api.get(`/barbers/${barberId}/certifications`),
+          api.get(`/barbers/${barberId}/event-certificates`),
+        ];
         const [
-          barbersResponse,
-          profileResponse,
-          servicesResponse,
-          reviewsResponse,
-          favoritesResponse,
-          certificationsResponse,
-          eventCertificationsResponse,
-        ] =
-          await Promise.all([
-            api.get("/users/barbers"),
-            api.get(`/barbers/profile/${barberId}`),
-            api.get(`/services/${barberId}`),
-            api.get(`/reviews/${barberId}`),
-            api.get("/favorites"),
-            api.get(`/barbers/${barberId}/certifications`),
-            api.get(`/barbers/${barberId}/event-certificates`),
-          ]);
+          servicesResult,
+          reviewsResult,
+          favoritesResult,
+          certificationsResult,
+          eventCertificationsResult,
+        ] = await Promise.allSettled(optionalRequests);
 
+        if (!isCurrentRequest()) return;
 
-
-        if (isMounted) {
-          dispatch(setBarbers(barbersResponse.data));
-          if (profileResponse.data) {
-            dispatch(
-              updateBarberProfile({
-                barberId,
-                profile: profileResponse.data,
-              })
-            );
-          }
+        if (servicesResult.status === "fulfilled") {
           dispatch(
             setServices({
               barberId,
-              services: servicesResponse.data,
+              services: servicesResult.value.data,
             })
           );
+        }
+        if (reviewsResult.status === "fulfilled") {
           dispatch(
             setReviews({
               barberId,
-              reviews: reviewsResponse.data,
+              reviews: reviewsResult.value.data,
             })
           );
-          dispatch(setFavorites(favoritesResponse.data));
-          setCertifications(certificationsResponse.data || []);
-          setEventCertifications(eventCertificationsResponse.data || []);
+        }
+        if (favoritesResult.status === "fulfilled" && favoritesResult.value) {
+          dispatch(setFavorites(favoritesResult.value.data));
+        }
+        if (certificationsResult.status === "fulfilled") {
+          setRouteState((currentState) =>
+            !isCurrentRequest()
+              ? currentState
+              : {
+                  ...currentState,
+                  certifications: certificationsResult.value.data || [],
+                }
+          );
+        }
+        if (eventCertificationsResult.status === "fulfilled") {
+          setRouteState((currentState) =>
+            !isCurrentRequest()
+              ? currentState
+              : {
+                  ...currentState,
+                  eventCertifications:
+                    eventCertificationsResult.value.data || [],
+                }
+          );
         }
 
         // Fetch salon review stats if barber belongs to approved salons
@@ -218,11 +275,14 @@ export default function ClientBarberProfilePage() {
         const barberLegacySalon = barberData?.salonStatus === "approved" ? barberData?.salon : null;
         const barberSalonId = barberPrimarySalon?.id || barberPrimarySalon?._id || barberLegacySalon?.id || barberLegacySalon?._id;
 
-        if (barberSalonId && isMounted) {
+        if (barberSalonId && isCurrentRequest()) {
           try {
             const { data: salonData } = await api.get(`/salons/${barberSalonId}`);
-            if (isMounted) {
-              setSalonRating(Number(salonData?.averageRating || 0));
+            if (isCurrentRequest()) {
+              setRouteState((currentState) => ({
+                ...currentState,
+                salonRating: Number(salonData?.averageRating || 0),
+              }));
             }
           } catch {
             // Salon stats are optional
@@ -230,15 +290,23 @@ export default function ClientBarberProfilePage() {
         }
 
       } catch (requestError) {
-        if (isMounted) {
-          setError(
-            requestError.response?.data?.message ||
-              "Could not load specialist profile. Please try again."
-          );
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            error:
+              requestError.response?.data?.message ||
+              "Could not load specialist profile. Please try again.",
+            certifications: [],
+            eventCertifications: [],
+            salonRating: null,
+          }));
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            isLoading: false,
+          }));
         }
       }
     }
@@ -248,14 +316,17 @@ export default function ClientBarberProfilePage() {
     return () => {
       isMounted = false;
     };
-  }, [barberId, dispatch]);
+  }, [barberId, currentUser?.id, dispatch]);
 
   const toggleFavorite = async () => {
     if (!currentUser?.id || !profileBarberId) return;
+    const routeIdSnapshot = barberId;
+    const userIdSnapshot = currentUserId;
 
     try {
       if (isFavorite) {
         await api.delete(`/favorites/${profileBarberId}`);
+        if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
         dispatch(
           removeFavorite({ clientId: currentUser.id, barberId: profileBarberId })
         );
@@ -263,16 +334,20 @@ export default function ClientBarberProfilePage() {
       }
 
       const { data } = await api.post("/favorites", { barberId: profileBarberId });
+      if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
       dispatch(addFavorite(data));
     } catch (requestError) {
-      setError(
-        requestError.response?.data?.message ||
-          "Could not update favorite. Please try again."
-      );
+      if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
+      setRouteState((currentState) => ({
+        ...currentState,
+        error:
+          requestError.response?.data?.message ||
+          "Could not update favorite. Please try again.",
+      }));
     }
   };
 
-  if (!isLoading && !barber) {
+  if (!isLoading && !barber && !error) {
     return <Container size="wide"><BarberProfileNotFound /></Container>;
   }
 

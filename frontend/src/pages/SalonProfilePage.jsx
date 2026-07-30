@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useParams } from "react-router-dom";
 
@@ -47,6 +47,19 @@ function isSalonOwnerOrAdmin(salon, userId) {
     salon.admins.some((adminId) => getIdString(adminId) === currentUserId);
 }
 
+function createInitialRouteState(routeId) {
+  return {
+    routeId,
+    salon: null,
+    salonReviews: [],
+    isLoading: true,
+    error: "",
+    salonJobs: [],
+    jobsLoading: false,
+    canManageCurrentSalon: false,
+  };
+}
+
 export default function SalonProfilePage() {
   const { salonId } = useParams();
   const dispatch = useDispatch();
@@ -54,56 +67,84 @@ export default function SalonProfilePage() {
   const services = useSelector((state) => state.services);
   const reviews = useSelector((state) => state.reviews);
   const favorites = useSelector((state) => state.favorites);
-  const [salon, setSalon] = useState(null);
-  const [salonReviews, setSalonReviews] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [salonJobs, setSalonJobs] = useState([]);
-  const [jobsLoading, setJobsLoading] = useState(false);
-  const [canManageCurrentSalon, setCanManageCurrentSalon] = useState(false);
+  const [routeState, setRouteState] = useState(() =>
+    createInitialRouteState(salonId)
+  );
   const [selectedStaffCategory, setSelectedStaffCategory] = useState("");
   const currentUserId = currentUser?.id || currentUser?._id || "";
+  const requestIdRef = useRef(0);
+  const activeSalonIdRef = useRef(salonId);
+  const activeUserIdRef = useRef(currentUserId);
+  const isCurrentRouteState = routeState.routeId === salonId;
+  const salon = isCurrentRouteState ? routeState.salon : null;
+  const salonReviews = isCurrentRouteState ? routeState.salonReviews : [];
+  const isLoading = !isCurrentRouteState || routeState.isLoading;
+  const error = isCurrentRouteState ? routeState.error : "";
+  const salonJobs = isCurrentRouteState ? routeState.salonJobs : [];
+  const jobsLoading = isCurrentRouteState ? routeState.jobsLoading : false;
+  const canManageCurrentSalon = isCurrentRouteState
+    ? routeState.canManageCurrentSalon
+    : false;
+  activeSalonIdRef.current = salonId;
+  activeUserIdRef.current = currentUserId;
+
+  const isCurrentFavoriteMutation = (routeIdSnapshot, userIdSnapshot) =>
+    activeSalonIdRef.current === routeIdSnapshot &&
+    activeUserIdRef.current === userIdSnapshot;
 
   useEffect(() => {
     let isMounted = true;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const isCurrentRequest = () =>
+      isMounted && requestIdRef.current === requestId;
 
     async function loadSalon() {
-      setIsLoading(true);
-      setError("");
-      setCanManageCurrentSalon(false);
+      setRouteState(createInitialRouteState(salonId));
 
       try {
         const { data } = await api.get(`/salons/${salonId}`);
 
-        if (!isMounted) return;
+        if (!isCurrentRequest()) return;
 
-        setSalon(data || null);
-        setSalonReviews(data?.latestReviews || []);
+        setRouteState((currentState) =>
+          !isCurrentRequest()
+            ? currentState
+            : {
+                ...currentState,
+                salon: data || null,
+                salonReviews: data?.latestReviews || [],
+              }
+        );
 
         const barberList = data?.barbers || [];
 
         await Promise.all(
           barberList.map(async (barber) => {
             const barberKey = barber.id || barber._id;
-            const [servicesResponse, reviewsResponse] = await Promise.all([
+            const [servicesResult, reviewsResult] = await Promise.allSettled([
               api.get(`/services/${barberKey}`),
               api.get(`/reviews/${barberKey}`),
             ]);
 
-            if (!isMounted) return;
+            if (!isCurrentRequest()) return;
 
-            dispatch(
-              setServices({
-                barberId: barberKey,
-                services: servicesResponse.data,
-              })
-            );
-            dispatch(
-              setReviews({
-                barberId: barberKey,
-                reviews: reviewsResponse.data,
-              })
-            );
+            if (servicesResult.status === "fulfilled") {
+              dispatch(
+                setServices({
+                  barberId: barberKey,
+                  services: servicesResult.value.data,
+                })
+              );
+            }
+            if (reviewsResult.status === "fulfilled") {
+              dispatch(
+                setReviews({
+                  barberId: barberKey,
+                  reviews: reviewsResult.value.data,
+                })
+              );
+            }
           })
         );
 
@@ -111,7 +152,7 @@ export default function SalonProfilePage() {
           try {
             const favoritesResponse = await api.get("/favorites");
 
-            if (isMounted) {
+            if (isCurrentRequest()) {
               dispatch(setFavorites(favoritesResponse.data));
             }
           } catch {
@@ -124,23 +165,28 @@ export default function SalonProfilePage() {
             `/salon-reviews/salon/${salonId}`
           );
 
-          if (isMounted) {
-            setSalonReviews(salonReviewsData?.reviews || []);
-            setSalon((currentSalon) =>
-              currentSalon
-                ? {
-                    ...currentSalon,
-                    averageRating:
-                      salonReviewsData?.averageRating ??
-                      currentSalon.averageRating,
-                    totalReviews:
-                      salonReviewsData?.totalReviews ??
-                      currentSalon.totalReviews,
-                    reviewsCount:
-                      salonReviewsData?.totalReviews ??
-                      currentSalon.reviewsCount,
+          if (isCurrentRequest()) {
+            setRouteState((currentState) =>
+              !isCurrentRequest()
+                ? currentState
+                : {
+                    ...currentState,
+                    salonReviews: salonReviewsData?.reviews || [],
+                    salon: currentState.salon
+                      ? {
+                          ...currentState.salon,
+                          averageRating:
+                            salonReviewsData?.averageRating ??
+                            currentState.salon.averageRating,
+                          totalReviews:
+                            salonReviewsData?.totalReviews ??
+                            currentState.salon.totalReviews,
+                          reviewsCount:
+                            salonReviewsData?.totalReviews ??
+                            currentState.salon.reviewsCount,
+                        }
+                      : currentState.salon,
                   }
-                : currentSalon
             );
           }
         } catch {
@@ -151,50 +197,80 @@ export default function SalonProfilePage() {
         if (currentUserId && currentUser?.role === "barber") {
           try {
             const { data: manageableSalons } = await api.get("/salons/mine/manageable");
-            if (isMounted) {
+            if (isCurrentRequest()) {
               const salons = getSalonList(manageableSalons);
               const canManage = salons.some(
                 (s) =>
                   getIdString(s) === String(salonId) &&
                   isSalonOwnerOrAdmin(s, currentUserId)
               );
-              setCanManageCurrentSalon(canManage);
+              setRouteState((currentState) =>
+                !isCurrentRequest()
+                  ? currentState
+                  : { ...currentState, canManageCurrentSalon: canManage }
+              );
             }
           } catch {
             // Manageable check is optional; replies stay read-only.
           }
         }
       } catch (requestError) {
-        if (isMounted) {
-          setError(
-            requestError.response?.data?.message ||
-              "Could not load salon. Please try again."
-          );
-          setSalon(null);
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            error:
+              requestError.response?.data?.message ||
+              "Could not load salon. Please try again.",
+            salon: null,
+            salonReviews: [],
+            salonJobs: [],
+            canManageCurrentSalon: false,
+          }));
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            isLoading: false,
+          }));
         }
       }
 
-      // ── Fetch active jobs for this salon (independent of main load) ──
-      if (isMounted) {
-        setJobsLoading(true);
+      if (isCurrentRequest()) {
+        setRouteState((currentState) => ({
+          ...currentState,
+          salonJobs: [],
+          jobsLoading: true,
+        }));
       }
 
       try {
         const { data: jobsData } = await api.get("/salon-jobs", {
           params: { salonId },
         });
-        if (isMounted) {
-          setSalonJobs(Array.isArray(jobsData?.jobs) ? jobsData.jobs : Array.isArray(jobsData) ? jobsData : []);
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            salonJobs: Array.isArray(jobsData?.jobs)
+              ? jobsData.jobs
+              : Array.isArray(jobsData)
+                ? jobsData
+                : [],
+          }));
         }
       } catch {
-        // Fail silently – the section simply won't show.
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            salonJobs: [],
+          }));
+        }
       } finally {
-        if (isMounted) {
-          setJobsLoading(false);
+        if (isCurrentRequest()) {
+          setRouteState((currentState) => ({
+            ...currentState,
+            jobsLoading: false,
+          }));
         }
       }
     }
@@ -212,6 +288,8 @@ export default function SalonProfilePage() {
 
   const toggleFavorite = async (barber) => {
     if (!currentUser?.id || !barber) return;
+    const routeIdSnapshot = salonId;
+    const userIdSnapshot = currentUserId;
 
     try {
       const barberId = barber.id || barber._id;
@@ -223,17 +301,22 @@ export default function SalonProfilePage() {
 
       if (isFavorited) {
         await api.delete(`/favorites/${barberId}`);
+        if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
         dispatch(removeFavorite({ clientId: currentUser.id, barberId }));
         return;
       }
 
       const { data } = await api.post("/favorites", { barberId });
+      if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
       dispatch(addFavorite(data));
     } catch (requestError) {
-      setError(
-        requestError.response?.data?.message ||
-          "Could not update favorite. Please try again."
-      );
+      if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
+      setRouteState((currentState) => ({
+        ...currentState,
+        error:
+          requestError.response?.data?.message ||
+          "Could not update favorite. Please try again.",
+      }));
     }
   };
 
@@ -246,25 +329,32 @@ export default function SalonProfilePage() {
 
   const handleSalonFavorite = async () => {
     if (!currentUser?.id || currentUser?.role !== "client" || !salonId) return;
+    const routeIdSnapshot = salonId;
+    const userIdSnapshot = currentUserId;
 
     try {
       if (isSalonFavorited) {
         await api.delete(`/favorites/salons/${salonId}`);
+        if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
         dispatch({ type: "favorites/removeSalonFavorite", payload: { clientId: currentUser.id, salonId } });
         return;
       }
 
       const { data } = await api.post(`/favorites/salons/${salonId}`);
+      if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
       dispatch({ type: "favorites/addSalonFavorite", payload: data });
     } catch (requestError) {
-      setError(
-        requestError.response?.data?.message ||
-          "Could not update salon favorite. Please try again."
-      );
+      if (!isCurrentFavoriteMutation(routeIdSnapshot, userIdSnapshot)) return;
+      setRouteState((currentState) => ({
+        ...currentState,
+        error:
+          requestError.response?.data?.message ||
+          "Could not update salon favorite. Please try again.",
+      }));
     }
   };
 
-  if (!isLoading && !salon) {
+  if (!isLoading && !salon && !error) {
     return <Navigate to="/specialists" replace />;
   }
 
@@ -316,7 +406,15 @@ export default function SalonProfilePage() {
 
           <SalonReviewSection
             salonReviews={salonReviews}
-            setSalonReviews={setSalonReviews}
+            setSalonReviews={(nextReviews) =>
+              setRouteState((currentState) => ({
+                ...currentState,
+                salonReviews:
+                  typeof nextReviews === "function"
+                    ? nextReviews(currentState.salonReviews)
+                    : nextReviews,
+              }))
+            }
             canManageCurrentSalon={canManageCurrentSalon}
             averageRating={averageRating}
             reviewsCount={reviewsCount}
