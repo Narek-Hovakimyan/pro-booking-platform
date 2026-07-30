@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
@@ -24,22 +24,25 @@ import {
   updateBooking,
 } from "@/store/slices/bookingsSlice";
 
-// ---------------------------------------------------------------------------
-// Cache
-// ---------------------------------------------------------------------------
-
 const notificationsCacheByUserId = new Map();
 
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
-
 export default function NotificationsPage() {
+  const { currentUser } = useSelector((state) => state.auth);
+  const currentUserId = getIdString(currentUser?.id || currentUser?._id);
+
+  return (
+    <NotificationsPageContent
+      key={currentUserId || "anonymous"}
+      currentUser={currentUser}
+      currentUserId={currentUserId}
+    />
+  );
+}
+
+function NotificationsPageContent({ currentUser, currentUserId }) {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { currentUser } = useSelector((state) => state.auth);
   const bookings = useSelector((state) => state.bookings || []);
-  const currentUserId = getIdString(currentUser?.id || currentUser?._id);
   const [notifications, setNotifications] = useState(
     () => notificationsCacheByUserId.get(String(currentUserId)) || [],
   );
@@ -50,6 +53,32 @@ export default function NotificationsPage() {
   const [activeAction, setActiveAction] = useState(null);
   const [rejectingAction, setRejectingAction] = useState(null);
   const [rejectionError, setRejectionError] = useState("");
+  const accountGenerationRef = useRef(0);
+  const currentAccountIdRef = useRef(currentUserId);
+  const loadRequestIdRef = useRef(0);
+
+  const captureAccount = useCallback(() => ({
+    generation: accountGenerationRef.current,
+    userId: currentUserId,
+  }), [currentUserId]);
+  const isCurrentAccount = useCallback((snapshot) => Boolean(snapshot?.userId) &&
+    snapshot.userId === currentAccountIdRef.current &&
+    snapshot.generation === accountGenerationRef.current, []);
+  const isCurrentLoadRequest = useCallback((snapshot) =>
+    isCurrentAccount(snapshot) && snapshot.requestId === loadRequestIdRef.current,
+  [isCurrentAccount]);
+
+  useEffect(() => {
+    accountGenerationRef.current += 1;
+    loadRequestIdRef.current = 0;
+    currentAccountIdRef.current = currentUserId;
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return undefined;
+    notificationsCacheByUserId.set(String(currentUserId), notifications);
+    return undefined;
+  }, [currentUserId, notifications]);
 
   const actionableNotificationCount = useMemo(
     () =>
@@ -79,17 +108,18 @@ export default function NotificationsPage() {
     return nextMap;
   }, [bookings, currentUser?.role, currentUserId]);
 
-  // ---- Fetch ----
-
   const loadNotifications = useCallback(
-    async ({ showLoading = false } = {}) => {
-      if (!currentUserId) return;
-
+    async ({ showLoading = false, accountSnapshot = null } = {}) => {
+      const snapshot = {
+        ...(accountSnapshot || captureAccount()),
+        requestId: loadRequestIdRef.current + 1,
+      };
+      if (!snapshot.userId || !isCurrentAccount(snapshot)) return;
+      loadRequestIdRef.current = snapshot.requestId;
       if (showLoading) {
         setIsLoading(true);
       }
       setError("");
-
       try {
         const { data } = await api.get("/notifications");
         const nextNotifications = data.map((item) => ({
@@ -97,18 +127,21 @@ export default function NotificationsPage() {
           id: item.id || item._id,
         }));
 
-        notificationsCacheByUserId.set(String(currentUserId), nextNotifications);
+        if (!isCurrentLoadRequest(snapshot)) return;
         setNotifications(nextNotifications);
       } catch (requestError) {
+        if (!isCurrentLoadRequest(snapshot)) return;
         setError(
           requestError.response?.data?.message ||
             "Could not load notifications. Please try again.",
         );
       } finally {
-        setIsLoading(false);
+        if (isCurrentLoadRequest(snapshot)) {
+          setIsLoading(false);
+        }
       }
     },
-    [currentUserId],
+    [captureAccount, isCurrentAccount, isCurrentLoadRequest],
   );
 
   useEffect(() => {
@@ -116,10 +149,11 @@ export default function NotificationsPage() {
 
     let isMounted = true;
     let intervalId = null;
+    const accountSnapshot = captureAccount();
 
     async function safeLoad(options) {
-      if (!isMounted) return;
-      await loadNotifications(options);
+      if (!isMounted || !isCurrentAccount(accountSnapshot)) return;
+      await loadNotifications({ ...options, accountSnapshot });
     }
 
     safeLoad({ showLoading: true });
@@ -129,7 +163,7 @@ export default function NotificationsPage() {
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [currentUserId, loadNotifications]);
+  }, [captureAccount, currentUserId, isCurrentAccount, loadNotifications]);
 
   useEffect(() => {
     if (
@@ -141,9 +175,10 @@ export default function NotificationsPage() {
     }
 
     let isMounted = true;
+    const accountSnapshot = captureAccount();
 
     dispatch(fetchBarberBookings(currentUserId)).catch((requestError) => {
-      if (!isMounted) return;
+      if (!isMounted || !isCurrentAccount(accountSnapshot)) return;
       setError(
         requestError.response?.data?.message ||
           "Could not load bookings for notification actions.",
@@ -153,102 +188,94 @@ export default function NotificationsPage() {
     return () => {
       isMounted = false;
     };
-  }, [actionableNotificationCount, currentUser?.role, currentUserId, dispatch]);
-
-  // ---- Actions ----
+  }, [actionableNotificationCount, captureAccount, currentUser?.role, currentUserId, dispatch, isCurrentAccount]);
 
   const markOneRead = useCallback(
     async (notificationId) => {
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
       setError("");
-
       try {
         const { data } = await api.put(`/notifications/${notificationId}/read`);
         const nextNotification = { ...data, id: data.id || data._id };
-
+        if (!isCurrentAccount(accountSnapshot)) return;
         setNotifications((current) =>
           current.map((n) =>
             n.id === notificationId ? nextNotification : n,
           ),
         );
-        notificationsCacheByUserId.set(
-          String(currentUserId),
-          notifications.map((n) =>
-            n.id === notificationId ? nextNotification : n,
-          ),
-        );
         window.dispatchEvent(new Event("notifications:updated"));
       } catch (requestError) {
+        if (!isCurrentAccount(accountSnapshot)) return;
         setError(
           requestError.response?.data?.message ||
             "Could not mark notification as read.",
         );
       }
     },
-    [currentUserId, notifications],
+    [captureAccount, isCurrentAccount],
   );
 
   const markAllRead = useCallback(async () => {
+    const accountSnapshot = captureAccount();
+    if (!isCurrentAccount(accountSnapshot)) return;
     setError("");
-
     try {
       await api.put("/notifications/read");
+      if (!isCurrentAccount(accountSnapshot)) return;
       setNotifications((current) =>
         current.map((n) => ({ ...n, isRead: true })),
       );
-      notificationsCacheByUserId.set(
-        String(currentUserId),
-        notifications.map((n) => ({ ...n, isRead: true })),
-      );
       window.dispatchEvent(new Event("notifications:updated"));
     } catch (requestError) {
+      if (!isCurrentAccount(accountSnapshot)) return;
       setError(
         requestError.response?.data?.message ||
           "Could not mark notifications as read.",
       );
     }
-  }, [currentUserId, notifications]);
+  }, [captureAccount, isCurrentAccount]);
 
   const deleteOne = useCallback(
     async (notificationId) => {
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
       setError("");
-
       try {
         await api.delete(`/notifications/${notificationId}`);
+        if (!isCurrentAccount(accountSnapshot)) return;
         setNotifications((current) =>
           current.filter((n) => n.id !== notificationId),
         );
-        notificationsCacheByUserId.set(
-          String(currentUserId),
-          notifications.filter((n) => n.id !== notificationId),
-        );
         window.dispatchEvent(new Event("notifications:updated"));
       } catch (requestError) {
+        if (!isCurrentAccount(accountSnapshot)) return;
         setError(
           requestError.response?.data?.message ||
             "Could not delete notification.",
         );
       }
     },
-    [currentUserId, notifications],
+    [captureAccount, isCurrentAccount],
   );
 
   const clearAll = useCallback(async () => {
+    const accountSnapshot = captureAccount();
+    if (!isCurrentAccount(accountSnapshot)) return;
     setError("");
-
     try {
       await api.delete("/notifications/user/all");
+      if (!isCurrentAccount(accountSnapshot)) return;
       setNotifications([]);
-      notificationsCacheByUserId.set(String(currentUserId), []);
       window.dispatchEvent(new Event("notifications:updated"));
     } catch (requestError) {
+      if (!isCurrentAccount(accountSnapshot)) return;
       setError(
         requestError.response?.data?.message ||
           "Could not clear notifications.",
       );
     }
-  }, [currentUserId]);
-
-  // ---- Extracted hooks ----
+  }, [captureAccount, isCurrentAccount]);
 
   const { eventRegistrationById, handleEventAction } =
     useEventRegistrationNotificationActions({
@@ -260,6 +287,8 @@ export default function NotificationsPage() {
       setError,
       markOneRead,
       loadNotifications,
+      captureAccount,
+      isCurrentAccount,
     });
 
   const { jobApplicationById, handleJobAction } =
@@ -272,34 +301,47 @@ export default function NotificationsPage() {
       setError,
       markOneRead,
       loadNotifications,
+      captureAccount,
+      isCurrentAccount,
     });
 
   const refreshBarberBookings = useCallback(async () => {
     if (currentUser?.role !== "barber" || !currentUserId) return;
+    const accountSnapshot = captureAccount();
+    if (!isCurrentAccount(accountSnapshot)) return;
     await dispatch(fetchBarberBookings(currentUserId));
-  }, [currentUser?.role, currentUserId, dispatch]);
+    if (!isCurrentAccount(accountSnapshot)) return;
+  }, [captureAccount, currentUser?.role, currentUserId, dispatch, isCurrentAccount]);
 
   const finishBookingAction = useCallback(
-    async (notification, updatedBooking) => {
+    async (notification, updatedBooking, accountSnapshot) => {
+      if (!isCurrentAccount(accountSnapshot)) return false;
+
       dispatch(updateBooking(updatedBooking));
 
       if (!notification.isRead) {
         await markOneRead(notification.id);
+        if (!isCurrentAccount(accountSnapshot)) return false;
       }
 
       await refreshBarberBookings();
+      if (!isCurrentAccount(accountSnapshot)) return false;
+      return true;
     },
-    [dispatch, markOneRead, refreshBarberBookings],
+    [dispatch, isCurrentAccount, markOneRead, refreshBarberBookings],
   );
 
   const handleBookingAction = useCallback(
     async (notification, booking, action) => {
       if (activeAction) return;
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
 
       const bookingId = getBookingId(booking) || getNotificationBookingId(notification);
       if (!bookingId) return;
 
       if (action === "reject-booking") {
+        if (!isCurrentAccount(accountSnapshot)) return;
         setRejectingAction({ notification, booking });
         setRejectionError("");
         setError("");
@@ -328,22 +370,29 @@ export default function NotificationsPage() {
           return;
         }
 
-        await finishBookingAction(notification, response.data);
+        if (!isCurrentAccount(accountSnapshot)) return;
+        await finishBookingAction(notification, response.data, accountSnapshot);
       } catch (requestError) {
+        if (!isCurrentAccount(accountSnapshot)) return;
+
         setError(
           requestError.response?.data?.message ||
             "Could not update booking. Please try again.",
         );
       } finally {
-        setActiveAction(null);
+        if (isCurrentAccount(accountSnapshot)) {
+          setActiveAction(null);
+        }
       }
     },
-    [activeAction, finishBookingAction],
+    [activeAction, captureAccount, finishBookingAction, isCurrentAccount],
   );
 
   const rejectBookingFromNotification = useCallback(
     async ({ rejectionReason }) => {
       if (!rejectingAction || activeAction) return;
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
 
       const { notification, booking } = rejectingAction;
       const bookingId = getBookingId(booking) || getNotificationBookingId(notification);
@@ -358,33 +407,45 @@ export default function NotificationsPage() {
           rejectionReason,
         });
 
-        await finishBookingAction(notification, data);
+        if (!isCurrentAccount(accountSnapshot)) return;
+        const finished = await finishBookingAction(notification, data, accountSnapshot);
+        if (!finished) return;
+
         setRejectingAction(null);
       } catch (requestError) {
+        if (!isCurrentAccount(accountSnapshot)) return;
+
         setRejectionError(
           requestError.response?.data?.message ||
             "Could not reject booking. Please try again.",
         );
       } finally {
-        setActiveAction(null);
+        if (isCurrentAccount(accountSnapshot)) {
+          setActiveAction(null);
+        }
       }
     },
-    [activeAction, finishBookingAction, rejectingAction],
+    [
+      activeAction,
+      captureAccount,
+      finishBookingAction,
+      isCurrentAccount,
+      rejectingAction,
+    ],
   );
-
-  // ---- Navigation ----
 
   const handleView = useCallback(
     async (notification, destination) => {
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
       if (!notification.isRead) {
         await markOneRead(notification.id);
+        if (!isCurrentAccount(accountSnapshot)) return;
       }
       navigate(destination);
     },
-    [markOneRead, navigate],
+    [captureAccount, isCurrentAccount, markOneRead, navigate],
   );
-
-  // ---- Derived state ----
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => !n.isRead).length,
@@ -404,8 +465,6 @@ export default function NotificationsPage() {
 
   const initialLoading = isLoading && notifications.length === 0;
   const refreshing = isLoading && notifications.length > 0;
-
-  // ---- Render ----
 
   return (
     <Container className="pb-12" size="tight">
@@ -470,3 +529,10 @@ export default function NotificationsPage() {
     </Container>
   );
 }
+
+NotificationsPage.__clearNotificationsCacheForTests = () => {
+  notificationsCacheByUserId.clear();
+};
+
+NotificationsPage.__getNotificationsCacheForTests = (userId) =>
+  notificationsCacheByUserId.get(String(userId)) || [];

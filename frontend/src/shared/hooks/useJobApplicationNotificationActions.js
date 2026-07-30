@@ -19,6 +19,8 @@ export function useJobApplicationNotificationActions({
   setError,
   markOneRead,
   loadNotifications,
+  captureAccount,
+  isCurrentAccount,
 }) {
   const [managedJobApplications, setManagedJobApplications] = useState([]);
 
@@ -44,16 +46,17 @@ export function useJobApplicationNotificationActions({
     }
 
     let isMounted = true;
+    const accountSnapshot = captureAccount();
 
     async function loadManagedJobApplications() {
       try {
         const { data } = await api.get("/salon-jobs/applications/managed");
 
-        if (isMounted) {
+        if (isMounted && isCurrentAccount(accountSnapshot)) {
           setManagedJobApplications(Array.isArray(data) ? data : []);
         }
       } catch (requestError) {
-        if (!isMounted) return;
+        if (!isMounted || !isCurrentAccount(accountSnapshot)) return;
 
         setManagedJobApplications([]);
         setError(
@@ -68,11 +71,26 @@ export function useJobApplicationNotificationActions({
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.role, currentUserId, jobActionableNotificationCount, setError]);
+  }, [
+    captureAccount,
+    currentUser?.role,
+    currentUserId,
+    isCurrentAccount,
+    jobActionableNotificationCount,
+    setError,
+  ]);
 
   /* ── applicationById lookup map ── */
   const jobApplicationById = useMemo(() => {
     const nextMap = new Map();
+
+    if (
+      currentUser?.role !== "barber" ||
+      !currentUserId ||
+      jobActionableNotificationCount === 0
+    ) {
+      return nextMap;
+    }
 
     managedJobApplications.forEach((application) => {
       const applicationId = getJobApplicationId(application);
@@ -82,7 +100,12 @@ export function useJobApplicationNotificationActions({
     });
 
     return nextMap;
-  }, [managedJobApplications]);
+  }, [
+    currentUser?.role,
+    currentUserId,
+    jobActionableNotificationCount,
+    managedJobApplications,
+  ]);
 
   /* ── Accept / Reject handler ── */
   const handleJobAction = useCallback(
@@ -93,6 +116,8 @@ export function useJobApplicationNotificationActions({
         getJobApplicationId(application) ||
         getNotificationJobApplicationId(notification);
       if (!applicationId) return;
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
 
       const status =
         action === "accept-job-application"
@@ -111,6 +136,7 @@ export function useJobApplicationNotificationActions({
           `/salon-jobs/applications/${applicationId}/status`,
           { status },
         );
+        if (!isCurrentAccount(accountSnapshot)) return;
         const nextApplication = data || { ...application, status };
 
         setManagedJobApplications((currentApplications) =>
@@ -123,19 +149,32 @@ export function useJobApplicationNotificationActions({
 
         if (!notification.isRead) {
           await markOneRead(notification.id);
+          if (!isCurrentAccount(accountSnapshot)) return;
         }
 
         await loadNotifications();
+        if (!isCurrentAccount(accountSnapshot)) return;
       } catch (requestError) {
+        if (!isCurrentAccount(accountSnapshot)) return;
         setError(
           requestError.response?.data?.message ||
             "Could not update job application. Please try again.",
         );
       } finally {
-        setActiveAction(null);
+        if (isCurrentAccount(accountSnapshot)) {
+          setActiveAction(null);
+        }
       }
     },
-    [activeAction, markOneRead, loadNotifications, setActiveAction, setError],
+    [
+      activeAction,
+      captureAccount,
+      isCurrentAccount,
+      markOneRead,
+      loadNotifications,
+      setActiveAction,
+      setError,
+    ],
   );
 
   return { jobApplicationById, handleJobAction };

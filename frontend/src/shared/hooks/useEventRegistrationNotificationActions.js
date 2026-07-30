@@ -20,6 +20,8 @@ export function useEventRegistrationNotificationActions({
   setError,
   markOneRead,
   loadNotifications,
+  captureAccount,
+  isCurrentAccount,
 }) {
   const [eventRegistrations, setEventRegistrations] = useState([]);
 
@@ -51,6 +53,7 @@ export function useEventRegistrationNotificationActions({
     }
 
     let isMounted = true;
+    const accountSnapshot = captureAccount();
 
     async function loadEventRegistrations() {
       try {
@@ -63,11 +66,11 @@ export function useEventRegistrationNotificationActions({
           Array.isArray(response.data) ? response.data : []
         );
 
-        if (isMounted) {
+        if (isMounted && isCurrentAccount(accountSnapshot)) {
           setEventRegistrations(nextRegistrations);
         }
       } catch (requestError) {
-        if (!isMounted) return;
+        if (!isMounted || !isCurrentAccount(accountSnapshot)) return;
 
         setEventRegistrations([]);
         setError(
@@ -82,11 +85,26 @@ export function useEventRegistrationNotificationActions({
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.role, currentUserId, eventActionableEventIds, setError]);
+  }, [
+    captureAccount,
+    currentUser?.role,
+    currentUserId,
+    eventActionableEventIds,
+    isCurrentAccount,
+    setError,
+  ]);
 
   /* ── registrationById lookup map ── */
   const eventRegistrationById = useMemo(() => {
     const nextMap = new Map();
+
+    if (
+      currentUser?.role !== "barber" ||
+      !currentUserId ||
+      eventActionableEventIds.length === 0
+    ) {
+      return nextMap;
+    }
 
     eventRegistrations.forEach((registration) => {
       const registrationId = getEventRegistrationId(registration);
@@ -96,7 +114,7 @@ export function useEventRegistrationNotificationActions({
     });
 
     return nextMap;
-  }, [eventRegistrations]);
+  }, [currentUser?.role, currentUserId, eventActionableEventIds.length, eventRegistrations]);
 
   /* ── Approve / Reject handler ── */
   const handleEventAction = useCallback(
@@ -106,6 +124,8 @@ export function useEventRegistrationNotificationActions({
       const eventId = getNotificationEventId(notification);
       const eventRegistrationId = getNotificationEventRegistrationId(notification);
       if (!eventId || !eventRegistrationId) return;
+      const accountSnapshot = captureAccount();
+      if (!isCurrentAccount(accountSnapshot)) return;
 
       setError("");
       setActiveAction({ notificationId: notification.id, action });
@@ -127,6 +147,8 @@ export function useEventRegistrationNotificationActions({
           return;
         }
 
+        if (!isCurrentAccount(accountSnapshot)) return;
+
         const nextRegistration =
           response.data?.registration ||
           {
@@ -135,6 +157,7 @@ export function useEventRegistrationNotificationActions({
               action === "approve-event-registration" ? "approved" : "rejected",
           };
 
+        if (!isCurrentAccount(accountSnapshot)) return;
         setEventRegistrations((currentRegistrations) =>
           currentRegistrations.map((registration) =>
             getEventRegistrationId(registration) === eventRegistrationId
@@ -145,19 +168,32 @@ export function useEventRegistrationNotificationActions({
 
         if (!notification.isRead) {
           await markOneRead(notification.id);
+          if (!isCurrentAccount(accountSnapshot)) return;
         }
 
         await loadNotifications();
+        if (!isCurrentAccount(accountSnapshot)) return;
       } catch (requestError) {
+        if (!isCurrentAccount(accountSnapshot)) return;
         setError(
           requestError.response?.data?.message ||
             "Could not process event registration. Please try again.",
         );
       } finally {
-        setActiveAction(null);
+        if (isCurrentAccount(accountSnapshot)) {
+          setActiveAction(null);
+        }
       }
     },
-    [activeAction, markOneRead, loadNotifications, setActiveAction, setError],
+    [
+      activeAction,
+      captureAccount,
+      isCurrentAccount,
+      markOneRead,
+      loadNotifications,
+      setActiveAction,
+      setError,
+    ],
   );
 
   return { eventRegistrationById, handleEventAction };
