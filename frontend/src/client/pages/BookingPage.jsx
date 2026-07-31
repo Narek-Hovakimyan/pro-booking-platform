@@ -34,6 +34,39 @@ const EMPTY_SLOT_SUMMARY = {
 const getEntityId = (entity) =>
   typeof entity === "string" ? entity : entity?.id || entity?._id || "";
 
+const getSalonEntryId = (salonEntry) => {
+  if (!salonEntry) return "";
+  if (typeof salonEntry === "string") return salonEntry;
+
+  const explicitSalonId = getEntityId(salonEntry?.salonId);
+  if (explicitSalonId) return explicitSalonId;
+
+  const nestedSalonId = getEntityId(salonEntry?.salon);
+  if (nestedSalonId) return nestedSalonId;
+
+  return getEntityId(salonEntry);
+};
+
+const getApprovedSalonEntries = (barber) =>
+  (Array.isArray(barber?.approvedSalons) && barber.approvedSalons.length > 0
+    ? barber.approvedSalons
+    : Array.isArray(barber?.salons)
+      ? barber.salons
+      : []
+  ).filter(
+    (salonEntry) =>
+      salonEntry &&
+      (salonEntry.status === "approved" || salonEntry.status === undefined)
+  );
+
+const getSingleApprovedSalonId = (barber) => {
+  const uniqueSalonIds = Array.from(
+    new Set(getApprovedSalonEntries(barber).map(getSalonEntryId).filter(Boolean))
+  );
+
+  return uniqueSalonIds.length === 1 ? uniqueSalonIds[0] : "";
+};
+
 const isMeaningfulWeeklyDay = (daySchedule) =>
   Boolean(daySchedule?.working) &&
   timeToMinutes(daySchedule.from) !== null &&
@@ -130,28 +163,8 @@ export default function BookingPage({
   const dispatch = useDispatch();
   const initialRebookContext = getRebookContext(location.state);
   const querySelectedSalonId = searchParams.get("salonId");
-  const initialSelectedSalonId =
-    querySelectedSalonId ||
-    location.state?.selectedSalonId ||
-    getEntityId(location.state?.salon) ||
-    null;
-  const [rebookContext, setRebookContext] = useState(initialRebookContext);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isServicesLoading, setIsServicesLoading] = useState(true);
-  const [isBarberLoading, setIsBarberLoading] = useState(false);
-  const [isScheduleBlocked, setIsScheduleBlocked] = useState(false);
-  const [error, setError] = useState("");
-  const [selectedDate, setSelectedDate] = useState(() =>
-    initialRebookContext?.serviceId ? "" : getNext7Days()[0].value
-  );
-  const [activeBarberId, setActiveBarberId] = useState(null);
-  const [selectedSalonId, setSelectedSalonId] = useState(initialSelectedSalonId);
-  const activeSelectedSalonId = querySelectedSalonId || selectedSalonId;
-  const [priceAdjustment, setPriceAdjustment] = useState({
-    discountPreview: 0,
-    pricingQuote: null,
-    voucherCode: "",
-  });
+  const stateSelectedSalonId =
+    location.state?.selectedSalonId || getEntityId(location.state?.salon) || null;
   const users = useSelector((state) => state.users);
   const barberFromState = location.state?.barber;
   const barberFromStore = (users || []).find(
@@ -169,6 +182,31 @@ export default function BookingPage({
         barberFromState.depositSettings ?? barberFromStore?.depositSettings,
     };
   }, [barberFromState, barberFromStore]);
+  const derivedSelectedSalonId = getSingleApprovedSalonId(barber);
+  const initialSelectedSalonId =
+    querySelectedSalonId || stateSelectedSalonId || derivedSelectedSalonId || null;
+  const [rebookContext, setRebookContext] = useState(initialRebookContext);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isServicesLoading, setIsServicesLoading] = useState(true);
+  const [isBarberLoading, setIsBarberLoading] = useState(false);
+  const [isScheduleBlocked, setIsScheduleBlocked] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedDate, setSelectedDate] = useState(() =>
+    initialRebookContext?.serviceId ? "" : getNext7Days()[0].value
+  );
+  const [activeBarberId, setActiveBarberId] = useState(null);
+  const [selectedSalonId, setSelectedSalonId] = useState(initialSelectedSalonId);
+  const activeSelectedSalonId =
+    querySelectedSalonId ||
+    stateSelectedSalonId ||
+    selectedSalonId ||
+    derivedSelectedSalonId ||
+    null;
+  const [priceAdjustment, setPriceAdjustment] = useState({
+    discountPreview: 0,
+    pricingQuote: null,
+    voucherCode: "",
+  });
   const needsEnrichedBarber = !barber?.depositSettings;
 
   const barberBookings = useMemo(
@@ -237,11 +275,28 @@ export default function BookingPage({
 
     if (!nextRebookContext) return;
 
-    navigate(location.pathname, {
-      replace: true,
-      state: location.state?.barber ? { barber: location.state.barber } : null,
-    });
-  }, [location.pathname, location.state, navigate]);
+    const nextSearchParams = new URLSearchParams(location.search);
+
+    if (querySelectedSalonId) {
+      nextSearchParams.set("salonId", querySelectedSalonId);
+    }
+
+    navigate(
+      nextSearchParams.toString()
+        ? { pathname: location.pathname, search: `?${nextSearchParams.toString()}` }
+        : location.pathname,
+      {
+        replace: true,
+        state: location.state?.barber ? { barber: location.state.barber } : null,
+      }
+    );
+  }, [
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    querySelectedSalonId,
+  ]);
 
   const handleSalonSelect = useCallback(
     (nextSalonId) => {

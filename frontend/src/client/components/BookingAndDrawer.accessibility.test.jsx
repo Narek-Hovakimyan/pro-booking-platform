@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import api from "@/shared/api/axios";
 import BookingsList from "@/barber/components/BookingsList";
+import BookingPage from "@/client/pages/BookingPage";
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
 import ManualBookingModal from "@/barber/components/bookings/ManualBookingModal";
 import CancelBookingModal from "@/client/components/CancelBookingModal";
@@ -14,6 +15,7 @@ import ReviewModal from "@/client/components/ReviewModal";
 import RescheduleBooking from "@/client/components/RescheduleBooking";
 import Drawer from "@/shared/components/common/Drawer";
 import * as dateUtils from "@/shared/utils/dates";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 vi.mock("react-redux", () => ({
   useDispatch: () => vi.fn(),
@@ -36,6 +38,7 @@ vi.mock("@/shared/api/axios", () => ({
 vi.mock("@/store/slices/bookingsSlice", () => ({
   fetchBarberBookings: vi.fn(() => ({ type: "fetchBarberBookings" })),
   fetchClientBookings: vi.fn(() => ({ type: "fetchClientBookings" })),
+  setBookings: vi.fn((payload) => ({ type: "setBookings", payload })),
   updateBooking: vi.fn((booking) => ({ type: "updateBooking", payload: booking })),
 }));
 
@@ -46,6 +49,18 @@ vi.mock("@/shared/utils/slots", () => ({
     blockedByBooking: false,
   })),
 }));
+
+const renderRouterMocks = vi.hoisted(() => ({
+  navigate: vi.fn(),
+}));
+
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useNavigate: () => renderRouterMocks.navigate,
+  };
+});
 
 function DrawerHarness({ closeLabel = "Close filters drawer", isOpen = true, onClose }) {
   return (
@@ -507,5 +522,104 @@ describe("Booking and drawer accessibility", () => {
 
     expect(screen.queryByRole("button", { name: "Open booking details" })).not.toBeInTheDocument();
     expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe("BookingPage salon-context navigation", () => {
+  function bookingPageState() {
+    return {
+      step: 2,
+      setStep: vi.fn(),
+      services: [],
+      selectedServiceId: null,
+      setSelectedServiceId: vi.fn(),
+      selectedDayKey: "",
+      setSelectedDayKey: vi.fn(),
+      selectedTime: "",
+      setSelectedTime: vi.fn(),
+      client: { name: "", phone: "", note: "" },
+      setClient: vi.fn(),
+      currentUser: { id: "client-1" },
+      bookings: [],
+      schedule: {},
+    };
+  }
+
+  function renderBookingPage(initial) {
+    renderRouterMocks.navigate.mockClear();
+    vi.mocked(api.get).mockClear();
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: initial.pathname,
+            search: initial.search || "",
+            state: initial.state || null,
+          },
+        ]}
+      >
+        <Routes>
+          <Route
+            path="/booking/:barberId"
+            element={<BookingPage {...bookingPageState()} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+
+  it("derives a single approved salon from production-shaped approvedSalons payload", async () => {
+    renderBookingPage({
+      pathname: "/booking/barber-1",
+      state: {
+        barber: {
+          id: "barber-1",
+          depositSettings: { enabled: false },
+          approvedSalons: [{ id: "salon-1", name: "Salon One", isPrimary: true }],
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith("/services/barber-1?salonId=salon-1");
+      expect(api.get).toHaveBeenCalledWith("/schedules/barber-1/salon-1");
+    });
+  });
+
+  it("keeps the booking page salon-scoped after a direct refresh with salonId in the query", async () => {
+    renderBookingPage({
+      pathname: "/booking/barber-1",
+      search: "?salonId=salon-1",
+    });
+
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith("/services/barber-1?salonId=salon-1");
+      expect(api.get).toHaveBeenCalledWith("/schedules/barber-1/salon-1");
+    });
+  });
+
+  it("preserves an existing salonId query when cleaning up rebook navigation state", () => {
+    renderBookingPage({
+      pathname: "/booking/barber-1",
+      search: "?salonId=salon-7",
+      state: {
+        rebook: true,
+        barber: { id: "barber-1", depositSettings: { enabled: false } },
+        barberId: "barber-1",
+        service: { id: "service-1" },
+        serviceId: "service-1",
+        selectedSalonId: "salon-7",
+      },
+    });
+
+    const cleanNavigation = renderRouterMocks.navigate.mock.calls[0];
+    expect(cleanNavigation[0]).toEqual({
+      pathname: "/booking/barber-1",
+      search: "?salonId=salon-7",
+    });
+    expect(cleanNavigation[1]).toMatchObject({
+      replace: true,
+      state: { barber: { id: "barber-1", depositSettings: { enabled: false } } },
+    });
   });
 });

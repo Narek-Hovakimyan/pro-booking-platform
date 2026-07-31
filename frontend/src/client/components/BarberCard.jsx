@@ -39,6 +39,16 @@ function getBarberAvatarUrl(barber) {
   return barber?.avatarUrl || barber?.imageUrl || "";
 }
 
+function getSalonEntryId(salonEntry) {
+  if (!salonEntry) return null;
+  if (typeof salonEntry === "string") return salonEntry;
+  if (typeof salonEntry.salon === "string") return salonEntry.salon;
+  if (salonEntry.salon && typeof salonEntry.salon === "object") {
+    return salonEntry.salon.id || salonEntry.salon._id || null;
+  }
+  return salonEntry.id || salonEntry._id || null;
+}
+
 export default function BarberCard({
   barber,
   bookingSalon = null,
@@ -159,9 +169,18 @@ export default function BarberCard({
 
     onToggleFavorite(barber);
   };
-  const bookingSalonId = bookingSalon?.id || bookingSalon?._id || null;
+  // Explicit salon context always wins and preserves its exact salonId.
+  // Without it, only a single approved/bookable salon may auto-scope the booking.
+  const explicitBookingSalonId = getSalonEntryId(bookingSalon);
+  const singleSalonEntry = approvedSalons.length === 1 ? approvedSalons[0] : null;
+  const singleSalonId = singleSalonEntry ? getSalonEntryId(singleSalonEntry) : null;
+  const singleLegacySalonId =
+    !singleSalonEntry && legacySalon ? getSalonEntryId(legacySalon) : null;
+  const bookingSalonId =
+    explicitBookingSalonId || singleSalonId || singleLegacySalonId || null;
+  const bookingSalonEntry = bookingSalon || singleSalonEntry || (singleLegacySalonId ? legacySalon : null);
   const bookingState = bookingSalonId
-    ? { barber, selectedSalonId: bookingSalonId, salon: bookingSalon }
+    ? { barber, selectedSalonId: bookingSalonId, salon: bookingSalonEntry }
     : { barber };
   const bookingPath = bookingSalonId
     ? `/booking/${barberId}?salonId=${encodeURIComponent(bookingSalonId)}`

@@ -41,6 +41,16 @@ import { fetchClientBookings } from "@/store/slices/bookingsSlice";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { getMediaUrl } from "@/shared/utils/media";
 
+function getSalonEntryId(salonEntry) {
+  if (!salonEntry) return null;
+  if (typeof salonEntry === "string") return salonEntry;
+  if (typeof salonEntry.salon === "string") return salonEntry.salon;
+  if (salonEntry.salon && typeof salonEntry.salon === "object") {
+    return salonEntry.salon.id || salonEntry.salon._id || null;
+  }
+  return salonEntry.id || salonEntry._id || null;
+}
+
 export default function FavoritesPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -251,7 +261,11 @@ export default function FavoritesPage() {
         ? eligibleBooking.salon
         : null;
 
-    navigate(`/booking/${barberId}`, {
+    const rebookPath = selectedSalonId
+      ? `/booking/${barberId}?salonId=${encodeURIComponent(selectedSalonId)}`
+      : `/booking/${barberId}`;
+
+    navigate(rebookPath, {
       state: {
         rebook: true,
         barber,
@@ -394,6 +408,18 @@ export default function FavoritesPage() {
             {favoriteBarbers.map((barber) => {
               const barberId = barber?.id || barber?._id;
               const bid = String(barberId);
+              const approvedSalons = (barber?.approvedSalons || barber?.salons || [])
+                .filter((s) => s?.status === "approved" || s?.status === undefined);
+              const singleSalonEntry = approvedSalons.length === 1 ? approvedSalons[0] : null;
+              const singleLegacySalonId =
+                !singleSalonEntry && barber?.salonStatus === "approved"
+                  ? getSalonEntryId(barber?.salon)
+                  : null;
+              const bookingSalonId =
+                getSalonEntryId(singleSalonEntry) || singleLegacySalonId || null;
+              const bookingPath = bookingSalonId
+                ? `/booking/${barberId}?salonId=${encodeURIComponent(bookingSalonId)}`
+                : `/booking/${barberId}`;
               const favServices = summaryServicesByBarberId[bid] || services;
               const startingPrice = getStartingPrice(favServices, barberId);
               const eligibleBooking = eligibleBookingByBarberId[barberId];
@@ -555,7 +581,7 @@ export default function FavoritesPage() {
                       <Button
                         as={Link}
                         state={{ barber }}
-                        to={`/booking/${barberId}`}
+                        to={bookingPath}
                         className="w-full"
                       >
                         Book appointment

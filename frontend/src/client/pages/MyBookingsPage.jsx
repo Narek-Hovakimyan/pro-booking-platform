@@ -403,7 +403,11 @@ export default function MyBookingsPage() {
     }
 
     setError("");
-    navigate(`/booking/${barberId}`, {
+    const rebookPath = salonId
+      ? `/booking/${barberId}?salonId=${encodeURIComponent(salonId)}`
+      : `/booking/${barberId}`;
+
+    navigate(rebookPath, {
       state: {
         rebook: true,
         barber: typeof barber === "object" ? barber : null,
