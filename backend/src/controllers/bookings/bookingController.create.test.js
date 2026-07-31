@@ -1109,6 +1109,47 @@ test("createBooking allows active salon seat only in the matching salon", async 
   assert.equal(String(createdBookings[0].salonId), salonId);
 });
 
+test("createBooking allows salon booking when approved membership omits legacy worksAsSpecialist", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings);
+  mockSalonScopedSeatAccess({
+    seatSalonId: salonId,
+    resolvedBarber: {
+      ...barber,
+      specialistOnboarding: {
+        version: 1,
+        status: "completed",
+        currentStep: "review",
+        workplace: "salon",
+        completedAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+      salons: [staffMembership(salonId, { worksAsSpecialist: undefined })],
+    },
+  });
+
+  const res = createResponse();
+
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(String(createdBookings[0].salonId), salonId);
+});
+
 test("createBooking blocks active seat from another salon", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings);

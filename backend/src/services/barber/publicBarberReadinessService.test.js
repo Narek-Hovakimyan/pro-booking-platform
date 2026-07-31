@@ -209,6 +209,25 @@ test("readiness allows approved specialist salon memberships and keeps eligibili
   assert.equal(readiness.publicReady, true);
 });
 
+test("readiness keeps legacy approved salon specialists bookable when worksAsSpecialist is missing", async () => {
+  User.find = () => createFindChain([
+    {
+      _id: "legacy-salon-ready",
+      role: "barber",
+      specialistOnboarding: completedState("salon"),
+      salons: [{ salon: "salon-a", status: "approved", relationshipStatus: "accepted" }],
+    },
+  ]);
+  BarberProfile.find = async () => [];
+  Schedule.find = async () => [];
+  Service.find = async () => [{ barberId: "legacy-salon-ready" }];
+
+  const readiness = await getPublicBarberReadiness("legacy-salon-ready");
+
+  assert.deepEqual([...readiness.eligibleSalonIds], ["salon-a"]);
+  assert.equal(readiness.publicReady, true);
+});
+
 test("readiness rejects pending, rejected, and non-specialist salon memberships", async () => {
   User.find = () => createFindChain([
     {

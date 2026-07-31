@@ -75,6 +75,16 @@ const getBookingDuration = (booking) => {
   return Number.isFinite(duration) && duration > 0 ? duration : 0;
 };
 
+const getPrimarySalonId = (salonEntry) => {
+  if (!salonEntry) return "";
+  if (typeof salonEntry.salon === "string") return salonEntry.salon;
+  if (salonEntry.salon && typeof salonEntry.salon === "object") {
+    return salonEntry.salon.id || salonEntry.salon._id || "";
+  }
+  if ("salon" in salonEntry || "status" in salonEntry || "isPrimary" in salonEntry) return "";
+  return salonEntry.id || salonEntry._id || "";
+};
+
 export default function BookingsList({
   bookings,
   services = [],
@@ -452,7 +462,7 @@ export default function BookingsList({
     setIsAddingBooking(true);
 
     try {
-      const salonId = primarySalon?.id || primarySalon?._id;
+      const salonId = getPrimarySalonId(primarySalon) || undefined;
 
       const { data } = await api.post("/bookings", {
         barberId: currentUser.id,

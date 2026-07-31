@@ -16,6 +16,11 @@ const isOnboardingReady = (user) => {
   const state = classifySpecialistOnboardingState(user);
   return state.kind === "legacy" || (state.kind === "valid" && state.state.status === "completed");
 };
+const isEligibleSalonMembership = (membership) =>
+  membership?.status === "approved" &&
+  membership?.relationshipStatus !== "pending" &&
+  membership?.relationshipStatus !== "rejected" &&
+  membership?.worksAsSpecialist !== false;
 const hasValidPersonalSchedule = (schedule) => {
   try { validatePersonalWeeklySchedule(schedule?.weeklySchedule); return true; } catch { return false; }
 };
@@ -51,7 +56,7 @@ export const buildPublicBarberReadiness = ({
     nonEmpty(profile?.address) &&
     hasValidPersonalSchedule(personalSchedule);
   const eligibleSalonIds = new Set((Array.isArray(barber.salons) ? barber.salons : [])
-    .filter((membership) => membership?.status === "approved" && membership?.relationshipStatus !== "pending" && membership?.relationshipStatus !== "rejected" && membership?.worksAsSpecialist === true)
+    .filter(isEligibleSalonMembership)
     .map((membership) => idOf(membership.salon)).filter(Boolean));
 
   return {
