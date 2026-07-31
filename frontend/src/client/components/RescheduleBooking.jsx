@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
@@ -31,6 +31,25 @@ const EMPTY_SLOT_SUMMARY = {
   blockedByTime: false,
   blockedByBooking: false,
 };
+const FIELD_SELECTOR =
+  "input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
+const FALLBACK_SELECTOR = "button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+
+function focusFirstControl(dialogRef) {
+  const firstControl =
+    dialogRef.current?.querySelector(FIELD_SELECTOR) ||
+    dialogRef.current?.querySelector(FALLBACK_SELECTOR);
+  firstControl?.focus();
+}
+
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+  if (element.matches(":disabled")) return false;
+  if (element.closest("[hidden], [aria-hidden='true']")) return false;
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
 
 const createInitialRescheduleSchedule = (barber) => ({
   weeklySchedule: initialSchedule,
@@ -58,6 +77,11 @@ const getExplicitWeeklyDayOff = (daySchedule) =>
 
 export default function RescheduleBooking({ booking, onClose }) {
   const dispatch = useDispatch();
+  const titleId = useId();
+  const dialogRef = useRef(null);
+  const lifecycleRef = useRef({ initialized: false, mounted: false, trigger: null });
+  const latestOnCloseRef = useRef(onClose);
+  const isSavingRef = useRef(false);
   const dateOptions = useMemo(() => getNext7Days(), []);
   const [selectedDate, setSelectedDate] = useState(
     booking.bookingDate || dateOptions[0].value
@@ -136,6 +160,47 @@ export default function RescheduleBooking({ booking, onClose }) {
   const todayKey = formatDateKey(new Date());
 
   useEffect(() => {
+    latestOnCloseRef.current = onClose;
+    isSavingRef.current = isSaving;
+  }, [isSaving, onClose]);
+
+  useLayoutEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.mounted = true;
+
+    if (!lifecycle.initialized) {
+      lifecycle.initialized = true;
+      lifecycle.trigger =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      focusFirstControl(dialogRef);
+    }
+
+    return () => {
+      lifecycle.mounted = false;
+      queueMicrotask(() => {
+        if (lifecycle.mounted || document.activeElement?.closest('[role="dialog"]')) {
+          return;
+        }
+        if (canRestoreFocus(lifecycle.trigger)) lifecycle.trigger.focus();
+        lifecycle.trigger = null;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSavingRef.current) {
+        latestOnCloseRef.current?.();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
 
     async function loadScheduleAndBookings() {
@@ -193,6 +258,8 @@ export default function RescheduleBooking({ booking, onClose }) {
   };
 
   const saveBookingTime = async () => {
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
     setIsSaving(true);
     setError("");
     setSuccessMessage("");
@@ -218,15 +285,31 @@ export default function RescheduleBooking({ booking, onClose }) {
           "Could not send reschedule request. Please try again."
       );
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="max-h-[90vh] w-full max-w-xl space-y-5 overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:rounded-3xl sm:p-6">
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !isSavingRef.current) {
+          latestOnCloseRef.current?.();
+        }
+      }}
+    >
+      <div
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="max-h-[90vh] w-full max-w-xl space-y-5 overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:rounded-3xl sm:p-6"
+        role="dialog"
+      >
         <div>
-          <h2 className="text-xl font-bold sm:text-2xl">Reschedule booking</h2>
+          <h2 className="text-xl font-bold sm:text-2xl" id={titleId}>
+            Reschedule booking
+          </h2>
           <p className="mt-1 text-sm text-neutral-500">
             Choose a new date and available time to request.
           </p>
@@ -305,7 +388,14 @@ export default function RescheduleBooking({ booking, onClose }) {
           >
             {isSaving ? "Sending..." : "Send reschedule request"}
           </Button>
-          <Button className="w-full sm:w-auto" onClick={onClose} variant="outline">
+          <Button
+            className="w-full sm:w-auto"
+            disabled={isSaving}
+            onClick={() => {
+              if (!isSavingRef.current) latestOnCloseRef.current?.();
+            }}
+            variant="outline"
+          >
             Close
           </Button>
         </div>

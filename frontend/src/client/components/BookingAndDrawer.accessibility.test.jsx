@@ -1,12 +1,43 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
+import ManualBookingModal from "@/barber/components/bookings/ManualBookingModal";
 import CancelBookingModal from "@/client/components/CancelBookingModal";
+import DelayBookingModal from "@/client/components/bookings/DelayBookingModal";
+import BookingDetailsModal from "@/shared/components/BookingDetailsModal";
 import ReviewModal from "@/client/components/ReviewModal";
+import RescheduleBooking from "@/client/components/RescheduleBooking";
 import Drawer from "@/shared/components/common/Drawer";
+
+vi.mock("react-redux", () => ({
+  useDispatch: () => vi.fn(),
+  useSelector: (selector) =>
+    selector({ bookings: [], users: [{ id: "barber-1", role: "barber" }] }),
+}));
+
+vi.mock("@/shared/api/axios", () => ({
+  default: {
+    get: vi.fn().mockResolvedValue({ data: {} }),
+    post: vi.fn(() => new Promise(() => {})),
+  },
+}));
+
+vi.mock("@/store/slices/bookingsSlice", () => ({
+  fetchBarberBookings: vi.fn(() => ({ type: "fetchBarberBookings" })),
+  fetchClientBookings: vi.fn(() => ({ type: "fetchClientBookings" })),
+  updateBooking: vi.fn((booking) => ({ type: "updateBooking", payload: booking })),
+}));
+
+vi.mock("@/shared/utils/slots", () => ({
+  getSlotAvailabilitySummary: vi.fn(() => ({
+    availableSlots: ["10:00"],
+    blockedByTime: false,
+    blockedByBooking: false,
+  })),
+}));
 
 function DrawerHarness({ closeLabel = "Close filters drawer", isOpen = true, onClose }) {
   return (
@@ -70,6 +101,83 @@ function RejectHarness({ isSubmitting = false, onClose = vi.fn() }) {
       onSubmit={vi.fn()}
     />
   );
+}
+
+const bookingFixture = {
+  id: "booking-1",
+  barberId: "barber-1",
+  clientId: "client-1",
+  bookingDate: "2026-08-01",
+  duration: 60,
+  serviceName: "Haircut",
+  status: "accepted",
+  time: "10:00",
+};
+
+function BookingDetailsHarness({ onClose = vi.fn(), detachedOnClose = false }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showTrigger, setShowTrigger] = useState(true);
+
+  return (
+    <>
+      {showTrigger && (
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+        >
+          Open booking details
+        </button>
+      )}
+      {isOpen && (
+        <BookingDetailsModal
+          booking={bookingFixture}
+          onClose={() => {
+            onClose();
+            setIsOpen(false);
+            if (detachedOnClose) setShowTrigger(false);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function DelayHarness({ isSubmitting = false, onClose = vi.fn() }) {
+  return (
+    <DelayBookingModal
+      booking={bookingFixture}
+      isSubmitting={isSubmitting}
+      onClose={onClose}
+      onSubmit={vi.fn()}
+    />
+  );
+}
+
+function ManualHarness({ isAddingBooking = false, onClose = vi.fn() }) {
+  const [manualBooking, setManualBooking] = useState({
+    clientName: "",
+    clientPhone: "",
+    serviceId: "service-1",
+    bookingDate: "2026-08-01",
+    time: "10:00",
+  });
+
+  return (
+    <ManualBookingModal
+      activeServices={[{ id: "service-1", name: "Haircut", duration: 60 }]}
+      isAddingBooking={isAddingBooking}
+      manualBooking={manualBooking}
+      onClose={onClose}
+      onSubmit={(event) => event.preventDefault()}
+      onUpdateManualBooking={(field, value) =>
+        setManualBooking((current) => ({ ...current, [field]: value }))
+      }
+    />
+  );
+}
+
+function RescheduleHarness({ onClose = vi.fn() }) {
+  return <RescheduleBooking booking={bookingFixture} onClose={onClose} />;
 }
 
 describe("Booking and drawer accessibility", () => {
@@ -223,5 +331,77 @@ describe("Booking and drawer accessibility", () => {
 
     unmount();
     expect(document.body).toBeInTheDocument();
+  });
+
+  it("gives remaining booking overlays names and focuses each once per open", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <StrictMode>
+        <BookingDetailsHarness />
+      </StrictMode>
+    );
+
+    const trigger = screen.getByRole("button", { name: "Open booking details" });
+    trigger.focus();
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Booking details" })).toHaveAttribute(
+      "aria-modal",
+      "true"
+    );
+    expect(screen.getByRole("button", { name: "Close booking details" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(trigger).toHaveFocus();
+    await user.click(trigger);
+    expect(screen.getByRole("button", { name: "Close booking details" })).toHaveFocus();
+
+    rerender(<DelayHarness />);
+    expect(screen.getByRole("dialog", { name: "Running late?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close delay booking modal" })).toHaveFocus();
+
+    rerender(<ManualHarness />);
+    expect(screen.getByRole("dialog", { name: "Add Booking" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Client name")).toHaveFocus();
+  });
+
+  it("uses direct backdrop and Escape close paths while guarding busy overlays", async () => {
+    const user = userEvent.setup();
+    const onDelayClose = vi.fn();
+    const { rerender } = render(<DelayHarness onClose={onDelayClose} />);
+    const delayDialog = screen.getByRole("dialog", { name: "Running late?" });
+
+    await user.click(delayDialog);
+    expect(onDelayClose).not.toHaveBeenCalled();
+    await user.click(delayDialog.parentElement);
+    expect(onDelayClose).toHaveBeenCalledTimes(1);
+
+    const onManualClose = vi.fn();
+    rerender(<ManualHarness isAddingBooking onClose={onManualClose} />);
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("dialog", { name: "Add Booking" }).parentElement);
+    expect(onManualClose).not.toHaveBeenCalled();
+
+    const onRescheduleClose = vi.fn();
+    rerender(<RescheduleHarness onClose={onRescheduleClose} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "10:00" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "10:00" }));
+    await user.click(screen.getByRole("button", { name: "Send reschedule request" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("dialog", { name: "Reschedule booking" }).parentElement);
+    expect(onRescheduleClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+  });
+
+  it("does not restore focus to a detached booking trigger", async () => {
+    const user = userEvent.setup();
+    render(<BookingDetailsHarness detachedOnClose />);
+
+    const trigger = screen.getByRole("button", { name: "Open booking details" });
+    trigger.focus();
+    await user.click(trigger);
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("button", { name: "Open booking details" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(document.body);
   });
 });

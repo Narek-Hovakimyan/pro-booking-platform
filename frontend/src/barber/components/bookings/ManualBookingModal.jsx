@@ -1,3 +1,4 @@
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
@@ -10,12 +11,83 @@ export default function ManualBookingModal({
   onSubmit,
   onUpdateManualBooking,
 }) {
+  const titleId = useId();
+  const dialogRef = useRef(null);
+  const lifecycleRef = useRef({ initialized: false, mounted: false, trigger: null });
+  const latestOnCloseRef = useRef(onClose);
+  const isAddingBookingRef = useRef(isAddingBooking);
+
+  useEffect(() => {
+    latestOnCloseRef.current = onClose;
+    isAddingBookingRef.current = isAddingBooking;
+  }, [isAddingBooking, onClose]);
+
+  useLayoutEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.mounted = true;
+
+    if (!lifecycle.initialized) {
+      lifecycle.initialized = true;
+      lifecycle.trigger =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      dialogRef.current?.querySelector("input:not([disabled])")?.focus();
+    }
+
+    return () => {
+      lifecycle.mounted = false;
+      queueMicrotask(() => {
+        if (lifecycle.mounted || document.activeElement?.closest('[role="dialog"]')) {
+          return;
+        }
+        const trigger = lifecycle.trigger;
+        if (
+          trigger instanceof HTMLElement &&
+          trigger.isConnected &&
+          !trigger.matches(":disabled") &&
+          !trigger.closest("[hidden], [aria-hidden='true']")
+        ) {
+          const style = window.getComputedStyle(trigger);
+          if (style.display !== "none" && style.visibility !== "hidden") {
+            trigger.focus();
+          }
+        }
+        lifecycle.trigger = null;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isAddingBookingRef.current) {
+        latestOnCloseRef.current?.();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6">
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !isAddingBookingRef.current) {
+          latestOnCloseRef.current?.();
+        }
+      }}
+    >
+      <div
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6"
+        role="dialog"
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-xl font-bold">Add Booking</h3>
+            <h3 className="text-xl font-bold" id={titleId}>Add Booking</h3>
             <p className="mt-1 text-sm text-neutral-500">
               Create a walk-in or phone booking.
             </p>
@@ -23,7 +95,9 @@ export default function ManualBookingModal({
           <Button
             aria-label="Close"
             disabled={isAddingBooking}
-            onClick={onClose}
+            onClick={() => {
+              if (!isAddingBookingRef.current) latestOnCloseRef.current?.();
+            }}
             size="icon"
             variant="outline"
           >
@@ -111,7 +185,9 @@ export default function ManualBookingModal({
             <Button
               className="w-full sm:w-auto"
               disabled={isAddingBooking}
-              onClick={onClose}
+              onClick={() => {
+                if (!isAddingBookingRef.current) latestOnCloseRef.current?.();
+              }}
               type="button"
               variant="outline"
             >

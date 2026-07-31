@@ -1,3 +1,4 @@
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { MessageCircle, X } from "lucide-react";
 
 import StatusBadge from "@/shared/components/StatusBadge";
@@ -16,6 +17,26 @@ const getBookingDate = (booking) => {
 
 const getDisplayStatus = (status) =>
   status === "confirmed" ? "accepted" : status;
+
+const FIELD_SELECTOR =
+  "input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
+const FALLBACK_SELECTOR = "button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+
+function focusFirstControl(dialogRef) {
+  const firstControl =
+    dialogRef.current?.querySelector(FIELD_SELECTOR) ||
+    dialogRef.current?.querySelector(FALLBACK_SELECTOR);
+  firstControl?.focus();
+}
+
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+  if (element.matches(":disabled")) return false;
+  if (element.closest("[hidden], [aria-hidden='true']")) return false;
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
 
 const formatCreatedDate = (dateValue) => {
   if (!dateValue) return "";
@@ -52,6 +73,53 @@ export default function BookingDetailsModal({
   onClose,
   onMessage,
 }) {
+  const titleId = useId();
+  const dialogRef = useRef(null);
+  const lifecycleRef = useRef({
+    initialized: false,
+    mounted: false,
+    trigger: null,
+  });
+  const latestOnCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    latestOnCloseRef.current = onClose;
+  }, [onClose]);
+
+  useLayoutEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.mounted = true;
+
+    if (!lifecycle.initialized) {
+      lifecycle.initialized = true;
+      lifecycle.trigger =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      focusFirstControl(dialogRef);
+    }
+
+    return () => {
+      lifecycle.mounted = false;
+      queueMicrotask(() => {
+        if (lifecycle.mounted || document.activeElement?.closest('[role="dialog"]')) {
+          return;
+        }
+        if (canRestoreFocus(lifecycle.trigger)) lifecycle.trigger.focus();
+        lifecycle.trigger = null;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") latestOnCloseRef.current?.();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const bookingBarber =
     booking?.barber && typeof booking.barber === "object"
       ? booking.barber
@@ -89,11 +157,24 @@ export default function BookingDetailsModal({
     getDisplayStatus(booking?.status) === "accepted";
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6">
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) latestOnCloseRef.current?.();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6"
+        role="dialog"
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold sm:text-2xl">Booking details</h2>
+            <h2 className="text-xl font-bold sm:text-2xl" id={titleId}>
+              Booking details
+            </h2>
             <p className="mt-1 text-sm text-neutral-500">{serviceName}</p>
           </div>
 
