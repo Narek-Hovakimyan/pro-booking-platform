@@ -190,7 +190,10 @@ export default function BookingDetailsModal({
         </div>
 
         {!booking ? (
-          <p className="mt-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <p
+            className="mt-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            role="alert"
+          >
             Booking not found
           </p>
         ) : (

@@ -491,7 +491,7 @@ export default function BookingsList({
     <Card className="rounded-2xl sm:rounded-3xl lg:col-span-2">
       <CardContent className="space-y-5 p-4 sm:p-6">
         <BookingsHeaderFilters
-          actionError={actionError}
+          actionError={isAddModalOpen ? "" : actionError}
           dateOptions={dateOptions}
           error={error}
           selectedDate={selectedDate}
@@ -530,6 +530,7 @@ export default function BookingsList({
         {isAddModalOpen && (
           <ManualBookingModal
             activeServices={activeServices}
+            error={actionError}
             isAddingBooking={isAddingBooking}
             manualBooking={manualBooking}
             onClose={() => setIsAddModalOpen(false)}

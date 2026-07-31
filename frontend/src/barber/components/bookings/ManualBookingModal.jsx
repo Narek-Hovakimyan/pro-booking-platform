@@ -6,6 +6,7 @@ import { Button } from "@/shared/components/ui/button";
 export default function ManualBookingModal({
   manualBooking,
   activeServices,
+  error = "",
   isAddingBooking,
   onClose,
   onSubmit,
@@ -16,6 +17,7 @@ export default function ManualBookingModal({
   const lifecycleRef = useRef({ initialized: false, mounted: false, trigger: null });
   const latestOnCloseRef = useRef(onClose);
   const isAddingBookingRef = useRef(isAddingBooking);
+  const errorMessage = error || manualBooking?.error || manualBooking?.errorMessage || "";
 
   useEffect(() => {
     latestOnCloseRef.current = onClose;
@@ -180,6 +182,15 @@ export default function ManualBookingModal({
               />
             </label>
           </div>
+
+          {errorMessage && (
+            <p
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              role="alert"
+            >
+              {errorMessage}
+            </p>
+          )}
 
           <div className="grid gap-2 sm:flex sm:justify-end">
             <Button

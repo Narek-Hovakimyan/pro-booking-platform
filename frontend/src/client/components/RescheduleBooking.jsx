@@ -318,6 +318,7 @@ export default function RescheduleBooking({ booking, onClose }) {
         <div className="flex flex-wrap gap-2">
           {dateOptions.map((day) => (
             <Button
+              aria-pressed={selectedDate === day.value}
               className="flex-1 sm:flex-none"
               key={day.value}
               onClick={() => {
@@ -351,6 +352,7 @@ export default function RescheduleBooking({ booking, onClose }) {
           ) : availableSlots.length > 0 ? (
             availableSlots.map((slot) => (
               <Button
+                aria-pressed={time === slot}
                 key={slot}
                 onClick={() => setTime(slot)}
                 variant={time === slot ? "default" : "outline"}
@@ -367,12 +369,19 @@ export default function RescheduleBooking({ booking, onClose }) {
 
         <div className="grid gap-2 sm:flex">
           {error && (
-            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <p
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              role="alert"
+            >
               {error}
             </p>
           )}
           {successMessage && (
-            <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+            <p
+              aria-live="polite"
+              className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700"
+              role="status"
+            >
               {successMessage}
             </p>
           )}

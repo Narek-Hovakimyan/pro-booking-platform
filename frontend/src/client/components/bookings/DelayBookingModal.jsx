@@ -123,7 +123,10 @@ export default function DelayBookingModal({
         </p>
 
         {error && (
-          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <p
+            className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            role="alert"
+          >
             {error}
           </p>
         )}

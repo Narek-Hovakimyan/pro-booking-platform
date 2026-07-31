@@ -1,8 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import api from "@/shared/api/axios";
+import BookingsList from "@/barber/components/BookingsList";
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
 import ManualBookingModal from "@/barber/components/bookings/ManualBookingModal";
 import CancelBookingModal from "@/client/components/CancelBookingModal";
@@ -11,11 +13,17 @@ import BookingDetailsModal from "@/shared/components/BookingDetailsModal";
 import ReviewModal from "@/client/components/ReviewModal";
 import RescheduleBooking from "@/client/components/RescheduleBooking";
 import Drawer from "@/shared/components/common/Drawer";
+import * as dateUtils from "@/shared/utils/dates";
 
 vi.mock("react-redux", () => ({
   useDispatch: () => vi.fn(),
   useSelector: (selector) =>
-    selector({ bookings: [], users: [{ id: "barber-1", role: "barber" }] }),
+    selector({
+      auth: { currentUser: { id: "barber-1", salons: [] } },
+      bookings: [],
+      notifications: [],
+      users: [{ id: "barber-1", role: "barber" }],
+    }),
 }));
 
 vi.mock("@/shared/api/axios", () => ({
@@ -107,7 +115,7 @@ const bookingFixture = {
   id: "booking-1",
   barberId: "barber-1",
   clientId: "client-1",
-  bookingDate: "2026-08-01",
+  bookingDate: "2099-08-01",
   duration: 60,
   serviceName: "Haircut",
   status: "accepted",
@@ -142,10 +150,11 @@ function BookingDetailsHarness({ onClose = vi.fn(), detachedOnClose = false }) {
   );
 }
 
-function DelayHarness({ isSubmitting = false, onClose = vi.fn() }) {
+function DelayHarness({ error = "", isSubmitting = false, onClose = vi.fn() }) {
   return (
     <DelayBookingModal
       booking={bookingFixture}
+      error={error}
       isSubmitting={isSubmitting}
       onClose={onClose}
       onSubmit={vi.fn()}
@@ -153,7 +162,7 @@ function DelayHarness({ isSubmitting = false, onClose = vi.fn() }) {
   );
 }
 
-function ManualHarness({ isAddingBooking = false, onClose = vi.fn() }) {
+function ManualHarness({ error = "", isAddingBooking = false, onClose = vi.fn() }) {
   const [manualBooking, setManualBooking] = useState({
     clientName: "",
     clientPhone: "",
@@ -165,6 +174,7 @@ function ManualHarness({ isAddingBooking = false, onClose = vi.fn() }) {
   return (
     <ManualBookingModal
       activeServices={[{ id: "service-1", name: "Haircut", duration: 60 }]}
+      error={error}
       isAddingBooking={isAddingBooking}
       manualBooking={manualBooking}
       onClose={onClose}
@@ -355,17 +365,89 @@ describe("Booking and drawer accessibility", () => {
     await user.click(trigger);
     expect(screen.getByRole("button", { name: "Close booking details" })).toHaveFocus();
 
-    rerender(<DelayHarness />);
+    rerender(<BookingDetailsModal booking={null} onClose={vi.fn()} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Booking not found");
+
+    rerender(<DelayHarness error="Could not delay booking." />);
     expect(screen.getByRole("dialog", { name: "Running late?" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close delay booking modal" })).toHaveFocus();
+    expect(within(screen.getByRole("dialog", { name: "Running late?" })).getByRole("alert")).toHaveTextContent(
+      "Could not delay booking."
+    );
 
-    rerender(<ManualHarness />);
+    rerender(<DelayHarness />);
+    expect(
+      within(screen.getByRole("dialog", { name: "Running late?" })).queryByRole("alert")
+    ).not.toBeInTheDocument();
+
+    rerender(<ManualHarness error="Could not add booking. Please try again." />);
     expect(screen.getByRole("dialog", { name: "Add Booking" })).toBeInTheDocument();
     expect(screen.getByLabelText("Client name")).toHaveFocus();
+    expect(within(screen.getByRole("dialog", { name: "Add Booking" })).getByRole("alert")).toHaveTextContent(
+      "Could not add booking. Please try again."
+    );
+
+    vi.mocked(api.get).mockRejectedValueOnce({
+      response: { data: { message: "Could not load available times. Please try again." } },
+    });
+    rerender(<RescheduleHarness />);
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("dialog", { name: "Reschedule booking" })).getByRole("alert")
+      ).toHaveTextContent("Could not load available times. Please try again.")
+    );
+  });
+
+  it("wires BookingsList action errors into the manual booking dialog and clears them on reopen", async () => {
+    const user = userEvent.setup();
+    render(
+      <BookingsList
+        bookings={[]}
+        services={[{ active: true, barberId: "barber-1", duration: 60, id: "service-1", name: "Haircut" }]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Booking" }));
+    let dialog = screen.getByRole("dialog", { name: "Add Booking" });
+    await user.type(screen.getByLabelText("Client name"), " ");
+    await user.selectOptions(screen.getByLabelText("Service"), "service-1");
+    fireEvent.change(screen.getByLabelText("Time"), { target: { value: "10:00" } });
+    await user.click(within(dialog).getByRole("button", { name: "Add Booking" }));
+
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Client name is required");
+    expect(screen.getAllByText("Client name is required")).toHaveLength(1);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Add Booking" }));
+    dialog = screen.getByRole("dialog", { name: "Add Booking" });
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("uses direct backdrop and Escape close paths while guarding busy overlays", async () => {
     const user = userEvent.setup();
+    const dateOptions = [
+      {
+        date: new Date("2099-07-31T00:00:00Z"),
+        dayKey: "fri",
+        label: "Fri, Jul 31",
+        value: "2099-07-31",
+      },
+      {
+        date: new Date("2099-08-01T00:00:00Z"),
+        dayKey: "sat",
+        label: "Sat, Aug 1",
+        value: "2099-08-01",
+      },
+      {
+        date: new Date("2099-08-02T00:00:00Z"),
+        dayKey: "sun",
+        label: "Sun, Aug 2",
+        value: "2099-08-02",
+      },
+    ];
+    const getNext7DaysSpy = vi
+      .spyOn(dateUtils, "getNext7Days")
+      .mockReturnValue(dateOptions);
     const onDelayClose = vi.fn();
     const { rerender } = render(<DelayHarness onClose={onDelayClose} />);
     const delayDialog = screen.getByRole("dialog", { name: "Running late?" });
@@ -384,12 +466,34 @@ describe("Booking and drawer accessibility", () => {
     const onRescheduleClose = vi.fn();
     rerender(<RescheduleHarness onClose={onRescheduleClose} />);
     await waitFor(() => expect(screen.getByRole("button", { name: "10:00" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "10:00" }));
+    expect(screen.getByRole("button", { name: "Sat, Aug 1", pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fri, Jul 31", pressed: false }));
+    expect(screen.getByRole("button", { name: "Fri, Jul 31", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sat, Aug 1", pressed: false })).toBeInTheDocument();
+
+    const timeButton = screen.getByRole("button", { name: "10:00", pressed: false });
+    await user.click(timeButton);
+    expect(screen.getByRole("button", { name: "10:00", pressed: true })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Choose another date"), {
+      target: { value: "2099-08-02" },
+    });
+    expect(screen.getByRole("button", { name: "Sun, Aug 2", pressed: true })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("Loading available slots...")).toBeInTheDocument()
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Loading available slots...")).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole("button", { name: "10:00", pressed: false })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "10:00", pressed: false }));
     await user.click(screen.getByRole("button", { name: "Send reschedule request" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("dialog", { name: "Reschedule booking" }).parentElement);
     expect(onRescheduleClose).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+    getNext7DaysSpy.mockRestore();
   });
 
   it("does not restore focus to a detached booking trigger", async () => {
