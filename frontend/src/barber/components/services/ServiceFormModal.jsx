@@ -1,5 +1,33 @@
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { AlertCircle, Pencil, Plus, X } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+
+const FIELD_SELECTOR =
+  "input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
+
+function focusFirstControl(dialogRef) {
+  const firstField =
+    dialogRef.current?.querySelector(FIELD_SELECTOR) ||
+    dialogRef.current?.querySelector("button:not([disabled])");
+  firstField?.focus();
+}
+
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) {
+    return false;
+  }
+
+  if (element.matches(":disabled")) {
+    return false;
+  }
+
+  if (element.closest("[hidden], [aria-hidden='true']")) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
 
 export default function ServiceFormModal({
   showModal,
@@ -11,16 +39,79 @@ export default function ServiceFormModal({
   onSave,
   children,
 }) {
+  const titleId = useId();
+  const dialogRef = useRef(null);
+  const triggerRef = useRef(null);
+  const isOpenRef = useRef(false);
+  const latestOnCloseRef = useRef(onClose);
+  const isSavingRef = useRef(isSaving);
+
+  useEffect(() => {
+    latestOnCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    isSavingRef.current = isSaving;
+  }, [isSaving]);
+
+  useLayoutEffect(() => {
+    if (showModal && !isOpenRef.current) {
+      isOpenRef.current = true;
+      triggerRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      focusFirstControl(dialogRef);
+      return;
+    }
+
+    if (!showModal && isOpenRef.current) {
+      isOpenRef.current = false;
+      if (canRestoreFocus(triggerRef.current)) {
+        triggerRef.current.focus();
+      }
+      triggerRef.current = null;
+    }
+  }, [showModal]);
+
+  useEffect(() => {
+    if (!showModal) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSavingRef.current) {
+        latestOnCloseRef.current?.();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showModal]);
+
+  useEffect(() => () => {
+    if (isOpenRef.current && canRestoreFocus(triggerRef.current)) {
+      triggerRef.current.focus();
+    }
+  }, []);
+
   if (!showModal) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (!isSavingRef.current && e.target === e.currentTarget) {
+          latestOnCloseRef.current?.();
+        }
       }}
     >
-      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col animate-in overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[92vh] w-full max-w-3xl flex-col animate-in overflow-hidden rounded-3xl bg-white shadow-2xl"
+      >
         {/* Modal header */}
         <div className="flex items-center justify-between border-b border-purple-100 bg-gradient-to-r from-purple-50 to-pink-50 px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
@@ -32,7 +123,7 @@ export default function ServiceFormModal({
               )}
             </div>
             <div>
-              <h3 className="text-lg font-bold text-neutral-950">
+              <h3 id={titleId} className="text-lg font-bold text-neutral-950">
                 {editingService ? "Edit service" : "Add service"}
               </h3>
               <p className="text-xs text-neutral-500 sm:text-sm">
@@ -43,7 +134,10 @@ export default function ServiceFormModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            aria-label={editingService ? "Close edit service dialog" : "Close add service dialog"}
+            disabled={isSaving}
+            onClick={() => latestOnCloseRef.current?.()}
             className="rounded-2xl p-2 text-neutral-400 transition-colors hover:bg-white hover:text-neutral-700"
           >
             <X className="h-5 w-5" />
@@ -68,7 +162,7 @@ export default function ServiceFormModal({
           <Button
             variant="ghost"
             disabled={isSaving}
-            onClick={onClose}
+            onClick={() => latestOnCloseRef.current?.()}
             className="w-full rounded-2xl sm:w-auto"
           >
             Cancel

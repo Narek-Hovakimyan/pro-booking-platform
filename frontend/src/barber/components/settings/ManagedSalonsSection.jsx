@@ -1,7 +1,7 @@
 import SettingsCard from "@/barber/components/settings/SettingsCard";
 import { Button } from "@/shared/components/ui/button";
 import { getMediaUrl } from "@/shared/utils/media";
-import { useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 const relationshipOptions = [
   { value: "staff", label: "Staff" },
@@ -37,6 +37,31 @@ const paymentTypeOptions = [
   { value: "commission", label: "Commission split" },
   { value: "fixed", label: "Fixed pay" },
 ];
+
+function focusFirstModalControl(dialogRef) {
+  const firstField =
+    dialogRef.current?.querySelector(
+      "input:not([disabled]), select:not([disabled]), textarea:not([disabled])"
+    ) || dialogRef.current?.querySelector("button:not([disabled])");
+  firstField?.focus();
+}
+
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) {
+    return false;
+  }
+
+  if (element.matches(":disabled")) {
+    return false;
+  }
+
+  if (element.closest("[hidden], [aria-hidden='true']")) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
 
 const getPersonId = (person) => person?.id || person?._id || "";
 
@@ -84,6 +109,18 @@ function PaymentSettingsModal({
   onClose,
   onSave,
 }) {
+  const modalId = useId();
+  const titleId = `${modalId}-title`;
+  const typeId = `${modalId}-payment-type`;
+  const staffPercentId = `${modalId}-staff-percent`;
+  const salonPercentId = `${modalId}-salon-percent`;
+  const amountId = `${modalId}-amount`;
+  const periodId = `${modalId}-period`;
+  const notesId = `${modalId}-notes`;
+  const dialogRef = useRef(null);
+  const triggerRef = useRef(null);
+  const latestOnCloseRef = useRef(onClose);
+  const isSavingRef = useRef(isSaving);
   const commissionTotal =
     Number(draft.commissionStaffPercent || 0) +
     Number(draft.commissionSalonPercent || 0);
@@ -93,17 +130,69 @@ function PaymentSettingsModal({
     draft.type === "fixed" &&
     (!Number(draft.fixedAmount) || Number(draft.fixedAmount) <= 0);
 
+  useEffect(() => {
+    latestOnCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    isSavingRef.current = isSaving;
+  }, [isSaving]);
+
+  useLayoutEffect(() => {
+    triggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    focusFirstModalControl(dialogRef);
+
+    return () => {
+      if (canRestoreFocus(triggerRef.current)) {
+        triggerRef.current.focus();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSavingRef.current) {
+        latestOnCloseRef.current?.();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/40 p-4 sm:items-center sm:justify-center">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+    <div
+      className="fixed inset-0 z-50 flex items-end bg-black/40 p-4 sm:items-center sm:justify-center"
+      onClick={(event) => {
+        if (!isSavingRef.current && event.target === event.currentTarget) {
+          latestOnCloseRef.current?.();
+        }
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-neutral-950">
+            <h3 id={titleId} className="text-base font-semibold text-neutral-950">
               Pay terms
             </h3>
             <p className="mt-0.5 text-sm text-neutral-500">{staffName}</p>
           </div>
-          <Button disabled={isSaving} onClick={onClose} size="sm" variant="outline">
+          <Button
+            disabled={isSaving}
+            onClick={() => latestOnCloseRef.current?.()}
+            size="sm"
+            variant="outline"
+          >
             Close
           </Button>
         </div>
@@ -112,6 +201,7 @@ function PaymentSettingsModal({
           <label className="grid gap-1 text-sm font-semibold text-neutral-800">
             Payment type
             <select
+              id={typeId}
               className="rounded-xl border border-neutral-200 bg-white px-3 py-2 font-normal"
               disabled={isSaving}
               value={draft.type}
@@ -148,6 +238,7 @@ function PaymentSettingsModal({
                 <label className="grid gap-1 text-sm font-semibold text-neutral-800">
                   Staff %
                   <input
+                    id={staffPercentId}
                     className="rounded-xl border border-neutral-200 px-3 py-2 font-normal"
                     disabled={isSaving}
                     min="0"
@@ -162,6 +253,7 @@ function PaymentSettingsModal({
                 <label className="grid gap-1 text-sm font-semibold text-neutral-800">
                   Salon %
                   <input
+                    id={salonPercentId}
                     className="rounded-xl border border-neutral-200 px-3 py-2 font-normal"
                     disabled={isSaving}
                     min="0"
@@ -187,6 +279,7 @@ function PaymentSettingsModal({
               <label className="grid gap-1 text-sm font-semibold text-neutral-800">
                 Amount
                 <input
+                  id={amountId}
                   className="rounded-xl border border-neutral-200 px-3 py-2 font-normal"
                   disabled={isSaving}
                   min="0"
@@ -198,6 +291,7 @@ function PaymentSettingsModal({
               <label className="grid gap-1 text-sm font-semibold text-neutral-800">
                 Period
                 <select
+                  id={periodId}
                   className="rounded-xl border border-neutral-200 bg-white px-3 py-2 font-normal"
                   disabled={isSaving}
                   value={draft.fixedPeriod}
@@ -221,6 +315,7 @@ function PaymentSettingsModal({
           <label className="grid gap-1 text-sm font-semibold text-neutral-800">
             Notes
             <textarea
+              id={notesId}
               className="min-h-20 rounded-xl border border-neutral-200 px-3 py-2 font-normal"
               disabled={isSaving}
               maxLength={500}
@@ -232,7 +327,12 @@ function PaymentSettingsModal({
           {error && <p className="text-sm font-medium text-red-600">{error}</p>}
 
           <div className="flex justify-end gap-2">
-            <Button disabled={isSaving} onClick={onClose} type="button" variant="outline">
+            <Button
+              disabled={isSaving}
+              onClick={() => latestOnCloseRef.current?.()}
+              type="button"
+              variant="outline"
+            >
               Cancel
             </Button>
             <Button

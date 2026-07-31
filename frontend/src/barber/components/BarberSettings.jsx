@@ -456,9 +456,9 @@ export default function BarberSettings({
         confirmation && (
           <ConfirmModal
             confirmLabel={confirmation.confirmLabel}
-            disabled={isSalonSaving}
+            isSubmitting={isSalonSaving}
             message={confirmation.message}
-            onCancel={closeConfirmation}
+            onClose={closeConfirmation}
             onConfirm={confirmSalonAction}
             title={confirmation.title}
           />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import api from "@/shared/api/axios";
 import {
@@ -41,8 +41,37 @@ function formatPrice(price) {
   return `${Number(price).toLocaleString()} դր`;
 }
 
-export default function SalonPromotionsManager({ salonId, salonName }) {
+function focusFirstModalControl(dialogRef) {
+  const firstField =
+    dialogRef.current?.querySelector(
+      "input:not([disabled]), select:not([disabled]), textarea:not([disabled])"
+    ) || dialogRef.current?.querySelector("button:not([disabled])");
+  firstField?.focus();
+}
 
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) {
+    return false;
+  }
+
+  if (element.matches(":disabled")) {
+    return false;
+  }
+
+  if (element.closest("[hidden], [aria-hidden='true']")) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
+export default function SalonPromotionsManager({ salonId, salonName }) {
+  const modalId = useId();
+  const dialogRef = useRef(null);
+  const createButtonRef = useRef(null);
+  const editButtonRefs = useRef(new Map());
+  const triggerRef = useRef(null);
 
   const [promotions, setPromotions] = useState([]);
   const [services, setServices] = useState([]);
@@ -55,9 +84,15 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
   const [form, setForm] = useState(emptyForm);
   const [modalError, setModalError] = useState("");
   const [saving, setSaving] = useState(false);
+  const isModalOpenRef = useRef(false);
+  const latestSavingRef = useRef(saving);
 
   const [copiedId, setCopiedId] = useState(null);
   const [successMsg, setSuccessMsg] = useState("");
+
+  useEffect(() => {
+    latestSavingRef.current = saving;
+  }, [saving]);
 
   /* ── Copy code ── */
   const copyCode = async (promotion) => {
@@ -156,6 +191,7 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
 
   /* ── Modal helpers ── */
   const openCreateModal = () => {
+    triggerRef.current = createButtonRef.current;
     setEditingPromotion(null);
     setForm(emptyForm);
     setModalError("");
@@ -163,6 +199,7 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
   };
 
   const openEditModal = (promotion) => {
+    triggerRef.current = editButtonRefs.current.get(String(promotion._id));
     setEditingPromotion(promotion);
     setForm({
       title: promotion.title || "",
@@ -190,6 +227,43 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
     setForm(emptyForm);
     setModalError("");
   };
+
+  useLayoutEffect(() => {
+    if (showModal && !isModalOpenRef.current) {
+      isModalOpenRef.current = true;
+      focusFirstModalControl(dialogRef);
+      return;
+    }
+
+    if (!showModal && isModalOpenRef.current) {
+      isModalOpenRef.current = false;
+      if (canRestoreFocus(triggerRef.current)) {
+        triggerRef.current.focus();
+      }
+      triggerRef.current = null;
+    }
+  }, [showModal]);
+
+  useEffect(() => {
+    if (!showModal) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !latestSavingRef.current) {
+        closeModal();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showModal]);
+
+  useEffect(() => () => {
+    if (isModalOpenRef.current && canRestoreFocus(triggerRef.current)) {
+      triggerRef.current.focus();
+    }
+  }, []);
 
   const handleField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -341,6 +415,7 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
           {promotions.length} promotion{promotions.length !== 1 ? "s" : ""}
         </p>
         <button
+          ref={createButtonRef}
           onClick={openCreateModal}
           className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-800"
         >
@@ -442,9 +517,18 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
                 {/* Actions */}
                 <div className="flex shrink-0 items-center gap-1">
                   <button
+                    ref={(node) => {
+                      const key = String(promotion._id);
+                      if (node) {
+                        editButtonRefs.current.set(key, node);
+                      } else {
+                        editButtonRefs.current.delete(key);
+                      }
+                    }}
                     onClick={() => openEditModal(promotion)}
                     className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
                     title="Edit"
+                    aria-label={`Edit promotion ${promotion.title}`}
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
@@ -474,16 +558,31 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
 
       {/* ──────── Modal ──────── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeModal();
+            }
+          }}
+        >
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${modalId}-title`}
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+          >
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-neutral-900">
+              <h3 id={`${modalId}-title`} className="text-lg font-bold text-neutral-900">
                 {editingPromotion
                   ? "Edit Promotion"
                   : "Create Promotion"}
               </h3>
               <button
+                type="button"
                 onClick={closeModal}
+                aria-label={editingPromotion ? "Close edit promotion dialog" : "Close create promotion dialog"}
                 className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
               >
                 <X className="h-5 w-5" />
@@ -500,10 +599,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
             <div className="space-y-4">
               {/* Title */}
               <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                <label
+                  htmlFor={`${modalId}-title-input`}
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                >
                   Title
                 </label>
                 <input
+                  id={`${modalId}-title-input`}
                   type="text"
                   value={form.title}
                   onChange={(e) => handleField("title", e.target.value)}
@@ -514,10 +617,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
 
               {/* Description */}
               <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                <label
+                  htmlFor={`${modalId}-description`}
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                >
                   Description (optional)
                 </label>
                 <textarea
+                  id={`${modalId}-description`}
                   value={form.description}
                   onChange={(e) => handleField("description", e.target.value)}
                   className="w-full rounded-xl border border-neutral-200 p-3 text-sm transition focus:border-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-100"
@@ -529,10 +636,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
               {/* Discount Type + Value */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                  <label
+                    htmlFor={`${modalId}-discount-type`}
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                  >
                     Discount Type
                   </label>
                   <select
+                    id={`${modalId}-discount-type`}
                     value={form.discountType}
                     onChange={(e) => handleField("discountType", e.target.value)}
                     className="w-full rounded-xl border border-neutral-200 p-3 text-sm transition focus:border-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-100"
@@ -542,12 +653,16 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                  <label
+                    htmlFor={`${modalId}-discount-value`}
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                  >
                     {form.discountType === "percentage"
                       ? "Percentage"
                       : "Amount (դր)"}
                   </label>
                   <input
+                    id={`${modalId}-discount-value`}
                     type="number"
                     value={form.discountValue}
                     onChange={(e) =>
@@ -566,10 +681,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
               {/* Code */}
               {!editingPromotion && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                  <label
+                    htmlFor={`${modalId}-code`}
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                  >
                     Code (leave empty to auto-generate)
                   </label>
                   <input
+                    id={`${modalId}-code`}
                     type="text"
                     value={form.code}
                     onChange={(e) =>
@@ -585,10 +704,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
               {/* Date range */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                  <label
+                    htmlFor={`${modalId}-start-date`}
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                  >
                     Start Date
                   </label>
                   <input
+                    id={`${modalId}-start-date`}
                     type="date"
                     value={form.startDate}
                     onChange={(e) => handleField("startDate", e.target.value)}
@@ -596,10 +719,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                  <label
+                    htmlFor={`${modalId}-end-date`}
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                  >
                     End Date
                   </label>
                   <input
+                    id={`${modalId}-end-date`}
                     type="date"
                     value={form.endDate}
                     onChange={(e) => handleField("endDate", e.target.value)}
@@ -610,10 +737,14 @@ export default function SalonPromotionsManager({ salonId, salonName }) {
 
               {/* Max Uses */}
               <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                <label
+                  htmlFor={`${modalId}-max-uses`}
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-neutral-600"
+                >
                   Max Uses
                 </label>
                 <input
+                  id={`${modalId}-max-uses`}
                   type="number"
                   value={form.maxUses}
                   onChange={(e) => handleField("maxUses", e.target.value)}
