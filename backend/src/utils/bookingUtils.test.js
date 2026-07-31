@@ -178,3 +178,22 @@ test("date schedule override beats weekly schedule", () => {
     breakTo: "",
   });
 });
+
+test("non-working date override beats default schedule fallback", () => {
+  const schedule = {
+    weeklySchedule: {},
+    scheduleOverrides: {
+      [dateKey]: {
+        isWorking: false,
+      },
+    },
+  };
+
+  assert.deepEqual(getScheduleForDate(schedule, dateKey, dayKey, defaultSchedule), {
+    working: false,
+    from: "",
+    to: "",
+    breakFrom: "",
+    breakTo: "",
+  });
+});

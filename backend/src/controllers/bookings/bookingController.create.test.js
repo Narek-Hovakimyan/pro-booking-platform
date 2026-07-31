@@ -28,6 +28,7 @@ import {
   clientId,
   createMutableBooking,
   createResponse,
+  getFutureBookingDateForDay,
   mockBookingFind,
   mockCreateBookingDependencies,
   mockSuccessfulCreateDependencies,
@@ -62,6 +63,7 @@ const oldAutoClosedWeeklySchedule = {
   fri: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
   sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
 };
+const tuesdayBookingDate = getFutureBookingDateForDay("tue");
 
 afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
@@ -387,7 +389,23 @@ test("createBooking resolves only the exact salon schedule", async () => {
   assert.deepEqual(queries, [{ barberId, salonId }]);
 });
 
-test("slot validation exact mode does not use default schedule fallback", async () => {
+test("slot validation exact mode uses default schedule fallback within the resolved salon schedule", async () => {
+  Booking.find = async () => [];
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate: tuesdayBookingDate,
+    time: "10:00",
+    duration: 30,
+    schedule: { weeklySchedule: {}, defaultSchedule: { startTime: "09:00", endTime: "18:00" } },
+    requireResolvedSchedule: true,
+  });
+
+  assert.equal(result.message, undefined);
+  assert.equal(result.effectiveDayKey, "tue");
+});
+
+test("slot validation exact mode keeps explicit weekly day off blocked", async () => {
   Booking.find = async () => [];
   const result = await __bookingTestHooks.validateBookingSlot({
     barberId,
@@ -395,7 +413,103 @@ test("slot validation exact mode does not use default schedule fallback", async 
     bookingDate,
     time: "10:00",
     duration: 30,
-    schedule: { weeklySchedule: {}, defaultSchedule: { startTime: "09:00", endTime: "18:00" } },
+    schedule: {
+      weeklySchedule: {
+        mon: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+      },
+      defaultSchedule: { startTime: "09:00", endTime: "18:00" },
+    },
+    requireResolvedSchedule: true,
+  });
+
+  assert.equal(result.message, "Barber is not working this day");
+});
+
+test("slot validation exact mode respects explicit weekly working hours", async () => {
+  Booking.find = async () => [];
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate,
+    time: "10:00",
+    duration: 30,
+    schedule: {
+      weeklySchedule: {
+        mon: { working: true, from: "11:00", to: "18:00", breakFrom: "", breakTo: "" },
+      },
+      defaultSchedule: { startTime: "09:00", endTime: "18:00" },
+    },
+    requireResolvedSchedule: true,
+  });
+
+  assert.equal(result.message, "This time is outside working hours");
+});
+
+test("slot validation exact mode respects working date overrides", async () => {
+  Booking.find = async () => [];
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate,
+    time: "10:00",
+    duration: 30,
+    schedule: {
+      weeklySchedule: {
+        mon: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
+      },
+      scheduleOverrides: {
+        [bookingDate]: {
+          isWorking: true,
+          startTime: "09:00",
+          endTime: "12:00",
+          breakStart: "",
+          breakEnd: "",
+        },
+      },
+      defaultSchedule: { startTime: "13:00", endTime: "18:00" },
+    },
+    requireResolvedSchedule: true,
+  });
+
+  assert.equal(result.message, undefined);
+});
+
+test("slot validation exact mode blocks non-working date overrides", async () => {
+  Booking.find = async () => [];
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate,
+    time: "10:00",
+    duration: 30,
+    schedule: {
+      weeklySchedule: {
+        mon: { working: true, from: "09:00", to: "18:00", breakFrom: "", breakTo: "" },
+      },
+      scheduleOverrides: {
+        [bookingDate]: { isWorking: false },
+      },
+      defaultSchedule: { startTime: "09:00", endTime: "18:00" },
+    },
+    requireResolvedSchedule: true,
+  });
+
+  assert.equal(result.message, "Barber is not working this day");
+});
+
+test("slot validation exact mode blocks non-working dates even with working default fallback", async () => {
+  Booking.find = async () => [];
+  const result = await __bookingTestHooks.validateBookingSlot({
+    barberId,
+    barber,
+    bookingDate: tuesdayBookingDate,
+    time: "10:00",
+    duration: 30,
+    schedule: {
+      weeklySchedule: {},
+      nonWorkingDays: [tuesdayBookingDate],
+      defaultSchedule: { startTime: "09:00", endTime: "18:00" },
+    },
     requireResolvedSchedule: true,
   });
 

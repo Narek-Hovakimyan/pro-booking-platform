@@ -84,24 +84,12 @@ export const validateBookingSlot = async ({
   );
   const availabilitySchedule = normalizeScheduleForAvailability(schedule);
 
-  const dateOverride = availabilitySchedule?.scheduleOverrides?.[bookingDate];
-  const exactDaySchedule = dateOverride
-    ? {
-        working: Boolean(dateOverride.isWorking),
-        from: dateOverride.startTime || "",
-        to: dateOverride.endTime || "",
-        breakFrom: dateOverride.breakStart || "",
-        breakTo: dateOverride.breakEnd || "",
-      }
-    : availabilitySchedule?.weeklySchedule?.[effectiveDayKey];
-  const daySchedule = requireResolvedSchedule
-    ? exactDaySchedule
-    : getScheduleForDate(
-        availabilitySchedule,
-        bookingDate,
-        effectiveDayKey,
-        scheduleDefaults
-      );
+  const daySchedule = getScheduleForDate(
+    availabilitySchedule,
+    bookingDate,
+    effectiveDayKey,
+    scheduleDefaults
+  );
 
   if (availabilitySchedule?.nonWorkingDays?.includes(bookingDate) || !daySchedule?.working) {
     return { message: "Barber is not working this day" };
