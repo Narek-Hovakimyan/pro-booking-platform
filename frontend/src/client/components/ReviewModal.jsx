@@ -1,7 +1,27 @@
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Star, X } from "lucide-react";
-import { useState } from "react";
 
 import { Button } from "@/shared/components/ui/button";
+
+const FIELD_SELECTOR =
+  "textarea:not([disabled]), button:not([disabled]), input:not([disabled]), select:not([disabled])";
+
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) {
+    return false;
+  }
+
+  if (element.matches(":disabled")) {
+    return false;
+  }
+
+  if (element.closest("[hidden], [aria-hidden='true']")) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
 
 export default function ReviewModal({
   booking,
@@ -15,8 +35,49 @@ export default function ReviewModal({
   onClose,
   onSubmit,
 }) {
+  const titleId = useId();
+  const dialogRef = useRef(null);
+  const triggerRef = useRef(null);
+  const latestOnCloseRef = useRef(onClose);
+  const isSubmittingRef = useRef(isSubmitting);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
+
+  useEffect(() => {
+    latestOnCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    isSubmittingRef.current = isSubmitting;
+  }, [isSubmitting]);
+
+  useLayoutEffect(() => {
+    triggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    dialogRef.current?.querySelector(FIELD_SELECTOR)?.focus();
+
+    return () => {
+      queueMicrotask(() => {
+        if (canRestoreFocus(triggerRef.current)) {
+          triggerRef.current.focus();
+        }
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSubmittingRef.current) {
+        latestOnCloseRef.current?.();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const submitReview = (event) => {
     event.preventDefault();
@@ -28,11 +89,24 @@ export default function ReviewModal({
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-lg space-y-5 overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[90vh] sm:rounded-3xl sm:p-6">
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={(event) => {
+        if (!isSubmittingRef.current && event.target === event.currentTarget) {
+          latestOnCloseRef.current?.();
+        }
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="max-h-[92vh] w-full max-w-lg space-y-5 overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[90vh] sm:rounded-3xl sm:p-6"
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold sm:text-2xl">{title}</h2>
+            <h2 id={titleId} className="text-xl font-bold sm:text-2xl">{title}</h2>
             <p className="mt-1 text-sm text-neutral-500">
               {subtitle || booking?.serviceName || "Completed booking"}
             </p>
@@ -41,7 +115,7 @@ export default function ReviewModal({
           <Button
             aria-label="Close review modal"
             disabled={isSubmitting}
-            onClick={onClose}
+            onClick={() => latestOnCloseRef.current?.()}
             size="icon"
             type="button"
             variant="ghost"
@@ -101,7 +175,7 @@ export default function ReviewModal({
             <Button
               className="w-full sm:w-auto"
               disabled={isSubmitting}
-              onClick={onClose}
+              onClick={() => latestOnCloseRef.current?.()}
               type="button"
               variant="outline"
             >
