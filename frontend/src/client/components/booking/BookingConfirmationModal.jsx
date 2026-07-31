@@ -1,7 +1,29 @@
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
+
 import { Button } from "@/shared/components/ui/button";
 import DepositNotice from "@/shared/components/booking/DepositNotice";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { calculateDepositEstimate } from "@/shared/utils/deposit";
+
+const FIELD_SELECTOR =
+  "input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
+const FALLBACK_SELECTOR = "button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+
+function focusFirstControl(dialogRef) {
+  const firstControl =
+    dialogRef.current?.querySelector(FIELD_SELECTOR) ||
+    dialogRef.current?.querySelector(FALLBACK_SELECTOR);
+  firstControl?.focus();
+}
+
+function canRestoreFocus(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+  if (element.matches(":disabled")) return false;
+  if (element.closest("[hidden], [aria-hidden='true']")) return false;
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
 
 export default function BookingConfirmationModal({
   isOpen,
@@ -26,6 +48,78 @@ export default function BookingConfirmationModal({
   depositSettings = null,
   disabledReason = "",
 }) {
+  const titleId = useId();
+  const dialogRef = useRef(null);
+  const lifecycleRef = useRef({ mounted: false, open: false, trigger: null });
+  const isOpenRef = useRef(isOpen);
+  const latestOnCloseRef = useRef(onClose);
+  const isSubmittingRef = useRef(isSubmitting);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+    latestOnCloseRef.current = onClose;
+    isSubmittingRef.current = isSubmitting;
+  }, [isOpen, isSubmitting, onClose]);
+
+  useLayoutEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.mounted = true;
+
+    return () => {
+      lifecycle.mounted = false;
+      if (!lifecycle.open) return;
+
+      queueMicrotask(() => {
+        if (lifecycle.mounted || isOpenRef.current || document.activeElement?.closest('[role="dialog"]')) {
+          return;
+        }
+        if (canRestoreFocus(lifecycle.trigger)) lifecycle.trigger.focus();
+        lifecycle.open = false;
+        lifecycle.trigger = null;
+      });
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const lifecycle = lifecycleRef.current;
+
+    if (!isOpen) {
+      if (!lifecycle.open) return;
+
+      lifecycle.open = false;
+      queueMicrotask(() => {
+        if (isOpenRef.current || document.activeElement?.closest('[role="dialog"]')) {
+          return;
+        }
+        if (canRestoreFocus(lifecycle.trigger)) lifecycle.trigger.focus();
+        lifecycle.trigger = null;
+      });
+      return;
+    }
+
+    if (lifecycle.open) return;
+
+    lifecycle.open = true;
+    lifecycle.trigger =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    focusFirstControl(dialogRef);
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (
+        event.key === "Escape" &&
+        isOpenRef.current &&
+        !isSubmittingRef.current
+      ) {
+        latestOnCloseRef.current?.();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   if (!isOpen) return null;
 
   const priceInfo = getServicePriceInfo(selectedService);
@@ -54,10 +148,23 @@ export default function BookingConfirmationModal({
   const depositEstimate = calculateDepositEstimate(depositSettings, finalTotal);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6">
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !isSubmittingRef.current) {
+          latestOnCloseRef.current?.();
+        }
+      }}
+    >
+      <div
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="max-h-[calc(100vh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6"
+        role="dialog"
+      >
         <div>
-          <h2 className="text-xl font-bold sm:text-2xl">
+          <h2 className="text-xl font-bold sm:text-2xl" id={titleId}>
             Confirm booking
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
@@ -279,7 +386,9 @@ export default function BookingConfirmationModal({
           <Button
             className="w-full sm:w-auto"
             disabled={isSubmitting}
-            onClick={onClose}
+            onClick={() => {
+              if (!isSubmittingRef.current) latestOnCloseRef.current?.();
+            }}
             variant="outline"
           >
             Cancel
