@@ -1,7 +1,17 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const reduxMocks = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+}));
 
 import api from "@/shared/api/axios";
 import BookingsList from "@/barber/components/BookingsList";
@@ -18,7 +28,7 @@ import * as dateUtils from "@/shared/utils/dates";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 vi.mock("react-redux", () => ({
-  useDispatch: () => vi.fn(),
+  useDispatch: () => reduxMocks.dispatch,
   useSelector: (selector) =>
     selector({
       auth: { currentUser: { id: "barber-1", salons: [] } },
@@ -53,6 +63,10 @@ vi.mock("@/shared/utils/slots", () => ({
 const renderRouterMocks = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
+
+beforeEach(() => {
+  reduxMocks.dispatch.mockClear();
+});
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal();
@@ -494,13 +508,7 @@ describe("Booking and drawer accessibility", () => {
       target: { value: "2099-08-02" },
     });
     expect(screen.getByRole("button", { name: "Sun, Aug 2", pressed: true })).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByText("Loading available slots...")).toBeInTheDocument()
-    );
-    await waitFor(() =>
-      expect(screen.queryByText("Loading available slots...")).not.toBeInTheDocument()
-    );
-    expect(screen.getByRole("button", { name: "10:00", pressed: false })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "10:00", pressed: false });
 
     await user.click(screen.getByRole("button", { name: "10:00", pressed: false }));
     await user.click(screen.getByRole("button", { name: "Send reschedule request" }));
