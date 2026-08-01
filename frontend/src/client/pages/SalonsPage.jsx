@@ -312,17 +312,19 @@ export default function SalonsPage() {
 
   const selectedBarbers = useMemo(() => {
     const salonId = selectedSalon?.id || selectedSalon?._id;
+    const publicBarbers = Array.isArray(selectedSalon?.barbers)
+      ? selectedSalon.barbers
+      : [];
 
-    return (selectedSalon?.barbers || [])
+    return publicBarbers
       .filter((barber) => {
         const barberSalonId =
           barber?.salon?.id || barber?.salon?._id || barber?.salon;
 
         return (
-          barber?.salonStatus === "approved" &&
-          (!salonId ||
-            !barberSalonId ||
-            String(barberSalonId) === String(salonId))
+          !salonId ||
+          !barberSalonId ||
+          String(barberSalonId) === String(salonId)
         );
       })
       .sort((a, b) => {
