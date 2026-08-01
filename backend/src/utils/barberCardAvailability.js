@@ -6,6 +6,7 @@ import {
 } from "./bookingDateTime.js";
 import {
   blockingBookingStatuses,
+  getDayScheduleFromDefaultSchedule,
   isMeaningfulWeeklyDay,
   getScheduleForDate,
   normalizeBookingStatus,
@@ -121,10 +122,32 @@ const getSalonName = (salonEntry) => {
   return salonEntry.name || "Salon";
 };
 
+const hasMeaningfulDefaultSchedule = (defaultScheduleValue) => {
+  if (!defaultScheduleValue) return false;
+
+  const startTime = defaultScheduleValue.startTime || defaultScheduleValue.from || "";
+  const endTime = defaultScheduleValue.endTime || defaultScheduleValue.to || "";
+
+  return timeToMinutes(startTime) !== null && timeToMinutes(endTime) !== null;
+};
+
+const getHoursFromDaySchedule = (daySchedule) => {
+  if (!daySchedule?.working) return null;
+
+  return {
+    startTime: daySchedule.from || defaultSchedule.startTime,
+    endTime: daySchedule.to || defaultSchedule.endTime,
+    hasBreak: Boolean(daySchedule.breakFrom && daySchedule.breakTo),
+    breakStart: daySchedule.breakFrom || "",
+    breakEnd: daySchedule.breakTo || "",
+  };
+};
+
 const getContextHoursForDate = (schedule, dateKey) => {
   const normalizedSchedule = normalizeScheduleForAvailability(schedule);
   if (!normalizedSchedule) return null;
 
+  const dayKey = getDayKeyFromDate(dateKey);
   const override = normalizedSchedule.scheduleOverrides?.[dateKey];
   if (override) {
     if (!override.isWorking) return null;
@@ -142,18 +165,22 @@ const getContextHoursForDate = (schedule, dateKey) => {
     return null;
   }
 
-  const weeklyDay = normalizedSchedule.weeklySchedule?.[getDayKeyFromDate(dateKey)];
-  if (weeklyDay?.working === false || !isMeaningfulWeeklyDay(weeklyDay)) {
+  const weeklyDay = normalizedSchedule.weeklySchedule?.[dayKey];
+  if (weeklyDay?.working === false) {
     return null;
   }
 
-  return {
-    startTime: weeklyDay.from || "",
-    endTime: weeklyDay.to || "",
-    hasBreak: Boolean(weeklyDay.breakFrom && weeklyDay.breakTo),
-    breakStart: weeklyDay.breakFrom || "",
-    breakEnd: weeklyDay.breakTo || "",
-  };
+  if (isMeaningfulWeeklyDay(weeklyDay)) {
+    return getHoursFromDaySchedule(weeklyDay);
+  }
+
+  if (!hasMeaningfulDefaultSchedule(normalizedSchedule.defaultSchedule)) {
+    return null;
+  }
+
+  return getHoursFromDaySchedule(
+    getDayScheduleFromDefaultSchedule(normalizedSchedule.defaultSchedule)
+  );
 };
 
 const hasExactScheduleSource = (schedule) => {
@@ -170,7 +197,7 @@ const hasExactScheduleSource = (schedule) => {
 
   return Object.values(normalizedSchedule.weeklySchedule || {}).some(
     (day) => day?.working === false || isMeaningfulWeeklyDay(day)
-  );
+  ) || hasMeaningfulDefaultSchedule(normalizedSchedule.defaultSchedule);
 };
 
 const findSlotForDate = ({ hours, dateKey, nowTime, duration, bookings }) => {

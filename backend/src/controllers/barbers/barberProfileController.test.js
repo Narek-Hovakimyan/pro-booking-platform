@@ -530,10 +530,13 @@ test("card summary marks barber unavailable when exact independent and salon sch
   assert.equal(res.body.barbers[0].approvedSalons.length, 1);
 });
 
-test("card summary exact contexts ignore default fallback and preserve privacy shape", async () => {
+test("card summary exact salon context falls back to schedule default hours and preserves privacy shape", async () => {
   const res = createResponse();
   const barberId = "64b000000000000000001015";
   const salonId = "64b000000000000000001016";
+  const OriginalDate = Date;
+  const fixedNow = new OriginalDate("2026-08-01T07:15:00+04:00");
+  const fixedTodayKey = "2026-08-01";
 
   User.find = () => createFindChain([
     {
@@ -564,21 +567,57 @@ test("card summary exact contexts ignore default fallback and preserve privacy s
     {
       barberId,
       salonId,
-      weeklySchedule: {},
+      weeklySchedule: {
+        fri: { working: true, from: "08:00", to: "09:00", breakFrom: "", breakTo: "" },
+      },
       defaultSchedule: {
-        startTime: "00:00",
-        endTime: "23:59",
+        startTime: "10:00",
+        endTime: "12:00",
         hasBreak: false,
       },
     },
   ]);
   mockPaidAccessForAllBarbers([barberId]);
 
-  await getBarberCardSummary({}, res);
+  class MockDate extends OriginalDate {
+    constructor(...args) {
+      if (args.length === 0) {
+        super(fixedNow.toISOString());
+        return;
+      }
+
+      super(...args);
+    }
+
+    static now() {
+      return fixedNow.getTime();
+    }
+
+    static parse(value) {
+      return OriginalDate.parse(value);
+    }
+
+    static UTC(...args) {
+      return OriginalDate.UTC(...args);
+    }
+  }
+
+  global.Date = MockDate;
+
+  try {
+    await getBarberCardSummary({}, res);
+  } finally {
+    global.Date = OriginalDate;
+  }
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.availability[0].status, "unavailable");
-  assert.equal(res.body.availability[0].firstAvailableSlot, null);
+  assert.equal(res.body.availability[0].status, "ready");
+  assert.deepEqual(res.body.availability[0].firstAvailableSlot, {
+    dateKey: fixedTodayKey,
+    time: "10:00",
+    salonId,
+    salonName: "Scoped Salon",
+  });
   assert.equal(res.body.barbers[0].address, undefined);
   assert.equal(res.body.barbers[0].phone, undefined);
 });
