@@ -5,6 +5,12 @@ import { getMediaUrl } from "@/shared/utils/media";
 
 const getInitial = (name = "User") => name.trim().charAt(0).toUpperCase() || "U";
 
+const getRoleLabel = (selectedUser) => {
+  if (selectedUser?.role === "barber") return "Specialist";
+  if (selectedUser?.role === "client") return "Client";
+  return selectedUser?.phone || "";
+};
+
 function AvatarCircle({ src, name, size = "md", className = "" }) {
   const [imgError, setImgError] = useState(false);
   const sizeClasses = size === "sm" ? "h-6 w-6" : "h-11 w-11";
@@ -53,7 +59,7 @@ export default function ChatHeader({ selectedUser, onBackToList }) {
           {selectedUser?.name || "User"}
         </h2>
         <p className="truncate text-sm text-neutral-500">
-          {selectedUser?.role || selectedUser?.phone || ""}
+          {getRoleLabel(selectedUser)}
         </p>
       </div>
     </div>
