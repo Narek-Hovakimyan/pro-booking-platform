@@ -620,6 +620,234 @@ describe("NotificationsPage account isolation", () => {
     expect(screen.queryByText("A booking")).not.toBeInTheDocument();
   });
 
+  it("keeps booking accept ordering as update then read then refresh", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/notifications") {
+        return Promise.resolve({
+          data: [
+            notification("booking-1", "Booking request", {
+              data: { bookingId: "booking-1" },
+              type: "booking_created",
+            }),
+          ],
+        });
+      }
+
+      if (url === "/bookings/barber/account-a") {
+        return Promise.resolve({
+          data: [{ _id: "booking-1", barberId: "account-a", status: "pending" }],
+        });
+      }
+
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    api.put.mockImplementation((url) => {
+      if (url === "/bookings/booking-1") {
+        return Promise.resolve({ data: { id: "booking-1", status: "accepted" } });
+      }
+
+      if (url === "/notifications/booking-1/read") {
+        return Promise.resolve({
+          data: notification("booking-1", "Booking request", {
+            data: { bookingId: "booking-1" },
+            isRead: true,
+            type: "booking_created",
+          }),
+        });
+      }
+
+      throw new Error(`Unexpected PUT ${url}`);
+    });
+
+    renderNotificationsPage({ id: "account-a", role: "barber" });
+    expect(await screen.findByText("Booking request")).toBeVisible();
+    api.get.mockClear();
+    api.put.mockClear();
+
+    fireEvent.click(screen.getByText("accept booking-1"));
+
+    await waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith("/bookings/booking-1", {
+        status: "accepted",
+      });
+      expect(api.put).toHaveBeenCalledWith("/notifications/booking-1/read");
+      expect(api.get).toHaveBeenCalledWith("/bookings/barber/account-a");
+    });
+
+    const bookingUpdateOrder = api.put.mock.invocationCallOrder[0];
+    const markReadOrder = api.put.mock.invocationCallOrder[1];
+    const refreshOrder = api.get.mock.invocationCallOrder[0];
+    expect(bookingUpdateOrder).toBeLessThan(markReadOrder);
+    expect(markReadOrder).toBeLessThan(refreshOrder);
+  });
+
+  it("submits booking rejection through the modal and refreshes after marking read", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/notifications") {
+        return Promise.resolve({
+          data: [
+            notification("booking-2", "Reject this booking", {
+              data: { bookingId: "booking-2" },
+              type: "booking_created",
+            }),
+          ],
+        });
+      }
+
+      if (url === "/bookings/barber/account-a") {
+        return Promise.resolve({
+          data: [{ _id: "booking-2", barberId: "account-a", status: "pending" }],
+        });
+      }
+
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    api.put.mockImplementation((url, payload) => {
+      if (url === "/bookings/booking-2") {
+        expect(payload).toEqual({
+          status: "rejected",
+          rejectionReason: "No availability today",
+        });
+        return Promise.resolve({ data: { id: "booking-2", status: "rejected" } });
+      }
+
+      if (url === "/notifications/booking-2/read") {
+        return Promise.resolve({
+          data: notification("booking-2", "Reject this booking", {
+            data: { bookingId: "booking-2" },
+            isRead: true,
+            type: "booking_created",
+          }),
+        });
+      }
+
+      throw new Error(`Unexpected PUT ${url}`);
+    });
+
+    renderNotificationsPage({ id: "account-a", role: "barber" });
+    expect(await screen.findByText("Reject this booking")).toBeVisible();
+    api.get.mockClear();
+    api.put.mockClear();
+
+    await act(async () => {
+      await latestNotificationsListProps.onBookingAction(
+        notification("booking-2", "Reject this booking", {
+          data: { bookingId: "booking-2" },
+          type: "booking_created",
+        }),
+        { id: "booking-2", status: "pending" },
+        "reject-booking",
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("Reason for rejection"), {
+      target: { value: "No availability today" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm reject" }));
+
+    await waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith("/bookings/booking-2", {
+        status: "rejected",
+        rejectionReason: "No availability today",
+      });
+      expect(api.put).toHaveBeenCalledWith("/notifications/booking-2/read");
+      expect(api.get).toHaveBeenCalledWith("/bookings/barber/account-a");
+    });
+  });
+
+  it("routes reschedule accept and reject through the existing patch endpoints", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/notifications") {
+        return Promise.resolve({
+          data: [
+            notification("reschedule-1", "Reschedule request", {
+              data: { bookingId: "reschedule-1" },
+              type: "booking_reschedule_requested",
+            }),
+          ],
+        });
+      }
+
+      if (url === "/bookings/barber/account-a") {
+        return Promise.resolve({
+          data: [
+            {
+              _id: "reschedule-1",
+              barberId: "account-a",
+              status: "accepted",
+              rescheduleRequest: { status: "pending" },
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    api.put.mockImplementation((url) => {
+      if (url === "/notifications/reschedule-1/read") {
+        return Promise.resolve({
+          data: notification("reschedule-1", "Reschedule request", {
+            data: { bookingId: "reschedule-1" },
+            isRead: true,
+            type: "booking_reschedule_requested",
+          }),
+        });
+      }
+
+      throw new Error(`Unexpected PUT ${url}`);
+    });
+
+    api.patch
+      .mockResolvedValueOnce({ data: { id: "reschedule-1", status: "accepted" } })
+      .mockResolvedValueOnce({ data: { id: "reschedule-1", status: "accepted" } });
+
+    renderNotificationsPage({ id: "account-a", role: "barber" });
+    expect(await screen.findByText("Reschedule request")).toBeVisible();
+
+    await act(async () => {
+      await latestNotificationsListProps.onBookingAction(
+        notification("reschedule-1", "Reschedule request", {
+          data: { bookingId: "reschedule-1" },
+          type: "booking_reschedule_requested",
+        }),
+        {
+          id: "reschedule-1",
+          status: "accepted",
+          rescheduleRequest: { status: "pending" },
+        },
+        "accept-reschedule",
+      );
+    });
+
+    await act(async () => {
+      await latestNotificationsListProps.onBookingAction(
+        notification("reschedule-1", "Reschedule request", {
+          data: { bookingId: "reschedule-1" },
+          type: "booking_reschedule_requested",
+          isRead: true,
+        }),
+        {
+          id: "reschedule-1",
+          status: "accepted",
+          rescheduleRequest: { status: "pending" },
+        },
+        "reject-reschedule",
+      );
+    });
+
+    expect(api.patch).toHaveBeenCalledWith(
+      "/bookings/reschedule-1/reschedule-request/accept",
+      {},
+    );
+    expect(api.patch).toHaveBeenCalledWith(
+      "/bookings/reschedule-1/reschedule-request/reject",
+      {},
+    );
+  });
+
   it("requires confirmation before clearing and cancel keeps notifications", async () => {
     api.get.mockResolvedValueOnce({
       data: [
