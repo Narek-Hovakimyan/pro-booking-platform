@@ -56,13 +56,44 @@ vi.mock("@/client/components/bookings/MyBookingsModals", () => ({
 }));
 
 vi.mock("@/client/components/bookings/MyBookingsSections", () => ({
-  default: ({ historyBookings, renderBookingCard }) => (
-    <div>{historyBookings.map((booking) => renderBookingCard(booking, "history"))}</div>
+  default: ({
+    activeBookings,
+    groupedActiveBookings,
+    groupedHistoryBookings,
+    historyBookings,
+    renderBookingCard,
+  }) => (
+    <div>
+      <section aria-label={`Active bookings ${activeBookings.length}`}>
+        {groupedActiveBookings.map((group) => (
+          <div data-testid={`active-group-${group.key}`} key={group.key}>
+            <h2>
+              {group.title} ({group.bookings.length})
+            </h2>
+            {group.bookings.map((booking) => renderBookingCard(booking, "active"))}
+          </div>
+        ))}
+      </section>
+      <section aria-label={`History ${historyBookings.length}`}>
+        {groupedHistoryBookings.map((group) => (
+          <div data-testid={`history-group-${group.key}`} key={group.key}>
+            <h2>
+              {group.title} ({group.bookings.length})
+            </h2>
+            {group.bookings.map((booking) => renderBookingCard(booking, "history"))}
+          </div>
+        ))}
+      </section>
+    </div>
   ),
 }));
 
 vi.mock("@/client/components/bookings/NextBookingSection", () => ({
-  default: () => null,
+  default: ({ nextBooking, serviceName }) => (
+    <section aria-label="Next booking">
+      {nextBooking ? <div data-testid="next-booking">{serviceName}</div> : null}
+    </section>
+  ),
 }));
 
 vi.mock("@/client/components/LoyaltyBanner", () => ({
@@ -70,12 +101,16 @@ vi.mock("@/client/components/LoyaltyBanner", () => ({
 }));
 
 vi.mock("@/client/components/BookingCard", () => ({
-  default: ({ booking, isBookAgainEligible, onBookAgain }) =>
-    isBookAgainEligible ? (
-      <button type="button" onClick={() => onBookAgain(booking)}>
-        Book again
-      </button>
-    ) : null,
+  default: ({ booking, bookingId, isActive, isBookAgainEligible, onBookAgain, serviceName }) => (
+    <article data-testid={`booking-card-${isActive ? "active" : "history"}-${bookingId || "missing"}`}>
+      <span>{serviceName}</span>
+      {isBookAgainEligible ? (
+        <button type="button" onClick={() => onBookAgain(booking)}>
+          Book again
+        </button>
+      ) : null}
+    </article>
+  ),
 }));
 
 vi.mock("@/store/slices/bookingsSlice", () => ({
@@ -100,6 +135,7 @@ vi.mock("@/store/slices/usersSlice", () => ({
 
 describe("MyBookingsPage salon-context rebook navigation", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     routerMocks.navigate.mockClear();
     dispatchMock.mockClear();
     state.bookings = [];
@@ -112,6 +148,179 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
 
       return Promise.resolve({ data: [] });
     });
+  });
+
+  const renderPage = () =>
+    render(
+      <MemoryRouter initialEntries={["/my-bookings"]}>
+        <MyBookingsPage />
+      </MemoryRouter>
+    );
+
+  it("shows the nearest upcoming booking once and leaves later active bookings visible", async () => {
+    state.bookings = [
+      {
+        _id: "next-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "10:00",
+        status: "accepted",
+        service: { name: "Nearest cut" },
+      },
+      {
+        id: "later-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "11:00",
+        status: "confirmed",
+        service: { name: "Later trim" },
+      },
+      {
+        id: "pending-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-02",
+        time: "09:00",
+        status: "pending",
+        service: { name: "Pending color" },
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByTestId("next-booking")).toHaveTextContent("Nearest cut");
+    expect(screen.queryByTestId("booking-card-active-next-booking")).not.toBeInTheDocument();
+    expect(screen.getByTestId("booking-card-active-later-booking")).toHaveTextContent("Later trim");
+    expect(screen.getByTestId("booking-card-active-pending-booking")).toHaveTextContent("Pending color");
+    expect(screen.getByText("Confirmed (1)")).toBeInTheDocument();
+    expect(screen.getByText("Pending confirmation (1)")).toBeInTheDocument();
+  });
+
+  it("does not remove bookings when the highlighted booking has no valid id", async () => {
+    state.bookings = [
+      {
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "10:00",
+        status: "accepted",
+        service: { name: "Missing id appointment" },
+      },
+      {
+        id: "later-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "11:00",
+        status: "accepted",
+        service: { name: "Later valid appointment" },
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByTestId("next-booking")).toHaveTextContent("Missing id appointment");
+    expect(screen.getByTestId("booking-card-active-missing")).toHaveTextContent(
+      "Missing id appointment"
+    );
+    expect(screen.getByTestId("booking-card-active-later-booking")).toHaveTextContent(
+      "Later valid appointment"
+    );
+    expect(screen.getByText("Confirmed (2)")).toBeInTheDocument();
+  });
+
+  it("keeps Armenia midnight-boundary active grouping from suppressing the wrong booking", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2099-08-01T23:55:00+04:00"));
+
+    state.bookings = [
+      {
+        id: "boundary-next",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-02",
+        time: "00:10",
+        status: "accepted",
+        service: { name: "After midnight" },
+      },
+      {
+        id: "boundary-later",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-02",
+        time: "00:30",
+        status: "accepted",
+        service: { name: "Still active" },
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByTestId("next-booking")).toHaveTextContent("After midnight");
+    expect(screen.queryByTestId("booking-card-active-boundary-next")).not.toBeInTheDocument();
+    expect(screen.getByTestId("booking-card-active-boundary-later")).toHaveTextContent(
+      "Still active"
+    );
+    expect(screen.getByText("Confirmed (1)")).toBeInTheDocument();
+  });
+
+  it("leaves history bookings unchanged", async () => {
+    state.bookings = [
+      {
+        id: "next-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "10:00",
+        status: "accepted",
+        service: { name: "Upcoming appointment" },
+      },
+      {
+        id: "completed-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-07-01",
+        time: "10:00",
+        status: "completed",
+        service: { name: "Completed appointment" },
+      },
+      {
+        id: "cancelled-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-07-02",
+        time: "10:00",
+        status: "cancelled",
+        service: { name: "Cancelled appointment" },
+      },
+      {
+        id: "rejected-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-07-03",
+        time: "10:00",
+        status: "rejected",
+        service: { name: "Rejected appointment" },
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByTestId("next-booking")).toHaveTextContent("Upcoming appointment");
+    expect(screen.getByTestId("booking-card-history-completed-booking")).toHaveTextContent(
+      "Completed appointment"
+    );
+    expect(screen.getByTestId("booking-card-history-cancelled-booking")).toHaveTextContent(
+      "Cancelled appointment"
+    );
+    expect(screen.getByTestId("booking-card-history-rejected-booking")).toHaveTextContent(
+      "Rejected appointment"
+    );
+    expect(screen.getByText("Completed (1)")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled (1)")).toBeInTheDocument();
+    expect(screen.getByText("Rejected (1)")).toBeInTheDocument();
   });
 
   it("preserves the booking salonId in the rebook query", async () => {
@@ -130,11 +339,7 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
       },
     ];
 
-    render(
-      <MemoryRouter initialEntries={["/my-bookings"]}>
-        <MyBookingsPage />
-      </MemoryRouter>
-    );
+    renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Book again" }));
 

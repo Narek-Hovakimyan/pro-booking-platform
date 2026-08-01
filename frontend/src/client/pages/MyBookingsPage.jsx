@@ -51,6 +51,16 @@ import {
   isBookingReviewed,
 } from "@/client/utils/bookingReviewUtils";
 
+const getComparableBookingId = (booking) => {
+  const bookingId = getBookingId(booking);
+
+  if (typeof bookingId !== "string" && typeof bookingId !== "number") {
+    return "";
+  }
+
+  return String(bookingId).trim();
+};
+
 export default function MyBookingsPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -96,21 +106,6 @@ export default function MyBookingsPage() {
     [myBookings]
   );
 
-  const groupedActiveBookings = useMemo(
-    () =>
-      activeBookingSections.map((section) => {
-        const sectionStatuses = new Set(section.statuses);
-        const sectionBookings = activeBookings
-          .filter((booking) => sectionStatuses.has(booking?.status))
-          .sort(sortBookingsAscending);
-
-        return {
-          ...section,
-          bookings: sectionBookings,
-        };
-      }),
-    [activeBookings]
-  );
   const groupedHistoryBookings = useMemo(
     () =>
       historyBookingSections.map((section) => {
@@ -141,6 +136,32 @@ export default function MyBookingsPage() {
       );
     },
     [myBookings]
+  );
+  const visibleActiveBookings = useMemo(() => {
+    const nextBookingId = getComparableBookingId(nextBooking);
+
+    if (!nextBookingId) return activeBookings;
+
+    return activeBookings.filter((booking) => {
+      const bookingId = getComparableBookingId(booking);
+
+      return !bookingId || bookingId !== nextBookingId;
+    });
+  }, [activeBookings, nextBooking]);
+  const groupedActiveBookings = useMemo(
+    () =>
+      activeBookingSections.map((section) => {
+        const sectionStatuses = new Set(section.statuses);
+        const sectionBookings = visibleActiveBookings
+          .filter((booking) => sectionStatuses.has(booking?.status))
+          .sort(sortBookingsAscending);
+
+        return {
+          ...section,
+          bookings: sectionBookings,
+        };
+      }),
+    [visibleActiveBookings]
   );
   const nextBookingBarberId = nextBooking ? getBookingBarberId(nextBooking) : "";
   const initialLoading = isLoading && myBookings.length === 0;
@@ -655,7 +676,7 @@ export default function MyBookingsPage() {
       </Card>
 
       <MyBookingsSections
-        activeBookings={activeBookings}
+        activeBookings={visibleActiveBookings}
         groupedActiveBookings={groupedActiveBookings}
         groupedHistoryBookings={groupedHistoryBookings}
         historyBookings={historyBookings}
