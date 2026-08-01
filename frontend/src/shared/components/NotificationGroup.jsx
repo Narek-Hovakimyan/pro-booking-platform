@@ -24,6 +24,7 @@ export default function NotificationGroup({
   currentUser,
   bookingById,
   eventRegistrationById,
+  isClearingAll,
   jobApplicationById,
   activeAction,
   onBookingAction,
@@ -324,7 +325,7 @@ export default function NotificationGroup({
                   <Button
                     aria-label="Delete notification"
                     className="h-8 px-2.5 text-xs sm:h-9 sm:px-3"
-                    disabled={isSameNotificationPending}
+                    disabled={isSameNotificationPending || isClearingAll}
                     onClick={() => onDelete(notification.id)}
                     size="default"
                     title="Delete"

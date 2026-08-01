@@ -7,18 +7,10 @@ import { restoreAuthSession } from "@/store/slices/authSlice";
 import api from "@/shared/api/axios";
 import NotificationsPage from "./NotificationsPage";
 
+let latestNotificationsListProps = null;
+
 vi.mock("@/shared/api/axios", () => ({
   default: { delete: vi.fn(), get: vi.fn(), patch: vi.fn(), put: vi.fn() },
-}));
-
-vi.mock("@/client/components/notifications/NotificationsHeader", () => ({
-  default: ({ onClearAll, onMarkAllRead, unreadCount }) => (
-    <div>
-      <div data-testid="unread-count">{unreadCount}</div>
-      <button onClick={onClearAll}>clear all</button>
-      <button onClick={onMarkAllRead}>mark all</button>
-    </div>
-  ),
 }));
 
 vi.mock("@/client/components/notifications/NotificationsStatus", () => ({
@@ -41,6 +33,7 @@ vi.mock("@/client/components/notifications/NotificationsList", () => ({
     activeAction,
     eventRegistrationById,
     groupedNotifications,
+    isClearingAll,
     jobApplicationById,
     onBookingAction,
     onDelete,
@@ -49,6 +42,19 @@ vi.mock("@/client/components/notifications/NotificationsList", () => ({
     onMarkRead,
     onView,
   }) => {
+    latestNotificationsListProps = {
+      activeAction,
+      eventRegistrationById,
+      groupedNotifications,
+      isClearingAll,
+      jobApplicationById,
+      onBookingAction,
+      onDelete,
+      onEventAction,
+      onJobAction,
+      onMarkRead,
+      onView,
+    };
     const notifications = Object.values(groupedNotifications).flat();
 
     return (
@@ -64,7 +70,12 @@ vi.mock("@/client/components/notifications/NotificationsList", () => ({
             <div key={notification.id}>
               <span>{notification.message}</span>
               <button onClick={() => onMarkRead(notification.id)}>read {notification.id}</button>
-              <button onClick={() => onDelete(notification.id)}>delete {notification.id}</button>
+              <button
+                disabled={isClearingAll}
+                onClick={() => onDelete(notification.id)}
+              >
+                delete {notification.id}
+              </button>
               <button onClick={() => onView(notification, `/target/${notification.id}`)}>
                 view {notification.id}
               </button>
@@ -163,6 +174,7 @@ async function flush() {
 
 beforeEach(() => {
   NotificationsPage.__clearNotificationsCacheForTests?.();
+  latestNotificationsListProps = null;
   api.delete.mockReset();
   api.get.mockReset();
   api.patch.mockReset();
@@ -401,7 +413,7 @@ describe("NotificationsPage account isolation", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("unread-count")).toHaveTextContent("1");
+      expect(screen.getByText("1 unread")).toBeInTheDocument();
     });
 
     expect(screen.getByText("First notification")).toBeVisible();
@@ -506,5 +518,188 @@ describe("NotificationsPage account isolation", () => {
     expect(await screen.findByText("B after booking")).toBeVisible();
     expect(screen.getByTestId("active-action")).toHaveTextContent("none");
     expect(screen.queryByText("A booking")).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation before clearing and cancel keeps notifications", async () => {
+    api.get.mockResolvedValueOnce({
+      data: [
+        notification("n-1", "First notification"),
+        notification("n-2", "Second notification"),
+      ],
+    });
+
+    renderNotificationsPage();
+    expect(await screen.findByText("First notification")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+    expect(screen.getByRole("dialog", { name: "Clear all notifications?" })).toBeVisible();
+    expect(api.delete).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog", { name: "Clear all notifications?" })).not.toBeInTheDocument();
+    expect(screen.getByText("First notification")).toBeVisible();
+    expect(screen.getByText("Second notification")).toBeVisible();
+    expect(api.delete).not.toHaveBeenCalled();
+  });
+
+  it("prevents duplicate clear submissions and clears only after success", async () => {
+    const clearAction = deferred();
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+
+    api.get.mockResolvedValueOnce({
+      data: [
+        notification("n-1", "First notification"),
+        notification("n-2", "Second notification"),
+      ],
+    });
+    api.delete.mockImplementation((url) => {
+      if (url === "/notifications/user/all") return clearAction.promise;
+      throw new Error(`Unexpected DELETE ${url}`);
+    });
+
+    renderNotificationsPage();
+    expect(await screen.findByText("First notification")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    const confirmButton = screen.getByRole("button", { name: "Clear notifications" });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(api.delete).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "delete n-1" })).toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "delete n-1" }));
+    latestNotificationsListProps.onDelete("n-1");
+    expect(api.delete).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("First notification")).toBeVisible();
+    expect(screen.getByText("Second notification")).toBeVisible();
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole("button", { name: "Clearing..." }).every(
+          (button) => button.disabled,
+        ),
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      clearAction.resolve({ data: { deletedCount: 2 } });
+    });
+
+    expect(await screen.findByText("No notifications")).toBeVisible();
+    expect(screen.queryByText("First notification")).not.toBeInTheDocument();
+    expect(NotificationsPage.__getNotificationsCacheForTests("account-a")).toEqual([]);
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "notifications:updated" }),
+    );
+  });
+
+  it("preserves the full list and shows an error when clear all fails", async () => {
+    api.get.mockResolvedValueOnce({
+      data: [
+        notification("n-1", "First notification"),
+        notification("n-2", "Second notification"),
+      ],
+    });
+    api.delete.mockRejectedValueOnce({
+      response: { data: { message: "Could not clear now." } },
+    });
+
+    renderNotificationsPage();
+    expect(await screen.findByText("First notification")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
+
+    expect(await screen.findByText("Could not clear now.")).toBeVisible();
+    expect(screen.getByText("First notification")).toBeVisible();
+    expect(screen.getByText("Second notification")).toBeVisible();
+    expect(screen.getByRole("button", { name: "delete n-1" })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "delete n-1" }));
+    await waitFor(() => {
+      expect(api.delete).toHaveBeenCalledWith("/notifications/n-1");
+    });
+  });
+
+  it("suppresses stale polling responses after a successful clear all", async () => {
+    const stalePoll = deferred();
+    let notificationLoadCount = 0;
+
+    api.get.mockImplementation((url) => {
+      if (url !== "/notifications") throw new Error(`Unexpected GET ${url}`);
+      notificationLoadCount += 1;
+      if (notificationLoadCount === 1) {
+        return Promise.resolve({ data: [notification("n-1", "First notification")] });
+      }
+      return stalePoll.promise;
+    });
+    api.delete.mockResolvedValueOnce({ data: { deletedCount: 1 } });
+
+    renderNotificationsPage();
+    expect(await screen.findByText("First notification")).toBeVisible();
+
+    fireEvent.click(screen.getByText("retry"));
+    await waitFor(() => {
+      expect(notificationLoadCount).toBe(2);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
+
+    expect(await screen.findByText("No notifications")).toBeVisible();
+
+    await act(async () => {
+      stalePoll.resolve({ data: [notification("n-stale", "Stale notification")] });
+    });
+    await flush();
+
+    expect(screen.queryByText("Stale notification")).not.toBeInTheDocument();
+    expect(screen.getByText("No notifications")).toBeVisible();
+  });
+
+  it("does not let an account A clear completion mutate account B", async () => {
+    const accountAClear = deferred();
+    let notificationLoadCount = 0;
+
+    api.get.mockImplementation((url) => {
+      if (url !== "/notifications") throw new Error(`Unexpected GET ${url}`);
+      notificationLoadCount += 1;
+      if (notificationLoadCount === 1) {
+        return Promise.resolve({ data: [notification("a-1", "A notification")] });
+      }
+      return Promise.resolve({ data: [notification("b-1", "B notification")] });
+    });
+    api.delete.mockImplementation((url) => {
+      if (url === "/notifications/user/all") return accountAClear.promise;
+      throw new Error(`Unexpected DELETE ${url}`);
+    });
+
+    const { store } = renderNotificationsPage({ id: "account-a", role: "client" });
+    expect(await screen.findByText("A notification")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
+
+    await act(async () => {
+      store.dispatch(
+        restoreAuthSession({
+          token: "token",
+          user: { id: "account-b", role: "client" },
+        }),
+      );
+    });
+
+    expect(await screen.findByText("B notification")).toBeVisible();
+
+    await act(async () => {
+      accountAClear.resolve({ data: { deletedCount: 1 } });
+    });
+    await flush();
+
+    expect(screen.getByText("B notification")).toBeVisible();
+    expect(screen.queryByText("No notifications")).not.toBeInTheDocument();
   });
 });

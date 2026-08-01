@@ -16,9 +16,7 @@ import {
   getIdString,
   getNotificationBookingId,
 } from "@/shared/utils/notificationActionHelpers";
-import {
-  getGroupLabel,
-} from "@/shared/utils/notificationHelpers";
+import { getGroupLabel } from "@/shared/utils/notificationHelpers";
 import {
   fetchBarberBookings,
   updateBooking,
@@ -51,17 +49,19 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
   );
   const [error, setError] = useState("");
   const [activeAction, setActiveAction] = useState(null);
+  const [isClearingAll, setIsClearingAll] = useState(false);
+  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [rejectingAction, setRejectingAction] = useState(null);
   const [rejectionError, setRejectionError] = useState("");
-  const accountGenerationRef = useRef(0);
-  const currentAccountIdRef = useRef(currentUserId);
+  const accountGenerationRef = useRef(0), clearAllInFlightRef = useRef(false);
+  const currentAccountIdRef = useRef(currentUserId), isPageAliveRef = useRef(true);
   const loadRequestIdRef = useRef(0);
 
   const captureAccount = useCallback(() => ({
     generation: accountGenerationRef.current,
     userId: currentUserId,
   }), [currentUserId]);
-  const isCurrentAccount = useCallback((snapshot) => Boolean(snapshot?.userId) &&
+  const isCurrentAccount = useCallback((snapshot) => isPageAliveRef.current && Boolean(snapshot?.userId) &&
     snapshot.userId === currentAccountIdRef.current &&
     snapshot.generation === accountGenerationRef.current, []);
   const isCurrentLoadRequest = useCallback((snapshot) =>
@@ -73,6 +73,8 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
     loadRequestIdRef.current = 0;
     currentAccountIdRef.current = currentUserId;
   }, [currentUserId]);
+
+  useEffect(() => () => { isPageAliveRef.current = false; }, []);
 
   useEffect(() => {
     if (!currentUserId) return undefined;
@@ -114,18 +116,14 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
         ...(accountSnapshot || captureAccount()),
         requestId: loadRequestIdRef.current + 1,
       };
-      if (!snapshot.userId || !isCurrentAccount(snapshot)) return;
+      if (!snapshot.userId || !isCurrentAccount(snapshot) || clearAllInFlightRef.current) return;
       loadRequestIdRef.current = snapshot.requestId;
-      if (showLoading) {
-        setIsLoading(true);
-      }
+      if (showLoading) setIsLoading(true);
       setError("");
       try {
         const { data } = await api.get("/notifications");
-        const nextNotifications = data.map((item) => ({
-          ...item,
-          id: item.id || item._id,
-        }));
+        if (clearAllInFlightRef.current) return;
+        const nextNotifications = data.map((item) => ({ ...item, id: item.id || item._id }));
 
         if (!isCurrentLoadRequest(snapshot)) return;
         setNotifications(nextNotifications);
@@ -218,7 +216,8 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
 
   const markAllRead = useCallback(async () => {
     const accountSnapshot = captureAccount();
-    if (!isCurrentAccount(accountSnapshot)) return;
+    if (isMarkingAllRead || isClearingAll || !isCurrentAccount(accountSnapshot)) return;
+    setIsMarkingAllRead(true);
     setError("");
     try {
       await api.put("/notifications/read");
@@ -233,13 +232,15 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
         requestError.response?.data?.message ||
           "Could not mark notifications as read.",
       );
+    } finally {
+      if (isCurrentAccount(accountSnapshot)) setIsMarkingAllRead(false);
     }
-  }, [captureAccount, isCurrentAccount]);
+  }, [captureAccount, isClearingAll, isCurrentAccount, isMarkingAllRead]);
 
   const deleteOne = useCallback(
     async (notificationId) => {
       const accountSnapshot = captureAccount();
-      if (!isCurrentAccount(accountSnapshot)) return;
+      if (clearAllInFlightRef.current || !isCurrentAccount(accountSnapshot)) return;
       setError("");
       try {
         await api.delete(`/notifications/${notificationId}`);
@@ -261,7 +262,11 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
 
   const clearAll = useCallback(async () => {
     const accountSnapshot = captureAccount();
-    if (!isCurrentAccount(accountSnapshot)) return;
+    if (clearAllInFlightRef.current || !isCurrentAccount(accountSnapshot)) return;
+    clearAllInFlightRef.current = true;
+    loadRequestIdRef.current += 1;
+    setIsLoading(false);
+    setIsClearingAll(true);
     setError("");
     try {
       await api.delete("/notifications/user/all");
@@ -274,6 +279,9 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
         requestError.response?.data?.message ||
           "Could not clear notifications.",
       );
+    } finally {
+      clearAllInFlightRef.current = false;
+      if (isCurrentAccount(accountSnapshot)) setIsClearingAll(false);
     }
   }, [captureAccount, isCurrentAccount]);
 
@@ -471,6 +479,8 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
       <div className="space-y-5 sm:space-y-6">
         <NotificationsHeader
           hasNotifications={notifications.length > 0}
+          isClearingAll={isClearingAll}
+          isMarkingAllRead={isMarkingAllRead}
           onClearAll={clearAll}
           onMarkAllRead={markAllRead}
           unreadCount={unreadCount}
@@ -500,7 +510,7 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
             onEventAction={handleEventAction}
             onJobAction={handleJobAction}
             onMarkRead={markOneRead}
-            onView={handleView}
+            onView={handleView} isClearingAll={isClearingAll}
           />
         )}
 

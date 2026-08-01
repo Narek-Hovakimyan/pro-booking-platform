@@ -7,6 +7,7 @@ export default function NotificationsList({
   bookingById,
   currentUser,
   eventRegistrationById,
+  isClearingAll,
   groupedNotifications,
   jobApplicationById,
   onBookingAction,
@@ -25,6 +26,7 @@ export default function NotificationsList({
             bookingById={bookingById}
             currentUser={currentUser}
             eventRegistrationById={eventRegistrationById}
+            isClearingAll={isClearingAll}
             jobApplicationById={jobApplicationById}
             key={title}
             notifications={groupedNotifications[title]}
