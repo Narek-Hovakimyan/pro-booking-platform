@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes } from "react-router-dom";
@@ -166,6 +167,29 @@ function renderNotificationsPage(currentUser = { id: "account-a", role: "client"
   );
 }
 
+function renderNotificationsPageInStrictMode(
+  currentUser = { id: "account-a", role: "client" },
+) {
+  return renderWithProviders(
+    <StrictMode>
+      <Routes>
+        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/target/:id" element={<div>target page</div>} />
+      </Routes>
+    </StrictMode>,
+    {
+      initialEntries: ["/notifications"],
+      preloadedState: {
+        auth: {
+          currentUser,
+          isAuthenticated: Boolean(currentUser),
+          token: currentUser ? "token" : null,
+        },
+      },
+    },
+  );
+}
+
 async function flush() {
   await act(async () => {
     await Promise.resolve();
@@ -187,6 +211,82 @@ afterEach(() => {
 });
 
 describe("NotificationsPage account isolation", () => {
+  it("completes the initial load under StrictMode and preserves cache behavior", async () => {
+    api.get.mockResolvedValueOnce({
+      data: [notification("strict-1", "Strict notification")],
+    });
+
+    renderNotificationsPageInStrictMode();
+
+    expect(await screen.findByText("Strict notification")).toBeVisible();
+    expect(screen.getByTestId("initial-loading")).toHaveTextContent("false");
+    await waitFor(() => {
+      expect(NotificationsPage.__getNotificationsCacheForTests("account-a")).toEqual([
+        expect.objectContaining({
+          id: "strict-1",
+          message: "Strict notification",
+        }),
+      ]);
+    });
+  });
+
+  it("exits loading and shows the empty state for an empty StrictMode response", async () => {
+    api.get.mockResolvedValueOnce({ data: [] });
+
+    renderNotificationsPageInStrictMode();
+
+    expect(await screen.findByText("No notifications")).toBeVisible();
+    expect(screen.getByTestId("initial-loading")).toHaveTextContent("false");
+    expect(screen.getByTestId("error")).toHaveTextContent("");
+  });
+
+  it("exits loading on initial failure and retry recovers in StrictMode", async () => {
+    api.get
+      .mockRejectedValueOnce({
+        response: { data: { message: "Could not load notifications." } },
+      })
+      .mockResolvedValueOnce({
+        data: [notification("retry-1", "Recovered notification")],
+      });
+
+    renderNotificationsPageInStrictMode();
+
+    expect(await screen.findByText("Could not load notifications.")).toBeVisible();
+    expect(screen.getByTestId("initial-loading")).toHaveTextContent("false");
+
+    fireEvent.click(screen.getByText("retry"));
+
+    expect(await screen.findByText("Recovered notification")).toBeVisible();
+    expect(screen.getByTestId("error")).toHaveTextContent("");
+    expect(screen.getByTestId("initial-loading")).toHaveTextContent("false");
+  });
+
+  it("blocks stale async completion after a real unmount", async () => {
+    const initialLoad = deferred();
+
+    api.get.mockImplementation((url) => {
+      if (url === "/notifications") return initialLoad.promise;
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    const { unmount } = renderNotificationsPageInStrictMode();
+
+    expect(screen.getByTestId("initial-loading")).toHaveTextContent("true");
+
+    unmount();
+
+    await act(async () => {
+      initialLoad.resolve({ data: [notification("late-1", "Late notification")] });
+    });
+    await flush();
+
+    expect(dispatchSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "notifications:updated" }),
+    );
+    expect(NotificationsPage.__getNotificationsCacheForTests("account-a")).toEqual([]);
+  });
+
   it("never exposes account A notifications on the first render after switching to account B", async () => {
     const accountBLoad = deferred();
 

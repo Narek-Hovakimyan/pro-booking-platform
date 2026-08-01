@@ -74,7 +74,13 @@ function NotificationsPageContent({ currentUser, currentUserId }) {
     currentAccountIdRef.current = currentUserId;
   }, [currentUserId]);
 
-  useEffect(() => () => { isPageAliveRef.current = false; }, []);
+  useEffect(() => {
+    isPageAliveRef.current = true;
+
+    return () => {
+      isPageAliveRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!currentUserId) return undefined;
