@@ -952,6 +952,43 @@ describe("NotificationsPage account isolation", () => {
     });
   });
 
+  it("keeps mark-all-read pending separate from clear-all and per-item delete state", async () => {
+    const markAllReadAction = deferred();
+
+    api.get.mockResolvedValueOnce({
+      data: [
+        notification("n-1", "First notification"),
+        notification("n-2", "Second notification"),
+      ],
+    });
+    api.put.mockImplementation((url) => {
+      if (url === "/notifications/read") return markAllReadAction.promise;
+      throw new Error(`Unexpected PUT ${url}`);
+    });
+
+    renderNotificationsPage();
+    expect(await screen.findByText("First notification")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Marking..." })).toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "delete n-1" })).not.toBeDisabled();
+
+    await act(async () => {
+      markAllReadAction.resolve({ data: {} });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Mark all read" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Clear all" })).not.toBeDisabled();
+  });
+
   it("suppresses stale polling responses after a successful clear all", async () => {
     const stalePoll = deferred();
     let notificationLoadCount = 0;
@@ -977,7 +1014,9 @@ describe("NotificationsPage account isolation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
 
-    expect(await screen.findByText("No notifications")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByText("No notifications")).toBeVisible();
+    });
 
     await act(async () => {
       stalePoll.resolve({ data: [notification("n-stale", "Stale notification")] });
@@ -986,6 +1025,50 @@ describe("NotificationsPage account isolation", () => {
 
     expect(screen.queryByText("Stale notification")).not.toBeInTheDocument();
     expect(screen.getByText("No notifications")).toBeVisible();
+  });
+
+  it("ignores stale mark-all-read completion after switching accounts", async () => {
+    const accountAMarkAllRead = deferred();
+    let notificationLoadCount = 0;
+
+    api.get.mockImplementation((url) => {
+      if (url !== "/notifications") throw new Error(`Unexpected GET ${url}`);
+      notificationLoadCount += 1;
+      if (notificationLoadCount === 1) {
+        return Promise.resolve({ data: [notification("a-1", "A notification")] });
+      }
+      return Promise.resolve({ data: [notification("b-1", "B notification")] });
+    });
+    api.put.mockImplementation((url) => {
+      if (url === "/notifications/read") return accountAMarkAllRead.promise;
+      throw new Error(`Unexpected PUT ${url}`);
+    });
+
+    const { store } = renderNotificationsPage({ id: "account-a", role: "client" });
+    expect(await screen.findByText("A notification")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+
+    await act(async () => {
+      store.dispatch(
+        restoreAuthSession({
+          token: "token",
+          user: { id: "account-b", role: "client" },
+        }),
+      );
+    });
+
+    expect(await screen.findByText("B notification")).toBeVisible();
+    expect(screen.getByText("1 unread")).toBeVisible();
+
+    await act(async () => {
+      accountAMarkAllRead.resolve({ data: {} });
+    });
+    await flush();
+
+    expect(screen.getByText("B notification")).toBeVisible();
+    expect(screen.getByText("1 unread")).toBeVisible();
+    expect(screen.getByTestId("error")).toHaveTextContent("");
   });
 
   it("does not let an account A clear completion mutate account B", async () => {
