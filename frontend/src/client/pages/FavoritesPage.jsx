@@ -1,5 +1,5 @@
 import { Heart, HeartCrack, MapPin, MessageCircle, Phone, Star, UserRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -51,6 +51,24 @@ function getSalonEntryId(salonEntry) {
   return salonEntry.id || salonEntry._id || null;
 }
 
+function normalizeFavoriteRemovalId(entityId) {
+  if (entityId === null || entityId === undefined) return null;
+  if (typeof entityId === "object") {
+    return entityId.id || entityId._id || null;
+  }
+
+  const normalizedId = String(entityId).trim();
+  return normalizedId || null;
+}
+
+function getFavoriteRemovalKey(clientId, type, entityId) {
+  const normalizedClientId = normalizeFavoriteRemovalId(clientId);
+  const normalizedId = normalizeFavoriteRemovalId(entityId);
+  return normalizedClientId && normalizedId
+    ? `${normalizedClientId}:${type}:${normalizedId}`
+    : null;
+}
+
 export default function FavoritesPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -63,12 +81,51 @@ export default function FavoritesPage() {
   const [summaryServicesByBarberId, setSummaryServicesByBarberId] = useState({});
   const [summaryReviewStatsByBarberId, setSummaryReviewStatsByBarberId] = useState({});
   const [hasLoadedCardSummary, setHasLoadedCardSummary] = useState(false);
+  const [pendingFavoriteRemovals, setPendingFavoriteRemovals] = useState({});
   const { currentUser } = useSelector((state) => state.auth);
   const users = useSelector((state) => state.users);
   const services = useSelector((state) => state.services);
   const reviews = useSelector((state) => state.reviews);
   const favorites = useSelector((state) => state.favorites);
   const bookings = useSelector((state) => state.bookings);
+  const pendingFavoriteRemovalsRef = useRef({});
+  const currentUserRef = useRef(currentUser || null);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser || null;
+  }, [currentUser]);
+
+  const isFavoriteRemovalPending = (type, entityId) => {
+    const removalKey = getFavoriteRemovalKey(currentUser?.id, type, entityId);
+    return removalKey ? Boolean(pendingFavoriteRemovals[removalKey]) : false;
+  };
+
+  const beginFavoriteRemoval = (clientId, type, entityId) => {
+    const removalKey = getFavoriteRemovalKey(clientId, type, entityId);
+    if (!removalKey || pendingFavoriteRemovalsRef.current[removalKey]) {
+      return null;
+    }
+
+    const nextPendingRemovals = {
+      ...pendingFavoriteRemovalsRef.current,
+      [removalKey]: true,
+    };
+
+    pendingFavoriteRemovalsRef.current = nextPendingRemovals;
+    setPendingFavoriteRemovals(nextPendingRemovals);
+    return removalKey;
+  };
+
+  const endFavoriteRemoval = (removalKey) => {
+    if (!removalKey || !pendingFavoriteRemovalsRef.current[removalKey]) {
+      return;
+    }
+
+    const nextPendingRemovals = { ...pendingFavoriteRemovalsRef.current };
+    delete nextPendingRemovals[removalKey];
+    pendingFavoriteRemovalsRef.current = nextPendingRemovals;
+    setPendingFavoriteRemovals(nextPendingRemovals);
+  };
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -279,37 +336,69 @@ export default function FavoritesPage() {
   };
 
   const removeSavedFavorite = async (barberId) => {
+    if (!currentUser?.id) return;
+
+    const initiatingClientId = normalizeFavoriteRemovalId(currentUser.id);
+    const removalKey = beginFavoriteRemoval(initiatingClientId, "barber", barberId);
+    if (!removalKey) return;
+
     setError("");
 
     try {
       await api.delete(`/favorites/${barberId}`);
-      dispatch(removeFavorite({ clientId: currentUser.id, barberId }));
+      if (normalizeFavoriteRemovalId(currentUserRef.current?.id) !== initiatingClientId) {
+        return;
+      }
+
+      dispatch(removeFavorite({ clientId: initiatingClientId, barberId }));
     } catch (requestError) {
+      if (normalizeFavoriteRemovalId(currentUserRef.current?.id) !== initiatingClientId) {
+        return;
+      }
+
       setError(
         requestError.response?.data?.message ||
           "Could not remove favorite. Please try again."
       );
+    } finally {
+      endFavoriteRemoval(removalKey);
     }
   };
 
   const removeSavedSalonFavorite = async (salonId) => {
+    if (!currentUser?.id) return;
+
+    const initiatingClientId = normalizeFavoriteRemovalId(currentUser.id);
+    const removalKey = beginFavoriteRemoval(initiatingClientId, "salon", salonId);
+    if (!removalKey) return;
+
     setError("");
 
     try {
       await api.delete(`/favorites/salons/${salonId}`);
-      dispatch(removeSalonFavorite({ clientId: currentUser.id, salonId }));
+      if (normalizeFavoriteRemovalId(currentUserRef.current?.id) !== initiatingClientId) {
+        return;
+      }
+
+      dispatch(removeSalonFavorite({ clientId: initiatingClientId, salonId }));
       dispatch(
         updateCurrentUser({
-          favoriteSalons: (currentUser?.favoriteSalons || []).filter(
+          favoriteSalons: (currentUserRef.current?.favoriteSalons || []).filter(
             (favoriteSalonId) => String(favoriteSalonId) !== String(salonId)
           ),
         })
       );
     } catch (requestError) {
+      if (normalizeFavoriteRemovalId(currentUserRef.current?.id) !== initiatingClientId) {
+        return;
+      }
+
       setError(
         requestError.response?.data?.message ||
           "Could not remove salon favorite. Please try again."
       );
+    } finally {
+      endFavoriteRemoval(removalKey);
     }
   };
 
@@ -477,6 +566,7 @@ export default function FavoritesPage() {
                       <Button
                         aria-label="Remove favorite"
                         className="absolute right-3 top-3 bg-white"
+                        disabled={isFavoriteRemovalPending("barber", barberId)}
                         onClick={() => removeSavedFavorite(barberId)}
                         size="icon"
                         variant="outline"
@@ -636,6 +726,7 @@ export default function FavoritesPage() {
                       <Button
                         aria-label="Remove salon favorite"
                         className="absolute right-3 top-3 bg-white"
+                        disabled={isFavoriteRemovalPending("salon", salonId)}
                         onClick={() => removeSavedSalonFavorite(salonId)}
                         size="icon"
                         variant="outline"
