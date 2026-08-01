@@ -119,7 +119,11 @@ export default function ClientProfilePage() {
     setError("");
 
     try {
-      const { data } = await api.put("/users/me", profile);
+      const { data } = await api.put("/users/me", {
+        name: profile.name,
+        city: profile.city,
+        phone: profile.phone,
+      });
 
       dispatch(updateCurrentUser(data));
       const nextProfile = {
@@ -320,16 +324,6 @@ export default function ClientProfilePage() {
                       placeholder="Phone"
                       value={profile.phone}
                       onChange={(event) => updateField("phone", event.target.value)}
-                    />
-                  </label>
-
-                  <label className="grid gap-2 text-sm font-semibold text-neutral-800">
-                    Avatar URL
-                    <input
-                      className={fieldClass}
-                      placeholder="Avatar URL"
-                      value={profile.avatarUrl}
-                      onChange={(event) => updateField("avatarUrl", event.target.value)}
                     />
                   </label>
 
