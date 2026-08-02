@@ -1,7 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import api from "@/shared/api/axios";
 
 export default function DepositSettingsSection() {
+  const baseId = useId();
+  const enableId = `${baseId}-deposit-enabled`;
+  const percentageId = `${baseId}-deposit-percentage`;
+  const fixedId = `${baseId}-deposit-fixed`;
+  const valueId = `${baseId}-deposit-value`;
+  const minimumBookingPriceId = `${baseId}-minimum-booking-price`;
+  const noShowPolicyTextId = `${baseId}-no-show-policy-text`;
+
   const [depositSettings, setDepositSettings] = useState({
     enabled: false,
     mode: "percentage",
@@ -57,7 +65,11 @@ export default function DepositSettingsSection() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6">
+      <div
+        className="rounded-2xl border border-neutral-200 bg-white p-6"
+        role="status"
+        aria-live="polite"
+      >
         <p className="text-sm text-neutral-500">Loading deposit settings...</p>
       </div>
     );
@@ -74,21 +86,29 @@ export default function DepositSettingsSection() {
       </p>
 
       {error && (
-        <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <p
+          className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          role="alert"
+        >
           {error}
         </p>
       )}
 
       {saved && (
-        <p className="mt-3 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+        <p
+          className="mt-3 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-700"
+          role="status"
+          aria-live="polite"
+        >
           Deposit settings saved.
         </p>
       )}
 
       <form onSubmit={handleSave} className="mt-5 space-y-5">
         {/* Enable toggle */}
-        <label className="flex items-center gap-3 cursor-pointer">
+        <div className="flex items-center gap-3">
           <input
+            id={enableId}
             type="checkbox"
             checked={depositSettings.enabled}
             onChange={(e) =>
@@ -99,21 +119,25 @@ export default function DepositSettingsSection() {
             }
             className="h-5 w-5 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
           />
-          <span className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor={enableId}
+            className="cursor-pointer text-sm font-medium text-neutral-800"
+          >
             Require deposit for bookings
-          </span>
-        </label>
+          </label>
+        </div>
 
         {depositSettings.enabled && (
           <>
             {/* Mode selector */}
-            <div>
-              <label className="text-sm font-semibold text-neutral-700">
+            <fieldset>
+              <legend className="text-sm font-semibold text-neutral-700">
                 Deposit mode
-              </label>
+              </legend>
               <div className="mt-2 flex gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
+                <div className="flex items-center gap-2">
                   <input
+                    id={percentageId}
                     type="radio"
                     name="depositMode"
                     value="percentage"
@@ -126,10 +150,16 @@ export default function DepositSettingsSection() {
                     }
                     className="text-neutral-900 focus:ring-neutral-900"
                   />
-                  <span className="text-sm text-neutral-700">Percentage</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    htmlFor={percentageId}
+                    className="cursor-pointer text-sm text-neutral-700"
+                  >
+                    Percentage
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
                   <input
+                    id={fixedId}
                     type="radio"
                     name="depositMode"
                     value="fixed"
@@ -142,21 +172,27 @@ export default function DepositSettingsSection() {
                     }
                     className="text-neutral-900 focus:ring-neutral-900"
                   />
-                  <span className="text-sm text-neutral-700">Fixed amount</span>
-                </label>
+                  <label
+                    htmlFor={fixedId}
+                    className="cursor-pointer text-sm text-neutral-700"
+                  >
+                    Fixed amount
+                  </label>
+                </div>
               </div>
-            </div>
+            </fieldset>
 
             {/* Value */}
             <div>
-              <label className="text-sm font-semibold text-neutral-700">
+              <label htmlFor={valueId} className="text-sm font-semibold text-neutral-700">
                 {depositSettings.mode === "percentage"
                   ? "Deposit percentage (%)"
                   : "Deposit amount (AMD)"}
               </label>
               <input
+                id={valueId}
                 type="number"
-                min={0}
+                min={depositSettings.mode === "percentage" ? 1 : 0}
                 max={depositSettings.mode === "percentage" ? 100 : undefined}
                 value={depositSettings.value}
                 onChange={(e) =>
@@ -176,13 +212,17 @@ export default function DepositSettingsSection() {
 
             {/* Minimum booking price */}
             <div>
-              <label className="text-sm font-semibold text-neutral-700">
+              <label
+                htmlFor={minimumBookingPriceId}
+                className="text-sm font-semibold text-neutral-700"
+              >
                 Minimum booking price (AMD)
               </label>
               <input
+                id={minimumBookingPriceId}
                 type="number"
                 min={0}
-                value={depositSettings.minimumBookingPrice || ""}
+                value={depositSettings.minimumBookingPrice ?? ""}
                 onChange={(e) =>
                   setDepositSettings((prev) => ({
                     ...prev,
@@ -201,10 +241,14 @@ export default function DepositSettingsSection() {
 
             {/* No-show policy text */}
             <div>
-              <label className="text-sm font-semibold text-neutral-700">
+              <label
+                htmlFor={noShowPolicyTextId}
+                className="text-sm font-semibold text-neutral-700"
+              >
                 No-show policy text
               </label>
               <textarea
+                id={noShowPolicyTextId}
                 maxLength={1000}
                 value={depositSettings.noShowPolicyText}
                 onChange={(e) =>
