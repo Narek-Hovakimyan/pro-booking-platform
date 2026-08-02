@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
-import { formatDateLabel } from "@/shared/utils/dates";
+import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
 const WORK_TIME_PRESETS = ["09:00", "10:00", "18:00", "20:00"];
 const BREAK_TIME_PRESETS = ["12:00", "13:00", "14:00", "15:00"];
@@ -70,8 +70,12 @@ export default function ScheduleDateOverrideEditor({
           <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
             {dateOptions.map((day) => {
               const status = dateStatusMap?.[day.value] || {};
-              const weekDay = day.label.split(" ")[0];
-              const dayNum = day.label.split(" ")[1];
+              const parsedDay = parseDateKey(day.value);
+              const weekDay = parsedDay
+                ? parsedDay.toLocaleDateString("en-US", { weekday: "short" })
+                : "—";
+              const dayNum = parsedDay ? String(parsedDay.getDate()) : "—";
+              const displayedLabel = parsedDay ? formatDateLabel(parsedDay) : day.label || day.value;
 
               return (
                 <button
@@ -80,7 +84,7 @@ export default function ScheduleDateOverrideEditor({
                   disabled={status.isPast}
                   onClick={() => onSelectDate(day.value)}
                   aria-pressed={day.value === selectedDateKey}
-                  aria-label={`${day.label} — ${status.isCustom ? "Custom" : status.isDayOff ? "Day off" : "Default"}`}
+                  aria-label={`${displayedLabel} — ${status.isCustom ? "Custom" : status.isDayOff ? "Day off" : "Default"}`}
                   className={cn(
                     "flex min-h-[76px] flex-col items-center justify-center gap-0 rounded-2xl border px-0.5 py-2 text-[10px] leading-tight transition",
                     "focus:outline-none focus:ring-2 focus:ring-purple-200",

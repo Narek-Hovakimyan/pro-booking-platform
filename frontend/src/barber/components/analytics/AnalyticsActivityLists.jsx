@@ -2,6 +2,15 @@ import { Calendar, CalendarDays, CheckCircle2 } from "lucide-react";
 
 import EmptyState from "@/shared/components/common/EmptyState";
 import StatusBadge from "@/shared/components/StatusBadge";
+import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
+
+const formatBookingDate = (dateKey) => {
+  if (!dateKey) return "—";
+
+  const parsedDate = parseDateKey(dateKey);
+
+  return parsedDate ? formatDateLabel(parsedDate) : "—";
+};
 
 export default function AnalyticsActivityLists({
   recentCompleted,
@@ -34,7 +43,8 @@ export default function AnalyticsActivityLists({
                     {getClientName(booking)} · {getServiceName(booking)}
                   </p>
                   <p className="text-xs text-neutral-400">
-                    {booking.bookingDate} {getBookingTime(booking) ? `at ${getBookingTime(booking)}` : ""}
+                    {formatBookingDate(booking.bookingDate)}{" "}
+                    {getBookingTime(booking) ? `at ${getBookingTime(booking)}` : ""}
                     {formatTimeAgo(booking.updatedAt || booking.createdAt)
                       ? ` · ${formatTimeAgo(booking.updatedAt || booking.createdAt)}`
                       : ""}
@@ -69,7 +79,8 @@ export default function AnalyticsActivityLists({
                     {getClientName(booking)} · {getServiceName(booking)}
                   </p>
                   <p className="text-xs text-neutral-400">
-                    {booking.bookingDate} {getBookingTime(booking) ? `at ${getBookingTime(booking)}` : ""}
+                    {formatBookingDate(booking.bookingDate)}{" "}
+                    {getBookingTime(booking) ? `at ${getBookingTime(booking)}` : ""}
                   </p>
                 </div>
                 <StatusBadge status={booking.status} />

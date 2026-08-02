@@ -223,10 +223,12 @@ describe("Header accessibility", () => {
     const moreButton = screen.getByRole("button", { name: "nav.more" });
 
     expect(moreButton).toHaveAttribute("aria-haspopup", "menu");
+    expect(moreButton.closest("div")).toHaveClass("hidden", "lg:block");
     await user.click(moreButton);
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "nav.account" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "nav.profile" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "nav.toggleMenu" })).toBeInTheDocument();
   });
 });

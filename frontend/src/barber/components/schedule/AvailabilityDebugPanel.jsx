@@ -42,7 +42,7 @@ function ResultBadge({ result }) {
   );
 }
 
-export default function AvailabilityDebugPanel({
+function AvailabilityDebugPanelContent({
   barberId,
   selectedSalonId,
   selectedDateKey,
@@ -304,6 +304,12 @@ export default function AvailabilityDebugPanel({
       </CardContent>
     </details>
   );
+}
+
+export default function AvailabilityDebugPanel(props) {
+  if (import.meta.env.PROD) return null;
+
+  return <AvailabilityDebugPanelContent {...props} />;
 }
 
 function InfoItem({ label, value }) {

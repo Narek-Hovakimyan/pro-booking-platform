@@ -1,4 +1,5 @@
 import { CalendarDays, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/shared/components/ui/button";
 
@@ -13,12 +14,14 @@ export default function BookingsHeaderFilters({
   onSelectDate,
   onDateInputChange,
 }) {
+  const { t } = useTranslation();
+
   return (
     <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
           <CalendarDays className="h-6 w-6" />
-          Ամրագրումներ
+          {t("nav.bookings")}
         </h2>
 
         <Button className="w-full sm:w-auto" onClick={onAddBooking}>

@@ -459,7 +459,7 @@ export default function Header() {
 
                   {/* More menu (desktop) — barber or platform admin */}
                   {(isBarber || isPlatformAdmin) && (
-                    <div className="relative" ref={moreMenuRef}>
+                    <div className="relative hidden lg:block" ref={moreMenuRef}>
                   <button
                     className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
                     onClick={() => setIsMoreOpen((v) => !v)}
