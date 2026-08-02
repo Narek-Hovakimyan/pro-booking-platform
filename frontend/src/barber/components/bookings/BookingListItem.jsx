@@ -3,13 +3,13 @@ import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
 import ClientReliabilitySummary from "@/barber/components/bookings/ClientReliabilitySummary";
 import TreatmentRecordSection from "@/barber/components/bookings/TreatmentRecordSection";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
+import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
-const formatRequestDate = (value) => {
-  if (!value) return "";
-  if (typeof value === "string") return value.slice(0, 10);
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+const formatBookingDateValue = (value) => {
+  if (typeof value !== "string") return "—";
+  const parsedDate = parseDateKey(value);
+  return parsedDate ? formatDateLabel(parsedDate) : "—";
 };
 
 export default function BookingListItem({
@@ -34,7 +34,8 @@ export default function BookingListItem({
   const isReschedulePending = rescheduleStatus === "pending";
   const isRescheduleRejected = rescheduleStatus === "rejected";
   const isRescheduleAccepted = rescheduleStatus === "accepted";
-  const requestedDate = formatRequestDate(
+  const bookingDateLabel = formatBookingDateValue(booking?.bookingDate);
+  const requestedDate = formatBookingDateValue(
     rescheduleRequest?.requestedBookingDate
   );
   const requestedTime = rescheduleRequest?.requestedTime || "";
@@ -60,11 +61,11 @@ export default function BookingListItem({
       </div>
 
       <div className="mt-1 text-sm text-neutral-500">
-        {getServiceName(booking)} · {booking?.bookingDate || "No date"}{" "}
+        {getServiceName(booking)} · {bookingDateLabel}{" "}
         {getBookingTime(booking) || "HH:mm"} ·{" "}
         {booking?.price !== undefined && booking?.price !== null && (
           <span className="font-semibold text-neutral-800">
-            {Number(booking.price || 0).toLocaleString()} դրամ
+            {formatCurrency(booking.price)}
           </span>
         )}
       </div>
@@ -75,7 +76,7 @@ export default function BookingListItem({
 
       {booking?.note && (
         <div className="mt-1 text-sm">
-          Նշում՝ {booking.note}
+          Note: {booking.note}
         </div>
       )}
 
@@ -161,7 +162,7 @@ export default function BookingListItem({
         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           <div className="font-semibold">Reschedule request</div>
           <p className="mt-1">
-            Requested: {requestedDate || "No date"} {requestedTime || "HH:mm"}
+            Requested: {requestedDate} {requestedTime || "HH:mm"}
           </p>
           {rescheduleRequest?.requestNote && (
             <p className="mt-1 text-amber-800">
