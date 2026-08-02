@@ -1,12 +1,51 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/shared/components/ui/button";
 import { CheckCircle2, ImagePlus, X, Gift, LoaderCircle, Tag } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 
 const MAX_REFERENCE_FILES = 5;
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+const getReferenceFileDescriptor = (file) =>
+  [file.name, file.size, file.type, file.lastModified].join(":");
+
+const createReferenceFileOccurrenceRegistry = () => {
+  let nextOccurrenceId = 0;
+  let previousOccurrences = [];
+
+  return {
+    reconcile(files) {
+      const usedPreviousIndexes = new Set();
+
+      const nextOccurrences = files.map((file) => {
+        const matchedIndex = previousOccurrences.findIndex(
+          (occurrence, index) =>
+            !usedPreviousIndexes.has(index) && occurrence.file === file
+        );
+
+        if (matchedIndex >= 0) {
+          usedPreviousIndexes.add(matchedIndex);
+          return previousOccurrences[matchedIndex];
+        }
+
+        return {
+          file,
+          key: `${getReferenceFileDescriptor(file)}:${++nextOccurrenceId}`,
+        };
+      });
+
+      previousOccurrences = nextOccurrences;
+      return nextOccurrences;
+    },
+    removeAt(index) {
+      previousOccurrences = previousOccurrences.filter(
+        (_, occurrenceIndex) => occurrenceIndex !== index
+      );
+    },
+  };
+};
 
 const HAIR_TYPE_OPTIONS = [
   { value: "straight", label: "Straight" },
@@ -32,6 +71,26 @@ const initialConsultationState = {
   desiredOutcome: "",
   notes: "",
 };
+
+function ReferencePreviewImage({ file, alt }) {
+  const imageRef = useRef(null);
+  const previewUrlRef = useRef("");
+
+  useEffect(() => {
+    const nextPreviewUrl = URL.createObjectURL(file);
+    previewUrlRef.current = nextPreviewUrl;
+
+    if (imageRef.current) {
+      imageRef.current.src = nextPreviewUrl;
+    }
+
+    return () => {
+      URL.revokeObjectURL(nextPreviewUrl);
+    };
+  }, [file]);
+
+  return <img ref={imageRef} alt={alt} className="h-full w-full object-cover" />;
+}
 
 export default function ClientDetailsStep({
   client = { name: "", phone: "", note: "" },
@@ -64,17 +123,12 @@ export default function ClientDetailsStep({
   );
   const [consentGiven, setConsentGiven] = useState(false);
   const [fileError, setFileError] = useState("");
-
-  const previewUrls = useMemo(
-    () => referenceFiles.map((file) => URL.createObjectURL(file)),
-    [referenceFiles]
+  const [referenceFileOccurrenceRegistry] = useState(
+    createReferenceFileOccurrenceRegistry
   );
-
-  useEffect(
-    () => () => {
-      previewUrls.forEach((url) => URL.revokeObjectURL(url));
-    },
-    [previewUrls]
+  const referenceFileOccurrences = useMemo(
+    () => referenceFileOccurrenceRegistry.reconcile(referenceFiles),
+    [referenceFileOccurrenceRegistry, referenceFiles]
   );
 
   const handleChange = (field, value) => {
@@ -121,6 +175,7 @@ export default function ClientDetailsStep({
 
   const removeFile = (index) => {
     if (!onReferenceFilesChange) return;
+    referenceFileOccurrenceRegistry.removeAt(index);
     const updated = referenceFiles.filter((_, i) => i !== index);
     onReferenceFilesChange(updated);
   };
@@ -175,7 +230,7 @@ export default function ClientDetailsStep({
     <div className="space-y-5">
       <div>
         <h2 className="text-xl font-bold sm:text-2xl">
-          {`Լրացրու տվյալները`}
+          Enter your details
         </h2>
         <p className="mt-1 text-sm text-neutral-500">
           Confirm your contact details for this booking.
@@ -305,7 +360,7 @@ export default function ClientDetailsStep({
                         Code: {voucherPreview.code}
                         {discountPreview > 0 && (
                           <span className="ml-2 font-semibold">
-                            Promo -{Number(discountPreview).toLocaleString()} դր
+                            Promo -{formatCurrency(discountPreview)}
                           </span>
                         )}
                       </p>
@@ -335,9 +390,9 @@ export default function ClientDetailsStep({
                   Available promo codes
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {publicVouchers.map((pv, i) => (
+                  {publicVouchers.map((pv) => (
                     <button
-                      key={i}
+                      key={pv.code}
                       type="button"
                       disabled={voucherLoading}
                       onClick={() => {
@@ -535,13 +590,12 @@ export default function ClientDetailsStep({
             <div className="flex flex-wrap gap-2">
               {referenceFiles.map((file, index) => (
                 <div
-                  key={index}
+                  key={referenceFileOccurrences[index]?.key ?? getReferenceFileDescriptor(file)}
                   className="relative h-20 w-20 overflow-hidden rounded-xl border"
                 >
-                  <img
-                    src={previewUrls[index]}
+                  <ReferencePreviewImage
+                    file={file}
                     alt={`Reference ${index + 1}`}
-                    className="h-full w-full object-cover"
                   />
                   <button
                     type="button"
