@@ -219,6 +219,44 @@ describe("FavoritesPage salon-context navigation", () => {
       })
     );
   });
+
+  it("shows the English subtitle and tab counts with proper tab semantics", async () => {
+    const barberFavorite = favoriteWithSalons([
+      { status: "approved", salon: { id: "salon-1", name: "Salon One" } },
+    ]);
+    const salonFavorite = {
+      clientId: "client-1",
+      type: "salon",
+      salonId: "salon-2",
+      salon: { id: "salon-2", name: "Blue Salon", barbers: [] },
+    };
+    state.favorites = [barberFavorite, salonFavorite];
+    mockFavoritesApi({ favorites: [barberFavorite], salonFavorites: [salonFavorite] });
+
+    renderFavorites();
+
+    expect(
+      screen.getByText("Your saved specialists and salons, all in one place.")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Specialists (1)", selected: true })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Salons (1)", selected: false })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tabpanel", { name: "Specialists (1)" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Salons (1)" }));
+
+    expect(
+      screen.getByRole("tab", { name: "Salons (1)", selected: true })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tabpanel", { name: "Salons (1)" })
+    ).toBeInTheDocument();
+  });
 });
 
 describe("FavoritesPage favorite removal protection", () => {
@@ -321,7 +359,7 @@ describe("FavoritesPage favorite removal protection", () => {
     await waitFor(() => expect(api.delete).toHaveBeenCalledTimes(1));
     expect(api.delete).toHaveBeenCalledWith("/favorites/shared-1");
     expect(removeFavoriteButton).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeSalonButton = await screen.findByRole("button", {
       name: "Remove salon favorite",
@@ -395,7 +433,7 @@ describe("FavoritesPage favorite removal protection", () => {
     );
 
     routerMocks.dispatch.mockClear();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeSalonButton = await screen.findByRole("button", {
       name: "Remove salon favorite",
@@ -437,7 +475,7 @@ describe("FavoritesPage favorite removal protection", () => {
     vi.mocked(api.delete).mockReturnValue(removal.promise);
 
     renderFavorites();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeButtons = await screen.findAllByRole("button", {
       name: "Remove salon favorite",
@@ -505,7 +543,7 @@ describe("FavoritesPage favorite removal protection", () => {
     );
     expect(removeFavoriteButton).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
     const removeSalonButton = await screen.findByRole("button", {
       name: "Remove salon favorite",
     });
@@ -546,7 +584,7 @@ describe("FavoritesPage favorite removal protection", () => {
     });
 
     renderFavorites();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeButton = await screen.findByRole("button", {
       name: "Remove salon favorite",
@@ -578,7 +616,7 @@ describe("FavoritesPage favorite removal protection", () => {
     vi.mocked(api.delete).mockResolvedValue({ data: {} });
 
     renderFavorites();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeButton = await screen.findByRole("button", {
       name: "Remove salon favorite",
@@ -640,7 +678,7 @@ describe("FavoritesPage favorite removal protection", () => {
     vi.mocked(api.delete).mockReturnValue(removal.promise);
 
     const view = renderFavorites();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeButtonA = await screen.findByRole("button", {
       name: "Remove salon favorite",
@@ -704,7 +742,7 @@ describe("FavoritesPage favorite removal protection", () => {
     vi.mocked(api.delete).mockReturnValue(removal.promise);
 
     const view = renderFavorites();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeButtonA = await screen.findByRole("button", {
       name: "Remove salon favorite",
@@ -773,7 +811,7 @@ describe("FavoritesPage favorite removal protection", () => {
       .mockReturnValueOnce(secondRemoval.promise);
 
     const view = renderFavorites();
-    fireEvent.click(screen.getByRole("button", { name: "Salons" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Salons \(\d+\)/ }));
 
     const removeButtonA = await screen.findByRole("button", {
       name: "Remove salon favorite",

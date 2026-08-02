@@ -1,5 +1,5 @@
 import { Heart, HeartCrack, MapPin, MessageCircle, Phone, Star, UserRound } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -72,6 +72,7 @@ function getFavoriteRemovalKey(clientId, type, entityId) {
 export default function FavoritesPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const tabIdBase = useId();
   const [activeTab, setActiveTab] = useState("barbers");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -284,6 +285,10 @@ export default function FavoritesPage() {
     activeTab === "barbers" ? favoriteBarbers : favoriteSalons;
   const initialLoading = isLoading && activeItems.length === 0;
   const refreshing = isLoading && activeItems.length > 0;
+  const specialistsTabId = `${tabIdBase}-specialists-tab`;
+  const salonsTabId = `${tabIdBase}-salons-tab`;
+  const specialistsPanelId = `${tabIdBase}-specialists-panel`;
+  const salonsPanelId = `${tabIdBase}-salons-panel`;
 
   // Derive latest eligible booking per barber for "Book again" CTA
   const clientBookings = (currentUser?.id
@@ -410,21 +415,30 @@ export default function FavoritesPage() {
             Favorites
           </h1>
           <p className="mt-2 text-neutral-500">
-            Քո պահպանած վարսահարդարներն ու սրահները։
+            Your saved specialists and salons, all in one place.
           </p>
         </div>
 
-        <div className="inline-flex rounded-xl border border-neutral-200 bg-white p-1 shadow-sm">
+        <div
+          aria-label="Favorite categories"
+          className="inline-flex rounded-xl border border-neutral-200 bg-white p-1 shadow-sm"
+          role="tablist"
+        >
           <button
             className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
               activeTab === "barbers"
                 ? "bg-neutral-950 text-white"
                 : "text-neutral-600 hover:bg-neutral-100"
             }`}
+            aria-controls={specialistsPanelId}
+            aria-selected={activeTab === "barbers"}
             onClick={() => setActiveTab("barbers")}
+            id={specialistsTabId}
+            role="tab"
+            tabIndex={activeTab === "barbers" ? 0 : -1}
             type="button"
           >
-            Specialists
+            Specialists ({favoriteBarbers.length})
           </button>
           <button
             className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
@@ -432,10 +446,15 @@ export default function FavoritesPage() {
                 ? "bg-neutral-950 text-white"
                 : "text-neutral-600 hover:bg-neutral-100"
             }`}
+            aria-controls={salonsPanelId}
+            aria-selected={activeTab === "salons"}
             onClick={() => setActiveTab("salons")}
+            id={salonsTabId}
+            role="tab"
+            tabIndex={activeTab === "salons" ? 0 : -1}
             type="button"
           >
-            Salons
+            Salons ({favoriteSalons.length})
           </button>
         </div>
 
@@ -452,48 +471,37 @@ export default function FavoritesPage() {
           </div>
         )}
 
-        {initialLoading ? (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((item) => (
-              activeTab === "barbers" ? (
-                <BarberCardSkeleton key={item} />
-              ) : (
-                <SalonCardSkeleton key={item} />
-              )
-            ))}
-          </div>
-        ) : activeTab === "barbers" && favoriteBarbers.length === 0 ? (
-          <Card className="rounded-2xl text-center shadow-card sm:rounded-3xl">
-            <CardContent className="space-y-4 p-8">
-              <HeartCrack className="mx-auto h-10 w-10 text-neutral-300" />
-              <div>
-                <h3 className="font-semibold text-neutral-950">No favorite specialists yet</h3>
-                <p className="mt-1 text-sm text-neutral-500">
-                  Start browsing and save your favorite specialists for quick access.
-                </p>
+        {activeTab === "barbers" ? (
+          <div
+            aria-labelledby={specialistsTabId}
+            className="space-y-4"
+            id={specialistsPanelId}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {initialLoading ? (
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {[0, 1, 2].map((item) => (
+                  <BarberCardSkeleton key={item} />
+                ))}
               </div>
-              <Button as={Link} to="/specialists" size="lg">
-                Browse specialists
-              </Button>
-            </CardContent>
-          </Card>
-        ) : activeTab === "salons" && favoriteSalons.length === 0 ? (
-          <Card className="rounded-2xl text-center shadow-card sm:rounded-3xl">
-            <CardContent className="space-y-4 p-8">
-              <HeartCrack className="mx-auto h-10 w-10 text-neutral-300" />
-              <div>
-                <h3 className="font-semibold text-neutral-950">No favorite salons yet</h3>
-                <p className="mt-1 text-sm text-neutral-500">
-                  Discover salons and save your favorites for later.
-                </p>
-              </div>
-              <Button as={Link} to="/salons" size="lg">
-                Browse salons
-              </Button>
-            </CardContent>
-          </Card>
-        ) : activeTab === "barbers" ? (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            ) : favoriteBarbers.length === 0 ? (
+              <Card className="rounded-2xl text-center shadow-card sm:rounded-3xl">
+                <CardContent className="space-y-4 p-8">
+                  <HeartCrack className="mx-auto h-10 w-10 text-neutral-300" />
+                  <div>
+                    <h3 className="font-semibold text-neutral-950">No favorite specialists yet</h3>
+                    <p className="mt-1 text-sm text-neutral-500">
+                      Start browsing and save your favorite specialists for quick access.
+                    </p>
+                  </div>
+                  <Button as={Link} to="/specialists" size="lg">
+                    Browse specialists
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {favoriteBarbers.map((barber) => {
               const barberId = barber?.id || barber?._id;
               const bid = String(barberId);
@@ -555,6 +563,8 @@ export default function FavoritesPage() {
                         <img
                           alt={barber.name}
                           className="aspect-[4/3] w-full rounded-2xl object-cover"
+                          decoding="async"
+                          loading="lazy"
                           src={getMediaUrl(barber.imageUrl)}
                         />
                       ) : (
@@ -700,9 +710,40 @@ export default function FavoritesPage() {
                 </Card>
               );
             })}
+              </div>
+            )}
           </div>
         ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            aria-labelledby={salonsTabId}
+            className="space-y-4"
+            id={salonsPanelId}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {initialLoading ? (
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {[0, 1, 2].map((item) => (
+                  <SalonCardSkeleton key={item} />
+                ))}
+              </div>
+            ) : favoriteSalons.length === 0 ? (
+              <Card className="rounded-2xl text-center shadow-card sm:rounded-3xl">
+                <CardContent className="space-y-4 p-8">
+                  <HeartCrack className="mx-auto h-10 w-10 text-neutral-300" />
+                  <div>
+                    <h3 className="font-semibold text-neutral-950">No favorite salons yet</h3>
+                    <p className="mt-1 text-sm text-neutral-500">
+                      Discover salons and save your favorites for later.
+                    </p>
+                  </div>
+                  <Button as={Link} to="/salons" size="lg">
+                    Browse salons
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {favoriteSalons.map((salon) => {
               const salonId = salon?.id || salon?._id;
               const barbers = salon?.barbers || [];
@@ -715,6 +756,8 @@ export default function FavoritesPage() {
                         <img
                           alt={salon?.name || "Salon"}
                           className="aspect-[4/3] w-full rounded-2xl object-cover"
+                          decoding="async"
+                          loading="lazy"
                           src={getMediaUrl(salon.imageUrl)}
                         />
                       ) : (
@@ -794,6 +837,8 @@ export default function FavoritesPage() {
                 </Card>
               );
             })}
+              </div>
+            )}
           </div>
         )}
       </div>
