@@ -11,6 +11,13 @@ import { getMediaUrl } from "@/shared/utils/media";
 
 const getBarberId = (barber) => barber?.id || barber?._id;
 
+const formatReviewCount = (count) => {
+  const parsedCount = Number(count);
+  const normalizedCount = Number.isFinite(parsedCount) ? parsedCount : 0;
+
+  return `${normalizedCount} review${normalizedCount === 1 ? "" : "s"}`;
+};
+
 const hasActiveServiceInCategory = (services, barberId, category) =>
   !category ||
   (services || []).some(
@@ -60,13 +67,14 @@ export default function SelectedSalonView({
           <div className="relative">
             {selectedSalon?.imageUrl ? (
               <img
-                alt={selectedSalon?.name || "Salon image"}
+                alt={`Photos of ${selectedSalon?.name || "this salon"}`}
                 className="aspect-[4/3] w-full rounded-2xl object-cover"
+                decoding="async"
                 src={getMediaUrl(selectedSalon.imageUrl)}
               />
             ) : (
               <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-neutral-100">
-                <UserRound className="h-16 w-16 text-neutral-400" />
+                <UserRound className="h-16 w-16 text-neutral-400" aria-hidden="true" />
               </div>
             )}
           </div>
@@ -79,7 +87,7 @@ export default function SelectedSalonView({
                 </h2>
                 {selectedSalon?.city && (
                   <p className="mt-2 flex items-center gap-2 text-sm text-neutral-500">
-                    <MapPin className="h-4 w-4" />
+                    <MapPin className="h-4 w-4" aria-hidden="true" />
                     {selectedSalon.city}
                   </p>
                 )}
@@ -90,7 +98,7 @@ export default function SelectedSalonView({
                 )}
                 {selectedSalon?.phone && (
                   <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
-                    <Phone className="h-4 w-4" />
+                    <Phone className="h-4 w-4" aria-hidden="true" />
                     {selectedSalon.phone}
                   </p>
                 )}
@@ -107,6 +115,7 @@ export default function SelectedSalonView({
                   variant={isSalonFavorite(getId(selectedSalon)) ? "default" : "outline"}
                 >
                   <Heart
+                    aria-hidden="true"
                     className={`mr-2 h-4 w-4 ${
                       isSalonFavorite(getId(selectedSalon))
                         ? "fill-white"
@@ -122,15 +131,17 @@ export default function SelectedSalonView({
 
             <div className="flex flex-wrap gap-3">
               <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
-                <UserRound className="h-4 w-4 text-neutral-500" />
+                <UserRound className="h-4 w-4 text-neutral-500" aria-hidden="true" />
                 {selectedBarbers.length}{" "}
                 {selectedBarbers.length === 1 ? "specialist" : "specialists"}
               </p>
 
               <p className="inline-flex items-center gap-2 rounded-xl bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
-                <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+                <Star className="h-4 w-4 fill-amber-400 text-amber-500" aria-hidden="true" />
                 {selectedSalonRating
-                  ? `${selectedSalonRating.toFixed(1)} (${selectedSalonReviewsCount} reviews)`
+                  ? `${selectedSalonRating.toFixed(1)} (${formatReviewCount(
+                      selectedSalonReviewsCount
+                    )})`
                   : "No reviews yet"}
               </p>
             </div>
@@ -140,10 +151,12 @@ export default function SelectedSalonView({
 
       <div className="space-y-3">
         <div>
-          <h2 className="text-xl font-bold">Salon Reviews</h2>
+          <h2 className="text-xl font-bold">Salon reviews</h2>
           <p className="mt-1 text-sm text-neutral-500">
             {selectedSalonRating
-              ? `${selectedSalonRating.toFixed(1)} average rating · ${selectedSalonReviewsCount} reviews`
+              ? `${selectedSalonRating.toFixed(1)} average rating · ${formatReviewCount(
+                  selectedSalonReviewsCount
+                )}`
               : "No reviews yet"}
           </p>
         </div>
