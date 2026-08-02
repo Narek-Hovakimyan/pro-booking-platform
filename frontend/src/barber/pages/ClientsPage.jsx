@@ -8,14 +8,14 @@ import Drawer from "@/shared/components/common/Drawer";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
-
-const formatCurrency = (amount) =>
-  `${Number(amount || 0).toLocaleString()} դրամ`;
+import { formatCurrency } from "@/platform/utils/billingFormatters";
+import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
 const formatBookingLabel = (booking) => {
   if (!booking?.date) return "None";
 
-  const pieces = [booking.date];
+  const parsedDate = typeof booking.date === "string" ? parseDateKey(booking.date) : null;
+  const pieces = [parsedDate ? formatDateLabel(parsedDate) : "—"];
   if (booking.time) pieces.push(booking.time);
   if (booking.serviceName) pieces.push(booking.serviceName);
 
