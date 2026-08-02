@@ -62,6 +62,7 @@ export default function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [canManageSalon, setCanManageSalon] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [clientMenuPathname, setClientMenuPathname] = useState(null);
   const moreMenuRef = useRef(null);
   const isMountedRef = useRef(true);
   const isClient = currentUser?.role === "client";
@@ -72,6 +73,10 @@ export default function Header() {
   const currentUserId = currentUser?.id || currentUser?._id;
   const canShowManageHiring =
     showBarberChrome && Boolean(currentUserId) && Boolean(token) && canManageSalon;
+  const isClientProfileMenu = isClient && !isPlatformAdmin;
+  const clientProfileMenuId = "header-client-profile-menu";
+  const isClientProfileOpen =
+    isClientProfileMenu && isMoreOpen && clientMenuPathname === pathname;
 
   useEffect(() => {
     return () => {
@@ -231,6 +236,29 @@ export default function Header() {
     };
   }, [currentUser?.id, dispatch, token]);
 
+  useEffect(() => {
+    if (!isClientProfileOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsMoreOpen(false);
+      }
+    };
+    const handlePointerDown = (event) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) {
+        setIsMoreOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("mousedown", handlePointerDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [isClientProfileOpen]);
+
   const logout = async () => {
     if (isLoggingOut) return;
 
@@ -260,6 +288,16 @@ export default function Header() {
   const handleMobileLink = (to) => {
     if (to) navigate(to);
     setIsMobileMenuOpen(false);
+  };
+
+  const handleClientProfileToggle = () => {
+    if (isClientProfileOpen) {
+      setIsMoreOpen(false);
+      return;
+    }
+
+    setClientMenuPathname(pathname);
+    setIsMoreOpen(true);
   };
 
   const currentLanguage = (i18n.resolvedLanguage || i18n.language || "hy").split("-")[0];
@@ -450,32 +488,38 @@ export default function Header() {
 
                   {/* Client simple dropdown */}
                   {isClient && !isPlatformAdmin && (
-                    <div className="relative">
-                  <button
-                    className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
-                    onClick={() => setIsMoreOpen((v) => !v)}
-                    type="button"
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </button>
-                  {isMoreOpen && (
-                    <div
-                      className="absolute right-0 top-10 z-50 w-40 rounded-xl border border-neutral-800 bg-neutral-950 p-1.5 shadow-xl shadow-black/50"
-                      ref={moreMenuRef}
-                    >
-                      <div className="px-3 py-1.5 text-xs font-medium text-neutral-500">
-                        {currentUser?.name || t("common.user")}
-                      </div>
+                    <div className="relative" ref={moreMenuRef}>
                       <button
-                        className="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
-                        onClick={logout}
+                        className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
+                        onClick={handleClientProfileToggle}
+                        aria-controls={clientProfileMenuId}
+                        aria-expanded={isClientProfileOpen}
+                        aria-haspopup="menu"
+                        aria-label={t("nav.profile")}
                         type="button"
-                        disabled={isLoggingOut}
                       >
-                        {t("nav.logout")}
+                        <ChevronDown className="h-3.5 w-3.5" />
                       </button>
-                    </div>
-                  )}
+                      {isClientProfileOpen && (
+                        <div
+                          id={clientProfileMenuId}
+                          className="absolute right-0 top-10 z-50 w-40 rounded-xl border border-neutral-800 bg-neutral-950 p-1.5 shadow-xl shadow-black/50"
+                          role="menu"
+                        >
+                          <div className="px-3 py-1.5 text-xs font-medium text-neutral-500">
+                            {currentUser?.name || t("common.user")}
+                          </div>
+                          <button
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/10 hover:text-white"
+                            onClick={logout}
+                            role="menuitem"
+                            type="button"
+                            disabled={isLoggingOut}
+                          >
+                            {t("nav.logout")}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>

@@ -269,12 +269,15 @@ export default function NestedHeaderMenu({
         t
       ).map((group) => {
         const isExpanded = expandedGroup === group.key;
+        const panelId = `header-mobile-group-${group.key}`;
 
         return (
           <div key={group.key}>
             <button
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-500 transition hover:bg-white/5"
               onClick={() => setExpandedGroup(isExpanded ? null : group.key)}
+              aria-controls={panelId}
+              aria-expanded={isExpanded}
               type="button"
             >
               {group.label}
@@ -286,7 +289,10 @@ export default function NestedHeaderMenu({
             </button>
 
             {isExpanded && (
-              <div className="ml-3 flex flex-col gap-0.5 border-l border-neutral-800 pl-2">
+              <div
+                id={panelId}
+                className="ml-3 flex flex-col gap-0.5 border-l border-neutral-800 pl-2"
+              >
                 {group.children.map((child) => (
                   <button
                     key={child.to}
