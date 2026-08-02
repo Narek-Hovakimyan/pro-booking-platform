@@ -10,6 +10,7 @@ import NextBookingSection from "@/client/components/bookings/NextBookingSection"
 import LoyaltyBanner from "@/client/components/LoyaltyBanner";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import api from "@/shared/api/axios";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { getSocket } from "@/shared/lib/socket";
 import { Container } from "@/shared/components/ui/Container";
 import {
@@ -308,7 +309,7 @@ export default function MyBookingsPage() {
   const formatPrice = (price) => {
     if (price === undefined || price === null || price === "") return "";
 
-    return `${Number(price || 0).toLocaleString()} դրամ`;
+    return formatCurrency(price);
   };
 
   const getSalonName = (booking) => {

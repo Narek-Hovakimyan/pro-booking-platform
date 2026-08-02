@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import FavoritesPage from "./FavoritesPage";
 import api from "@/shared/api/axios";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { removeFavorite, removeSalonFavorite } from "@/store/slices/favoritesSlice";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 
@@ -244,6 +245,8 @@ describe("FavoritesPage salon-context navigation", () => {
     expect(
       screen.getByRole("tab", { name: "Salons (1)", selected: false })
     ).toBeInTheDocument();
+    expect(await screen.findByText(formatCurrency(1000))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View profile" })).toBeInTheDocument();
     expect(
       screen.getByRole("tabpanel", { name: "Specialists (1)" })
     ).toBeInTheDocument();

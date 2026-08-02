@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MyBookingsPage from "./MyBookingsPage";
 import api from "@/shared/api/axios";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 
 const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -101,9 +102,10 @@ vi.mock("@/client/components/LoyaltyBanner", () => ({
 }));
 
 vi.mock("@/client/components/BookingCard", () => ({
-  default: ({ booking, bookingId, isActive, isBookAgainEligible, onBookAgain, serviceName }) => (
+  default: ({ booking, bookingId, isActive, isBookAgainEligible, onBookAgain, price, serviceName }) => (
     <article data-testid={`booking-card-${isActive ? "active" : "history"}-${bookingId || "missing"}`}>
       <span>{serviceName}</span>
+      {price ? <span>{price}</span> : null}
       {isBookAgainEligible ? (
         <button type="button" onClick={() => onBookAgain(booking)}>
           Book again
@@ -336,11 +338,13 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
         serviceId: "service-1",
         service: { id: "service-1", name: "Haircut" },
         barber: { id: "barber-1", name: "Anna" },
+        price: 1000,
       },
     ];
 
     renderPage();
 
+    expect(await screen.findByText(formatCurrency(1000))).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Book again" }));
 
     await waitFor(() => {

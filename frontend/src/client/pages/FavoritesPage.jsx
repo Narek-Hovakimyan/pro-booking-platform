@@ -26,6 +26,7 @@ import {
   BarberCardSkeleton,
   SalonCardSkeleton,
 } from "@/shared/components/LoadingSkeletons";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { Container } from "@/shared/components/ui/Container";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -625,7 +626,7 @@ export default function FavoritesPage() {
                       {startingPrice ? (
                         <>
                           <span className="text-lg font-bold text-neutral-900">
-                            {startingPrice.toLocaleString()} դրամ
+                            {formatCurrency(startingPrice)}
                           </span>
                           <span className="text-sm text-neutral-500">starting price</span>
                         </>
@@ -694,7 +695,7 @@ export default function FavoritesPage() {
                       to={`/specialists/${barberId}/profile`}
                       variant="outline"
                     >
-                      View Profile
+                      View profile
                     </Button>
                     <Button
                       as={Link}
