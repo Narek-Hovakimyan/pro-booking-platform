@@ -1,9 +1,11 @@
 import { Clock, MessageSquare, Phone, Scissors, UserRound } from "lucide-react";
 
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import StatusBadge from "@/shared/components/StatusBadge";
 import ClientReliabilitySummary from "@/barber/components/bookings/ClientReliabilitySummary";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
+import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
 function getBookingCardTone(status) {
   switch (status) {
@@ -46,6 +48,12 @@ function isEligibleForNoShowLateCancel(booking) {
     !booking.noShowMarkedAt &&
     !booking.lateCancelledAt
   );
+}
+
+function formatRequestedDate(value) {
+  if (typeof value !== "string") return "—";
+  const parsedDate = parseDateKey(value);
+  return parsedDate ? formatDateLabel(parsedDate) : "—";
 }
 
 export default function CalendarBookingCard({
@@ -101,7 +109,7 @@ export default function CalendarBookingCard({
       <div className="mt-3 grid gap-2 text-sm text-neutral-700 sm:grid-cols-2">
         <p>Duration: {duration} min</p>
         <p className="font-semibold text-neutral-900">
-          Price: {price.toLocaleString()} AMD
+          Price: {formatCurrency(price)}
         </p>
       </div>
 
@@ -132,9 +140,9 @@ export default function CalendarBookingCard({
             booking.rescheduleRequest.requestedTime) && (
             <p className="mt-0.5">
               To:{" "}
-              {booking.rescheduleRequest.requestedBookingDate
-                ? String(booking.rescheduleRequest.requestedBookingDate).slice(0, 10)
-                : ""}
+              {formatRequestedDate(
+                booking.rescheduleRequest.requestedBookingDate
+              )}
               {booking.rescheduleRequest.requestedTime
                 ? ` ${booking.rescheduleRequest.requestedTime}`
                 : ""}
