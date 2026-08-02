@@ -1,18 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { getMyRevenue } from "@/shared/api/revenue";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const formatCurrency = (amount) =>
-  `${Number(amount || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })} AMD`;
 
 const getToday = () => {
   const d = new Date();
@@ -134,6 +130,8 @@ function Skeleton() {
 
 export default function RevenuePage() {
   const { currentUser } = useSelector((state) => state.auth);
+  const fromInputId = useId();
+  const toInputId = useId();
   const [revenueData, setRevenueData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -219,9 +217,8 @@ export default function RevenuePage() {
   }, [fetchRevenue, from, to]);
 
   const formatDateDisplay = useCallback((dateStr) => {
-    if (!dateStr) return "";
-    const [y, m, d] = dateStr.split("-");
-    return `${d}.${m}.${y}`;
+    const parsedDate = parseDateKey(dateStr);
+    return parsedDate ? formatDateLabel(parsedDate) : "—";
   }, []);
 
   // ── Metrics ──
@@ -263,39 +260,52 @@ export default function RevenuePage() {
       <h1 className="text-xl font-bold text-neutral-900">Revenue Dashboard</h1>
 
       {/* ── Date controls ── */}
-      <div className="flex flex-wrap items-center gap-2">
-        {datePresets.map((preset) => (
-          <button
-            key={preset.label}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              activePreset === preset.label
-                ? "bg-neutral-900 text-white"
-                : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-            }`}
-            onClick={() => handlePreset(preset)}
-            type="button"
-          >
-            {preset.label}
-          </button>
-        ))}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
+          {datePresets.map((preset) => (
+            <button
+              key={preset.label}
+              aria-pressed={activePreset === preset.label}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                activePreset === preset.label
+                  ? "bg-neutral-900 text-white"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+              }`}
+              onClick={() => handlePreset(preset)}
+              type="button"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <label className="text-xs text-neutral-500">From</label>
-          <input
-            className="rounded-lg border border-neutral-200 px-2 py-1 text-sm"
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-          <label className="text-xs text-neutral-500">To</label>
-          <input
-            className="rounded-lg border border-neutral-200 px-2 py-1 text-sm"
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
+        <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-neutral-500" htmlFor={fromInputId}>
+              From
+            </label>
+            <input
+              className="rounded-lg border border-neutral-200 px-2 py-1 text-sm"
+              id={fromInputId}
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-neutral-500" htmlFor={toInputId}>
+              To
+            </label>
+            <input
+              className="rounded-lg border border-neutral-200 px-2 py-1 text-sm"
+              id={toInputId}
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </div>
           <button
-            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-neutral-700"
+            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-neutral-700 sm:self-auto"
             onClick={handleCustomDate}
             type="button"
           >
