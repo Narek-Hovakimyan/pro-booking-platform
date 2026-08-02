@@ -13,10 +13,7 @@ import {
   getServicePriceInfo,
   getServiceCategoryLabel,
 } from "@/shared/data/serviceCategories";
-
-function formatPrice(price) {
-  return Number(price).toLocaleString();
-}
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 
 function getCustomCategoryName(customCategories, customCategoryId) {
   if (!customCategoryId) return null;
@@ -79,6 +76,10 @@ export default function ServiceCard({
   onDeleteConfirmExecute,
 }) {
   const priceInfo = getServicePriceInfo(service);
+  const discountBadgeLabel =
+    priceInfo.hasDiscount && service.discountType === "fixed"
+      ? `-${formatCurrency(priceInfo.serviceDiscountAmount)}`
+      : priceInfo.discountLabel;
 
   return (
     <div
@@ -124,7 +125,7 @@ export default function ServiceCard({
                 </span>
                 {priceInfo.hasDiscount && (
                   <span className="inline-flex rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 ring-1 ring-rose-100">
-                    {priceInfo.discountLabel}
+                    {discountBadgeLabel}
                   </span>
                 )}
               </div>
@@ -151,15 +152,15 @@ export default function ServiceCard({
               {priceInfo.hasDiscount ? (
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="text-neutral-400 line-through">
-                    {formatPrice(priceInfo.originalPrice)} դր
+                    {formatCurrency(priceInfo.originalPrice)}
                   </span>
                   <span className="font-bold text-neutral-950">
-                    {formatPrice(priceInfo.discountedPrice)} դր
+                    {formatCurrency(priceInfo.discountedPrice)}
                   </span>
                 </span>
               ) : (
                 <span className="font-bold text-neutral-950">
-                  {formatPrice(priceInfo.originalPrice)} դր
+                  {formatCurrency(priceInfo.originalPrice)}
                 </span>
               )}
             </div>

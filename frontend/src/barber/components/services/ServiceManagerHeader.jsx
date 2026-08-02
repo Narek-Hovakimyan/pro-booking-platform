@@ -22,7 +22,11 @@ export default function ServiceManagerHeader({
     >
       <CardContent className="space-y-6 p-4 sm:p-6">
         {/* Header + stats */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div
+          className={`flex flex-col gap-4 ${
+            fullPage ? "xl:flex-row xl:items-start xl:justify-between" : ""
+          }`}
+        >
           <div className="min-w-0">
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-purple-700 shadow-sm ring-1 ring-purple-100">
@@ -36,18 +40,22 @@ export default function ServiceManagerHeader({
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white bg-white/80 p-2 text-center shadow-sm">
-            <div className="px-2">
+          <div
+            className={`grid w-full grid-cols-3 gap-2 rounded-2xl border border-white bg-white/80 p-2 text-center shadow-sm ${
+              fullPage ? "xl:ml-auto xl:max-w-sm" : ""
+            }`}
+          >
+            <div className="min-w-0 rounded-xl bg-white/70 px-2 py-2">
               <p className="text-lg font-bold text-neutral-950">{servicesCount}</p>
-              <p className="text-[11px] font-semibold uppercase text-neutral-400">Total</p>
+              <p className="text-xs font-semibold uppercase leading-tight text-neutral-400">Total</p>
             </div>
-            <div className="px-2">
+            <div className="min-w-0 rounded-xl bg-white/70 px-2 py-2">
               <p className="text-lg font-bold text-emerald-700">{activeCount}</p>
-              <p className="text-[11px] font-semibold uppercase text-neutral-400">Active</p>
+              <p className="text-xs font-semibold uppercase leading-tight text-neutral-400">Active</p>
             </div>
-            <div className="px-2">
+            <div className="min-w-0 rounded-xl bg-white/70 px-2 py-2">
               <p className="text-lg font-bold text-neutral-500">{inactiveCount}</p>
-              <p className="text-[11px] font-semibold uppercase text-neutral-400">Inactive</p>
+              <p className="text-xs font-semibold uppercase leading-tight text-neutral-400">Inactive</p>
             </div>
           </div>
         </div>
