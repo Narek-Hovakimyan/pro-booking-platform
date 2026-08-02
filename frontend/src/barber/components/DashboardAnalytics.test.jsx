@@ -25,11 +25,24 @@ vi.mock("@/barber/components/analytics/AnalyticsHeader", () => ({
 }));
 
 vi.mock("@/barber/components/analytics/AnalyticsSummaryCards", () => ({
-  default: () => <section aria-label="analytics summary">Personal summary marker</section>,
+  default: ({ income, formatCurrency: formatIncome }) => (
+    <section aria-label="analytics summary">
+      Personal summary marker
+      <div>Expected income: {formatIncome(income.totalExpectedIncome)}</div>
+    </section>
+  ),
 }));
 
 vi.mock("@/barber/components/analytics/AnalyticsNextBooking", () => ({
-  default: () => <section aria-label="analytics next booking">Next booking marker</section>,
+  default: ({ nextBooking, getBookingPrice, onViewBookings }) => (
+    <section aria-label="analytics next booking">
+      <div>Next booking marker</div>
+      <div>Next booking price: {nextBooking ? getBookingPrice(nextBooking) || "omitted" : "none"}</div>
+      <button onClick={onViewBookings} type="button">
+        Mock view bookings
+      </button>
+    </section>
+  ),
 }));
 
 vi.mock("@/barber/components/analytics/AnalyticsPendingActions", () => ({
@@ -267,5 +280,106 @@ describe("DashboardAnalytics", () => {
     expect(link).toHaveAttribute("href", "/admin/settings/salon");
     expect(screen.getByRole("region", { name: "analytics summary" })).toBeVisible();
     expect(within(screen.getByRole("region", { name: "analytics activity" })).getByText("Activity marker")).toBeVisible();
+  });
+
+  it("formats summary income values in AMD and passes complete booking prices", async () => {
+    setupApi({
+      manageableData: [],
+      statusData: { salons: [] },
+      onboardingData: { state: { workplace: "independent" } },
+      incomeData: {
+        completedIncome: 25000,
+        totalExpectedIncome: 30000,
+      },
+    });
+
+    renderDashboard({
+      bookings: [
+        {
+          _id: "booking-string-price",
+          status: "accepted",
+          bookingDate: "2026-08-02",
+          time: "99:99",
+          serviceName: "Clipper Cut",
+          clientName: "Sam",
+          price: "5000",
+        },
+      ],
+    });
+    await waitForDashboard();
+
+    expect(screen.getByText("Expected income: 30,000 AMD")).toBeInTheDocument();
+    expect(screen.getByText("Next booking price: 5,000 AMD")).toBeInTheDocument();
+  });
+
+  it("keeps zero prices and omits invalid or missing booking prices", async () => {
+    setupApi({
+      manageableData: [],
+      statusData: { salons: [] },
+      onboardingData: { state: { workplace: "independent" } },
+    });
+
+    const { rerender } = renderWithProviders(
+      <DashboardAnalytics
+        bookings={[
+          {
+            _id: "booking-zero-price",
+            status: "accepted",
+            bookingDate: "2026-08-02",
+            time: "99:99",
+            serviceName: "Clipper Cut",
+            clientName: "Sam",
+            price: 0,
+          },
+        ]}
+      />,
+      {
+        initialEntries: ["/admin"],
+        preloadedState: {
+          auth: {
+            currentUser: buildStoreUser(),
+            token: "token",
+            isAuthenticated: true,
+          },
+          notifications: [],
+        },
+      },
+    );
+    await waitForDashboard();
+
+    expect(screen.getByText("Next booking price: 0 AMD")).toBeInTheDocument();
+
+    rerender(
+      <DashboardAnalytics
+        bookings={[
+          {
+            _id: "booking-invalid-price",
+            status: "accepted",
+            bookingDate: "2026-08-02",
+            time: "99:99",
+            serviceName: "Clipper Cut",
+            clientName: "Sam",
+            price: "not-a-number",
+          },
+        ]}
+      />
+    );
+    expect(await screen.findByText("Next booking price: omitted")).toBeInTheDocument();
+
+    rerender(
+      <DashboardAnalytics
+        bookings={[
+          {
+            _id: "booking-missing-price",
+            status: "accepted",
+            bookingDate: "2026-08-02",
+            time: "99:99",
+            serviceName: "Clipper Cut",
+            clientName: "Sam",
+          },
+        ]}
+      />
+    );
+    expect(await screen.findByText("Next booking price: omitted")).toBeInTheDocument();
   });
 });

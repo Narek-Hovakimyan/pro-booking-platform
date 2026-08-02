@@ -27,7 +27,7 @@ export default function AnalyticsBookingRow({
         <p className="mt-0.5 text-sm text-neutral-500">
           {getServiceName(booking)}
           {getBookingTime(booking) ? ` · ${getBookingTime(booking)}` : ""}
-          {getBookingPrice(booking) ? ` · ${getBookingPrice(booking)} AMD` : ""}
+          {getBookingPrice(booking) ? ` · ${getBookingPrice(booking)}` : ""}
         </p>
         {booking?.note && (
           <p className="mt-0.5 text-xs text-neutral-400">Note: {booking.note}</p>

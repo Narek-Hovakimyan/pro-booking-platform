@@ -37,7 +37,7 @@ export default function AnalyticsNextBooking({
           <p className="mt-0.5 text-sm text-neutral-600">
             {getServiceName(nextBooking)}
             {getBookingTime(nextBooking) ? ` at ${getBookingTime(nextBooking)}` : ""}
-            {getBookingPrice(nextBooking) ? ` · ${getBookingPrice(nextBooking)} AMD` : ""}
+            {getBookingPrice(nextBooking) ? ` · ${getBookingPrice(nextBooking)}` : ""}
           </p>
         </div>
         <Button

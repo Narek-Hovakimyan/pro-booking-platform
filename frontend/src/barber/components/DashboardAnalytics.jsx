@@ -19,6 +19,7 @@ import api from "@/shared/api/axios";
 import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { formatDateKey } from "@/shared/utils/dates";
 import AnalyticsActivityLists from "@/barber/components/analytics/AnalyticsActivityLists";
 import AnalyticsHeader from "@/barber/components/analytics/AnalyticsHeader";
@@ -32,8 +33,6 @@ import { StatCardSkeleton } from "@/barber/components/analytics/AnalyticsStatCar
 // ---------------------------------------------------------------------------
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
-
-const formatCurrency = (amount) => `${Number(amount || 0).toLocaleString()} AMD`;
 
 const getSalonList = (data) => {
   if (Array.isArray(data)) return data;
@@ -88,9 +87,18 @@ function getBookingTime(booking) {
 }
 
 function getBookingPrice(booking) {
-  return booking?.price !== undefined && booking?.price !== null
-    ? Number(booking.price).toLocaleString()
-    : "";
+  const rawPrice = booking?.price;
+
+  if (typeof rawPrice === "number") {
+    return Number.isFinite(rawPrice) ? formatCurrency(rawPrice) : "";
+  }
+
+  if (typeof rawPrice === "string" && rawPrice.trim() !== "") {
+    const parsedPrice = Number(rawPrice);
+    return Number.isFinite(parsedPrice) ? formatCurrency(parsedPrice) : "";
+  }
+
+  return "";
 }
 
 function formatTimeAgo(dateValue) {
