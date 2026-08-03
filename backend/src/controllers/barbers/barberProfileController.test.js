@@ -1049,7 +1049,7 @@ test("getProfileByBarberId keeps independent-ready barber visible without stale 
   assert.equal(res.body.address, undefined);
 });
 
-test("generic public BarberProfile GET handlers serialize list and detail responses", async () => {
+test("explicit public BarberProfile GET handlers serialize list and detail responses without generic mutations", async () => {
   const privateProfile = {
     _id: "profile-1",
     barberId: "barber-1",
@@ -1060,6 +1060,11 @@ test("generic public BarberProfile GET handlers serialize list and detail respon
     unknownFutureField: "private",
     toObject() { return { ...this }; },
   };
+  assert.deepEqual(Object.keys(barberProfileController).sort(), ["getAll", "getById"]);
+  assert.equal(barberProfileController.create, undefined);
+  assert.equal(barberProfileController.update, undefined);
+  assert.equal(barberProfileController.remove, undefined);
+
   BarberProfile.find = async () => [privateProfile];
   BarberProfile.findById = async () => privateProfile;
   User.find = () => createFindChain([{ _id: "barber-1", role: "barber" }]);

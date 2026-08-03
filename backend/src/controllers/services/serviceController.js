@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import Salon from "../../models/Salon.js";
 import Service, { SERVICE_CATEGORIES } from "../../models/Service.js";
 import ServiceCategory from "../../models/ServiceCategory.js";
-import { createCrudController } from "../crudController.js";
 import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import { barberHasPaidAccessForSalon as _barberHasPaidAccess } from "../../services/subscriptionService.js";
@@ -18,8 +17,6 @@ export const __serviceControllerTestHooks = {
     barberHasPaidAccess = fn;
   },
 };
-
-export const serviceController = createCrudController(Service, "Service");
 
 /**
  * Calculate the discounted price for a service based on its discount settings.

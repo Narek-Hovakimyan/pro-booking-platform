@@ -4,7 +4,6 @@ import Review from "../../models/Review.js";
 import Salon from "../../models/Salon.js";
 import Service, { SERVICE_CATEGORIES } from "../../models/Service.js";
 import User from "../../models/User.js";
-import { createCrudController } from "../crudController.js";
 import { getTodayFirstAvailableSlot } from "../../utils/barberCardAvailability.js";
 import { barberHasPaidAccess, getPaidAccessByBarberIds } from "../../services/subscriptionService.js";
 import { getArmeniaDateKey } from "../../utils/bookingDateTime.js";
@@ -30,13 +29,7 @@ import {
   getPublicAvailabilityScheduleMaps,
 } from "../../services/barber/publicAvailabilityContextService.js";
 
-const genericBarberProfileController = createCrudController(
-  BarberProfile,
-  "Barber profile"
-);
-
 export const barberProfileController = {
-  ...genericBarberProfileController,
   getAll: async (_req, res) => {
     try {
       const items = await BarberProfile.find();

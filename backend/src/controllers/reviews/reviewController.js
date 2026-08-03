@@ -1,9 +1,6 @@
 import Booking from "../../models/Booking.js";
 import Review from "../../models/Review.js";
-import { createCrudController } from "../crudController.js";
 import { sendControllerError } from "../../utils/controllerError.js";
-
-export const reviewController = createCrudController(Review, "Review");
 
 const serializeReply = (reply) => {
   if (!reply || !reply.message) return null;

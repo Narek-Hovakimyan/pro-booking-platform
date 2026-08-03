@@ -11,7 +11,6 @@ import {
   normalizePublicAvailabilityIds,
   resolvePublicScheduleContext,
 } from "../../services/barber/publicAvailabilityContextService.js";
-import { createCrudController } from "../crudController.js";
 import {
   cleanCurrentAndFutureDateKeys,
   cleanPastScheduleDates,
@@ -26,8 +25,6 @@ import {
   sanitizeWeeklySchedule,
 } from "../../utils/scheduleUtils.js";
 import { sendControllerError } from "../../utils/controllerError.js";
-
-export const scheduleController = createCrudController(Schedule, "Schedule");
 
 const canEditSalonSchedule = async ({ barberId, salonId, user }) => {
   if (user?.role !== "barber") {

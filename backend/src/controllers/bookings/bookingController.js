@@ -26,7 +26,6 @@ import {
   notifyWaitlistForReleasedBookingSlot,
 } from "../../services/booking/bookingSideEffectsService.js";
 import { createNotification } from "../notifications/notificationController.js";
-import { createCrudController } from "../crudController.js";
 import {
   barberHasPaidAccessForSalon,
 } from "../../services/subscriptionService.js";
@@ -64,8 +63,6 @@ import {
   releaseBookingSlotHolds,
   runBookingSlotTransaction,
 } from "../../services/booking/bookingSlotHoldService.js";
-
-export const bookingController = createCrudController(Booking, "Booking");
 
 export const __bookingTestHooks = {
   allowedBookingDelayMinutes,
