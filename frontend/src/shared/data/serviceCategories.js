@@ -1,3 +1,5 @@
+import { formatCurrency } from "../../platform/utils/billingFormatters";
+
 export const serviceCategories = [
   { value: "haircut", label: "Haircut" },
   { value: "hair-color", label: "Hair color" },
@@ -44,7 +46,7 @@ export const getServicePriceInfo = (service) => {
     hasDiscount && discountType === "percent"
       ? `${discountValue}% OFF`
       : hasDiscount
-        ? `-${serviceDiscountAmount} դր`
+        ? `-${formatCurrency(serviceDiscountAmount)}`
         : "";
 
   return {

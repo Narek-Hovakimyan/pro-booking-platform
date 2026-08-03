@@ -3,6 +3,29 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import DepositNotice from "@/shared/components/booking/DepositNotice";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { calculateDepositEstimate } from "@/shared/utils/deposit";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
+
+const isMissingAmount = (value) =>
+  value == null || (typeof value === "string" && value.trim() === "");
+
+const normalizeAmount = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : null;
+};
+
+const resolveAmount = (value, fallback = 0) => {
+  const selectedValue = isMissingAmount(value) ? fallback : value;
+  const normalizedSelectedValue = normalizeAmount(selectedValue);
+
+  if (normalizedSelectedValue !== null) {
+    return normalizedSelectedValue;
+  }
+
+  const normalizedFallbackValue = normalizeAmount(fallback);
+  return normalizedFallbackValue ?? 0;
+};
+
+const formatBookingCurrency = (value) => formatCurrency(resolveAmount(value));
 
 export default function BookingSummary({
   selectedService,
@@ -16,23 +39,34 @@ export default function BookingSummary({
   isServiceLoading = false,
 }) {
   const priceInfo = getServicePriceInfo(selectedService);
-  const servicePrice = Number(pricingQuote?.originalPrice ?? priceInfo.originalPrice);
-  const serviceDiscountAmount = Number(
-    pricingQuote?.serviceDiscountAmount ?? priceInfo.serviceDiscountAmount
+  const servicePrice = resolveAmount(
+    pricingQuote?.originalPrice,
+    priceInfo.originalPrice
   );
-  const serviceDiscountedPrice = Number(
-    pricingQuote?.serviceDiscountedPrice ?? priceInfo.discountedPrice
+  const serviceDiscountAmount = resolveAmount(
+    pricingQuote?.serviceDiscountAmount,
+    priceInfo.serviceDiscountAmount
+  );
+  const serviceDiscountedPrice = resolveAmount(
+    pricingQuote?.serviceDiscountedPrice,
+    priceInfo.discountedPrice
   );
   const promoDiscount = Math.max(
     0,
-    Number(pricingQuote?.voucherDiscountAmount ?? discountPreview ?? 0)
+    resolveAmount(pricingQuote?.voucherDiscountAmount, discountPreview)
   );
-  const loyaltyDiscount = Math.max(0, Number(pricingQuote?.loyaltyDiscountAmount || 0));
+  const loyaltyDiscount = Math.max(
+    0,
+    resolveAmount(pricingQuote?.loyaltyDiscountAmount)
+  );
   const hasLoyaltyDiscount =
     Boolean(pricingQuote?.loyaltyDiscountApplied) && loyaltyDiscount > 0 && !promoDiscount;
   const finalTotal = Math.max(
     0,
-    Number(pricingQuote?.finalPrice ?? serviceDiscountedPrice - promoDiscount)
+    resolveAmount(
+      pricingQuote?.finalPrice,
+      serviceDiscountedPrice - promoDiscount
+    )
   );
   const totalDiscount = Math.max(0, servicePrice - finalTotal);
   const depositEstimate = calculateDepositEstimate(
@@ -80,14 +114,14 @@ export default function BookingSummary({
               <div className="flex justify-between gap-3">
                 <span>Service price</span>
                 <span className="font-semibold text-neutral-900">
-                  {servicePrice.toLocaleString()} դր
+                  {formatBookingCurrency(servicePrice)}
                 </span>
               </div>
               {serviceDiscountAmount > 0 && (
                 <div className="flex justify-between gap-3 text-rose-700">
                   <span>Service discount</span>
                   <span className="font-semibold">
-                    -{serviceDiscountAmount.toLocaleString()} դր
+                    -{formatBookingCurrency(serviceDiscountAmount)}
                   </span>
                 </div>
               )}
@@ -95,7 +129,7 @@ export default function BookingSummary({
                 <div className="flex justify-between gap-3 text-amber-700">
                   <span>Promo discount</span>
                   <span className="font-semibold">
-                    -{promoDiscount.toLocaleString()} դր
+                    -{formatBookingCurrency(promoDiscount)}
                   </span>
                 </div>
               )}
@@ -103,14 +137,14 @@ export default function BookingSummary({
                 <div className="flex justify-between gap-3 text-emerald-700">
                   <span>Loyalty discount</span>
                   <span className="font-semibold">
-                    -{loyaltyDiscount.toLocaleString()} դր
+                    -{formatBookingCurrency(loyaltyDiscount)}
                   </span>
                 </div>
               )}
               <div className="flex justify-between gap-3 border-t border-neutral-200 pt-2 text-neutral-950">
                 <span className="font-semibold">Final price</span>
                 <span className="font-bold">
-                  {finalTotal.toLocaleString()} դր
+                  {formatBookingCurrency(finalTotal)}
                 </span>
               </div>
             </div>

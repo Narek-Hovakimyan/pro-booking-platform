@@ -1,7 +1,11 @@
-const formatMoney = (value) => {
+import { formatCurrency } from "@/platform/utils/billingFormatters";
+
+const toSafeAmount = (value) => {
   const numericValue = Number(value);
-  return `${(Number.isFinite(numericValue) ? numericValue : 0).toLocaleString()} դրամ`;
+  return Number.isFinite(numericValue) ? numericValue : 0;
 };
+
+const formatMoney = (value) => formatCurrency(toSafeAmount(value));
 
 export default function DepositNotice({
   originalPrice = 0,
@@ -15,7 +19,7 @@ export default function DepositNotice({
   paymentMessage = "",
   className = "",
 }) {
-  const safeDiscountAmount = Math.max(0, Number(discountAmount || 0));
+  const safeDiscountAmount = Math.max(0, toSafeAmount(discountAmount));
   const safePaymentStatus = paymentStatus || "pending";
 
   return (
