@@ -15,7 +15,8 @@
     "migrate:schedule-per-salon": "node migrations/migrateScheduleToPerSalon.js",
     "subscriptions:grace": "node scripts/grantSubscriptionGraceToExistingBarbers.js",
     "audit:legacy-salons": "node scripts/auditLegacySalonFields.js",
-    "index:barberprofiles:barberId": "node scripts/createBarberProfileBarberIdUniqueIndex.js"
+    "index:barberprofiles:barberId": "node scripts/createBarberProfileBarberIdUniqueIndex.js",
+    "backfill:booking-slot-holds": "node scripts/backfill-booking-slot-holds.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

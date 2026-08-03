@@ -9,14 +9,14 @@ import {
 } from "./bookingDateTime.js";
 import {
   blockingBookingStatuses,
+  getBookingSlotMinutes,
   getBookingCreationLockKey,
   getIdString,
   getScheduleForDate,
   getScheduleSlotError,
   isPastBookingTime,
-  normalizeBookingStatus,
-  slotOverlaps,
 } from "./bookingUtils.js";
+import { findBookingSlotConflict } from "../services/booking/bookingSlotHoldService.js";
 import {
   normalizeScheduleForAvailability,
   serializeDefaultSchedule,
@@ -101,24 +101,26 @@ export const validateBookingSlot = async ({
     return { message: scheduleSlotError };
   }
 
-  // Check barber slot overlap across all salons. Only blocking statuses reserve slots.
-  const activeBookingQuery = {
-    barberId,
-    status: { $in: blockingBookingStatuses },
-    bookingDate,
-  };
-
-  if (ignoreBookingId) {
-    activeBookingQuery._id = { $ne: ignoreBookingId };
+  const slotDuration = Number(duration);
+  const slotMinutes = getBookingSlotMinutes(time, duration);
+  if (
+    !Number.isFinite(slotDuration) ||
+    !Number.isInteger(slotDuration) ||
+    slotDuration <= 0 ||
+    slotMinutes.length !== slotDuration
+  ) {
+    return { message: "This time is outside working hours" };
   }
 
-  const activeBookings = await Booking.find(activeBookingQuery);
-  const hasOverlap = activeBookings.some((booking) =>
-    blockingBookingStatuses.includes(normalizeBookingStatus(booking?.status)) &&
-    slotOverlaps(booking, time, duration)
-  );
+  const conflict = await findBookingSlotConflict({
+    barberId,
+    bookingDate,
+    time,
+    duration,
+    ignoreBookingId,
+  });
 
-  if (hasOverlap) {
+  if (conflict) {
     return { message: "This time is already booked" };
   }
 

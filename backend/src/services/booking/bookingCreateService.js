@@ -43,6 +43,13 @@ import {
   stageBookingReferenceMedia,
 } from "./bookingReferenceMediaService.js";
 import { isMediaStoreError } from "../media/mediaStore.js";
+import {
+  assertBookingSlotProtectionReady,
+  BookingSlotProtectionUnavailableError,
+  createBookingSlotHolds,
+  isBookingSlotConflictError,
+  isBookingSlotProtectionUnavailableError,
+} from "./bookingSlotHoldService.js";
 
 const TRANSACTION_CAPABLE_TOPOLOGIES = new Set([
   "ReplicaSetWithPrimary",
@@ -105,7 +112,7 @@ export const __bookingCreateServiceTestHooks = bookingCreateHooks;
 const createBookingTransactionRequiredResponse = () => ({
   status: 503,
   body: {
-    message: "Booking reference media requires transaction support",
+    message: "Booking slot protection is temporarily unavailable",
   },
 });
 
@@ -321,118 +328,134 @@ export const createBookingService = async ({
       };
     }
 
-    // ── Voucher claim ──
-    const rawVoucherCode =
-      body.promotionCode || body.voucherCode || body.voucher_code;
-    let pricing;
     try {
-      pricing = await buildBookingPricing({
-        barber: bookingReadiness.barber,
-        barberId,
-        clientId: isManualBooking ? null : clientId,
-        service,
-        serviceId,
-        salonId: bookingReadiness.salonId,
-        voucherCode: rawVoucherCode,
-        claimVoucher: Boolean(rawVoucherCode),
-      });
-    } catch (pricingError) {
-      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
-        media: stagedReferenceMedia,
-        error: pricingError,
-      }).catch(() => {});
-      return {
-        status: 400,
-        body: { message: pricingError.message },
-      };
-    }
-    const voucherClaim = pricing.voucherClaim;
-    const loyaltyDiscount = pricing.loyaltyDiscount;
-    const bookingPrice = pricing.serviceDiscountedPrice;
-    const effectivePrice = pricing.finalPrice;
-
-    // ── Deposit calculation ──
-    // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
-    let depositSettings = { enabled: false };
-    try {
-      const barberProfile = await BarberProfile.findOne({ barberId }).lean();
-      if (barberProfile?.depositSettings) {
-        depositSettings = barberProfile.depositSettings;
+      await assertBookingSlotProtectionReady();
+    } catch (error) {
+      if (isBookingSlotProtectionUnavailableError(error)) {
+        await bookingCreateHooks.compensateBookingReferenceMediaFailure({
+          media: stagedReferenceMedia,
+        }).catch(() => {});
+        return createBookingTransactionRequiredResponse();
       }
-    } catch {
-      // BarberProfile not available — deposit not required
+      throw error;
     }
-    const { depositRequired, depositAmount } = calculateDeposit(depositSettings, effectivePrice);
-    const depositStatus = depositRequired ? "pending" : "not_required";
 
     let booking;
     let session = null;
+    let transactionEntered = false;
+    let voucherClaim = null;
     let promotedReferenceMedia = [];
-    const bookingId = hasNewReferenceMedia ? new mongoose.Types.ObjectId() : null;
+    const bookingId = new mongoose.Types.ObjectId();
     try {
-      const payload = buildBookingCreatePayload({
-        barberId,
-        serviceId,
-        depositRequired,
-        depositAmount,
-        depositStatus,
-        depositSettings,
-        clientId,
-        clientName: isManualBooking ? clientName : body.clientName,
-        clientPhone,
-        phone: body.phone,
-        createdBy,
-        isManualBooking,
-        note: body.note,
-        referenceImages,
-        salonId: bookingReadiness.salonId,
-        bookingDate,
-        time,
-        dayKey: latestSlotValidation.effectiveDayKey,
-        serviceName: service.name,
-        duration: bookingDuration,
-        price: effectivePrice,
-        status,
-        consultation,
-        consent,
-        loyaltyDiscount,
-        bookingPrice,
-        voucherClaim,
-        rawVoucherCode,
-        pricing,
-      });
-      if (bookingId) {
-        payload._id = bookingId;
+      session = await bookingCreateHooks.startSession();
+      if (!session || typeof session.withTransaction !== "function") {
+        throw new BookingSlotProtectionUnavailableError();
       }
 
-      if (hasNewReferenceMedia) {
-        session = await bookingCreateHooks.startSession();
-        if (!session) {
-          throw Object.assign(new Error("Booking reference media requires transaction support"), {
-            statusCode: 503,
-            transactionRequired: true,
+      const createInsideMutation = async () => {
+        transactionEntered = true;
+        // ── Voucher claim ──
+        const rawVoucherCode =
+          body.promotionCode || body.voucherCode || body.voucher_code;
+        let pricing;
+        try {
+          pricing = await buildBookingPricing({
+            barber: bookingReadiness.barber,
+            barberId,
+            clientId: isManualBooking ? null : clientId,
+            service,
+            serviceId,
+            salonId: bookingReadiness.salonId,
+            voucherCode: rawVoucherCode,
+            claimVoucher: Boolean(rawVoucherCode),
+          });
+        } catch (pricingError) {
+          pricingError.bookingPricingError = true;
+          throw pricingError;
+        }
+        voucherClaim = pricing.voucherClaim;
+        const loyaltyDiscount = pricing.loyaltyDiscount;
+        const bookingPrice = pricing.serviceDiscountedPrice;
+        const effectivePrice = pricing.finalPrice;
+
+        // ── Deposit calculation ──
+        // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
+        let depositSettings = { enabled: false };
+        try {
+          const barberProfile = await BarberProfile.findOne({ barberId }).lean();
+          if (barberProfile?.depositSettings) {
+            depositSettings = barberProfile.depositSettings;
+          }
+        } catch {
+          // BarberProfile not available — deposit not required
+        }
+        const { depositRequired, depositAmount } = calculateDeposit(
+          depositSettings,
+          effectivePrice
+        );
+        const depositStatus = depositRequired ? "pending" : "not_required";
+
+        const payload = buildBookingCreatePayload({
+          barberId,
+          serviceId,
+          depositRequired,
+          depositAmount,
+          depositStatus,
+          depositSettings,
+          clientId,
+          clientName: isManualBooking ? clientName : body.clientName,
+          clientPhone,
+          phone: body.phone,
+          createdBy,
+          isManualBooking,
+          note: body.note,
+          referenceImages,
+          salonId: bookingReadiness.salonId,
+          bookingDate,
+          time,
+          dayKey: latestSlotValidation.effectiveDayKey,
+          serviceName: service.name,
+          duration: bookingDuration,
+          price: effectivePrice,
+          status,
+          consultation,
+          consent,
+          loyaltyDiscount,
+          bookingPrice,
+          voucherClaim,
+          rawVoucherCode,
+          pricing,
+        });
+        payload._id = bookingId;
+
+        if (hasNewReferenceMedia) {
+          promotedReferenceMedia = await bookingCreateHooks.promoteBookingReferenceMedia({
+            media: stagedReferenceMedia,
           });
         }
-        promotedReferenceMedia = await bookingCreateHooks.promoteBookingReferenceMedia({
-          media: stagedReferenceMedia,
+
+        await createBookingSlotHolds({
+          bookingId: payload._id,
+          barberId,
+          bookingDate,
+          time,
+          duration: bookingDuration,
+          session,
         });
-        await session.withTransaction(async () => {
-          booking = await createBookingRecord({ payload, session });
+        booking = await createBookingRecord({ payload, session });
+        if (hasNewReferenceMedia) {
           await bookingCreateHooks.activateBookingReferenceMedia({
             media: stagedReferenceMedia,
             bookingId: booking._id,
             session,
           });
-        });
-      } else {
-        booking = await Booking.create(payload);
-      }
+        }
+      };
+
+      await session.withTransaction(createInsideMutation);
     } catch (createErr) {
       if (voucherClaim) {
         await rollbackVoucherClaim(voucherClaim.voucher._id).catch(() => {});
-      }
-      if (booking?._id && !session && !hasNewReferenceMedia) {
-        await Booking.findByIdAndDelete?.(booking._id).catch(() => {});
       }
       await bookingCreateHooks.compensateBookingReferenceMediaFailure({
         media: stagedReferenceMedia,
@@ -448,8 +471,24 @@ export const createBookingService = async ({
           body: { message: createErr.message || "Could not promote booking reference media" },
         };
       }
-      if (createErr?.transactionRequired) {
+      if (createErr?.bookingPricingError) {
+        return {
+          status: 400,
+          body: { message: createErr.message },
+        };
+      }
+      if (
+        !transactionEntered ||
+        createErr?.transactionRequired ||
+        isBookingSlotProtectionUnavailableError(createErr)
+      ) {
         return createBookingTransactionRequiredResponse();
+      }
+      if (isBookingSlotConflictError(createErr)) {
+        return {
+          status: 400,
+          body: { message: "This time is already booked" },
+        };
       }
       throw createErr;
     } finally {

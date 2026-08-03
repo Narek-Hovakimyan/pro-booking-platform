@@ -42,6 +42,14 @@ export const defaultPersonalSchedule = {
 export const monthKeyPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const blockingBookingStatuses = ["pending", "accepted", "confirmed"];
 export const incomeBookingStatuses = ["pending", "accepted", "completed"];
+export const terminalBookingStatuses = [
+  "completed",
+  "rejected",
+  "cancelled",
+  "expired",
+  "no_show",
+  "late_cancelled",
+];
 export const maxRejectionReasonLength = 300;
 export const maxCancellationReasonLength = 300;
 
@@ -181,6 +189,22 @@ export const slotOverlaps = (booking, time, duration) => {
     nextStart + nextDuration > bookingStart;
 };
 
+export const getBookingSlotMinutes = (time, duration) => {
+  const slotStart = timeToMinutes(time);
+  const slotDuration = Number(duration);
+
+  if (
+    slotStart === null ||
+    !Number.isFinite(slotDuration) ||
+    slotDuration <= 0
+  ) {
+    return [];
+  }
+
+  return Array.from({ length: slotDuration }, (_, offset) => slotStart + offset)
+    .filter((minute) => minute >= 0 && minute < 24 * 60);
+};
+
 // ─── Booking date helpers ───
 
 export const getBookingMonthKey = (booking) => {
@@ -209,6 +233,9 @@ export const getBookingDate = (booking) =>
 
 export const normalizeBookingStatus = (status) =>
   status === "confirmed" ? "accepted" : status;
+
+export const isTerminalBookingStatus = (status) =>
+  terminalBookingStatuses.includes(status);
 
 // ─── Formatting helpers ───
 

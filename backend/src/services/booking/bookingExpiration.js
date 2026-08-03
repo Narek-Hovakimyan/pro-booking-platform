@@ -10,6 +10,10 @@ import {
   isTimeKey,
   timeToMinutes,
 } from "../../utils/bookingDateTime.js";
+import {
+  releaseBookingSlotHolds,
+  runBookingSlotTransaction,
+} from "./bookingSlotHoldService.js";
 
 export const EXPIRED_REASON = "Barber did not confirm before appointment time";
 const EXPIRATION_BATCH_SIZE = 1000;
@@ -106,7 +110,21 @@ export const expirePendingBookings = async (nowOrOptions = new Date()) => {
   const leaseContext = hasOptions ? nowOrOptions.leaseContext : undefined;
   const withFencedWrite = typeof leaseContext?.withFencedWrite === "function"
     ? (write) => leaseContext.withFencedWrite(write)
-    : (write) => write({});
+    : async (write) => {
+        const afterCommitCallbacks = [];
+        const result = await runBookingSlotTransaction(({ session }) =>
+          write({
+            session,
+            afterCommit(callback) {
+              if (typeof callback === "function") {
+                afterCommitCallbacks.push(callback);
+              }
+            },
+          })
+        );
+        await Promise.allSettled(afterCommitCallbacks.map((callback) => callback()));
+        return result;
+      };
   const expiredBookings = [];
 
   while (true) {
@@ -142,6 +160,11 @@ export const expirePendingBookings = async (nowOrOptions = new Date()) => {
           { returnDocument: "after", session }
         );
         if (!claimedBooking) return null;
+
+        await releaseBookingSlotHolds({
+          bookingId: claimedBooking._id,
+          session,
+        });
 
         const dateKey = getBookingDateKey(claimedBooking);
         const time = claimedBooking?.time || "";

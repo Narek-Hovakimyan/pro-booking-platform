@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 
 import { delayBooking } from "./bookingController.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Schedule from "../../models/Schedule.js";
 import User from "../../models/User.js";
@@ -16,6 +17,7 @@ import {
   createMutableBooking,
   createResponse,
   mockBookingFind,
+  mockBookingSlotHoldModel,
   mockDelayDependencies,
   mockDelayStatusClaim,
   originalMethods,
@@ -30,6 +32,11 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
+  BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
+  BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
+  mockBookingSlotHoldModel();
   Notification.create = originalMethods.notificationCreate;
   Schedule.findOne = originalMethods.scheduleFindOne;
   User.findById = originalMethods.userFindById;
@@ -477,6 +484,54 @@ test("concurrent delay requests only apply one stale-time update", async () => {
   assert.deepEqual(statusCodes, [200, 400]);
   assert.equal(storedBooking.time, "10:10");
   assert.equal(notifications.length, 2);
+});
+
+test("stale booking delay update writes no holds and emits no side effects", async () => {
+  const booking = createMutableBooking({
+    _id: "booking-stale-delay",
+    status: "accepted",
+    time: "10:00",
+  });
+  const res = createResponse();
+  let holdWrites = 0;
+  let holdDeletes = 0;
+  let notifications = 0;
+
+  Booking.findById = async () => booking;
+  mockDelayDependencies([], booking);
+  Booking.findOneAndUpdate = async () => null;
+  BookingSlotHold.bulkWrite = async () => {
+    holdWrites += 1;
+    return { ok: 1 };
+  };
+  BookingSlotHold.insertMany = async () => {
+    holdWrites += 1;
+    return [];
+  };
+  BookingSlotHold.deleteMany = async () => {
+    holdDeletes += 1;
+    return { deletedCount: 60 };
+  };
+  Notification.create = async () => {
+    notifications += 1;
+    return null;
+  };
+
+  await delayBooking(
+    {
+      user: client,
+      params: { id: booking._id },
+      body: { delayMinutes: 10 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Booking could not be delayed");
+  assert.equal(booking.time, "10:00");
+  assert.equal(holdWrites, 0);
+  assert.equal(holdDeletes, 0);
+  assert.equal(notifications, 0);
 });
 
 test("booking delay handles invalid booking time and date with 400", async () => {

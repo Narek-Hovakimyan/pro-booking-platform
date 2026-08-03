@@ -6,6 +6,7 @@ import path from "path";
 import { __bookingTestHooks, createBooking, updateBooking } from "./bookingController.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
 import Schedule from "../../models/Schedule.js";
@@ -14,8 +15,10 @@ import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
+import Voucher from "../../models/Voucher.js";
 import { handleReferenceImageUploadError } from "../../middleware/uploadMiddleware.js";
 import { __bookingCreateServiceTestHooks } from "../../services/booking/bookingCreateService.js";
+import { __bookingSideEffectsTestHooks } from "../../services/booking/bookingSideEffectsService.js";
 import { MEDIA_STORE_ERROR_CODES, MediaStoreError } from "../../services/media/mediaStore.js";
 import { explicitAllDaysOffMarker } from "../../utils/scheduleUtils.js";
 
@@ -30,6 +33,7 @@ import {
   createResponse,
   getFutureBookingDateForDay,
   mockBookingFind,
+  mockBookingSlotHoldModel,
   mockCreateBookingDependencies,
   mockSuccessfulCreateDependencies,
   originalMethods,
@@ -53,6 +57,9 @@ const originalCompensateBookingReferenceMediaFailure =
 const originalSupportsTransactions =
   __bookingCreateServiceTestHooks.supportsTransactions;
 const originalStartSession = __bookingCreateServiceTestHooks.startSession;
+const originalVoucherFindOne = Voucher.findOne;
+const originalVoucherFindOneAndUpdate = Voucher.findOneAndUpdate;
+const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
 
 const oldAutoClosedWeeklySchedule = {
   sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
@@ -71,6 +78,11 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
+  BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
+  BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
+  mockBookingSlotHoldModel();
   BarberProfile.findOne = originalMethods.barberProfileFindOne;
   Notification.create = originalMethods.notificationCreate;
   Salon.exists = originalMethods.salonExists;
@@ -94,6 +106,10 @@ afterEach(() => {
   __bookingCreateServiceTestHooks.supportsTransactions =
     originalSupportsTransactions;
   __bookingCreateServiceTestHooks.startSession = originalStartSession;
+  __bookingSideEffectsTestHooks.resetGetIO();
+  Voucher.findOne = originalVoucherFindOne;
+  Voucher.findOneAndUpdate = originalVoucherFindOneAndUpdate;
+  Voucher.findByIdAndUpdate = originalVoucherFindByIdAndUpdate;
   if (originalPaymentProvider === undefined) {
     delete process.env.PAYMENT_PROVIDER;
   } else {
@@ -125,8 +141,13 @@ const installReferenceMediaSuccessHooks = () => {
     media = [],
   } = {}) => media;
   __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure = async () => {};
-  __bookingCreateServiceTestHooks.supportsTransactions = async () => false;
-  __bookingCreateServiceTestHooks.startSession = async () => null;
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => true;
+  __bookingCreateServiceTestHooks.startSession = async () => ({
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  });
 };
 
 installReferenceMediaSuccessHooks();
@@ -2102,12 +2123,15 @@ test("booking create with new reference media fails closed when transactions are
   );
 
   assert.equal(res.statusCode, 503);
-  assert.equal(res.body.message, "Booking reference media requires transaction support");
+  assert.equal(
+    res.body.message,
+    "Booking slot protection is temporarily unavailable"
+  );
   assert.equal(createdBookings.length, 0);
   assert.equal(stageAttempts, 0);
 });
 
-test("media-free booking create preserves the original non-transaction path", async () => {
+test("media-free booking create uses the booking transaction when a session is available", async () => {
   const createdBookings = [];
   let startSessionAttempts = 0;
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
@@ -2115,6 +2139,12 @@ test("media-free booking create preserves the original non-transaction path", as
   __bookingCreateServiceTestHooks.startSession = async () => {
     startSessionAttempts += 1;
     return createTransactionSession();
+  };
+  Booking.findOneAndUpdate = async (query, update, options = {}) => {
+    assert.ok(options.session);
+    const booking = { ...update.$setOnInsert, _id: query._id };
+    createdBookings.push(booking);
+    return booking;
   };
 
   const res = createResponse();
@@ -2137,7 +2167,128 @@ test("media-free booking create preserves the original non-transaction path", as
 
   assert.equal(res.statusCode, 201);
   assert.equal(createdBookings.length, 1);
-  assert.equal(startSessionAttempts, 0);
+  assert.equal(startSessionAttempts, 1);
+});
+
+test("booking create maps transaction setup failures to protection-unavailable without side effects", async () => {
+  const cases = [
+    {
+      label: "session rejection",
+      startSession: async () => {
+        throw new Error("startSession failed");
+      },
+    },
+    {
+      label: "invalid session",
+      startSession: async () => ({ id: "bad-session" }),
+    },
+    {
+      label: "transaction setup failure",
+      startSession: async () => ({
+        async withTransaction() {
+          throw new Error("transaction setup failed");
+        },
+        async endSession() {},
+      }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    const filename = `ref-${testCase.label.replaceAll(" ", "-")}.jpg`;
+    createReferenceUploadFile(filename);
+    const createdBookings = [];
+    let bookingWrites = 0;
+    let holdWrites = 0;
+    let paymentWrites = 0;
+    let notificationWrites = 0;
+    let mediaActivations = 0;
+    let socketEmits = 0;
+    let voucherWrites = 0;
+
+    mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+    __bookingCreateServiceTestHooks.supportsTransactions = async () => true;
+    __bookingCreateServiceTestHooks.startSession = testCase.startSession;
+    __bookingCreateServiceTestHooks.activateBookingReferenceMedia = async () => {
+      mediaActivations += 1;
+      return [];
+    };
+    __bookingSideEffectsTestHooks.setGetIO(() => ({
+      to: () => ({
+        emit: () => {
+          socketEmits += 1;
+        },
+      }),
+    }));
+    Booking.create = async () => {
+      bookingWrites += 1;
+      return null;
+    };
+    Booking.findOneAndUpdate = async () => {
+      bookingWrites += 1;
+      return null;
+    };
+    BookingSlotHold.bulkWrite = async () => {
+      holdWrites += 1;
+      return { ok: 1 };
+    };
+    BookingSlotHold.insertMany = async () => {
+      holdWrites += 1;
+      return [];
+    };
+    SubscriptionPaymentAttempt.create = async () => {
+      paymentWrites += 1;
+      return null;
+    };
+    Notification.create = async () => {
+      notificationWrites += 1;
+      return null;
+    };
+    Voucher.findOne = async () => {
+      voucherWrites += 1;
+      return null;
+    };
+    Voucher.findOneAndUpdate = async () => {
+      voucherWrites += 1;
+      return null;
+    };
+    Voucher.findByIdAndUpdate = async () => {
+      voucherWrites += 1;
+      return null;
+    };
+
+    const res = createResponse();
+    await createBooking(
+      {
+        user: client,
+        files: [{ filename }],
+        body: {
+          barberId,
+          clientId,
+          serviceId,
+          bookingDate,
+          time: "10:00",
+          salonId,
+          clientName: "Client",
+          promotionCode: "SAVE10",
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 503, testCase.label);
+    assert.deepEqual(res.body, {
+      message: "Booking slot protection is temporarily unavailable",
+    });
+    assert.equal(createdBookings.length, 0);
+    assert.equal(bookingWrites, 0);
+    assert.equal(holdWrites, 0);
+    assert.equal(paymentWrites, 0);
+    assert.equal(notificationWrites, 0);
+    assert.equal(mediaActivations, 0);
+    assert.equal(socketEmits, 0);
+    assert.equal(voucherWrites, 0);
+    __bookingSideEffectsTestHooks.resetGetIO();
+  }
 });
 
 test("duplicate transaction callback execution does not create duplicate bookings", async () => {
@@ -2283,6 +2434,11 @@ test("createBooking validation error returns 400", async () => {
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
   console.error = () => {};
   Booking.create = async () => {
+    const error = new Error("Booking validation failed");
+    error.name = "ValidationError";
+    throw error;
+  };
+  Booking.findOneAndUpdate = async () => {
     const error = new Error("Booking validation failed");
     error.name = "ValidationError";
     throw error;
@@ -2866,9 +3022,9 @@ test("createBooking with enabled deposit stores pending deposit fields", async (
   const createdBookings = [];
   const paymentAttempts = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
-  const createBookingRecord = Booking.create;
-  Booking.create = async (payload) => {
-    const booking = await createBookingRecord(payload);
+  const createBookingRecord = Booking.findOneAndUpdate;
+  Booking.findOneAndUpdate = async (...args) => {
+    const booking = await createBookingRecord(...args);
     booking.currency = "AMD";
     booking.paidAmount = 0;
     booking.paymentStatus = "pending";

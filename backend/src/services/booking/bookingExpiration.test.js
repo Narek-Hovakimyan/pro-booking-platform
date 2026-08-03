@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 
 import Notification from "../../models/Notification.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import WaitlistEntry from "../../models/WaitlistEntry.js";
 import {
   __bookingExpirationTestHooks,
@@ -10,26 +11,52 @@ import {
   expirePendingBookings,
   shouldExpireBooking,
 } from "./bookingExpiration.js";
+import {
+  __bookingSlotHoldServiceTestHooks,
+} from "./bookingSlotHoldService.js";
 
 const originalMethods = {
   bookingFind: Booking.find,
   bookingFindOne: Booking.findOne,
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
+  bookingSlotHoldDeleteMany: BookingSlotHold.deleteMany,
   notificationCreate: Notification.create,
   waitlistEntryFind: WaitlistEntry.find,
+  slotHoldIndexesReady: __bookingSlotHoldServiceTestHooks.indexesReady,
+  slotHoldSupportsTransactions: __bookingSlotHoldServiceTestHooks.supportsTransactions,
+  slotHoldStartSession: __bookingSlotHoldServiceTestHooks.startSession,
+};
+
+const installBookingSlotTransactionMocks = () => {
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = async () => ({
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  });
 };
 
 afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findOne = originalMethods.bookingFindOne;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
   Notification.create = originalMethods.notificationCreate;
   WaitlistEntry.find = originalMethods.waitlistEntryFind;
+  __bookingSlotHoldServiceTestHooks.indexesReady =
+    originalMethods.slotHoldIndexesReady;
+  __bookingSlotHoldServiceTestHooks.supportsTransactions =
+    originalMethods.slotHoldSupportsTransactions;
+  __bookingSlotHoldServiceTestHooks.startSession =
+    originalMethods.slotHoldStartSession;
   __bookingExpirationTestHooks.setNotifyMatchingWaitlistEntries(async () => 0);
+  installBookingSlotTransactionMocks();
 });
 
 const createBooking = (overrides = {}) => ({
-  _id: "booking-1",
+  _id: "64b000000000000000000010",
   barberId: "64b000000000000000000001",
   clientId: "64b000000000000000000002",
   bookingDate: "2026-05-07",
@@ -40,6 +67,7 @@ const createBooking = (overrides = {}) => ({
 });
 
 __bookingExpirationTestHooks.setNotifyMatchingWaitlistEntries(async () => 0);
+installBookingSlotTransactionMocks();
 
 test("past pending booking becomes expired and sends notifications", async () => {
   const booking = createBooking({ time: "09:00" });
@@ -47,6 +75,7 @@ test("past pending booking becomes expired and sends notifications", async () =>
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => booking;
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   Booking.findOneAndUpdate = async (query, update) => {
     if (query._id === booking._id && query.status === "pending") {
       return { ...booking, ...(update.$set || {}) };
@@ -57,6 +86,7 @@ test("past pending booking becomes expired and sends notifications", async () =>
     notifications.push(payload);
     return payload;
   };
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   WaitlistEntry.find = async () => [];
 
   const expiredBookings = await expirePendingBookings(
@@ -79,6 +109,7 @@ test("future pending booking stays pending", async () => {
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => booking;
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
   Booking.findOneAndUpdate = async () => null;
   Notification.create = async (payload) => payload;
 
@@ -177,6 +208,7 @@ test("duplicate expiration does not send duplicate notifications", async () => {
     notifications.push(payload);
     return payload;
   };
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   WaitlistEntry.find = async () => [];
 
   // First run — should expire and send notifications
@@ -212,6 +244,7 @@ test("booking with no clientId still sends barber notification only", async () =
     notifications.push(payload);
     return payload;
   };
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   WaitlistEntry.find = async () => [];
 
   const expiredBookings = await expirePendingBookings(
@@ -230,6 +263,7 @@ test("findOneAndUpdate returning null does not notify for booking expiration", a
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => booking;
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
   // findOneAndUpdate always returns null - simulates losing the atomic claim race
   Booking.findOneAndUpdate = async () => null;
   Notification.create = async (payload) => {
@@ -266,6 +300,12 @@ test("booking expiration re-reads in transaction, uses session, and preserves de
     assert.equal(query.time, booking.time);
     return { ...booking, ...(update.$set || {}) };
   };
+  let holdDeleteSession = null;
+  BookingSlotHold.deleteMany = async (query, options) => {
+    holdDeleteSession = options.session;
+    assert.deepEqual(query, { bookingId: booking._id });
+    return { deletedCount: 30 };
+  };
   Notification.create = async (payload, options) => {
     notificationOptions.push({ payload, options });
     return payload;
@@ -283,6 +323,7 @@ test("booking expiration re-reads in transaction, uses session, and preserves de
 
   assert.equal(fencedCalls, 1);
   assert.equal(findOneCalls, 1);
+  assert.equal(holdDeleteSession, session);
   assert.equal(notificationOptions.length, 2);
   assert.equal(notificationOptions[0].options.session, session);
   assert.match(notificationOptions[0].payload.internalHash || "", /^[a-f0-9]{64}$/);
@@ -301,6 +342,7 @@ test("transactional re-read skips future reschedule without writes or notificati
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => rescheduledBooking;
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
   Booking.findOneAndUpdate = async () => {
     updateCalls += 1;
     return null;
@@ -324,6 +366,7 @@ test("transactional re-read skips non-pending status changes without writes", as
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => ({ ...booking, status: "accepted" });
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
   Booking.findOneAndUpdate = async () => {
     updateCalls += 1;
     return null;
@@ -343,6 +386,7 @@ test("missing booking fields use exists-false CAS predicates", async () => {
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => ({ ...booking });
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   Booking.findOneAndUpdate = async (query, update) => {
     assert.deepEqual(query.bookingDate, { $exists: false });
     assert.equal(query.dayKey, "2026-05-06");
@@ -367,6 +411,7 @@ test("waitlist processing is awaited inside the fenced expiration transaction", 
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => ({ ...booking });
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   Booking.findOneAndUpdate = async (query, update) =>
     ({ ...booking, ...(update.$set || {}) });
   Notification.create = async (payload) => {
@@ -412,6 +457,7 @@ test("waitlist failure aborts booking expiration and propagates", async () => {
 
   Booking.find = async () => [booking];
   Booking.findOne = async () => ({ ...booking });
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   Booking.findOneAndUpdate = async (query, update) => {
     updateCalls += 1;
     return { ...booking, ...(update.$set || {}) };

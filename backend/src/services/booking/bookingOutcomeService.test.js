@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
+import { __bookingSlotHoldServiceTestHooks } from "./bookingSlotHoldService.js";
 import {
   markBookingLateCancel,
   markBookingNoShow,
@@ -10,6 +12,17 @@ import {
 const originalMethods = {
   bookingFindById: Booking.findById,
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
+  bookingSlotHoldDeleteMany: BookingSlotHold.deleteMany,
+  indexesReady: __bookingSlotHoldServiceTestHooks.indexesReady,
+  supportsTransactions: __bookingSlotHoldServiceTestHooks.supportsTransactions,
+  startSession: __bookingSlotHoldServiceTestHooks.startSession,
+};
+
+const outcomeSession = {
+  async withTransaction(callback) {
+    return callback();
+  },
+  async endSession() {},
 };
 
 const barberId = "64b000000000000000000001";
@@ -83,6 +96,18 @@ const outcomeActions = [
 afterEach(() => {
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
+  __bookingSlotHoldServiceTestHooks.indexesReady = originalMethods.indexesReady;
+  __bookingSlotHoldServiceTestHooks.supportsTransactions =
+    originalMethods.supportsTransactions;
+  __bookingSlotHoldServiceTestHooks.startSession = originalMethods.startSession;
+});
+
+beforeEach(() => {
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = async () => outcomeSession;
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
 });
 
 const assertOutcomeError = async (promise, statusCode, message) => {

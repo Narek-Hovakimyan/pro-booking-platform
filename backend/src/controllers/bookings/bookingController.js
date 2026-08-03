@@ -46,6 +46,7 @@ import {
   defaultWeeklySchedule,
   defaultWorkingDaySchedule,
   getDayScheduleFromDefaultSchedule,
+  isTerminalBookingStatus,
   maxCancellationReasonLength,
   maxRejectionReasonLength,
   normalizeBookingStatus,
@@ -57,6 +58,12 @@ import {
   validateBookingSlot,
   withBookingCreationLock,
 } from "../../utils/bookingSlotValidation.js";
+import {
+  isBookingSlotConflictError,
+  moveBookingSlotHolds,
+  releaseBookingSlotHolds,
+  runBookingSlotTransaction,
+} from "../../services/booking/bookingSlotHoldService.js";
 
 export const bookingController = createCrudController(Booking, "Booking");
 
@@ -352,7 +359,15 @@ export const updateBooking = async (req, res) => {
       return res.status(400).json({ message: "No allowed booking updates provided" });
     }
 
-    const applyAndSaveUpdates = async () => {
+    const applyAndSaveUpdates = async ({ session = null } = {}) => {
+      const bookingToUpdate = session
+        ? await Booking.findById(req.params.id, null, { session })
+        : booking;
+
+      if (!bookingToUpdate) {
+        return { statusCode: 404, message: "Booking not found" };
+      }
+
       if (isRescheduling && rescheduleSlotRequest) {
         const latestSlotValidation = await validateBookingSlot(rescheduleSlotRequest);
 
@@ -361,66 +376,105 @@ export const updateBooking = async (req, res) => {
         }
 
         safeUpdates.dayKey = latestSlotValidation.effectiveDayKey;
+
+        await moveBookingSlotHolds({
+          bookingId: bookingToUpdate._id,
+          barberId: bookingToUpdate.barberId,
+          fromBookingDate: bookingToUpdate.bookingDate,
+          fromTime: bookingToUpdate.time,
+          fromDuration: bookingToUpdate.duration,
+          toBookingDate: safeUpdates.bookingDate,
+          toTime: safeUpdates.time,
+          toDuration: bookingToUpdate.duration,
+          session,
+        });
       }
 
-      Object.assign(booking, safeUpdates);
-      if (booking.clientPhone && !booking.phone) {
-        booking.phone = booking.clientPhone;
+      Object.assign(bookingToUpdate, safeUpdates);
+      if (bookingToUpdate.clientPhone && !bookingToUpdate.phone) {
+        bookingToUpdate.phone = bookingToUpdate.clientPhone;
       }
-      if (booking.bookingDate) {
-        booking.dayKey = getDayKeyFromDate(booking.bookingDate) || booking.dayKey;
+      if (bookingToUpdate.bookingDate) {
+        bookingToUpdate.dayKey =
+          getDayKeyFromDate(bookingToUpdate.bookingDate) || bookingToUpdate.dayKey;
       }
-      await booking.save();
+      await bookingToUpdate.save(session ? { session } : undefined);
 
-      return { booking };
+      if (safeUpdates.status && isTerminalBookingStatus(safeUpdates.status)) {
+        await releaseBookingSlotHolds({
+          bookingId: bookingToUpdate._id,
+          session,
+        });
+      }
+
+      return { booking: bookingToUpdate };
     };
 
+    const requiresTransactionalSlotMutation =
+      isRescheduling ||
+      (safeUpdates.status && isTerminalBookingStatus(safeUpdates.status));
+
     const saveResult =
-      isRescheduling && rescheduleSlotRequest
+      requiresTransactionalSlotMutation
         ? await withBookingCreationLock(
             getBookingCreationLockKey({
               barberId: booking.barberId,
-              bookingDate: rescheduleSlotRequest.bookingDate,
+              bookingDate: isRescheduling
+                ? rescheduleSlotRequest.bookingDate
+                : booking.bookingDate,
             }),
-            applyAndSaveUpdates
+            async () => {
+              try {
+                return await runBookingSlotTransaction(({ session }) =>
+                  applyAndSaveUpdates({ session })
+                );
+              } catch (error) {
+                if (isBookingSlotConflictError(error)) {
+                  return { message: "This time is already booked" };
+                }
+                throw error;
+              }
+            }
           )
         : await applyAndSaveUpdates();
 
     if (saveResult.message) {
-      return res.status(400).json({ message: saveResult.message });
+      return res.status(saveResult.statusCode || 400).json({ message: saveResult.message });
     }
+
+    const updatedBooking = saveResult.booking;
 
     if (safeUpdates.status && safeUpdates.status !== previousStatus) {
       await notifyUsersForBookingStatusChange({
-        booking,
+        booking: updatedBooking,
         status: safeUpdates.status,
         requester: req.user,
         isBookingClient,
       });
 
       if (safeUpdates.status === "rejected" || safeUpdates.status === "cancelled") {
-        notifyWaitlistForReleasedBookingSlot(booking);
-        restoreVoucherOnCancel(booking, previousStatus);
+        notifyWaitlistForReleasedBookingSlot(updatedBooking);
+        restoreVoucherOnCancel(updatedBooking, previousStatus);
       }
 
       // ── Review request automation ──
       if (safeUpdates.status === "completed") {
-        if (booking.clientId && !booking.reviewed) {
-          const existingReview = await Review.exists({ bookingId: booking._id });
+        if (updatedBooking.clientId && !updatedBooking.reviewed) {
+          const existingReview = await Review.exists({ bookingId: updatedBooking._id });
           if (!existingReview) {
             const existingNotification = await Notification.findOne({
-              userId: booking.clientId,
+              userId: updatedBooking.clientId,
               type: "review_request",
-              "data.bookingId": booking._id,
+              "data.bookingId": updatedBooking._id,
             });
             if (!existingNotification) {
               await createNotification({
-                userId: booking.clientId,
+                userId: updatedBooking.clientId,
                 type: "review_request",
                 message: "How was your visit? Leave a review for your specialist.",
                 data: {
-                  bookingId: booking._id,
-                  barberId: booking.barberId,
+                  bookingId: updatedBooking._id,
+                  barberId: updatedBooking.barberId,
                 },
               });
             }
@@ -428,44 +482,44 @@ export const updateBooking = async (req, res) => {
         }
 
         // ── Book again retention automation ──
-        if (booking.clientId) {
+        if (updatedBooking.clientId) {
           const existingReminder = await Notification.findOne({
-            userId: booking.clientId,
+            userId: updatedBooking.clientId,
             type: "book_again_reminder",
-            "data.bookingId": booking._id,
+            "data.bookingId": updatedBooking._id,
           });
           if (!existingReminder) {
             await createNotification({
-              userId: booking.clientId,
+              userId: updatedBooking.clientId,
               type: "book_again_reminder",
               message: "Book your next appointment with the same specialist.",
               data: {
-                bookingId: booking._id,
-                barberId: booking.barberId,
-                salonId: booking.salonId || null,
+                bookingId: updatedBooking._id,
+                barberId: updatedBooking.barberId,
+                salonId: updatedBooking.salonId || null,
               },
             });
           }
         }
 
         // ── Loyalty / punch-card automation ──
-        if (booking.clientId) {
+        if (updatedBooking.clientId) {
           const activeProgram = await LoyaltyProgram.findOne({
             ownerType: "barber",
-            ownerId: booking.barberId,
+            ownerId: updatedBooking.barberId,
             active: true,
           });
 
           if (activeProgram) {
             let progress = await LoyaltyProgress.findOne({
               programId: activeProgram._id,
-              clientId: booking.clientId,
+              clientId: updatedBooking.clientId,
             });
 
             if (!progress) {
               progress = await LoyaltyProgress.create({
                 programId: activeProgram._id,
-                clientId: booking.clientId,
+                clientId: updatedBooking.clientId,
                 punchBookingIds: [],
                 punchCount: 0,
                 rewardsEarned: 0,
@@ -474,11 +528,11 @@ export const updateBooking = async (req, res) => {
 
             // Prevent duplicate punch for same booking
             const alreadyPunched = progress.punchBookingIds.some(
-              (id) => String(id) === String(booking._id)
+              (id) => String(id) === String(updatedBooking._id)
             );
 
             if (!alreadyPunched) {
-              progress.punchBookingIds.push(booking._id);
+              progress.punchBookingIds.push(updatedBooking._id);
               progress.punchCount += 1;
               progress.lastPunchAt = new Date();
 
@@ -490,14 +544,14 @@ export const updateBooking = async (req, res) => {
               if (expectedRewards > progress.rewardsEarned) {
                 progress.rewardsEarned = expectedRewards;
                 await createNotification({
-                  userId: booking.clientId,
+                  userId: updatedBooking.clientId,
                   type: "loyalty_reward_earned",
                   message: `You've earned a reward: ${activeProgram.rewardText}`,
                   data: {
                     programId: activeProgram._id,
-                    bookingId: booking._id,
-                    barberId: booking.barberId,
-                    salonId: booking.salonId || null,
+                    bookingId: updatedBooking._id,
+                    barberId: updatedBooking.barberId,
+                    salonId: updatedBooking.salonId || null,
                   },
                 });
               }
@@ -509,9 +563,9 @@ export const updateBooking = async (req, res) => {
       }
     }
 
-    emitBookingUpdated(booking, "updated");
+    emitBookingUpdated(updatedBooking, "updated");
 
-    return res.json(serializeBookingForResponse(booking, req.user));
+    return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
     return sendControllerError(res, error, "Could not update booking");
   }

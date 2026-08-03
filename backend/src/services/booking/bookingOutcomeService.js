@@ -1,5 +1,9 @@
 import Booking from "../../models/Booking.js";
 import { getBookingEndDateTime } from "../../utils/bookingDateTime.js";
+import {
+  releaseBookingSlotHolds,
+  runBookingSlotTransaction,
+} from "./bookingSlotHoldService.js";
 
 export class BookingOutcomeError extends Error {
   constructor(statusCode, message) {
@@ -70,27 +74,51 @@ const markBookingOutcome = async ({ bookingId, requester, config, now = new Date
 
   assertPastAcceptedBookingForBarber({ booking, requester, config, now });
 
-  const updatedBooking = await Booking.findOneAndUpdate(
-    {
-      _id: booking._id,
-      barberId: booking.barberId,
-      status: "accepted",
-    },
-    {
-      $set: {
-        status: config.status,
-        [config.markedAtField]: new Date(),
-        [config.markedByField]: requester._id,
+  return runBookingSlotTransaction(async ({ session }) => {
+    const lockedBooking = await Booking.findById(
+      bookingId,
+      null,
+      session ? { session } : undefined
+    );
+
+    if (!lockedBooking) {
+      throw new BookingOutcomeError(404, "Booking not found");
+    }
+
+    assertPastAcceptedBookingForBarber({
+      booking: lockedBooking,
+      requester,
+      config,
+      now,
+    });
+
+    const updatedBooking = await Booking.findOneAndUpdate(
+      {
+        _id: lockedBooking._id,
+        barberId: lockedBooking.barberId,
+        status: "accepted",
       },
-    },
-    { returnDocument: "after" }
-  );
+      {
+        $set: {
+          status: config.status,
+          [config.markedAtField]: new Date(),
+          [config.markedByField]: requester._id,
+        },
+      },
+      { returnDocument: "after", ...(session ? { session } : {}) }
+    );
 
-  if (!updatedBooking) {
-    throw new BookingOutcomeError(400, config.claimFailureMessage);
-  }
+    if (!updatedBooking) {
+      throw new BookingOutcomeError(400, config.claimFailureMessage);
+    }
 
-  return updatedBooking;
+    await releaseBookingSlotHolds({
+      bookingId: updatedBooking._id,
+      session,
+    });
+
+    return updatedBooking;
+  });
 };
 
 export const markBookingNoShow = ({ bookingId, requester }) =>

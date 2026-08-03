@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 
 import { getClientReliability } from "./bookingAnalyticsController.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 
 import {
   barber,
@@ -12,6 +13,7 @@ import {
   clientId,
   createMutableBooking,
   createResponse,
+  mockBookingSlotHoldModel,
   originalMethods,
   otherClient,
 } from "./bookingController.testUtils.js";
@@ -23,6 +25,11 @@ afterEach(() => {
   Booking.aggregate = originalMethods.bookingAggregate;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
+  BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
+  BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
+  mockBookingSlotHoldModel();
 });
 
 // --- Client reliability tests ---

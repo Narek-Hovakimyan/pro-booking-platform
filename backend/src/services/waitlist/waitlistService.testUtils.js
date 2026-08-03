@@ -4,6 +4,10 @@ import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import WaitlistEntry from "../../models/WaitlistEntry.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
+import {
+  __bookingSlotHoldServiceTestHooks,
+} from "../booking/bookingSlotHoldService.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
@@ -31,6 +35,10 @@ const originalMethods = {
   waitlistPopulate: WaitlistEntry.populate,
   bookingFind: Booking.find,
   bookingCreate: Booking.create,
+  bookingSlotHoldFindOne: BookingSlotHold.findOne,
+  bookingSlotHoldInsertMany: BookingSlotHold.insertMany,
+  bookingSlotHoldBulkWrite: BookingSlotHold.bulkWrite,
+  bookingSlotHoldDeleteMany: BookingSlotHold.deleteMany,
   notificationCreate: Notification.create,
   salonFindById: Salon.findById,
   serviceFindOne: Service.findOne,
@@ -39,6 +47,21 @@ const originalMethods = {
   subscriptionSeatFindOne: SubscriptionSeat.findOne,
 };
 const originalConsoleWarn = console.warn;
+
+const mockBookingSlotHoldModel = () => {
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = async () => ({
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  });
+  BookingSlotHold.findOne = async () => null;
+  BookingSlotHold.insertMany = async (docs) => docs;
+  BookingSlotHold.bulkWrite = async () => ({ ok: 1 });
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
+};
 
 export const applyWaitlistPopulatePassthrough = () => {
   WaitlistEntry.populate = async (entry) => entry;
@@ -53,6 +76,10 @@ export const resetWaitlistServiceModelMocks = () => {
   WaitlistEntry.populate = originalMethods.waitlistPopulate;
   Booking.find = originalMethods.bookingFind;
   Booking.create = originalMethods.bookingCreate;
+  BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
+  BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
+  BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
   Notification.create = originalMethods.notificationCreate;
   Salon.findById = originalMethods.salonFindById;
   Service.findOne = originalMethods.serviceFindOne;
@@ -64,6 +91,7 @@ export const resetWaitlistServiceModelMocks = () => {
   // Re-apply passthrough for populateWaitlistEntry so action tests
   // don't hit the real Mongoose populate (which needs a DB connection).
   applyWaitlistPopulatePassthrough();
+  mockBookingSlotHoldModel();
 };
 
 export const createMockEntry = (overrides = {}) => ({
@@ -198,9 +226,11 @@ export const mockWaitlistApprovalFlow = ({
   Service.findOne = async () => service;
   Salon.findById = async () => ({ _id: salonId });
   Booking.find = async () => activeBookings;
+  mockBookingSlotHoldModel();
   Booking.create = async (payload) => {
-    createdBooking = { _id: bookingId, ...payload };
-    return createdBooking;
+    const bookingPayload = Array.isArray(payload) ? payload[0] : payload;
+    createdBooking = { _id: bookingId, ...bookingPayload };
+    return Array.isArray(payload) ? [createdBooking] : createdBooking;
   };
   Notification.create = async (payload) => payload;
   Subscription.findOne = async () => ({
@@ -237,3 +267,4 @@ export const mockWaitlistFindWithSafePopulate = ({ expectedQuery, entries }) => 
 };
 
 applyWaitlistPopulatePassthrough();
+mockBookingSlotHoldModel();

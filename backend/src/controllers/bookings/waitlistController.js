@@ -10,9 +10,13 @@ import {
   acceptWaitlistOffer,
   declineWaitlistOffer,
 } from "../../services/waitlist/waitlistService.js";
+import {
+  isBookingSlotProtectionUnavailableError,
+} from "../../services/booking/bookingSlotHoldService.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
 const getWaitlistActionStatus = (error) => {
+  if (isBookingSlotProtectionUnavailableError(error)) return 503;
   if (error.code === "NOT_FOUND") return 404;
   if (error.code === "FORBIDDEN") return 403;
   if (error.code === "CONFLICT") return 409;

@@ -9,6 +9,7 @@ import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
 import User from "../../models/User.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import {
   barberId,
   clientId,
@@ -18,7 +19,11 @@ import {
   resetWaitlistServiceModelMocks,
   serviceId,
 } from "./waitlistService.testUtils.js";
-import { acceptWaitlistOffer } from "./waitlistService.js";
+import {
+  __bookingSlotHoldServiceTestHooks,
+  BookingSlotProtectionUnavailableError,
+} from "../booking/bookingSlotHoldService.js";
+import { acceptWaitlistOffer, approveWaitlistEntry } from "./waitlistService.js";
 
 const mockBarberPaidAccess = () => {
   Subscription.findOne = async () => ({
@@ -32,9 +37,33 @@ const mockBarberPaidAccess = () => {
   });
 };
 
+const createBookingResult = (payload, overrides = {}) => {
+  const bookingPayload = Array.isArray(payload) ? payload[0] : payload;
+  const booking = { ...bookingPayload, ...overrides };
+  return Array.isArray(payload) ? [booking] : booking;
+};
+
+const originalSlotHoldMethods = {
+  deleteMany: BookingSlotHold.deleteMany,
+  indexesReady: __bookingSlotHoldServiceTestHooks.indexesReady,
+  supportsTransactions: __bookingSlotHoldServiceTestHooks.supportsTransactions,
+  startSession: __bookingSlotHoldServiceTestHooks.startSession,
+};
+
 afterEach(() => {
   resetWaitlistServiceModelMocks();
+  BookingSlotHold.deleteMany = originalSlotHoldMethods.deleteMany;
+  __bookingSlotHoldServiceTestHooks.indexesReady = originalSlotHoldMethods.indexesReady;
+  __bookingSlotHoldServiceTestHooks.supportsTransactions =
+    originalSlotHoldMethods.supportsTransactions;
+  __bookingSlotHoldServiceTestHooks.startSession = originalSlotHoldMethods.startSession;
 });
+
+const installProtectionUnavailableHooks = (startSession) => {
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = startSession;
+};
 
 test("client can accept own offered waitlist entry", async () => {
   mockBarberPaidAccess();
@@ -79,8 +108,9 @@ test("client can accept own offered waitlist entry", async () => {
   Salon.findById = async () => null;
   Booking.find = async () => [];
   Booking.create = async (payload) => {
-    bookingCreated = { _id: "new-booking", ...payload };
-    return bookingCreated;
+    const result = createBookingResult(payload, { _id: "new-booking" });
+    bookingCreated = Array.isArray(result) ? result[0] : result;
+    return result;
   };
   Notification.create = async (payload) => {
     notificationCreated = payload;
@@ -136,8 +166,9 @@ test("accept creates accepted Booking", async () => {
   Salon.findById = async () => null;
   Booking.find = async () => [];
   Booking.create = async (payload) => {
-    bookingCreated = { _id: "booking-123", ...payload };
-    return bookingCreated;
+    const result = createBookingResult(payload, { _id: "booking-123" });
+    bookingCreated = Array.isArray(result) ? result[0] : result;
+    return result;
   };
   Notification.create = async (payload) => payload;
 
@@ -188,7 +219,8 @@ test("accept marks waitlist converted and stores convertedBooking", async () => 
   Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
   Salon.findById = async () => null;
   Booking.find = async () => [];
-  Booking.create = async (payload) => ({ _id: "booking-456", ...payload });
+  Booking.create = async (payload) =>
+    createBookingResult(payload, { _id: "booking-456" });
   Notification.create = async (payload) => payload;
 
   const result = await acceptWaitlistOffer({ entryId: "accept-convert", clientId });
@@ -236,7 +268,8 @@ test("accept sends barber notification", async () => {
   Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
   Salon.findById = async () => null;
   Booking.find = async () => [];
-  Booking.create = async (payload) => ({ _id: "booking-notif", ...payload });
+  Booking.create = async (payload) =>
+    createBookingResult(payload, { _id: "booking-notif" });
   Notification.create = async (payload) => {
     barberNotification = payload;
     return payload;
@@ -289,7 +322,8 @@ test("accept succeeds if barber notification fails after booking and conversion"
   Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
   Salon.findById = async () => null;
   Booking.find = async () => [];
-  Booking.create = async (payload) => ({ _id: "booking-notif-fail", ...payload });
+  Booking.create = async (payload) =>
+    createBookingResult(payload, { _id: "booking-notif-fail" });
   Notification.create = async () => {
     throw new Error("notification service unavailable");
   };
@@ -302,6 +336,176 @@ test("accept succeeds if barber notification fails after booking and conversion"
   assert.equal(logs.length, 1);
   assert.equal(logs[0][0], "Waitlist notification failed (non-fatal):");
   assert.equal(logs[0][1], "notification service unavailable");
+});
+
+test("acceptWaitlistOffer fails closed with 503 when slot protection is unavailable", async () => {
+  mockBarberPaidAccess();
+  const entry = createMockEntry({
+    _id: "accept-protection-unavailable",
+    status: "offered",
+    offeredTime: "14:00",
+    offeredAt: new Date(),
+  });
+  let bookingCreated = 0;
+  let notificationCreated = 0;
+  let holdWrites = 0;
+  let holdDeletes = 0;
+  let restoreCalls = 0;
+
+  installProtectionUnavailableHooks(async () => ({
+    async withTransaction() {
+      throw new Error("transaction setup failed");
+    },
+    async endSession() {},
+  }));
+
+  WaitlistEntry.findOne = async (query) => {
+    if (String(query._id) === String(entry._id) && query.status === "offered") {
+      return entry;
+    }
+    return null;
+  };
+  WaitlistEntry.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(entry._id)) return null;
+    if (query.status === "offered") {
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    if (query.status === "converting") {
+      restoreCalls += 1;
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    return null;
+  };
+  User.findById = (id) => ({
+    select: async () => {
+      if (String(id) === String(clientId)) return { _id: clientId, name: "Client" };
+      if (String(id) === String(barberId)) return { _id: barberId, name: "Barber", role: "barber" };
+      return null;
+    },
+  });
+  Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
+  Salon.findById = async () => null;
+  Booking.find = async () => [];
+  Booking.create = async () => {
+    bookingCreated += 1;
+    return null;
+  };
+  BookingSlotHold.bulkWrite = async () => {
+    holdWrites += 1;
+  };
+  BookingSlotHold.insertMany = async () => {
+    holdWrites += 1;
+  };
+  BookingSlotHold.deleteMany = async () => {
+    holdDeletes += 1;
+  };
+  Notification.create = async () => {
+    notificationCreated += 1;
+    return null;
+  };
+
+  await assert.rejects(
+    () => acceptWaitlistOffer({ entryId: entry._id, clientId }),
+    (error) => {
+      assert.equal(error.statusCode, 503);
+      assert.equal(error.message, "Booking slot protection is temporarily unavailable");
+      assert.equal(error instanceof BookingSlotProtectionUnavailableError, true);
+      return true;
+    }
+  );
+
+  assert.equal(bookingCreated, 0);
+  assert.equal(notificationCreated, 0);
+  assert.equal(holdWrites, 0);
+  assert.equal(holdDeletes, 0);
+  assert.equal(restoreCalls, 1);
+});
+
+test("approveWaitlistEntry fails closed with 503 when slot protection is unavailable", async () => {
+  mockBarberPaidAccess();
+  const entry = createMockEntry({
+    _id: "approve-protection-unavailable",
+    status: "active",
+    offeredTime: "",
+    offeredAt: null,
+  });
+  let bookingCreated = 0;
+  let notificationCreated = 0;
+  let holdWrites = 0;
+  let holdDeletes = 0;
+  let restoreCalls = 0;
+
+  installProtectionUnavailableHooks(async () => ({
+    async withTransaction() {
+      throw new Error("transaction setup failed");
+    },
+    async endSession() {},
+  }));
+
+  WaitlistEntry.findOne = async (query) => {
+    if (String(query._id) === String(entry._id)) {
+      return entry;
+    }
+    return null;
+  };
+  WaitlistEntry.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(entry._id)) return null;
+    if (query.status?.$in?.includes(entry.status)) {
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    if (query.status === "converting") {
+      restoreCalls += 1;
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    return null;
+  };
+  User.findById = (id) => ({
+    select: async () => {
+      if (String(id) === String(clientId)) return { _id: clientId, name: "Client" };
+      if (String(id) === String(barberId)) return { _id: barberId, name: "Barber", role: "barber" };
+      return null;
+    },
+  });
+  Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
+  Salon.findById = async () => null;
+  Booking.find = async () => [];
+  Booking.create = async () => {
+    bookingCreated += 1;
+    return null;
+  };
+  BookingSlotHold.bulkWrite = async () => {
+    holdWrites += 1;
+  };
+  BookingSlotHold.insertMany = async () => {
+    holdWrites += 1;
+  };
+  BookingSlotHold.deleteMany = async () => {
+    holdDeletes += 1;
+  };
+  Notification.create = async () => {
+    notificationCreated += 1;
+    return null;
+  };
+
+  await assert.rejects(
+    () => approveWaitlistEntry({ entryId: entry._id, barberId, time: "14:00" }),
+    (error) => {
+      assert.equal(error.statusCode, 503);
+      assert.equal(error.message, "Booking slot protection is temporarily unavailable");
+      assert.equal(error instanceof BookingSlotProtectionUnavailableError, true);
+      return true;
+    }
+  );
+
+  assert.equal(bookingCreated, 0);
+  assert.equal(notificationCreated, 0);
+  assert.equal(holdWrites, 0);
+  assert.equal(holdDeletes, 0);
+  assert.equal(restoreCalls, 1);
 });
 
 test("client cannot accept someone else's offer", async () => {

@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { approveEntry, cancelEntry, createEntry } from "./waitlistController.js";
+import { acceptOfferEntry, approveEntry, cancelEntry, createEntry } from "./waitlistController.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
+import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import WaitlistEntry from "../../models/WaitlistEntry.js";
+import {
+  __bookingSlotHoldServiceTestHooks,
+} from "../../services/booking/bookingSlotHoldService.js";
+import {
+  createMockEntry,
+  resetWaitlistServiceModelMocks,
+} from "../../services/waitlist/waitlistService.testUtils.js";
 
 const clientId = "64b000000000000000000001";
 const barberId = "64b000000000000000000010";
@@ -21,15 +32,18 @@ const originalMethods = {
   userFindById: User.findById,
   waitlistCreate: WaitlistEntry.create,
   waitlistFindOne: WaitlistEntry.findOne,
+  waitlistFindOneAndUpdate: WaitlistEntry.findOneAndUpdate,
 };
 
 afterEach(() => {
+  resetWaitlistServiceModelMocks();
   Booking.create = originalMethods.bookingCreate;
   Salon.findById = originalMethods.salonFindById;
   Service.findOne = originalMethods.serviceFindOne;
   User.findById = originalMethods.userFindById;
   WaitlistEntry.create = originalMethods.waitlistCreate;
   WaitlistEntry.findOne = originalMethods.waitlistFindOne;
+  WaitlistEntry.findOneAndUpdate = originalMethods.waitlistFindOneAndUpdate;
 });
 
 const createResponse = () => ({
@@ -216,4 +230,77 @@ test("legacy approve endpoint requires offer flow and creates no booking", async
     message: "Use offer flow; client confirmation is required",
   });
   assert.equal(bookingCreated, false);
+});
+
+test("waitlist accept preserves slot-protection 503 status and body", async () => {
+  const entry = createMockEntry({
+    _id: "waitlist-protection-controller",
+    status: "offered",
+    offeredTime: "14:00",
+    offeredAt: new Date(),
+  });
+  let bookingWrites = 0;
+  let holdWrites = 0;
+  let notificationWrites = 0;
+
+  Subscription.findOne = async () => ({ _id: "sub-1", status: "active" });
+  SubscriptionSeat.findOne = () => ({ populate: async () => null });
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = async () => ({
+    async withTransaction() {
+      throw new Error("transaction setup failed");
+    },
+    async endSession() {},
+  });
+  WaitlistEntry.findOne = async (query) =>
+    String(query._id) === String(entry._id) &&
+    String(query.clientId) === clientId &&
+    query.status === "offered"
+      ? entry
+      : null;
+  WaitlistEntry.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(entry._id)) return null;
+    Object.assign(entry, update.$set || {});
+    return entry;
+  };
+  Service.findOne = async () => ({
+    _id: serviceId,
+    barberId,
+    name: "Haircut",
+    duration: 30,
+    price: 50,
+  });
+  User.findById = () => ({ select: async () => ({ _id: barberId, role: "barber" }) });
+  Salon.findById = async () => null;
+  Booking.find = async () => [];
+  Booking.create = async () => {
+    bookingWrites += 1;
+    return null;
+  };
+  BookingSlotHold.bulkWrite = async () => {
+    holdWrites += 1;
+    return { ok: 1 };
+  };
+  Notification.create = async () => {
+    notificationWrites += 1;
+    return null;
+  };
+
+  const response = createResponse();
+  await acceptOfferEntry(
+    {
+      user: { _id: clientId, role: "client" },
+      params: { id: entry._id },
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(response.body, {
+    message: "Booking slot protection is temporarily unavailable",
+  });
+  assert.equal(bookingWrites, 0);
+  assert.equal(holdWrites, 0);
+  assert.equal(notificationWrites, 0);
 });

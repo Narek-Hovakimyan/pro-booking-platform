@@ -7,6 +7,7 @@ import {
   markNoShow,
 } from "./bookingOutcomeController.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Schedule from "../../models/Schedule.js";
 
@@ -19,6 +20,7 @@ import {
   createMutableBooking,
   createResponse,
   mockBookingFind,
+  mockBookingSlotHoldModel,
   mockBookingStatusClaim,
   originalMethods,
   pastBookingDate,
@@ -30,6 +32,11 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
+  BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
+  BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
+  mockBookingSlotHoldModel();
   Notification.create = originalMethods.notificationCreate;
   Schedule.findOne = originalMethods.scheduleFindOne;
 });

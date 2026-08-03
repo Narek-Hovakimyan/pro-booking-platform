@@ -3,6 +3,7 @@ import {
   __bookingSideEffectsTestHooks,
 } from "../../services/booking/bookingSideEffectsService.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
@@ -16,6 +17,12 @@ import {
   getArmeniaDateKey,
   getDayKeyFromDate,
 } from "../../utils/bookingDateTime.js";
+import {
+  __bookingSlotHoldServiceTestHooks,
+} from "../../services/booking/bookingSlotHoldService.js";
+import {
+  __bookingCreateServiceTestHooks,
+} from "../../services/booking/bookingCreateService.js";
 
 // ── Singleton model-method capture ──────────────────────────────────
 
@@ -26,6 +33,10 @@ export const originalMethods = {
   bookingAggregate: Booking.aggregate,
   bookingFindById: Booking.findById,
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
+  bookingSlotHoldFindOne: BookingSlotHold.findOne,
+  bookingSlotHoldInsertMany: BookingSlotHold.insertMany,
+  bookingSlotHoldBulkWrite: BookingSlotHold.bulkWrite,
+  bookingSlotHoldDeleteMany: BookingSlotHold.deleteMany,
   barberProfileFindOne: BarberProfile.findOne,
   notificationCreate: Notification.create,
   salonExists: Salon.exists,
@@ -39,10 +50,29 @@ export const originalMethods = {
   userFindById: User.findById,
 };
 
+export const mockBookingSlotHoldModel = () => {
+  const session = {
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  };
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = async () => session;
+  __bookingCreateServiceTestHooks.supportsTransactions = async () => true;
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  BookingSlotHold.findOne = async () => null;
+  BookingSlotHold.insertMany = async (docs) => docs;
+  BookingSlotHold.bulkWrite = async () => ({ ok: 1 });
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 0 });
+};
+
 // ── Silence fire-and-forget waitlist notifications ──────────────────
 // These would outlive each test and try to call WaitlistEntry.find on
 // an unconnected mongoose buffer.
 __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries(async () => {});
+mockBookingSlotHoldModel();
 
 // ── IDs ─────────────────────────────────────────────────────────────
 
@@ -225,13 +255,33 @@ export const mockCreateBookingDependencies = (createdBookings) => {
     },
   });
   Booking.find = mockBookingFind(createdBookings);
-  Booking.create = async (payload) => {
+  mockBookingSlotHoldModel();
+  const createBooking = async (payload) => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
+    const bookingPayload = Array.isArray(payload) ? payload[0] : payload;
     const booking = {
+      ...bookingPayload,
       _id: `booking-${createdBookings.length + 1}`,
-      ...payload,
     };
+    createdBookings.push(booking);
+    return Array.isArray(payload) ? [booking] : booking;
+  };
+  Booking.create = createBooking;
+  Booking.findOneAndUpdate = async (query, update) => {
+    const existing = createdBookings.find(
+      (booking) => String(booking._id) === String(query._id)
+    );
+    if (existing) return existing;
+
+    const booking = {
+      ...update.$setOnInsert,
+      _id: `booking-${createdBookings.length + 1}`,
+    };
+    if (Booking.create !== createBooking) {
+      const created = await Booking.create(booking);
+      return Array.isArray(created) ? created[0] : created;
+    }
     createdBookings.push(booking);
     return booking;
   };
@@ -293,6 +343,7 @@ export const mockDelayDependencies = (
   activeBookings = [],
   storedBooking = null
 ) => {
+  mockBookingSlotHoldModel();
   User.findById = () => ({
     select: async () => barberWithSalon,
   });

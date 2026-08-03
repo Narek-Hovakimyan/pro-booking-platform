@@ -10,6 +10,7 @@ import {
   __bookingSideEffectsTestHooks,
 } from "../../services/booking/bookingSideEffectsService.js";
 import Booking from "../../models/Booking.js";
+import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Schedule from "../../models/Schedule.js";
 import User from "../../models/User.js";
@@ -25,6 +26,7 @@ import {
   createResponse,
   getFutureBookingDateForDay,
   mockBookingFind,
+  mockBookingSlotHoldModel,
   originalMethods,
   otherClient,
 } from "./bookingController.testUtils.js";
@@ -53,6 +55,7 @@ const createPendingRescheduleRequest = (overrides = {}) => ({
 });
 
 const mockRescheduleDependencies = (activeBookings = []) => {
+  mockBookingSlotHoldModel();
   User.findById = () => ({
     select: async (fields) =>
       fields === "name" ? { name: "Barber" } : barberWithSalon,
@@ -75,6 +78,11 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
+  BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
+  BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
+  BookingSlotHold.deleteMany = originalMethods.bookingSlotHoldDeleteMany;
+  mockBookingSlotHoldModel();
   Notification.create = originalMethods.notificationCreate;
   Schedule.findOne = originalMethods.scheduleFindOne;
   User.findById = originalMethods.userFindById;

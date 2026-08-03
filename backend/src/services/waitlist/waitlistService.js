@@ -29,6 +29,12 @@ import {
   createWaitlistActionError,
 } from "./waitlistValidation.js";
 import { barberHasPaidAccessForSalon } from "../subscriptionService.js";
+import {
+  createBookingSlotHolds,
+  isBookingSlotConflictError,
+  releaseBookingSlotHolds,
+  runBookingSlotTransaction,
+} from "../booking/bookingSlotHoldService.js";
 
 const waitlistCreationLocks = new Map();
 const waitlistDisplayPopulate = [
@@ -424,47 +430,78 @@ export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
 
   let booking;
   let convertedEntry;
+  let usedSession = false;
 
   try {
-    // Re-check overlap before creating Booking
-    const context = await getValidatedWaitlistConversionContext(claimedEntry, claimedEntry.offeredTime);
+    ({ booking, convertedEntry } = await runBookingSlotTransaction(async ({ session }) => {
+      usedSession = Boolean(session);
+      const context = await getValidatedWaitlistConversionContext(
+        claimedEntry,
+        claimedEntry.offeredTime
+      );
+      const bookingId = new Booking()._id;
 
-    booking = await Booking.create({
-      clientId: claimedEntry.clientId,
-      barberId: claimedEntry.barberId,
-      salonId: claimedEntry.salonId || null,
-      serviceId: claimedEntry.serviceId,
-      bookingDate: claimedEntry.date,
-      dayKey: getDayKeyFromDate(claimedEntry.date),
-      time: claimedEntry.offeredTime,
-      duration: context.duration,
-      price: context.price,
-      serviceName: context.service.name || "",
-      status: "accepted",
-      createdBy: "barber",
-    });
+      await createBookingSlotHolds({
+        bookingId,
+        barberId: claimedEntry.barberId,
+        bookingDate: claimedEntry.date,
+        time: claimedEntry.offeredTime,
+        duration: context.duration,
+        session,
+      });
 
-    convertedEntry = await WaitlistEntry.findOneAndUpdate(
-      { _id: claimedEntry._id, status: "converting" },
-      {
-        $set: {
-          status: "converted",
-          convertedAt: new Date(),
-          convertedBooking: booking._id,
+      const bookingPayload = {
+        _id: bookingId,
+        clientId: claimedEntry.clientId,
+        barberId: claimedEntry.barberId,
+        salonId: claimedEntry.salonId || null,
+        serviceId: claimedEntry.serviceId,
+        bookingDate: claimedEntry.date,
+        dayKey: getDayKeyFromDate(claimedEntry.date),
+        time: claimedEntry.offeredTime,
+        duration: context.duration,
+        price: context.price,
+        serviceName: context.service.name || "",
+        status: "accepted",
+        createdBy: "barber",
+      };
+      booking = session
+        ? await Booking.create([bookingPayload], { session })
+        : await Booking.create(bookingPayload);
+      booking = Array.isArray(booking) ? booking[0] : booking;
+
+      convertedEntry = await WaitlistEntry.findOneAndUpdate(
+        { _id: claimedEntry._id, status: "converting" },
+        {
+          $set: {
+            status: "converted",
+            convertedAt: new Date(),
+            convertedBooking: booking._id,
+          },
         },
-      },
-      { returnDocument: "after" }
-    );
+        { returnDocument: "after", ...(session ? { session } : {}) }
+      );
 
-    if (!convertedEntry) {
-      // Clean up the booking if we can't mark the waitlist
-      await Booking.findByIdAndDelete(booking._id);
-      throw createWaitlistActionError(
-        "Waitlist entry could not be converted",
-        "CONFLICT"
+      if (!convertedEntry) {
+        throw createWaitlistActionError(
+          "Waitlist entry could not be converted",
+          "CONFLICT"
+        );
+      }
+
+      return { booking, convertedEntry };
+    }));
+  } catch (error) {
+    if (!usedSession && booking?._id) {
+      await Booking.findByIdAndDelete?.(booking._id).catch(() => {});
+      await releaseBookingSlotHolds({ bookingId: booking._id }).catch(() => {});
+    }
+    if (isBookingSlotConflictError(error)) {
+      error = createWaitlistActionError(
+        "This time is already booked",
+        "VALIDATION_ERROR"
       );
     }
-  } catch (error) {
     // If the error is overlap, restore to offered so client can retry
     if (error.message === "This time is no longer available" || error.message === "This time is already booked") {
       await WaitlistEntry.findOneAndUpdate(
@@ -584,42 +621,74 @@ export const approveWaitlistEntry = async ({ entryId, barberId, time }) => {
 
   let booking;
   let convertedEntry;
+  let usedSession = false;
 
   try {
-    booking = await Booking.create({
-      clientId: claimedEntry.clientId,
-      barberId: claimedEntry.barberId,
-      salonId: claimedEntry.salonId || null,
-      serviceId: claimedEntry.serviceId,
-      bookingDate: claimedEntry.date,
-      dayKey: getDayKeyFromDate(claimedEntry.date),
-      time,
-      duration: context.duration,
-      price: context.price,
-      serviceName: context.service.name || "",
-      status: "accepted",
-      createdBy: "barber",
-    });
+    ({ booking, convertedEntry } = await runBookingSlotTransaction(async ({ session }) => {
+      usedSession = Boolean(session);
+      const bookingId = new Booking()._id;
 
-    convertedEntry = await WaitlistEntry.findOneAndUpdate(
-      { _id: claimedEntry._id, status: "converting" },
-      {
-        $set: {
-          status: "converted",
-          convertedAt: new Date(),
-          convertedBooking: booking._id,
+      await createBookingSlotHolds({
+        bookingId,
+        barberId: claimedEntry.barberId,
+        bookingDate: claimedEntry.date,
+        time,
+        duration: context.duration,
+        session,
+      });
+
+      const bookingPayload = {
+        _id: bookingId,
+        clientId: claimedEntry.clientId,
+        barberId: claimedEntry.barberId,
+        salonId: claimedEntry.salonId || null,
+        serviceId: claimedEntry.serviceId,
+        bookingDate: claimedEntry.date,
+        dayKey: getDayKeyFromDate(claimedEntry.date),
+        time,
+        duration: context.duration,
+        price: context.price,
+        serviceName: context.service.name || "",
+        status: "accepted",
+        createdBy: "barber",
+      };
+      booking = session
+        ? await Booking.create([bookingPayload], { session })
+        : await Booking.create(bookingPayload);
+      booking = Array.isArray(booking) ? booking[0] : booking;
+
+      convertedEntry = await WaitlistEntry.findOneAndUpdate(
+        { _id: claimedEntry._id, status: "converting" },
+        {
+          $set: {
+            status: "converted",
+            convertedAt: new Date(),
+            convertedBooking: booking._id,
+          },
         },
-      },
-      { returnDocument: "after" }
-    );
+        { returnDocument: "after", ...(session ? { session } : {}) }
+      );
 
-    if (!convertedEntry) {
-      throw createWaitlistActionError(
-        "Waitlist entry could not be converted",
-        "CONFLICT"
+      if (!convertedEntry) {
+        throw createWaitlistActionError(
+          "Waitlist entry could not be converted",
+          "CONFLICT"
+        );
+      }
+
+      return { booking, convertedEntry };
+    }));
+  } catch (error) {
+    if (!usedSession && booking?._id) {
+      await Booking.findByIdAndDelete?.(booking._id).catch(() => {});
+      await releaseBookingSlotHolds({ bookingId: booking._id }).catch(() => {});
+    }
+    if (isBookingSlotConflictError(error)) {
+      error = createWaitlistActionError(
+        "This time is already booked",
+        "VALIDATION_ERROR"
       );
     }
-  } catch (error) {
     await WaitlistEntry.findOneAndUpdate(
       { _id: claimedEntry._id, status: "converting" },
       { $set: { status: previousStatus } },

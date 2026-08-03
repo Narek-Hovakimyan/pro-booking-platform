@@ -18,6 +18,11 @@ import {
 import { createNotification } from "../../controllers/notifications/notificationController.js";
 import { emitBookingUpdated } from "./bookingSideEffectsService.js";
 import { getBookingNotificationData } from "../../utils/bookingNotificationData.js";
+import {
+  isBookingSlotConflictError,
+  moveBookingSlotHolds,
+  runBookingSlotTransaction,
+} from "./bookingSlotHoldService.js";
 
 /**
  * Delay a booking by the given minutes.
@@ -106,50 +111,73 @@ export const delayBookingService = async ({ bookingId, delayMinutes, user }) => 
       bookingDate: booking.bookingDate,
     }),
     async () => {
-      const slotValidation = await validateBookingSlot({
-        barberId: booking.barberId,
-        salonId: booking?.salonId || null,
-        bookingDate: booking.bookingDate,
-        dayKey: nextDayKey,
-        time: newTime,
-        duration: booking.duration,
-        ignoreBookingId: booking._id,
-      });
-
-      if (slotValidation.message) {
-        return { message: slotValidation.message };
-      }
-
-      const updatedBooking = await Booking.findOneAndUpdate(
-        {
-          _id: booking._id,
-          clientId: booking.clientId,
-          status: "accepted",
-          bookingDate: booking.bookingDate,
-          time: booking.time,
-          $or: [
-            { delayMinutesTotal: { $lte: 0 } },
-            { delayMinutesTotal: { $exists: false } },
-          ],
-          delayedAt: null,
-        },
-        {
-          $set: {
+      try {
+        return await runBookingSlotTransaction(async ({ session }) => {
+          const slotValidation = await validateBookingSlot({
+            barberId: booking.barberId,
+            salonId: booking?.salonId || null,
+            bookingDate: booking.bookingDate,
+            dayKey: nextDayKey,
             time: newTime,
-            dayKey: slotValidation.effectiveDayKey,
-            reminderSentAt: null,
-            delayMinutesTotal: delayMinutes,
-            delayedAt: new Date(),
-          },
-        },
-        { returnDocument: "after" }
-      );
+            duration: booking.duration,
+            ignoreBookingId: booking._id,
+          });
 
-      if (!updatedBooking) {
-        return { message: "Booking could not be delayed" };
+          if (slotValidation.message) {
+            return { message: slotValidation.message };
+          }
+
+          const updatedBooking = await Booking.findOneAndUpdate(
+            {
+              _id: booking._id,
+              clientId: booking.clientId,
+              status: "accepted",
+              bookingDate: booking.bookingDate,
+              time: booking.time,
+              $or: [
+                { delayMinutesTotal: { $lte: 0 } },
+                { delayMinutesTotal: { $exists: false } },
+              ],
+              delayedAt: null,
+            },
+            {
+              $set: {
+                time: newTime,
+                dayKey: slotValidation.effectiveDayKey,
+                reminderSentAt: null,
+                delayMinutesTotal: delayMinutes,
+                delayedAt: new Date(),
+              },
+            },
+            { returnDocument: "after", ...(session ? { session } : {}) }
+          );
+
+          if (!updatedBooking) {
+            const err = new Error("Booking could not be delayed");
+            err.statusCode = 400;
+            throw err;
+          }
+
+          await moveBookingSlotHolds({
+            bookingId: booking._id,
+            barberId: booking.barberId,
+            fromBookingDate: booking.bookingDate,
+            fromTime: booking.time,
+            fromDuration: booking.duration,
+            toBookingDate: booking.bookingDate,
+            toTime: newTime,
+            toDuration: booking.duration,
+            session,
+          });
+
+          return { booking: updatedBooking };
+        });
+      } catch (error) {
+        if (isBookingSlotConflictError(error)) {
+          return { message: "This time is already booked" };
+        }
+        throw error;
       }
-
-      return { booking: updatedBooking };
     }
   );
 

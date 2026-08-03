@@ -17,6 +17,11 @@ import {
   serializeBookingForResponse,
 } from "../../utils/bookingUtils.js";
 import { createNotification } from "../notifications/notificationController.js";
+import {
+  isBookingSlotConflictError,
+  moveBookingSlotHolds,
+  runBookingSlotTransaction,
+} from "../../services/booking/bookingSlotHoldService.js";
 
 const getRescheduleErrorStatusCode = (error) => {
   if (error?.statusCode) return error.statusCode;
@@ -168,74 +173,99 @@ export const acceptRescheduleRequest = async (req, res) => {
         bookingDate: requestedBookingDate,
       }),
       async () => {
-        const lockedBooking = await Booking.findById(req.params.id);
+        try {
+          return await runBookingSlotTransaction(async ({ session }) => {
+            const lockedBooking = await Booking.findById(
+              req.params.id,
+              null,
+              session ? { session } : undefined
+            );
 
-        if (!lockedBooking) {
-          return { statusCode: 404, message: "Booking not found" };
+            if (!lockedBooking) {
+              return { statusCode: 404, message: "Booking not found" };
+            }
+
+            if (!isAssignedBarberForBooking(req.user, lockedBooking)) {
+              return {
+                statusCode: 403,
+                message: "Only the assigned barber can accept reschedule request",
+              };
+            }
+
+            if (!hasPendingRescheduleRequest(lockedBooking)) {
+              return { message: "No pending reschedule request" };
+            }
+
+            const lockedRequest = lockedBooking.rescheduleRequest;
+            const lockedRequestedBookingDate = storedDateToDateKey(
+              lockedRequest.requestedBookingDate
+            );
+            const lockedRequestedTime = lockedRequest.requestedTime;
+            const lockedRequestedDayKey =
+              lockedRequest.requestedDayKey ||
+              getDayKeyFromDate(lockedRequestedBookingDate) ||
+              lockedBooking.dayKey;
+
+            const latestSlotValidation = await validateBookingSlot({
+              barberId: lockedBooking.barberId,
+              salonId: lockedBooking?.salonId || null,
+              bookingDate: lockedRequestedBookingDate,
+              dayKey: lockedRequestedDayKey,
+              time: lockedRequestedTime,
+              duration: lockedBooking.duration,
+              ignoreBookingId: lockedBooking._id,
+            });
+
+            if (latestSlotValidation.message) {
+              return { message: latestSlotValidation.message };
+            }
+
+            const releasedSlot = {
+              barberId: lockedBooking.barberId,
+              salonId: lockedBooking.salonId || null,
+              serviceId: lockedBooking.serviceId,
+              bookingDate: lockedBooking.bookingDate,
+              time: lockedBooking.time,
+            };
+            const movedToNewSlot =
+              String(releasedSlot.bookingDate) !== String(lockedRequestedBookingDate) ||
+              String(releasedSlot.time) !== String(lockedRequestedTime);
+
+            await moveBookingSlotHolds({
+              bookingId: lockedBooking._id,
+              barberId: lockedBooking.barberId,
+              fromBookingDate: lockedBooking.bookingDate,
+              fromTime: lockedBooking.time,
+              fromDuration: lockedBooking.duration,
+              toBookingDate: lockedRequestedBookingDate,
+              toTime: lockedRequestedTime,
+              toDuration: lockedBooking.duration,
+              session,
+            });
+
+            lockedBooking.bookingDate = lockedRequestedBookingDate;
+            lockedBooking.dayKey = latestSlotValidation.effectiveDayKey;
+            lockedBooking.time = lockedRequestedTime;
+            lockedBooking.reminderSentAt = null;
+            lockedBooking.reminder24hSentAt = null;
+            lockedBooking.reminder2hSentAt = null;
+            lockedBooking.rescheduleRequest.status = "accepted";
+            lockedBooking.rescheduleRequest.respondedBy = req.user._id;
+            lockedBooking.rescheduleRequest.respondedAt = new Date();
+
+            await lockedBooking.save(session ? { session } : undefined);
+
+            return {
+              booking: lockedBooking,
+              releasedSlot: movedToNewSlot ? releasedSlot : null,
+            };
+          });
+        } catch (error) {
+          if (isBookingSlotConflictError(error)) {
+            return { message: "This time is already booked" };
+          }
+          throw error;
         }
-
-        if (!isAssignedBarberForBooking(req.user, lockedBooking)) {
-          return {
-            statusCode: 403,
-            message: "Only the assigned barber can accept reschedule request",
-          };
-        }
-
-        if (!hasPendingRescheduleRequest(lockedBooking)) {
-          return { message: "No pending reschedule request" };
-        }
-
-        const lockedRequest = lockedBooking.rescheduleRequest;
-        const lockedRequestedBookingDate = storedDateToDateKey(
-          lockedRequest.requestedBookingDate
-        );
-        const lockedRequestedTime = lockedRequest.requestedTime;
-        const lockedRequestedDayKey =
-          lockedRequest.requestedDayKey ||
-          getDayKeyFromDate(lockedRequestedBookingDate) ||
-          lockedBooking.dayKey;
-
-        const latestSlotValidation = await validateBookingSlot({
-          barberId: lockedBooking.barberId,
-          salonId: lockedBooking?.salonId || null,
-          bookingDate: lockedRequestedBookingDate,
-          dayKey: lockedRequestedDayKey,
-          time: lockedRequestedTime,
-          duration: lockedBooking.duration,
-          ignoreBookingId: lockedBooking._id,
-        });
-
-        if (latestSlotValidation.message) {
-          return { message: latestSlotValidation.message };
-        }
-
-        const releasedSlot = {
-          barberId: lockedBooking.barberId,
-          salonId: lockedBooking.salonId || null,
-          serviceId: lockedBooking.serviceId,
-          bookingDate: lockedBooking.bookingDate,
-          time: lockedBooking.time,
-        };
-        const movedToNewSlot =
-          String(releasedSlot.bookingDate) !== String(lockedRequestedBookingDate) ||
-          String(releasedSlot.time) !== String(lockedRequestedTime);
-
-        lockedBooking.bookingDate = lockedRequestedBookingDate;
-        lockedBooking.dayKey = latestSlotValidation.effectiveDayKey;
-        lockedBooking.time = lockedRequestedTime;
-        lockedBooking.reminderSentAt = null;
-        lockedBooking.reminder24hSentAt = null;
-        lockedBooking.reminder2hSentAt = null;
-        lockedBooking.rescheduleRequest.status = "accepted";
-        lockedBooking.rescheduleRequest.respondedBy = req.user._id;
-        lockedBooking.rescheduleRequest.respondedAt = new Date();
-
-        await lockedBooking.save();
-
-        return {
-          booking: lockedBooking,
-          releasedSlot: movedToNewSlot ? releasedSlot : null,
-        };
       }
     );
 
