@@ -1,10 +1,26 @@
 import { AtSign, Award, BadgeCheck, Calendar, MapPin, Star } from "lucide-react";
 
 import ReviewReplyBlock from "@/features/reviews/components/ReviewReplyBlock";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 
 const INSTAGRAM_USERNAME_PATTERN = /^[A-Za-z0-9._]{1,30}$/;
+
+function normalizeStartingPrice(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+
+  return numericValue;
+}
 
 function getInstagramProfileLink(value) {
   const rawValue = value?.trim();
@@ -52,6 +68,7 @@ export default function BarberProfileSidebar({
   totalCerts,
 }) {
   const instagramProfile = getInstagramProfileLink(barber?.instagram);
+  const normalizedStartingPrice = normalizeStartingPrice(startingPrice);
 
   return (
     <div className="space-y-6">
@@ -176,11 +193,11 @@ export default function BarberProfileSidebar({
                 </div>
               );
             })()}
-            {startingPrice && (
+            {normalizedStartingPrice !== null && (
               <div className="flex items-center gap-3 text-sm">
                 <Calendar className="h-4 w-4 shrink-0 text-brand-600" />
                 <span className="font-semibold text-brand-700">
-                  From {startingPrice.toLocaleString()} դրամ
+                  From {formatCurrency(normalizedStartingPrice)}
                 </span>
               </div>
             )}

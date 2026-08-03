@@ -11,10 +11,26 @@ import {
 
 import { Link } from "react-router-dom";
 
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { getMediaUrl } from "@/shared/utils/media";
+
+function normalizeStartingPrice(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+
+  return numericValue;
+}
 
 export default function BarberProfileHero({
   barber,
@@ -30,6 +46,8 @@ export default function BarberProfileHero({
   toggleFavorite,
   totalCerts,
 }) {
+  const normalizedStartingPrice = normalizeStartingPrice(startingPrice);
+
   return (
     <Card className="overflow-hidden rounded-2xl shadow-card sm:rounded-3xl">
       <CardContent className="grid gap-0 lg:grid-cols-[340px_1fr]">
@@ -141,8 +159,8 @@ export default function BarberProfileHero({
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700">
-              {startingPrice
-                ? `From ${startingPrice.toLocaleString()} դրամ`
+              {normalizedStartingPrice !== null
+                ? `From ${formatCurrency(normalizedStartingPrice)}`
                 : "No active services"}
             </span>
           </div>
