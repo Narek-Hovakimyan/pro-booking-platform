@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
 import { Button } from "@/shared/components/ui/button";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import DepositNotice from "@/shared/components/booking/DepositNotice";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { calculateDepositEstimate } from "@/shared/utils/deposit";
@@ -8,6 +9,29 @@ import { calculateDepositEstimate } from "@/shared/utils/deposit";
 const FIELD_SELECTOR =
   "input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
 const FALLBACK_SELECTOR = "button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+
+const isMissingAmount = (value) =>
+  value === null ||
+  value === undefined ||
+  (typeof value === "string" && value.trim() === "");
+
+const normalizeAmount = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+};
+
+const resolveAmount = (value, fallback = 0) => {
+  const selectedValue = isMissingAmount(value) ? fallback : value;
+  const normalizedValue = normalizeAmount(selectedValue);
+
+  if (normalizedValue !== null) return normalizedValue;
+
+  const normalizedFallback = normalizeAmount(fallback);
+  return normalizedFallback !== null ? normalizedFallback : 0;
+};
+
+const formatMoney = (value, fallback = 0) =>
+  formatCurrency(resolveAmount(value, fallback));
 
 function focusFirstControl(dialogRef) {
   const firstControl =
@@ -123,26 +147,42 @@ export default function BookingConfirmationModal({
   if (!isOpen) return null;
 
   const priceInfo = getServicePriceInfo(selectedService);
-  const servicePrice = Number(pricingQuote?.originalPrice ?? priceInfo.originalPrice);
-  const serviceDiscountAmount = Number(
-    pricingQuote?.serviceDiscountAmount ?? priceInfo.serviceDiscountAmount
+  const servicePrice = resolveAmount(
+    pricingQuote?.originalPrice,
+    priceInfo.originalPrice
   );
-  const serviceDiscountedPrice = Number(
-    pricingQuote?.serviceDiscountedPrice ?? priceInfo.discountedPrice
+  const serviceDiscountAmount = Math.max(
+    0,
+    resolveAmount(
+      pricingQuote?.serviceDiscountAmount,
+      priceInfo.serviceDiscountAmount
+    )
+  );
+  const serviceDiscountedPrice = Math.max(
+    0,
+    resolveAmount(
+      pricingQuote?.serviceDiscountedPrice,
+      priceInfo.discountedPrice
+    )
   );
   const promoDiscount = Math.max(
     0,
-    Number(pricingQuote?.voucherDiscountAmount ?? discountPreview ?? 0)
+    resolveAmount(pricingQuote?.voucherDiscountAmount, discountPreview ?? 0)
   );
-  const loyaltyDiscount = Math.max(0, Number(pricingQuote?.loyaltyDiscountAmount || 0));
+  const loyaltyDiscount = Math.max(
+    0,
+    resolveAmount(pricingQuote?.loyaltyDiscountAmount, 0)
+  );
+  const loyaltyDiscountPercent = Math.max(
+    0,
+    resolveAmount(pricingQuote?.loyaltyDiscountPercent, 0)
+  );
   const hasLoyaltyDiscount =
     Boolean(pricingQuote?.loyaltyDiscountApplied) && loyaltyDiscount > 0 && !promoDiscount;
+  const fallbackFinalTotal = Math.max(0, serviceDiscountedPrice - promoDiscount);
   const finalTotal = Math.max(
     0,
-    Number(
-      pricingQuote?.finalPrice ??
-        serviceDiscountedPrice - promoDiscount
-    )
+    resolveAmount(pricingQuote?.finalPrice, fallbackFinalTotal)
   );
   const totalDiscount = Math.max(0, servicePrice - finalTotal);
   const depositEstimate = calculateDepositEstimate(depositSettings, finalTotal);
@@ -228,7 +268,7 @@ export default function BookingConfirmationModal({
               <div className="flex items-center justify-between gap-4 px-4 py-3">
                 <span className="text-neutral-500">Service price</span>
                 <span className="font-semibold text-neutral-950">
-                  {servicePrice.toLocaleString()} դրամ
+                  {formatMoney(servicePrice)}
                 </span>
               </div>
               {serviceDiscountAmount > 0 && (
@@ -236,7 +276,7 @@ export default function BookingConfirmationModal({
                   <div className="flex items-center justify-between gap-4 bg-rose-50 px-4 py-2 text-rose-800">
                     <span className="font-medium">Service discount</span>
                     <span className="font-semibold">
-                      -{serviceDiscountAmount.toLocaleString()} դր
+                      -{formatMoney(serviceDiscountAmount)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-4 px-4 py-3">
@@ -244,7 +284,7 @@ export default function BookingConfirmationModal({
                       Subtotal after service discount
                     </span>
                     <span className="font-semibold text-neutral-950">
-                      {serviceDiscountedPrice.toLocaleString()} դրամ
+                      {formatMoney(serviceDiscountedPrice)}
                     </span>
                   </div>
                 </>
@@ -255,17 +295,17 @@ export default function BookingConfirmationModal({
             <div className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-2 text-sm text-amber-800">
               <span className="font-medium">Promo code discount ({voucherCode})</span>
               <span className="font-semibold">
-                -{promoDiscount.toLocaleString()} դր
+                -{formatMoney(promoDiscount)}
               </span>
             </div>
           )}
           {selectedService && hasLoyaltyDiscount && (
             <div className="flex items-center justify-between gap-4 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
               <span className="font-medium">
-                Loyalty discount ({Number(pricingQuote.loyaltyDiscountPercent || 0)}%)
+                Loyalty discount ({loyaltyDiscountPercent}%)
               </span>
               <span className="font-semibold">
-                -{loyaltyDiscount.toLocaleString()} դր
+                -{formatMoney(loyaltyDiscount)}
               </span>
             </div>
           )}
@@ -283,8 +323,7 @@ export default function BookingConfirmationModal({
             <div className="flex items-center justify-between gap-4 rounded-b-2xl bg-neutral-900 px-4 py-3 text-white">
               <span className="font-medium">Final price</span>
               <span className="text-lg font-bold">
-                {finalTotal.toLocaleString()}{" "}
-                դրամ
+                {formatMoney(finalTotal)}
               </span>
             </div>
           )}

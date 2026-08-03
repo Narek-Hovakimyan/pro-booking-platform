@@ -1,8 +1,29 @@
 import { Button } from "@/shared/components/ui/button";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import {
   getServicePriceInfo,
   groupServicesByDisplayCategory,
 } from "@/shared/data/serviceCategories";
+
+const isMissingAmount = (value) =>
+  value === null ||
+  value === undefined ||
+  (typeof value === "string" && value.trim() === "");
+
+const normalizeAmount = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+};
+
+const resolveAmount = (value, fallback = 0) => {
+  const selectedValue = isMissingAmount(value) ? fallback : value;
+  const normalizedValue = normalizeAmount(selectedValue);
+
+  if (normalizedValue !== null) return normalizedValue;
+
+  const normalizedFallback = normalizeAmount(fallback);
+  return normalizedFallback !== null ? normalizedFallback : 0;
+};
 
 export default function ServiceStep({
   services = [],
@@ -34,6 +55,8 @@ export default function ServiceStep({
                 {group.services.map((service) => {
                   const isSelected = String(selectedServiceId) === String(service?.id || service?._id);
                   const priceInfo = getServicePriceInfo(service);
+                  const originalPrice = resolveAmount(priceInfo.originalPrice);
+                  const discountedPrice = resolveAmount(priceInfo.discountedPrice);
                   return (
                     <button
                       key={service?.id || service?._id}
@@ -81,11 +104,11 @@ export default function ServiceStep({
                           <span className="inline-flex items-center gap-1.5">
                             {priceInfo.hasDiscount && (
                               <span className={`line-through ${isSelected ? "text-neutral-400" : "text-neutral-400"}`}>
-                                {Number(priceInfo.originalPrice).toLocaleString()} դրամ
+                                {formatCurrency(originalPrice)}
                               </span>
                             )}
                             <span className={`font-semibold ${isSelected ? "text-white" : "text-neutral-800"}`}>
-                              {Number(priceInfo.discountedPrice).toLocaleString()} դրամ
+                              {formatCurrency(discountedPrice)}
                             </span>
                           </span>
                         </span>
