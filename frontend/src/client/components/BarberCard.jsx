@@ -3,6 +3,7 @@ import { Heart, MapPin, MessageCircle, Store, UserRound, Star } from "lucide-rea
 import { Link, useNavigate } from "react-router-dom";
 
 import SalonListModal from "@/client/components/SalonListModal";
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { getUniqueDisplayCategoryEntries } from "@/client/utils/favoriteHelpers";
@@ -10,14 +11,29 @@ import { getSpecialistProfessionDisplay } from "@/shared/data/professions";
 import { formatAvailabilityLabel, getAvailabilityTone } from "@/shared/utils/availability";
 import { getMediaUrl } from "@/shared/utils/media";
 
+function normalizePrice(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+
+  return numericValue;
+}
+
 function getBarberPrices(services, barberId) {
   return (services || [])
     .filter(
       (service) =>
         String(service?.barberId) === String(barberId) && service?.active
     )
-    .map((service) => Number(service?.price))
-    .filter(Number.isFinite);
+    .map((service) => normalizePrice(service?.price))
+    .filter((price) => price !== null);
 }
 
 function getReviewStats(reviews, barberId) {
@@ -279,7 +295,7 @@ export default function BarberCard({
           {prices.length > 0 ? (
             <>
               <span className="text-lg font-bold text-neutral-900">
-                {Math.min(...prices).toLocaleString()} դրամ
+                {formatCurrency(Math.min(...prices))}
               </span>
               <span className="text-sm text-neutral-500">starting price</span>
             </>

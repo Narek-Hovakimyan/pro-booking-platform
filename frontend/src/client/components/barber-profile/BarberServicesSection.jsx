@@ -2,12 +2,28 @@ import { Clock, Scissors } from "lucide-react";
 
 import { Link } from "react-router-dom";
 
+import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import {
   getServiceDisplayCategory,
   groupServicesByDisplayCategory,
 } from "@/shared/data/serviceCategories";
+
+function normalizePrice(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return 0;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) return 0;
+
+  return numericValue;
+}
 
 function ServiceCard({ service, barber, profileBarberId }) {
   return (
@@ -35,9 +51,8 @@ function ServiceCard({ service, barber, profileBarberId }) {
         </div>
         <div className="shrink-0 py-4 pr-4 text-right">
           <div className="text-xl font-bold text-brand-700">
-            {Number(service?.price || 0).toLocaleString()}
+            {formatCurrency(normalizePrice(service?.price))}
           </div>
-          <div className="text-xs text-neutral-500">դրամ</div>
           <Button
             as={Link}
             className="mt-2"
