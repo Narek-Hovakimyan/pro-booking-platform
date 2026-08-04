@@ -1,8 +1,10 @@
 import Salon from "../../models/Salon.js";
+import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
+import { extendManualSubscription } from "../subscription/subscriptionManualMutations.js";
 import {
   computeSeatUsage,
   getIdString,
@@ -31,11 +33,10 @@ import {
   isBarberAcceptedStaffForSalon,
   isBarberChairRenterForSalon,
 } from "./platformBillingSeatHelpers.js";
-
-/* ── Query helpers ───────────────────────────────────── */
-
-/* ── Main service methods ─────────────────────────────── */
-
+import {
+  createWithRequiredSession,
+  runInRequiredTransaction,
+} from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
 export {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
@@ -47,20 +48,23 @@ export {
   getSalonPayments,
 };
 
-/* ════════════════════════════════════════════════════════════ */
-/*  PHASE 3: Write mutation methods with audit log            */
-/* ════════════════════════════════════════════════════════════ */
-
-/**
- * Update salon subscription seat count.
- *
- * @param {string} salonId
- * @param {Object} options
- * @param {number} options.seatCount - New seat count (must be >= 1)
- * @param {string} options.note - Required reason
- * @param {Object} options.actor - req.user
- * @returns {Object} Updated billing detail
- */
+const createPlatformAuditLog = async (payload, session) =>
+  createWithRequiredSession(
+    PlatformAuditLog,
+    {
+      actorId: payload.actorId,
+      action: payload.action,
+      salonId: payload.salonId || null,
+      targetUserId: payload.targetUserId || null,
+      subscriptionId: payload.subscriptionId || null,
+      paymentAttemptId: payload.paymentAttemptId || null,
+      oldValue: payload.oldValue ?? null,
+      newValue: payload.newValue ?? null,
+      note: payload.note || "",
+      requestIp: payload.requestIp || "",
+    },
+    session
+  );
 export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, requestIp } = {}) => {
   if (!note || !note.trim()) {
     const error = new Error("note is required");
@@ -129,16 +133,6 @@ export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, re
   return getSalonBillingDetail(salonId);
 };
 
-/**
- * Assign a seat to an accepted staff member of a salon.
- *
- * @param {string} salonId
- * @param {Object} options
- * @param {string} options.barberId - The staff barber to assign
- * @param {string} options.note - Required reason
- * @param {Object} options.actor - req.user
- * @returns {Object} Updated billing detail
- */
 export const assignSalonSeat = async (salonId, { barberId, note, actor, requestIp } = {}) => {
   if (!note || !note.trim()) {
     const error = new Error("note is required");
@@ -239,16 +233,6 @@ export const assignSalonSeat = async (salonId, { barberId, note, actor, requestI
   return getSalonBillingDetail(salonId);
 };
 
-/**
- * Revoke a seat from an assigned staff barber.
- *
- * @param {string} salonId
- * @param {Object} options
- * @param {string} options.barberId - The staff barber to revoke seat from
- * @param {string} options.note - Required reason
- * @param {Object} options.actor - req.user
- * @returns {Object} Updated billing detail
- */
 export const revokeSalonSeat = async (salonId, { barberId, note, actor, requestIp } = {}) => {
   if (!note || !note.trim()) {
     const error = new Error("note is required");
@@ -322,18 +306,6 @@ export const revokeSalonSeat = async (salonId, { barberId, note, actor, requestI
   return getSalonBillingDetail(salonId);
 };
 
-/**
- * Manually confirm a salon subscription payment attempt.
- *
- * Only salon subscription payments (ownerType=salon, purpose=subscription)
- * with pending/requires_action status and manual provider can be confirmed.
- *
- * @param {string} paymentAttemptId
- * @param {Object} options
- * @param {string} options.note - Required reason
- * @param {Object} options.actor - req.user
- * @returns {Object} Confirmation result with updated billing detail
- */
 export const confirmSalonPayment = async (paymentAttemptId, { note, actor, requestIp } = {}) => {
   if (!note || !note.trim()) {
     const error = new Error("note is required");
@@ -341,140 +313,143 @@ export const confirmSalonPayment = async (paymentAttemptId, { note, actor, reque
     throw error;
   }
 
-  const attempt = await SubscriptionPaymentAttempt.findById(paymentAttemptId);
-  if (!attempt) {
-    const error = new Error("Payment attempt not found");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  // Must be salon subscription payment only
-  if (attempt.ownerType !== "salon") {
-    const error = new Error("Only salon subscription payments can be confirmed");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (attempt.purpose !== "subscription") {
-    const error = new Error("Only subscription payment attempts can be confirmed");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // Must be confirmable status
-  const confirmableStatuses = ["pending", "requires_action"];
-  if (!confirmableStatuses.includes(attempt.status)) {
-    const error = new Error(
-      `Payment attempt status "${attempt.status}" cannot be confirmed. Only pending or requires_action allowed.`
+  const trimmedNote = note.trim();
+  const result = await runInRequiredTransaction(async (session) => {
+    const options = { session };
+    const attempt = await SubscriptionPaymentAttempt.findById(
+      paymentAttemptId,
+      null,
+      options
     );
-    error.statusCode = 400;
-    throw error;
-  }
+    if (!attempt) {
+      const error = new Error("Payment attempt not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  // Must be manual provider. Disabled means payments are unavailable and must not be confirmed.
-  if (attempt.provider !== "manual") {
-    const error = new Error(
-      `Payment provider "${attempt.provider}" cannot be manually confirmed through this endpoint`
-    );
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const oldValue = { status: attempt.status, paidAt: attempt.paidAt, confirmedAt: attempt.confirmedAt };
-
-  const now = new Date();
-  let linkedSubscription = null;
-  let oldSubscriptionState = null;
-
-  if (attempt.subscriptionId) {
-    linkedSubscription = await Subscription.findById(attempt.subscriptionId);
-    if (
-      !linkedSubscription ||
-      linkedSubscription.ownerType !== "salon" ||
-      getIdString(linkedSubscription.ownerId) !== getIdString(attempt.ownerId)
-    ) {
-      const error = new Error("Payment attempt subscription does not match the salon owner");
+    if (attempt.ownerType !== "salon") {
+      const error = new Error("Only salon subscription payments can be confirmed");
       error.statusCode = 400;
       throw error;
     }
 
-    oldSubscriptionState = {
-      status: linkedSubscription.status,
-      currentPeriodStart: linkedSubscription.currentPeriodStart,
-      currentPeriodEnd: linkedSubscription.currentPeriodEnd,
-      lastPaymentAt: linkedSubscription.lastPaymentAt,
-      seatCount: linkedSubscription.seatCount,
+    if (attempt.purpose !== "subscription") {
+      const error = new Error("Only subscription payment attempts can be confirmed");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const confirmableStatuses = ["pending", "requires_action"];
+    if (!confirmableStatuses.includes(attempt.status)) {
+      const error = new Error(
+        `Payment attempt status "${attempt.status}" cannot be confirmed. Only pending or requires_action allowed.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (attempt.provider !== "manual") {
+      const error = new Error(
+        `Payment provider "${attempt.provider}" cannot be manually confirmed through this endpoint`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const oldValue = {
+      status: attempt.status,
+      paidAt: attempt.paidAt,
+      confirmedAt: attempt.confirmedAt,
     };
-  }
+    const now = new Date();
 
-  attempt.status = "paid";
-  attempt.paidAt = now;
-  attempt.confirmedAt = now;
-  await attempt.save();
+    if (attempt.subscriptionId) {
+      const linkedSubscription = await Subscription.findById(
+        attempt.subscriptionId,
+        null,
+        options
+      );
+      if (
+        !linkedSubscription ||
+        linkedSubscription.ownerType !== "salon" ||
+        getIdString(linkedSubscription.ownerId) !== getIdString(attempt.ownerId)
+      ) {
+        const error = new Error("Payment attempt subscription does not match the salon owner");
+        error.statusCode = 400;
+        throw error;
+      }
 
-  // Activate subscription if one is linked
-  if (linkedSubscription) {
-    const wasExpiredOrTrialing = ["trialing", "expired"].includes(linkedSubscription.status) || !linkedSubscription.currentPeriodEnd || new Date(linkedSubscription.currentPeriodEnd) <= now;
-    const periodStart = wasExpiredOrTrialing ? now : linkedSubscription.currentPeriodEnd;
-    const periodEnd = new Date(periodStart);
-    periodEnd.setMonth(periodEnd.getMonth() + (attempt.months || 1));
+      const subscription = await extendManualSubscription({
+        ownerType: attempt.ownerType,
+        ownerId: attempt.ownerId,
+        payerId: attempt.payerId,
+        seatCount: attempt.seatCount,
+        months: attempt.months,
+        now,
+        session,
+      });
 
-    linkedSubscription.status = "active";
-    linkedSubscription.currentPeriodStart = periodStart;
-    linkedSubscription.currentPeriodEnd = periodEnd;
-    linkedSubscription.lastPaymentAt = now;
-    linkedSubscription.seatCount = attempt.seatCount || linkedSubscription.seatCount;
-    await linkedSubscription.save();
+      attempt.status = "paid";
+      attempt.paidAt = now;
+      attempt.confirmedAt = now;
+      attempt.subscriptionId = subscription._id;
+      await attempt.save(options);
 
-    // Update audit to capture subscription change too
-    await createAuditLogOrRollback(
+      await createPlatformAuditLog(
+        {
+          actorId: actor._id,
+          action: "salon_subscription.payment_confirm",
+          salonId: attempt.ownerId,
+          subscriptionId: subscription._id,
+          paymentAttemptId: attempt._id,
+          oldValue,
+          newValue: {
+            status: "paid",
+            paidAt: now,
+            confirmedAt: now,
+            subscriptionStatus: "active",
+          },
+          note: trimmedNote,
+          requestIp,
+        },
+        session
+      );
+
+      return { type: "billing_detail", salonId: getIdString(attempt.ownerId) };
+    }
+
+    attempt.status = "paid";
+    attempt.paidAt = now;
+    attempt.confirmedAt = now;
+    await attempt.save(options);
+
+    await createPlatformAuditLog(
       {
         actorId: actor._id,
         action: "salon_subscription.payment_confirm",
         salonId: attempt.ownerId,
-        subscriptionId: linkedSubscription._id,
         paymentAttemptId: attempt._id,
         oldValue,
-        newValue: { status: "paid", paidAt: now, confirmedAt: now, subscriptionStatus: "active" },
-        note: note.trim(),
+        newValue: { status: "paid", paidAt: now, confirmedAt: now },
+        note: trimmedNote,
         requestIp,
       },
-      async () => {
-        attempt.status = oldValue.status;
-        attempt.paidAt = oldValue.paidAt;
-          attempt.confirmedAt = oldValue.confirmedAt;
-          await attempt.save();
-          Object.assign(linkedSubscription, oldSubscriptionState);
-          await linkedSubscription.save();
-        }
-      );
+      session
+    );
 
-    return getSalonBillingDetail(getIdString(attempt.ownerId));
+    return {
+      type: "payment_attempt_only",
+      payload: {
+        confirmed: true,
+        paymentAttempt: serializePaymentAttempt(attempt),
+        salonId: attempt.ownerId,
+      },
+    };
+  });
+
+  if (result.type === "billing_detail") {
+    return getSalonBillingDetail(result.salonId);
   }
 
-  // No subscription linked — just confirm payment
-  await createAuditLogOrRollback(
-    {
-      actorId: actor._id,
-      action: "salon_subscription.payment_confirm",
-      salonId: attempt.ownerId,
-      paymentAttemptId: attempt._id,
-      oldValue,
-      newValue: { status: "paid", paidAt: now, confirmedAt: now },
-      note: note.trim(),
-      requestIp,
-    },
-    async () => {
-      attempt.status = oldValue.status;
-      attempt.paidAt = oldValue.paidAt;
-      attempt.confirmedAt = oldValue.confirmedAt;
-      await attempt.save();
-    }
-  );
-
-  return {
-    confirmed: true,
-    paymentAttempt: serializePaymentAttempt(attempt),
-    salonId: attempt.ownerId,
-  };
+  return result.payload;
 };

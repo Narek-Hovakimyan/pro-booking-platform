@@ -29,6 +29,12 @@ import {
   isBarberAcceptedStaffForSalon,
 } from "./platformBillingSeatHelpers.js";
 
+const originalStartSession = mongoose.startSession;
+const readyStateDescriptor = Object.getOwnPropertyDescriptor(
+  mongoose.connection,
+  "readyState"
+);
+
 /* ── ObjectId helpers ────────────────────────────────── */
 
 const oid = (hex) => new mongoose.Types.ObjectId(hex);
@@ -694,8 +700,30 @@ const mockMethod = (Model, method, impl) => {
 };
 
 afterEach(() => {
+  mongoose.startSession = originalStartSession;
+  if (readyStateDescriptor) {
+    Object.defineProperty(mongoose.connection, "readyState", readyStateDescriptor);
+  } else {
+    delete mongoose.connection.readyState;
+  }
   restoreOriginals();
 });
+
+const stubTransactionSession = () => {
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    value: 1,
+  });
+
+  const session = {
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  };
+  mongoose.startSession = async () => session;
+  return session;
+};
 
 test("platform billing seat eligibility uses worksAsSpecialist:false canonical membership over legacy approved", async () => {
   await assertPlatformSeatEligibility(
@@ -2268,6 +2296,8 @@ test("confirmSalonPayment rejects missing note, booking deposits, disabled provi
     { statusCode: 400, message: "note is required" }
   );
 
+  stubTransactionSession();
+
   mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
     saveableDoc({ ...depositPaymentDoc, ownerType: "salon", status: "pending" })
   );
@@ -2314,6 +2344,7 @@ test("confirmSalonPayment rejects missing note, booking deposits, disabled provi
 });
 
 test("confirmSalonPayment manually confirms subscription payment with audit and sanitized response", async () => {
+  stubTransactionSession();
   let auditPayload;
   const attempt = saveableDoc({
     ...subscriptionPaymentDoc,
@@ -2327,7 +2358,7 @@ test("confirmSalonPayment manually confirms subscription payment with audit and 
 
   mockMethod(SubscriptionPaymentAttempt, "findById", async () => attempt);
   mockMethod(PlatformAuditLog, "create", async (payload) => {
-    auditPayload = payload;
+    auditPayload = Array.isArray(payload) ? payload[0] : payload;
     return payload;
   });
 
@@ -2353,4 +2384,27 @@ test("confirmSalonPayment manually confirms subscription payment with audit and 
   assert.equal(result.paymentAttempt.subscriptionId, undefined);
   assert.equal(result.paymentAttempt.ownerId, undefined);
   assert.equal(result.paymentAttempt.ownerType, undefined);
+});
+
+test("confirmSalonPayment fails closed before reading when a transaction session is unavailable", async () => {
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    value: 1,
+  });
+
+  let attemptReadCount = 0;
+  mongoose.startSession = async () => null;
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () => {
+    attemptReadCount++;
+    return saveableDoc(subscriptionPaymentDoc);
+  });
+
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    (error) =>
+      error.statusCode === 503 &&
+      error.code === "PAYMENT_CONFIRMATION_TRANSACTION_UNAVAILABLE"
+  );
+
+  assert.equal(attemptReadCount, 0);
 });

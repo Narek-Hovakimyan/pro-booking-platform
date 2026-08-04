@@ -62,6 +62,11 @@ const originalAttemptFindById = SubscriptionPaymentAttempt.findById;
 const originalSalonFindById = Salon.findById;
 const originalUserFindById = User.findById;
 const originalUserFind = User.find;
+const originalStartSession = mongoose.startSession;
+const readyStateDescriptor = Object.getOwnPropertyDescriptor(
+  mongoose.connection,
+  "readyState"
+);
 
 const barberId = new mongoose.Types.ObjectId();
 const salonId = new mongoose.Types.ObjectId();
@@ -106,6 +111,12 @@ afterEach(() => {
   Salon.findById = originalSalonFindById;
   User.findById = originalUserFindById;
   User.find = originalUserFind;
+  mongoose.startSession = originalStartSession;
+  if (readyStateDescriptor) {
+    Object.defineProperty(mongoose.connection, "readyState", readyStateDescriptor);
+  } else {
+    delete mongoose.connection.readyState;
+  }
 });
 
 /* ── Chainable query helper ─────────────────────────────── */
@@ -349,16 +360,18 @@ const stubManualConfirmationDependencies = ({
     return existingSubscription;
   };
   Subscription.create = async (payload) => {
+    const normalizedPayload = Array.isArray(payload) ? payload[0] : payload;
     subscriptionCreateCount++;
     subscriptionToReturn = makeSubDoc({
-      ...payload,
-      _id: payload._id || new mongoose.Types.ObjectId(),
+      ...normalizedPayload,
+      _id: normalizedPayload._id || new mongoose.Types.ObjectId(),
     });
-    return subscriptionToReturn;
+    return Array.isArray(payload) ? [subscriptionToReturn] : subscriptionToReturn;
   };
   PaymentRecord.create = async (payload) => {
-    paymentRecords.push(payload);
-    return payload;
+    const normalizedPayload = Array.isArray(payload) ? payload[0] : payload;
+    paymentRecords.push(normalizedPayload);
+    return Array.isArray(payload) ? [normalizedPayload] : normalizedPayload;
   };
 
   return {
@@ -367,6 +380,22 @@ const stubManualConfirmationDependencies = ({
     getSubscriptionFindCount: () => subscriptionFindCount,
     getSubscription: () => subscriptionToReturn,
   };
+};
+
+const stubTransactionSession = () => {
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    value: 1,
+  });
+
+  const session = {
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  };
+  mongoose.startSession = async () => session;
+  return session;
 };
 
 const ownerId = new mongoose.Types.ObjectId();
@@ -2557,6 +2586,7 @@ test("client cannot create payment attempt", async () => {
 });
 
 test("dev-confirm activates subscription and creates one paid payment record", async () => {
+  stubTransactionSession();
   const now = new Date("2026-06-05T12:00:00.000Z");
   let attemptSaveCount = 0;
   const attempt = makePaymentAttempt({
@@ -2592,6 +2622,7 @@ test("dev-confirm activates subscription and creates one paid payment record", a
 });
 
 test("dev-confirm is idempotent and does not double-extend subscription", async () => {
+  stubTransactionSession();
   const attempt = makePaymentAttempt();
   let attemptSaveCount = 0;
   attempt.save = async function save() {
@@ -2655,6 +2686,7 @@ test("cancel pending payment attempt works and does not activate subscription", 
 });
 
 test("cancelled payment attempt cannot be confirmed", async () => {
+  stubTransactionSession();
   const attempt = makePaymentAttempt({ status: "cancelled" });
 
   SubscriptionPaymentAttempt.findById = async () => attempt;
@@ -2672,6 +2704,7 @@ test("cancelled payment attempt cannot be confirmed", async () => {
 });
 
 test("non-owner cannot read, confirm, or cancel payment attempt", async () => {
+  stubTransactionSession();
   const attempt = makePaymentAttempt();
 
   SubscriptionPaymentAttempt.findById = async () => attempt;
@@ -2711,6 +2744,7 @@ test("non-owner cannot read, confirm, or cancel payment attempt", async () => {
 });
 
 test("salon owner can confirm salon payment attempt", async () => {
+  stubTransactionSession();
   const attempt = makePaymentAttempt({
     ownerType: "salon",
     ownerId: salonId,
@@ -2805,6 +2839,7 @@ test("current salon owner cannot access another salon payment attempt", async ()
 });
 
 test("client cannot confirm payment attempt", async () => {
+  stubTransactionSession();
   const attempt = makePaymentAttempt({
     ownerId: clientId,
     payerId: clientId,
@@ -2822,6 +2857,33 @@ test("client cannot confirm payment attempt", async () => {
       error.statusCode === 403 &&
       error.message === "Only barbers can manage subscription payments"
   );
+});
+
+test("dev-confirm fails closed when a transaction session is unavailable", async () => {
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    value: 1,
+  });
+
+  let attemptReadCount = 0;
+  mongoose.startSession = async () => null;
+  SubscriptionPaymentAttempt.findById = async () => {
+    attemptReadCount++;
+    return makePaymentAttempt();
+  };
+
+  await assert.rejects(
+    () =>
+      confirmSubscriptionPaymentAttempt({
+        paymentAttemptId: new mongoose.Types.ObjectId(),
+        confirmedBy: { _id: barberId, role: "barber" },
+      }),
+    (error) =>
+      error.statusCode === 503 &&
+      error.code === "PAYMENT_CONFIRMATION_TRANSACTION_UNAVAILABLE"
+  );
+
+  assert.equal(attemptReadCount, 0);
 });
 
 test("individual payment history returns own records newest first", async () => {

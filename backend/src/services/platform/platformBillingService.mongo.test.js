@@ -1,0 +1,345 @@
+import assert from "node:assert/strict";
+import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
+
+import PaymentRecord from "../../models/PaymentRecord.js";
+import PlatformAuditLog from "../../models/PlatformAuditLog.js";
+import Salon from "../../models/Salon.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
+import { confirmSalonPayment } from "./platformBillingService.js";
+
+const REAL_MONGO_TESTS_ENABLED =
+  process.env.RUN_REAL_MONGO_TRANSACTION_TESTS === "true";
+
+const originals = {
+  platformAuditLogCreate: PlatformAuditLog.create,
+  startSession: mongoose.startSession,
+};
+
+const actorId = new mongoose.Types.ObjectId();
+const requestIp = "203.0.113.10";
+
+const connectIsolatedDb = async (suffix) => {
+  const mongoUri = process.env.MONGO_URI;
+  if (!mongoUri) {
+    throw new Error("RUN_REAL_MONGO_TRANSACTION_TESTS=true requires MONGO_URI");
+  }
+
+  const isolatedUri = new URL(mongoUri);
+  const databaseName =
+    isolatedUri.pathname.replace(/^\/+|\/+$/g, "") || "hairbook_ci_test";
+  isolatedUri.pathname = `/${databaseName}_${suffix}_${process.pid}`;
+
+  await mongoose.connect(isolatedUri.toString(), {
+    serverSelectionTimeoutMS: 5000,
+  });
+
+  await Promise.all([
+    PaymentRecord.deleteMany({}),
+    PlatformAuditLog.deleteMany({}),
+    Salon.deleteMany({}),
+    Subscription.deleteMany({}),
+    SubscriptionPaymentAttempt.deleteMany({}),
+    SubscriptionPlan.deleteMany({}),
+    SubscriptionSeat.deleteMany({}),
+    User.deleteMany({}),
+  ]);
+  await Promise.all([
+    SubscriptionPaymentAttempt.createIndexes(),
+    SubscriptionPlan.createIndexes(),
+  ]);
+};
+
+afterEach(async () => {
+  PlatformAuditLog.create = originals.platformAuditLogCreate;
+  mongoose.startSession = originals.startSession;
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect().catch(() => {});
+  }
+});
+
+const createFixture = async ({ providerPaymentId, attemptStatus = "pending" }) => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const subscriptionId = new mongoose.Types.ObjectId();
+
+  await User.create({
+    _id: ownerId,
+    name: "Salon Owner",
+    phone: `+374${String(Date.now()).slice(-7)}${String(Math.floor(Math.random() * 10))}`,
+    email: `owner-${providerPaymentId}@example.com`,
+    password: "hashed-password",
+    role: "barber",
+  });
+
+  await Salon.create({
+    _id: salonId,
+    name: "Replica Salon",
+    city: "Yerevan",
+    address: "10 Test St",
+    phone: "+37410000000",
+    ownerId,
+  });
+
+  await Subscription.create({
+    _id: subscriptionId,
+    ownerType: "salon",
+    ownerId: salonId,
+    ownerRefModel: "Salon",
+    payerId: ownerId,
+    planId: new mongoose.Types.ObjectId(),
+    status: "trialing",
+    seatCount: 2,
+    pricePerSeat: 5000,
+    totalPrice: 10000,
+    provider: "manual",
+    currentPeriodStart: new Date("2026-07-01T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+  });
+
+  const attempt = await SubscriptionPaymentAttempt.create({
+    purpose: "subscription",
+    ownerType: "salon",
+    ownerId: salonId,
+    payerId: ownerId,
+    subscriptionId,
+    provider: "manual",
+    providerPaymentId,
+    providerIntentId: providerPaymentId,
+    amount: 15000,
+    currency: "AMD",
+    seatCount: 3,
+    months: 1,
+    status: attemptStatus,
+    metadata: { action: "renew" },
+  });
+
+  return { attempt, salonId, ownerId, subscriptionId };
+};
+
+test(
+  "real Mongo confirmSalonPayment fails closed before mutation when a transaction session is unavailable",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_confirm_tx_unavailable");
+    const providerPaymentId = `platform_confirm_unavailable_${Date.now()}`;
+    const { attempt, salonId, subscriptionId } = await createFixture({ providerPaymentId });
+
+    let attemptReadCount = 0;
+    const originalFindById = SubscriptionPaymentAttempt.findById;
+    SubscriptionPaymentAttempt.findById = function wrappedFindById(...args) {
+      attemptReadCount++;
+      return originalFindById.apply(this, args);
+    };
+    mongoose.startSession = async () => null;
+
+    try {
+      await assert.rejects(
+        () =>
+          confirmSalonPayment(String(attempt._id), {
+            actor: { _id: actorId },
+            note: "Manual payment verified",
+            requestIp,
+          }),
+        (error) =>
+          error.statusCode === 503 &&
+          error.code === "PAYMENT_CONFIRMATION_TRANSACTION_UNAVAILABLE"
+      );
+    } finally {
+      SubscriptionPaymentAttempt.findById = originalFindById;
+    }
+    assert.equal(attemptReadCount, 0);
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
+      0
+    );
+    assert.equal(
+      await PlatformAuditLog.countDocuments({
+        paymentAttemptId: attempt._id,
+        action: "salon_subscription.payment_confirm",
+      }),
+      0
+    );
+
+    const refreshedAttempt = await SubscriptionPaymentAttempt.findById(attempt._id).lean();
+    const refreshedSubscription = await Subscription.findById(subscriptionId).lean();
+    assert.equal(refreshedAttempt.status, "pending");
+    assert.equal(refreshedAttempt.paidAt, null);
+    assert.equal(refreshedAttempt.confirmedAt, null);
+    assert.equal(refreshedSubscription.status, "trialing");
+    assert.equal(refreshedSubscription.seatCount, 2);
+  }
+);
+
+test(
+  "real Mongo confirmSalonPayment confirms atomically and creates one payment record and audit log",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_confirm_success");
+    const providerPaymentId = `platform_confirm_${Date.now()}`;
+    const { attempt, salonId, subscriptionId } = await createFixture({ providerPaymentId });
+
+    const result = await confirmSalonPayment(String(attempt._id), {
+      actor: { _id: actorId },
+      note: "Manual payment verified",
+      requestIp,
+    });
+
+    assert.equal(result.salon.id.toString(), String(salonId));
+    assert.equal(result.subscription.status, "active");
+    assert.equal(result.subscription.seatCount, 3);
+    assert.equal(result.latestPendingAttempt, null);
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
+      1
+    );
+    assert.equal(
+      await PlatformAuditLog.countDocuments({
+        paymentAttemptId: attempt._id,
+        action: "salon_subscription.payment_confirm",
+      }),
+      1
+    );
+
+    const refreshedAttempt = await SubscriptionPaymentAttempt.findById(attempt._id).lean();
+    assert.equal(refreshedAttempt.status, "paid");
+    assert.ok(refreshedAttempt.paidAt);
+    assert.ok(refreshedAttempt.confirmedAt);
+  }
+);
+
+test(
+  "real Mongo simultaneous duplicate confirmSalonPayment calls mutate once",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_confirm_duplicate");
+    const providerPaymentId = `platform_confirm_dupe_${Date.now()}`;
+    const { attempt, salonId, subscriptionId } = await createFixture({ providerPaymentId });
+
+    const results = await Promise.allSettled([
+      confirmSalonPayment(String(attempt._id), {
+        actor: { _id: actorId },
+        note: "Manual payment verified",
+        requestIp,
+      }),
+      confirmSalonPayment(String(attempt._id), {
+        actor: { _id: actorId },
+        note: "Manual payment verified",
+        requestIp,
+      }),
+    ]);
+
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+    assert.match(
+      results.find((result) => result.status === "rejected").reason.message,
+      /cannot be confirmed/i
+    );
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
+      1
+    );
+    assert.equal(
+      await PlatformAuditLog.countDocuments({
+        paymentAttemptId: attempt._id,
+        action: "salon_subscription.payment_confirm",
+      }),
+      1
+    );
+  }
+);
+
+test(
+  "real Mongo confirmSalonPayment rolls back payment, subscription, payment record, and audit on failure and retries once",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_confirm_rollback");
+    const providerPaymentId = `platform_confirm_rollback_${Date.now()}`;
+    const { attempt, salonId, subscriptionId } = await createFixture({ providerPaymentId });
+
+    let failOnce = true;
+    PlatformAuditLog.create = async function patchedCreate(docs, options) {
+      const session = options?.session;
+      if (failOnce) {
+        const visibleAttempt = await SubscriptionPaymentAttempt.findById(
+          attempt._id,
+          null,
+          session ? { session } : undefined
+        );
+        const visibleSubscription = await Subscription.findById(
+          subscriptionId,
+          null,
+          session ? { session } : undefined
+        );
+        const visiblePayment = await PaymentRecord.findOne(
+          { subscriptionId, ownerType: "salon", ownerId: salonId },
+          null,
+          session ? { session } : undefined
+        );
+        assert.equal(visibleAttempt.status, "paid");
+        assert.equal(visibleSubscription.status, "active");
+        assert.ok(visiblePayment);
+        failOnce = false;
+        throw new Error("force audit transaction failure");
+      }
+
+      return originals.platformAuditLogCreate.call(this, docs, options);
+    };
+
+    await assert.rejects(
+      () =>
+        confirmSalonPayment(String(attempt._id), {
+          actor: { _id: actorId },
+          note: "Manual payment verified",
+          requestIp,
+        }),
+      /force audit transaction failure/
+    );
+
+    let refreshedAttempt = await SubscriptionPaymentAttempt.findById(attempt._id).lean();
+    let refreshedSubscription = await Subscription.findById(subscriptionId).lean();
+    assert.equal(refreshedAttempt.status, "pending");
+    assert.equal(refreshedAttempt.paidAt, null);
+    assert.equal(refreshedAttempt.confirmedAt, null);
+    assert.equal(refreshedSubscription.status, "trialing");
+    assert.equal(refreshedSubscription.seatCount, 2);
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
+      0
+    );
+    assert.equal(
+      await PlatformAuditLog.countDocuments({
+        paymentAttemptId: attempt._id,
+        action: "salon_subscription.payment_confirm",
+      }),
+      0
+    );
+
+    const retry = await confirmSalonPayment(String(attempt._id), {
+      actor: { _id: actorId },
+      note: "Manual payment verified",
+      requestIp,
+    });
+
+    assert.equal(retry.subscription.status, "active");
+    refreshedAttempt = await SubscriptionPaymentAttempt.findById(attempt._id).lean();
+    refreshedSubscription = await Subscription.findById(subscriptionId).lean();
+    assert.equal(refreshedAttempt.status, "paid");
+    assert.equal(refreshedSubscription.status, "active");
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
+      1
+    );
+    assert.equal(
+      await PlatformAuditLog.countDocuments({
+        paymentAttemptId: attempt._id,
+        action: "salon_subscription.payment_confirm",
+      }),
+      1
+    );
+  }
+);

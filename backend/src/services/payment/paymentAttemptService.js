@@ -1,6 +1,7 @@
 import Booking from "../../models/Booking.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import { runInRequiredTransaction } from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
 import { extendManualSubscription, serializeSubscriptionStatus } from "../subscriptionService.js";
 import { applyPaymentAttemptTransition } from "./paymentAttemptState.js";
 import {
@@ -14,6 +15,11 @@ const getIdString = (value) => {
   if (typeof value.id === "string") return value.id;
   return String(value);
 };
+
+const TERMINAL_STATUSES = new Set(["paid", "failed", "refunded", "cancelled", "expired"]);
+
+const isTerminalIdempotentStatus = (currentStatus, nextStatus) =>
+  currentStatus === nextStatus && TERMINAL_STATUSES.has(nextStatus);
 
 const serializePaymentAttempt = (attempt) => {
   if (!attempt) return null;
@@ -30,11 +36,11 @@ const serializePaymentAttempt = (attempt) => {
     subscriptionId: raw.subscriptionId || null,
     amount: raw.amount,
     currency: raw.currency,
+    metadata: raw.metadata ?? {},
     status: raw.status,
     provider: raw.provider,
     providerPaymentId: raw.providerPaymentId || raw.providerIntentId || null,
     checkoutUrl: raw.checkoutUrl || null,
-    metadata: raw.metadata || {},
     paidAt: raw.paidAt || null,
     confirmedAt: raw.confirmedAt || null,
     failedAt: raw.failedAt || null,
@@ -139,7 +145,11 @@ const normalizeWebhookStatus = (event) => {
   return null;
 };
 
-const findAttemptForWebhookEvent = async ({ providerName, providerPaymentId }) => {
+const findAttemptForWebhookEvent = async ({
+  providerName,
+  providerPaymentId,
+  session = null,
+}) => {
   if (!providerPaymentId) {
     const error = new Error("Webhook event is missing provider payment id");
     error.code = "WEBHOOK_PAYMENT_ID_MISSING";
@@ -147,13 +157,17 @@ const findAttemptForWebhookEvent = async ({ providerName, providerPaymentId }) =
     throw error;
   }
 
-  const attempt = await SubscriptionPaymentAttempt.findOne({
-    provider: providerName,
-    $or: [
-      { providerPaymentId },
-      { providerIntentId: providerPaymentId },
-    ],
-  });
+  const attempt = await SubscriptionPaymentAttempt.findOne(
+    {
+      provider: providerName,
+      $or: [
+        { providerPaymentId },
+        { providerIntentId: providerPaymentId },
+      ],
+    },
+    null,
+    session ? { session } : undefined
+  );
 
   if (!attempt) {
     const error = new Error("Payment attempt not found for webhook event");
@@ -164,6 +178,13 @@ const findAttemptForWebhookEvent = async ({ providerName, providerPaymentId }) =
 
   return attempt;
 };
+
+const findAttemptById = (attemptId, session = null) =>
+  SubscriptionPaymentAttempt.findOne(
+    { _id: attemptId },
+    null,
+    session ? { session } : undefined
+  );
 
 export const processPaymentWebhook = async ({
   rawBody,
@@ -179,82 +200,99 @@ export const processPaymentWebhook = async ({
     return { ignored: true, message: "Unsupported payment webhook event" };
   }
 
-  const attempt = await findAttemptForWebhookEvent({
-    providerName,
-    providerPaymentId: event.providerPaymentId,
-  });
   const eventId =
     event.id || `${providerName}:${event.providerPaymentId}:${nextStatus}`;
-
-  if (attempt.processedWebhookEventIds?.includes(eventId)) {
-    return {
-      idempotent: true,
-      paymentAttempt: serializePaymentAttempt(attempt),
-    };
-  }
-
-  const transition = applyPaymentAttemptTransition(attempt, nextStatus, now);
-  attempt.processedWebhookEventIds = [
-    ...(attempt.processedWebhookEventIds || []),
-    eventId,
-  ];
-
-  let subscription = null;
-  let booking = null;
-
-  if (!transition.idempotent && nextStatus === "paid") {
-    if ((attempt.purpose || "subscription") === "subscription") {
-      subscription = await extendManualSubscription({
-        ownerType: attempt.ownerType,
-        ownerId: attempt.ownerId,
-        payerId: attempt.payerId,
-        seatCount: attempt.seatCount,
-        months: attempt.months,
-        now,
-      });
-      attempt.subscriptionId = subscription._id;
+  const run = async (session = null) => {
+    const options = session ? { session } : undefined;
+    const attempt = await findAttemptForWebhookEvent({
+      providerName,
+      providerPaymentId: event.providerPaymentId,
+      session,
+    });
+    const claimed = await SubscriptionPaymentAttempt.findOneAndUpdate(
+      { _id: attempt._id, processedWebhookEventIds: { $ne: eventId } },
+      { $push: { processedWebhookEventIds: { $each: [eventId], $slice: -100 } } },
+      { returnDocument: "after", ...options }
+    );
+    if (!claimed) {
+      const current = await findAttemptById(attempt._id, session);
+      return { idempotent: true, paymentAttempt: serializePaymentAttempt(current) };
     }
 
-    if (attempt.purpose === "booking_deposit") {
-      booking = await Booking.findById(attempt.bookingId);
-      if (booking && booking.depositStatus !== "paid") {
-        booking.depositStatus = "paid";
-        await booking.save();
+    if (isTerminalIdempotentStatus(claimed.status, nextStatus)) {
+      return {
+        idempotent: true,
+        paymentAttempt: serializePaymentAttempt(claimed),
+        attempt: claimed,
+      };
+    }
+
+    const transition = applyPaymentAttemptTransition(claimed, nextStatus, now);
+    let subscription = null;
+    let booking = null;
+
+    if (
+      !transition.idempotent &&
+      nextStatus === "paid" &&
+      (claimed.purpose || "subscription") === "subscription"
+    ) {
+      subscription = await extendManualSubscription({
+        ownerType: claimed.ownerType,
+        ownerId: claimed.ownerId,
+        payerId: claimed.payerId,
+        seatCount: claimed.seatCount,
+        months: claimed.months,
+        now,
+        session,
+      });
+      claimed.subscriptionId = subscription._id;
+    }
+
+    if (
+      !transition.idempotent &&
+      claimed.purpose === "booking_deposit" &&
+      ["paid", "failed", "refunded"].includes(nextStatus)
+    ) {
+      booking = await Booking.findById(claimed.bookingId, null, options);
+      const target = { paid: "paid", failed: "failed", refunded: "refunded" }[nextStatus];
+      const expected = { paid: "pending", failed: "pending", refunded: "paid" }[nextStatus];
+      if (booking && booking.depositStatus === expected) {
+        booking.depositStatus = target;
+        await booking.save(options);
       }
     }
-  }
 
-  if (!transition.idempotent && nextStatus === "failed" && attempt.purpose === "booking_deposit") {
-    booking = await Booking.findById(attempt.bookingId);
-    if (booking && booking.depositStatus === "pending") {
-      booking.depositStatus = "failed";
-      await booking.save();
+    if (!transition.idempotent) {
+      await claimed.save(options);
     }
-  }
+    return {
+      idempotent: transition.idempotent,
+      paymentAttempt: serializePaymentAttempt(claimed),
+      subscription,
+      booking,
+      attempt: claimed,
+    };
+  };
 
-  if (!transition.idempotent && nextStatus === "refunded" && attempt.purpose === "booking_deposit") {
-    booking = await Booking.findById(attempt.bookingId);
-    if (booking && booking.depositStatus === "paid") {
-      booking.depositStatus = "refunded";
-      await booking.save();
-    }
-  }
+  const result = await runInRequiredTransaction(async (session) => run(session));
 
-  await attempt.save();
+  if (result.idempotent) return result;
+  const { subscription, booking, attempt: processedAttempt } = result;
+  const attemptForResponse = processedAttempt;
 
   return {
-    idempotent: transition.idempotent,
-    paymentAttempt: serializePaymentAttempt(attempt),
+    idempotent: result.idempotent,
+    paymentAttempt: result.paymentAttempt,
     subscription: subscription
       ? serializeSubscriptionStatus(subscription, null, now)
-      : attempt.subscriptionId
+      : attemptForResponse.subscriptionId
         ? serializeSubscriptionStatus(
-            await Subscription.findById(attempt.subscriptionId),
+            await Subscription.findById(attemptForResponse.subscriptionId),
             null,
             now
           )
         : null,
-    bookingId: booking ? getIdString(booking._id) : getIdString(attempt.bookingId),
+    bookingId: booking ? getIdString(booking._id) : getIdString(attemptForResponse.bookingId),
   };
 };
 

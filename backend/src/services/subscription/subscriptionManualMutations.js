@@ -1,6 +1,7 @@
 import User from "../../models/User.js";
 import Salon from "../../models/Salon.js";
 import Subscription from "../../models/Subscription.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import PaymentRecord from "../../models/PaymentRecord.js";
 import {
   sameId,
@@ -11,11 +12,54 @@ import {
 } from "./subscriptionPlanHelpers.js";
 import {
   GRACE_DAYS,
+  DEFAULT_PLAN_CODE,
   PAID_SUBSCRIPTION_STATUSES,
   MANUAL_PROVIDER,
   addDays,
   addMonths,
 } from "./subscriptionHelpers.js";
+
+const createWithOptionalSession = async (Model, payload, session) => {
+  if (!session) return Model.create(payload);
+
+  const [document] = await Model.create([payload], { session });
+  return document;
+};
+
+const getOrCreateDefaultSubscriptionPlanWithSession = async (session = null) => {
+  if (!session) {
+    return getOrCreateDefaultSubscriptionPlan();
+  }
+
+  const options = { session };
+  const existing = await SubscriptionPlan.findOne({ code: DEFAULT_PLAN_CODE }, null, options);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await createWithOptionalSession(
+      SubscriptionPlan,
+      {
+        name: "Barber Monthly",
+        code: DEFAULT_PLAN_CODE,
+        pricePerSeat: 5000,
+        currency: "AMD",
+        interval: "month",
+        features: [
+          "Accept unlimited bookings",
+          "Manage your schedule",
+          "Client management",
+        ],
+        isActive: true,
+      },
+      session
+    );
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+    return SubscriptionPlan.findOne({ code: DEFAULT_PLAN_CODE }, null, options);
+  }
+};
 
 /**
  * Grant active subscription and paid PaymentRecord to all existing barbers without a current active subscription.
@@ -128,6 +172,8 @@ export const extendManualSubscription = async ({
   seatCount = 1,
   months = 1,
   requester = null,
+  now = new Date(),
+  session = null,
 }) => {
   if (!["barber", "salon"].includes(ownerType)) {
     const error = new Error("ownerType must be 'barber' or 'salon'");
@@ -167,7 +213,11 @@ export const extendManualSubscription = async ({
     }
 
     if (ownerType === "salon") {
-      const salon = await Salon.findById(ownerId);
+      const salon = await Salon.findById(
+        ownerId,
+        null,
+        session ? { session } : undefined
+      );
       if (!salon) {
         const error = new Error("Salon not found");
         error.statusCode = 404;
@@ -197,15 +247,18 @@ export const extendManualSubscription = async ({
     throw error;
   }
 
-  const plan = await getOrCreateDefaultSubscriptionPlan();
-
-  const now = new Date();
+  const plan = await getOrCreateDefaultSubscriptionPlanWithSession(session);
   const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
+  const queryOptions = session ? { session } : undefined;
 
-  let subscription = await Subscription.findOne({
-    ownerType,
-    ownerId,
-  });
+  let subscription = await Subscription.findOne(
+    {
+      ownerType,
+      ownerId,
+    },
+    null,
+    queryOptions
+  );
 
   const isContinuingSubscription =
     subscription &&
@@ -230,39 +283,47 @@ export const extendManualSubscription = async ({
     subscription.payerId = payerId;
     subscription.planId = plan._id;
     subscription.provider = MANUAL_PROVIDER;
-    await subscription.save();
+    await subscription.save(queryOptions);
   } else {
-    subscription = await Subscription.create({
-      ownerType,
-      ownerId,
-      ownerRefModel: ownerType === "barber" ? "User" : "Salon",
-      payerId,
-      planId: plan._id,
-      status: "active",
-      seatCount: normalizedSeatCount,
-      pricePerSeat: plan.pricePerSeat,
-      totalPrice: monthlyTotal,
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-      provider: MANUAL_PROVIDER,
-      lastPaymentAt: now,
-    });
+    subscription = await createWithOptionalSession(
+      Subscription,
+      {
+        ownerType,
+        ownerId,
+        ownerRefModel: ownerType === "barber" ? "User" : "Salon",
+        payerId,
+        planId: plan._id,
+        status: "active",
+        seatCount: normalizedSeatCount,
+        pricePerSeat: plan.pricePerSeat,
+        totalPrice: monthlyTotal,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        provider: MANUAL_PROVIDER,
+        lastPaymentAt: now,
+      },
+      session
+    );
   }
 
-  await PaymentRecord.create({
-    subscriptionId: subscription._id,
-    payerId,
-    ownerType,
-    ownerId,
-    amount: monthlyTotal * normalizedMonths,
-    currency: plan.currency,
-    seatCount: normalizedSeatCount,
-    periodStart,
-    periodEnd,
-    status: "paid",
-    provider: MANUAL_PROVIDER,
-    paidAt: now,
-  });
+  await createWithOptionalSession(
+    PaymentRecord,
+    {
+      subscriptionId: subscription._id,
+      payerId,
+      ownerType,
+      ownerId,
+      amount: monthlyTotal * normalizedMonths,
+      currency: plan.currency,
+      seatCount: normalizedSeatCount,
+      periodStart,
+      periodEnd,
+      status: "paid",
+      provider: MANUAL_PROVIDER,
+      paidAt: now,
+    },
+    session
+  );
 
   return subscription;
 };

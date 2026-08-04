@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import Booking from "../../models/Booking.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
@@ -9,7 +10,13 @@ const originalEnv = process.env.NODE_ENV;
 const originalProvider = process.env.PAYMENT_PROVIDER;
 const originalSecret = process.env.PAYMENT_WEBHOOK_SECRET;
 const originalAttemptFindOne = SubscriptionPaymentAttempt.findOne;
+const originalAttemptFindOneAndUpdate = SubscriptionPaymentAttempt.findOneAndUpdate;
 const originalBookingFindById = Booking.findById;
+const originalStartSession = mongoose.startSession;
+const readyStateDescriptor = Object.getOwnPropertyDescriptor(
+  mongoose.connection,
+  "readyState"
+);
 
 afterEach(() => {
   process.env.NODE_ENV = originalEnv;
@@ -24,7 +31,14 @@ afterEach(() => {
     process.env.PAYMENT_WEBHOOK_SECRET = originalSecret;
   }
   SubscriptionPaymentAttempt.findOne = originalAttemptFindOne;
+  SubscriptionPaymentAttempt.findOneAndUpdate = originalAttemptFindOneAndUpdate;
   Booking.findById = originalBookingFindById;
+  mongoose.startSession = originalStartSession;
+  if (readyStateDescriptor) {
+    Object.defineProperty(mongoose.connection, "readyState", readyStateDescriptor);
+  } else {
+    delete mongoose.connection.readyState;
+  }
 });
 
 test("production manual provider rejects unsigned fake paid webhook", async () => {
@@ -51,6 +65,16 @@ test("duplicate paid deposit webhook is idempotent", async () => {
   process.env.NODE_ENV = "development";
   process.env.PAYMENT_PROVIDER = "mock";
   process.env.PAYMENT_WEBHOOK_SECRET = "test-secret";
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    get: () => 1,
+  });
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      return callback();
+    },
+    async endSession() {},
+  });
 
   const booking = {
     _id: "booking-1",
@@ -62,7 +86,7 @@ test("duplicate paid deposit webhook is idempotent", async () => {
     },
   };
   const attempt = {
-    _id: "attempt-1",
+    _id: "507f1f77bcf86cd799439011",
     purpose: "booking_deposit",
     ownerType: "barber",
     ownerId: "barber-1",
@@ -82,6 +106,11 @@ test("duplicate paid deposit webhook is idempotent", async () => {
   };
 
   SubscriptionPaymentAttempt.findOne = async () => attempt;
+  SubscriptionPaymentAttempt.findOneAndUpdate = async (filter, update) => {
+    if (attempt.processedWebhookEventIds.includes(update.$push.processedWebhookEventIds.$each[0])) return null;
+    attempt.processedWebhookEventIds.push(...update.$push.processedWebhookEventIds.$each);
+    return attempt;
+  };
   Booking.findById = async () => booking;
 
   const rawBody = Buffer.from(
@@ -102,4 +131,63 @@ test("duplicate paid deposit webhook is idempotent", async () => {
   assert.equal(booking.depositStatus, "paid");
   assert.equal(booking.saveCount, 1);
   assert.equal(attempt.saveCount, 1);
+});
+
+test("webhook processing fails closed before mutation when transactions are unavailable", async () => {
+  process.env.NODE_ENV = "development";
+  process.env.PAYMENT_PROVIDER = "mock";
+  process.env.PAYMENT_WEBHOOK_SECRET = "test-secret";
+
+  let attemptedRead = false;
+  SubscriptionPaymentAttempt.findOne = async () => {
+    attemptedRead = true;
+    throw new Error("should not read attempts without a transaction");
+  };
+
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    get: () => 0,
+  });
+
+  await assert.rejects(
+    () =>
+      processPaymentWebhook({
+        rawBody: Buffer.from(
+          JSON.stringify({
+            id: "evt_requires_tx",
+            type: "payment.paid",
+            providerPaymentId: "mock-payment-no-session",
+          })
+        ),
+        headers: { "x-payment-webhook-secret": "test-secret" },
+      }),
+    (error) =>
+      error.statusCode === 503 &&
+      error.code === "PAYMENT_CONFIRMATION_TRANSACTION_UNAVAILABLE"
+  );
+
+  assert.equal(attemptedRead, false);
+});
+
+test("payment-attempt schema rejects unsafe references, numbers, currency, metadata, and event growth", async () => {
+  const base = {
+    purpose: "booking_deposit",
+    ownerType: "barber",
+    ownerId: "507f1f77bcf86cd799439012",
+    payerId: "507f1f77bcf86cd799439013",
+    bookingId: "507f1f77bcf86cd799439014",
+    amount: 100,
+    currency: "AMD",
+    seatCount: 1,
+    months: 1,
+  };
+  await assert.doesNotReject(() => new SubscriptionPaymentAttempt(base).validate());
+  const subscriptionBase = { ...base, purpose: "subscription", bookingId: null };
+  await assert.doesNotReject(() => new SubscriptionPaymentAttempt(subscriptionBase).validate());
+  await assert.rejects(() => new SubscriptionPaymentAttempt({ ...subscriptionBase, status: "paid" }).validate());
+  await assert.rejects(() => new SubscriptionPaymentAttempt({ ...base, amount: 1.5 }).validate());
+  await assert.rejects(() => new SubscriptionPaymentAttempt({ ...base, currency: "USD" }).validate());
+  await assert.rejects(() => new SubscriptionPaymentAttempt({ ...base, subscriptionId: base.bookingId }).validate());
+  await assert.rejects(() => new SubscriptionPaymentAttempt({ ...base, metadata: { nested: { a: { b: { c: { d: { e: 1 } } } } } } }).validate());
+  await assert.rejects(() => new SubscriptionPaymentAttempt({ ...base, processedWebhookEventIds: Array.from({ length: 101 }, (_, i) => `evt-${i}`) }).validate());
 });

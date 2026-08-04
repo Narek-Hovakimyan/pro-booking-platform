@@ -34,50 +34,6 @@ const isApprovedMember = (barber, salonId) => {
   return isAcceptedSalonStaffMember(barber, salonId);
 };
 
-/* ───────────────────────────────────────────────────────────
- *  Default plan & basic subscription helpers (Phase 1)
- * ─────────────────────────────────────────────────────────── */
-
-/**
- * Get or create the default subscription plan.
- * Idempotent — safe to call repeatedly.
- */
-/**
- * Get subscription by owner type and owner ID, populated with plan.
- */
-/**
- * Create a trial subscription for a barber or salon owner.
- * Idempotent — if a subscription already exists for this owner, returns it.
- */
-/**
- * Check if a barber has paid access to the platform.
- * Returns true if:
- *   1. The barber has an active or trialing individual subscription, OR
- *   2. The barber has an active SubscriptionSeat whose parent salon subscription
- *      is active or trialing.
- */
-
-/**
- * Get a user's subscription access details.
- * For barbers: returns individual subscription and salon seat coverage.
- * For clients: returns a clear "not applicable" indicator.
- */
-/* ══════════════════════════════════════════════════════════
- *  Phase 2 — Salon seat assignment
- * ══════════════════════════════════════════════════════════ */
-
-/* ── Internal authorization helpers ─────────────────────── */
-
-/**
- * Fetch a salon and verify the requester is the owner or an admin.
- * On success returns the salon document.
- * Throws an error with a statusCode property on failure.
- */
-/**
- * Check if a barber user is accepted staff for the given salon.
- */
-/* ── Public service functions ───────────────────────────── */
-
 export const revokeSalonSeatsForRemovedMember = async ({
   salonId,
   barberId,
@@ -114,23 +70,6 @@ export const revokeSalonSeatsForRemovedMember = async ({
   };
 };
 
-/**
- * Get salon subscription details including seats and approved members.
- *
- * @param {Object} params
- * @param {string} params.salonId
- * @param {Object} params.requester - Express req.user (must have _id)
- * @returns {Object} { subscription, activeSeats, revokedSeats, availableSeatCount, approvedMembers }
- */
-/**
- * Assign a salon subscription seat to a barber.
- *
- * @param {Object} params
- * @param {string} params.salonId
- * @param {string} params.barberId
- * @param {Object} params.assignedBy - Express req.user (must have _id)
- * @returns {Object} the SubscriptionSeat document
- */
 export const assignSalonSubscriptionSeat = async ({
   salonId,
   barberId,
@@ -251,14 +190,6 @@ export const assignSalonSubscriptionSeat = async ({
   }
 };
 
-/**
- * Revoke an active salon subscription seat.
- *
- * @param {Object} params
- * @param {string} params.seatId
- * @param {Object} params.requester - Express req.user (must have _id)
- * @returns {Object} the updated SubscriptionSeat
- */
 export const revokeSalonSubscriptionSeat = async ({ seatId, requester }) => {
   if (!requester?._id) {
     const err = new Error("Authentication required");
@@ -293,20 +224,6 @@ export const revokeSalonSubscriptionSeat = async ({ seatId, requester }) => {
 
   return seat;
 };
-
-/**
- * Update the seat count of a salon subscription.
- *
- * @param {Object} params
- * @param {string} params.salonId
- * @param {number} params.seatCount - New seat count (>= 1)
- * @param {Object} params.requester - Express req.user (must have _id)
- * @returns {Object} the updated Subscription
- */
-/**
- * Confirm a subscription seat update (no period extension).
- * Used for action=update_seats — updates seatCount without changing currentPeriodEnd.
- */
 
 export const updateSalonSubscriptionSeatCount = async ({
   salonId,
