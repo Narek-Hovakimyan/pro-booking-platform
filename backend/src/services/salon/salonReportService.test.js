@@ -643,6 +643,19 @@ test("CSV export uses report owner/admin and salon subscription checks", async (
   assert.match(adminExport.filename, /^salon-reports-test-salon-/);
 });
 
+test("CSV export handles empty results without changing the filename shape", async () => {
+  const exportData = await setupCsvExport({
+    bookings: [],
+    members: [],
+  });
+
+  assert.match(exportData.filename, /^salon-reports-test-salon-2026-06-15-to-2026-06-15\.csv$/);
+  assert.match(exportData.content, /Total bookings,0/);
+  assert.match(exportData.content, /Gross revenue,0/);
+  assert.match(exportData.content, /Staff earnings total,0/);
+  assert.match(exportData.content, /Salon earnings total,0/);
+});
+
 test("CSV export reuses report filtering and safe earnings fields", async () => {
   const exportData = await setupCsvExport({
     members: [
