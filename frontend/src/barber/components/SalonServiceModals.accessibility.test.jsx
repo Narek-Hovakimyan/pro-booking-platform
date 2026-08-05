@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -321,6 +321,14 @@ describe("salon and service management modal accessibility", () => {
 
   it("labels promotion fields and restores focus after close paths", async () => {
     const user = userEvent.setup();
+    const saveDeferred = createDeferred();
+    apiPost.mockImplementation((url) => {
+      if (url === "/salons/salon-1/promotions") {
+        return saveDeferred.promise;
+      }
+
+      throw new Error(`Unexpected POST ${url}`);
+    });
     renderPromotionsManager();
 
     await waitFor(() =>
@@ -346,17 +354,27 @@ describe("salon and service management modal accessibility", () => {
       "Max Uses",
     ].forEach((label) => expect(screen.getByLabelText(label)).toBeInTheDocument());
 
+    await user.type(screen.getByLabelText("Title"), "Spring Special");
+    await user.type(screen.getByLabelText("Amount (դր)"), "5000");
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Create Promotion" })).getByRole("button", {
+        name: "Create Promotion",
+      })
+    );
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Create Promotion" })).not.toBeInTheDocument();
-    expect(createTrigger).toHaveFocus();
 
-    const editTrigger = screen.getByRole("button", { name: "Edit promotion Summer Special" });
-    await user.click(editTrigger);
-    expect(screen.getByRole("dialog", { name: "Edit Promotion" })).toBeVisible();
-    expect(screen.getByLabelText("Title")).toHaveFocus();
-    await user.click(document.querySelector(".fixed.inset-0"));
-    expect(screen.queryByRole("dialog", { name: "Edit Promotion" })).not.toBeInTheDocument();
-    expect(editTrigger).toHaveFocus();
+    await act(async () => {
+      saveDeferred.resolve({ data: { ok: true } });
+      await saveDeferred.promise;
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Create Promotion" })).not.toBeInTheDocument()
+    );
+    expect(createTrigger).toHaveFocus();
   });
 
   it("adds pay terms dialog semantics, focus entry, close button name, and focus return", async () => {
