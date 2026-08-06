@@ -638,3 +638,99 @@ test("overlap failure restores entry to offered", async () => {
   );
   assert.ok(restoreCall, "entry was restored to offered");
 });
+
+test("accept rejects stale claim when offer disappears before conversion", async () => {
+  mockBarberPaidAccess();
+  const entry = createMockEntry({
+    _id: "accept-stale-claim",
+    status: "offered",
+    offeredTime: "15:00",
+    offeredAt: new Date(),
+  });
+  let bookingCreated = 0;
+
+  WaitlistEntry.findOne = async (query) => {
+    if (String(query._id) === "accept-stale-claim" && query.status === "offered") return entry;
+    return null;
+  };
+  WaitlistEntry.findOneAndUpdate = async (query) => {
+    if (String(query._id) !== String(entry._id)) return null;
+    if (query.status === "offered") return null;
+    return entry;
+  };
+  User.findById = (id) => ({
+    select: async () => {
+      if (String(id) === String(clientId)) return { _id: clientId, name: "Client" };
+      if (String(id) === String(barberId)) return { _id: barberId, name: "Barber", role: "barber" };
+      return null;
+    },
+  });
+  Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
+  Salon.findById = async () => null;
+  Booking.find = async () => [];
+  Booking.create = async () => {
+    bookingCreated += 1;
+    return null;
+  };
+
+  await assert.rejects(
+    () => acceptWaitlistOffer({ entryId: "accept-stale-claim", clientId }),
+    (err) => {
+      assert.equal(err.code, "CONFLICT");
+      return true;
+    }
+  );
+
+  assert.equal(bookingCreated, 0);
+  assert.equal(entry.status, "offered");
+});
+
+test("accept restores offered entry when booking creation fails", async () => {
+  mockBarberPaidAccess();
+  const entry = createMockEntry({
+    _id: "accept-rollback",
+    status: "offered",
+    offeredTime: "15:30",
+    offeredAt: new Date(),
+  });
+
+  WaitlistEntry.findOne = async (query) => {
+    if (String(query._id) === "accept-rollback" && query.status === "offered") return entry;
+    return null;
+  };
+  let claimed = false;
+  WaitlistEntry.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(entry._id)) return null;
+    if (query.status === "offered" && !claimed) {
+      claimed = true;
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    if (query.status === "converting") {
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    return null;
+  };
+  User.findById = (id) => ({
+    select: async () => {
+      if (String(id) === String(clientId)) return { _id: clientId, name: "Client" };
+      if (String(id) === String(barberId)) return { _id: barberId, name: "Barber", role: "barber" };
+      return null;
+    },
+  });
+  Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
+  Salon.findById = async () => null;
+  Booking.find = async () => [];
+  Booking.create = async () => {
+    throw new Error("booking write failed");
+  };
+
+  await assert.rejects(
+    () => acceptWaitlistOffer({ entryId: "accept-rollback", clientId }),
+    /booking write failed/
+  );
+
+  assert.equal(entry.status, "offered");
+  assert.equal(entry.convertedBooking, null);
+});

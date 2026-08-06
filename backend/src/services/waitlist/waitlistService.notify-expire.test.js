@@ -387,6 +387,7 @@ test("notifyMatchingWaitlistEntries requires barberId and date", async () => {
 test("concurrent notifyMatchingWaitlistEntries calls only notify once", async () => {
   const mockEntry = createMockEntry({ _id: "entry-concurrent-notify" });
   let notificationCount = 0;
+  let notificationPayloads = [];
   let claimed = false;
 
   WaitlistEntry.find = async () => [mockEntry];
@@ -404,6 +405,7 @@ test("concurrent notifyMatchingWaitlistEntries calls only notify once", async ()
   });
   Notification.create = async (payload) => {
     notificationCount += 1;
+    notificationPayloads.push(payload);
     return payload;
   };
 
@@ -414,6 +416,12 @@ test("concurrent notifyMatchingWaitlistEntries calls only notify once", async ()
 
   assert.equal(counts[0] + counts[1], 1);
   assert.equal(notificationCount, 1);
+  assert.equal(
+    notificationPayloads[0].internalHash,
+    createHash("sha256")
+      .update(`waitlist-slot-available:${mockEntry._id}:${futureDate}:10:00`)
+      .digest("hex")
+  );
   assert.equal(mockEntry.status, "notified");
 });
 
