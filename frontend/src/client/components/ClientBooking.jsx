@@ -1,18 +1,14 @@
-import { useNavigate } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
-import { Store } from "lucide-react";
+import { useEffect, useRef } from "react";
 
-import { Card, CardContent } from "@/shared/components/ui/card";
-import { Button } from "@/shared/components/ui/button";
-import ServiceStep from "@/client/components/booking/ServiceStep";
-import ClientDetailsStep from "@/client/components/booking/ClientDetailsStep";
-import BookingConfirmationModal from "@/client/components/booking/BookingConfirmationModal";
-import WaitlistForm from "@/client/components/waitlist/WaitlistForm";
-import { useBooking } from "@/shared/hooks/useBooking";
-import api from "@/shared/api/axios";
-import { getFriendlyApiError } from "@/shared/api/errors";
-import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { formatDateKey, getDayKeyFromDate, parseDateKey } from "@/shared/utils/dates";
+import { getServicePriceInfo } from "@/shared/data/serviceCategories";
+import { useBooking } from "@/shared/hooks/useBooking";
+import { useClientBookingState } from "@/client/hooks/useClientBookingState";
+import { useClientBookingSalon } from "@/client/hooks/useClientBookingSalon";
+import { useClientBookingVoucher } from "@/client/hooks/useClientBookingVoucher";
+import { useClientBookingConfirmation } from "@/client/hooks/useClientBookingConfirmation";
+import { useClientBookingSubmission } from "@/client/hooks/useClientBookingSubmission";
+import ClientBookingStepContent from "@/client/components/booking/ClientBookingStepContent";
 
 export default function ClientBooking({
   barber,
@@ -44,224 +40,208 @@ export default function ClientBooking({
   isServiceDataLoading = false,
   onRefreshServices,
 }) {
-  const navigate = useNavigate();
   const { createBooking } = useBooking();
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [confirmationService, setConfirmationService] = useState(null);
-  const [isPreparingConfirmation, setIsPreparingConfirmation] = useState(false);
-  const [bookingQuote, setBookingQuote] = useState(null);
-  const [isQuoteLoading, setIsQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState("");
-  const [showWaitlistForm, setShowWaitlistForm] = useState(false);
-  const [waitlistSuccess, setWaitlistSuccess] = useState(false);
-  const [salonSelectorOpen, setSalonSelectorOpen] = useState(false);
-  const [referenceFiles, setReferenceFiles] = useState([]);
-  const [consultation, setConsultation] = useState(null);
-  const [consent, setConsent] = useState(null);
-  /* ── Voucher state ── */
-  const [voucherCode, setVoucherCode] = useState("");
-  const [voucherPreview, setVoucherPreview] = useState(null);
-  const [discountPreview, setDiscountPreview] = useState(0);
-  const [voucherError, setVoucherError] = useState("");
-  const [voucherLoading, setVoucherLoading] = useState(false);
   const selectedBarberId = barber?._id || barber?.id || "";
   const selectedServiceEntityId =
     selectedService?._id || selectedService?.id || selectedServiceId || "";
-  const previousServiceIdRef = useRef(selectedServiceEntityId);
-  const previousSalonIdRef = useRef(externalSelectedSalonId);
   const todayKey = formatDateKey(new Date());
   const safeServices = services || [];
   const activeServices = safeServices.filter((service) => service?.active);
   const hasActiveServices = activeServices.length > 0;
-  const safeNonWorkingDays = nonWorkingDays || [];
-  const safeAvailableSlots = availableSlots || [];
-
-  // Get approved salons for this barber
-  const approvedSalons = (barber?.approvedSalons || barber?.salons || [])
-    .filter((s) => s?.status === "approved" || s?.status === undefined);
-  const getSalonData = (salonEntry) => salonEntry?.salon || salonEntry;
-  const getSalonId = (salonEntry) => {
-    const salonData = getSalonData(salonEntry);
-    return salonData?.id || salonData?._id || "";
-  };
-  const getSalonName = (salonEntry) => getSalonData(salonEntry)?.name || "";
-  const normalizeBookingSalonId = (value) => {
-    if (value === undefined || value === null) return "";
-
-    const candidate = String(value).trim();
-    return /^[a-fA-F0-9]{24}$/.test(candidate) ? candidate : "";
-  };
-  const selectedBookingSalonId = normalizeBookingSalonId(externalSelectedSalonId);
-  const withSelectedSalonContext = (payload) =>
-    selectedBookingSalonId ? { ...payload, salonId: selectedBookingSalonId } : payload;
-  const hasMultipleSalons = approvedSalons.length > 1;
-  const primarySalon = barber?.primarySalon || approvedSalons.find((s) => s?.isPrimary) || approvedSalons[0];
-  const selectedSalon = externalSelectedSalonId
-    ? approvedSalons.find((s) => String(getSalonId(s)) === String(externalSelectedSalonId))
-    : primarySalon;
-  const selectedSalonName = getSalonName(selectedSalon);
   const parsedSelectedDate = selectedDate ? parseDateKey(selectedDate) : null;
   const selectedDateDayKey =
     selectedDayKey || (parsedSelectedDate ? getDayKeyFromDate(parsedSelectedDate) : "");
-  const hasRequiredBookingData = Boolean(
-    selectedBarberId &&
-      selectedServiceEntityId &&
-      selectedDate &&
-      selectedDateDayKey &&
-      selectedTime &&
-      isSelectedTimeValid &&
-      currentUser &&
-      selectedService &&
-      client.name?.trim() &&
-      client.phone?.trim() &&
-      !isSaving
-  );
-  const canPrepareConfirmation = Boolean(
-    hasRequiredBookingData && !isServiceDataLoading && !isPreparingConfirmation
-  );
-  const canSubmitConfirmation = Boolean(
-    selectedBarberId &&
-      selectedServiceEntityId &&
-      selectedDate &&
-      selectedDateDayKey &&
-      selectedTime &&
-      isSelectedTimeValid &&
-      currentUser &&
-      (confirmationService || selectedService) &&
-      bookingQuote &&
-      !isQuoteLoading &&
-      client.name?.trim() &&
-      client.phone?.trim() &&
-      !isSaving
-  );
-  const confirmDisabledReason = [
-    !selectedBarberId && "No specialist selected",
-    !selectedServiceEntityId && "No service selected",
-    !selectedDate && "No date selected",
-    !selectedTime && "Please select a time first.",
-    selectedTime && !isSelectedTimeValid && "Selected time is no longer available.",
-    !currentUser && "Please log in to confirm.",
-    !selectedService && "Selected service is no longer available.",
-    !client.name?.trim() && "Please enter your name.",
-    !client.phone?.trim() && "Please enter your phone number.",
-    isSaving && "Booking in progress…",
-    isServiceDataLoading && "Service details are still loading.",
-    isPreparingConfirmation && "Preparing booking details…",
-    isQuoteLoading && "Calculating final price…",
-    quoteError && "Final price could not be calculated.",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const canRenderConfirmationModal = Boolean(
-    showConfirmation && selectedTime && isSelectedTimeValid
-  );
-
   const selectedServicePriceInfo = getServicePriceInfo(selectedService);
 
-  /* ── Public vouchers ── */
-  const [publicVouchers, setPublicVouchers] = useState([]);
+  const bookingState = useClientBookingState({
+    barberId: selectedBarberId,
+    externalSelectedSalonId,
+    selectedDate,
+    selectedServiceEntityId,
+  });
+  const { setShowWaitlistForm, showWaitlistForm } = bookingState;
 
-  useEffect(() => {
-    if (!selectedBarberId) return;
-    api
-      .get(`/vouchers/public/barber/${selectedBarberId}`)
-      .then(({ data }) => {
-        setPublicVouchers(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        // Public vouchers are optional — no error state needed
-        setPublicVouchers([]);
-      });
-  }, [selectedBarberId]);
+  const salon = useClientBookingSalon({
+    barber,
+    dateOptions,
+    externalSelectedSalonId,
+    onSalonSelect,
+    setSelectedDate,
+    setSelectedDayKey,
+    setSelectedTime,
+    setStep,
+  });
 
-  const handleContinueAfterService = () => {
-    if (hasMultipleSalons && !externalSelectedSalonId) {
-      setSalonSelectorOpen(true);
-    } else {
+  const confirmation = useClientBookingConfirmation({
+    barberId: selectedBarberId,
+    client,
+    currentUser,
+    isSaving: bookingState.isSaving,
+    onRefreshServices,
+    selectedBarberId,
+    selectedDate,
+    selectedDateDayKey,
+    selectedService,
+    selectedServiceEntityId,
+    selectedTime,
+    selectedBookingSalonId: salon.selectedBookingSalonId,
+    isSelectedTimeValid,
+    setError: bookingState.setError,
+    setSelectedTime,
+    setStep,
+    voucherCode: bookingState.voucherCode,
+  });
+
+  const voucher = useClientBookingVoucher({
+    selectedBarberId,
+    selectedServiceEntityId,
+    selectedSalonId: salon.selectedBookingSalonId,
+    voucherCode: bookingState.voucherCode,
+    setVoucherCode: bookingState.setVoucherCode,
+    clearBookingQuote: confirmation.clearBookingQuote,
+    setQuoteError: confirmation.setQuoteError,
+  });
+
+  const resetBookingFlow = useRef(null);
+  const handleResetBookingFlow = () => resetBookingFlow.current?.();
+
+  const submission = useClientBookingSubmission({
+    client,
+    consent: bookingState.consent,
+    consultation: bookingState.consultation,
+    createBooking,
+    currentUser,
+    isSaving: bookingState.isSaving,
+    onResetBookingFlow: handleResetBookingFlow,
+    referenceFiles: bookingState.referenceFiles,
+    selectedBarberId,
+    selectedBookingSalonId: salon.selectedBookingSalonId,
+    selectedDate,
+    selectedDateDayKey,
+    selectedService,
+    selectedServiceEntityId,
+    selectedTime,
+    setError: bookingState.setError,
+    setIsSaving: bookingState.setIsSaving,
+    isSelectedTimeValid,
+    voucherCode: bookingState.voucherCode,
+  });
+
+  const canPrepareConfirmation =
+    confirmation.canPrepareConfirmation && !isServiceDataLoading;
+
+  const handleSelectService = (serviceId) => {
+    confirmation.setConfirmationService(null);
+    setSelectedServiceId(serviceId);
+    setSelectedTime("");
+  };
+
+  const handleSelectDate = (day) => {
+    const date = parseDateKey(day.value);
+    if (!date || day.value < todayKey) return;
+    setSelectedDate(day.value);
+    setSelectedDayKey(day.dayKey || getDayKeyFromDate(date));
+    setSelectedTime("");
+    confirmation.clearBookingQuote();
+    bookingState.setError("");
+  };
+
+  const handleSelectCustomDate = (value) => {
+    const date = parseDateKey(value);
+    if (!date || value < todayKey) return;
+    setSelectedDate(value);
+    setSelectedDayKey(getDayKeyFromDate(date));
+    setSelectedTime("");
+    confirmation.clearBookingQuote();
+    bookingState.setError("");
+  };
+
+  const handleSelectTime = (time) => {
+    setSelectedTime(time);
+    confirmation.clearBookingQuote();
+    bookingState.setError("");
+  };
+
+  const handleContinueToClientDetails = () => {
+    if (isServiceDataLoading) return;
+    if (!selectedTime || !isSelectedTimeValid) {
+      bookingState.setError("Please select a time first.");
       setStep(3);
+      return;
     }
+
+    bookingState.setError("");
+    setStep(4);
   };
 
-  const handleSalonSelect = (salonEntry) => {
-    const salonId = getSalonId(salonEntry);
-    if (onSalonSelect) onSalonSelect(salonId);
-    setSalonSelectorOpen(false);
-    setStep(3);
+  const handleBackToServiceSelection = () => {
+    setStep(2);
   };
 
-  const changeRebookService = () => {
+  const handleChangeRebookService = () => {
     setStep(2);
     setSelectedTime("");
     setSelectedDate("");
     setSelectedDayKey("");
   };
 
-  const resetBookingFlow = () => {
-    const initialDateOption = dateOptions[0];
-
-    setShowConfirmation(false);
-    setConfirmationService(null);
-    setBookingQuote(null);
-    setIsQuoteLoading(false);
-    setQuoteError("");
-    setError("");
-    setStep(2);
-    setSelectedServiceId(null);
-    setSelectedTime("");
-    setSelectedDate(initialDateOption?.value || "");
-    setSelectedDayKey(initialDateOption?.dayKey || "");
-    setClient({ name: "", phone: "", note: "" });
-    setReferenceFiles([]);
-    setConsultation(null);
-    setConsent(null);
-    removeVoucher();
+  const handleOpenWaitlistForm = () => setShowWaitlistForm(true);
+  const handleCloseWaitlistForm = () => setShowWaitlistForm(false);
+  const handleCancelSalonSelector = () => salon.setSalonSelectorOpen(false);
+  const handleWaitlistSuccess = () => {
+    setShowWaitlistForm(false);
+    bookingState.setWaitlistSuccess(true);
   };
 
-  const rebookServiceSummary = isRebooking && selectedService && (
-    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <span className="inline-flex rounded-full bg-neutral-900 px-3 py-1 text-xs font-semibold text-white">
-            Booking again
-          </span>
-          <div className="mt-3 font-semibold text-neutral-950">
-            {selectedService.name || "Service"}
-          </div>
-          <div className="mt-1 text-sm text-neutral-600">
-            {selectedServicePriceInfo.hasDiscount && (
-              <span className="mr-1.5 text-neutral-400 line-through">
-                {selectedServicePriceInfo.originalPrice.toLocaleString()} դրամ
-              </span>
-            )}
-            <span className={selectedServicePriceInfo.hasDiscount ? "font-semibold text-emerald-700" : ""}>
-              {selectedServicePriceInfo.discountedPrice.toLocaleString()} դրամ
-            </span>{" "}
-            ·{" "}
-            {selectedService.duration || 20} min
-          </div>
-        </div>
-
-        <Button onClick={changeRebookService} variant="outline">
-          Change service
-        </Button>
-      </div>
-    </div>
-  );
+  const handleOpenConfirmation = () => {
+    if (isServiceDataLoading) return;
+    confirmation.openConfirmation();
+  };
 
   useEffect(() => {
-    const resetId = window.setTimeout(() => {
-      setShowConfirmation(false);
-      setError("");
-    }, 0);
+    if (!onPriceAdjustmentChange) return;
 
-    return () => window.clearTimeout(resetId);
-  }, [barber?.id]);
+    onPriceAdjustmentChange({
+      discountPreview: voucher.discountPreview,
+      pricingQuote: confirmation.bookingQuote,
+      voucherCode: bookingState.voucherCode,
+    });
+  }, [
+    bookingState.voucherCode,
+    confirmation.bookingQuote,
+    onPriceAdjustmentChange,
+    voucher.discountPreview,
+  ]);
+
+  useEffect(() => {
+    resetBookingFlow.current = () => {
+      const initialDateOption = dateOptions[0];
+      confirmation.resetConfirmationFlow();
+      voucher.removeVoucher();
+      bookingState.resetBookingExtras();
+      bookingState.setError("");
+      setStep(2);
+      setSelectedServiceId(null);
+      setSelectedTime("");
+      setSelectedDate(initialDateOption?.value || "");
+      setSelectedDayKey(initialDateOption?.dayKey || "");
+      setClient({ name: "", phone: "", note: "" });
+    };
+  }, [
+    bookingState,
+    confirmation,
+    dateOptions,
+    setClient,
+    setSelectedDate,
+    setSelectedDayKey,
+    setSelectedServiceId,
+    setSelectedTime,
+    setStep,
+    voucher,
+  ]);
 
   useEffect(() => {
     if (isServiceDataLoading) return;
-
     if (!hasActiveServices && step > 2) {
       setStep(2);
       setSelectedServiceId(null);
@@ -277,603 +257,61 @@ export default function ClientBooking({
   ]);
 
   useEffect(() => {
-    const resetId = window.setTimeout(() => {
-      setWaitlistSuccess(false);
-    }, 0);
+    if (!showWaitlistForm) return undefined;
 
-    return () => window.clearTimeout(resetId);
-  }, [externalSelectedSalonId, selectedBarberId, selectedDate, selectedServiceEntityId]);
-
-  /* ── Voucher validation ── */
-  const applyVoucher = async (code) => {
-    setVoucherLoading(true);
-    setVoucherError("");
-    try {
-      const { data } = await api.post("/vouchers/validate", withSelectedSalonContext({
-        code,
-        barberId: selectedBarberId,
-        serviceId: selectedServiceEntityId,
-      }));
-      if (data.valid) {
-        setBookingQuote(null);
-        setQuoteError("");
-        setVoucherCode(code);
-        setVoucherPreview(data.voucher);
-        setDiscountPreview(data.discountPreview);
-        setVoucherError("");
+    const onEscape = (event) => {
+      if (event.key === "Escape") {
+        setShowWaitlistForm(false);
       }
-    } catch (err) {
-      setVoucherPreview(null);
-      setDiscountPreview(0);
-      setVoucherCode("");
-      setVoucherError(
-        err.response?.data?.message || "Invalid or expired voucher code"
-      );
-    } finally {
-      setVoucherLoading(false);
-    }
-  };
+    };
 
-  const removeVoucher = () => {
-    setVoucherCode("");
-    setVoucherPreview(null);
-    setDiscountPreview(0);
-    setBookingQuote(null);
-    setQuoteError("");
-    setVoucherError("");
-  };
-
-  useEffect(() => {
-    if (!onPriceAdjustmentChange) return;
-
-    onPriceAdjustmentChange({
-      discountPreview,
-      pricingQuote: bookingQuote,
-      voucherCode,
-    });
-  }, [bookingQuote, discountPreview, onPriceAdjustmentChange, voucherCode]);
-
-  /* ── Clear voucher when service changes ── */
-  useEffect(() => {
-    const resetId = window.setTimeout(() => {
-      if (
-        previousServiceIdRef.current &&
-        previousServiceIdRef.current !== selectedServiceEntityId
-      ) {
-        removeVoucher();
-      }
-      setBookingQuote(null);
-      setQuoteError("");
-      previousServiceIdRef.current = selectedServiceEntityId;
-    }, 0);
-
-    return () => window.clearTimeout(resetId);
-  }, [selectedServiceEntityId]);
-
-  const voucherCodeChange = () => {
-    // Called when user starts editing the code field after a code was applied
-    if (voucherCode) {
-      removeVoucher();
-    }
-  };
-
-  // Reset date/time only when the selected salon actually changes.
-  useEffect(() => {
-    if (
-      externalSelectedSalonId &&
-      previousSalonIdRef.current !== externalSelectedSalonId
-    ) {
-      const initialDateOption = dateOptions[0];
-      setSelectedDate(initialDateOption?.value || "");
-      setSelectedDayKey(initialDateOption?.dayKey || "");
-      setSelectedTime("");
-    }
-    previousSalonIdRef.current = externalSelectedSalonId;
-  }, [
-    dateOptions,
-    externalSelectedSalonId,
-    setSelectedDate,
-    setSelectedDayKey,
-    setSelectedTime,
-  ]);
-
-  const selectDate = (dateKey) => {
-    const date = parseDateKey(dateKey);
-
-    if (!date || dateKey < todayKey) return;
-
-    const selectedOption = dateOptions.find((day) => day.value === dateKey);
-    const dayKey = selectedOption?.dayKey || [
-      "sun",
-      "mon",
-      "tue",
-      "wed",
-      "thu",
-      "fri",
-      "sat",
-    ][date.getDay()];
-
-    setSelectedDate(dateKey);
-    setSelectedDayKey(dayKey);
-    setSelectedTime("");
-    setBookingQuote(null);
-    setQuoteError("");
-  };
-
-  const selectTime = (time) => {
-    setSelectedTime(time);
-    setBookingQuote(null);
-    setQuoteError("");
-    setError("");
-  };
-
-  const goToClientDetails = () => {
-    if (!selectedTime || !isSelectedTimeValid) {
-      setError("Please select a time first.");
-      setShowConfirmation(false);
-      // Internal step 3 is the date/time selection screen.
-      setStep(3);
-      return;
-    }
-
-    setError("");
-    setStep(4);
-  };
-
-  const submitBooking = async () => {
-    if (
-      isSaving ||
-      !selectedBarberId ||
-      !currentUser ||
-      !selectedService ||
-      !selectedDate ||
-      !selectedDateDayKey ||
-      !selectedTime ||
-      !isSelectedTimeValid ||
-      !client.name?.trim() ||
-      !client.phone?.trim()
-    ) {
-      return;
-    }
-
-    setIsSaving(true);
-    setError("");
-
-    try {
-      const bookingPayload = withSelectedSalonContext({
-        barberId: selectedBarberId,
-        clientId: currentUser.id || currentUser._id,
-        serviceId: selectedServiceEntityId,
-        serviceName: selectedService.name,
-        duration: selectedService?.duration || 20,
-        dayKey: selectedDateDayKey,
-        bookingDate: selectedDate,
-        time: selectedTime,
-        status: "pending",
-        clientName: client.name,
-        phone: client.phone,
-        note: client.note,
-      });
-
-      if (referenceFiles.length > 0) {
-        bookingPayload.files = referenceFiles;
-      }
-
-      if (consultation) {
-        bookingPayload.consultation = consultation;
-      }
-
-      if (consent) {
-        bookingPayload.consent = consent;
-      }
-
-      if (voucherCode) {
-        bookingPayload.voucherCode = voucherCode;
-      }
-
-      const createdBooking = await createBooking(bookingPayload);
-
-      resetBookingFlow();
-      navigate("/success", {
-        state: {
-          booking: createdBooking,
-          payment: createdBooking?.payment || createdBooking?.depositPayment || null,
-        },
-      });
-    } catch (requestError) {
-      setError(
-        getFriendlyApiError(
-          requestError,
-          "Could not create booking. Please try again."
-        )
-      );
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const openConfirmation = async () => {
-    if (isPreparingConfirmation) return;
-
-    if (!selectedTime || !isSelectedTimeValid) {
-      setError("Please select a time first.");
-      setShowConfirmation(false);
-      // Internal step 3 is the date/time selection screen.
-      setStep(3);
-      return;
-    }
-
-    if (!canPrepareConfirmation) return;
-
-    setIsPreparingConfirmation(true);
-    setError("");
-
-    try {
-      const latestServices = await onRefreshServices?.();
-      const latestSelectedService = Array.isArray(latestServices)
-        ? latestServices.find(
-            (service) =>
-              String(service?.id || service?._id) === String(selectedServiceEntityId)
-          )
-        : selectedService;
-
-      if (!latestSelectedService || latestSelectedService.active === false) {
-        setError(
-          "Selected service is no longer available. Please choose another service."
-        );
-        setStep(2);
-        setSelectedTime("");
-        setConfirmationService(null);
-        return;
-      }
-
-      if (!selectedTime || !isSelectedTimeValid) {
-        setError("Please select a time first.");
-        setShowConfirmation(false);
-        // Internal step 3 is the date/time selection screen.
-        setStep(3);
-        return;
-      }
-
-      setConfirmationService(latestSelectedService);
-      setBookingQuote(null);
-      setQuoteError("");
-      setShowConfirmation(true);
-      setIsQuoteLoading(true);
-
-      const { data: quote } = await api.post("/bookings/quote", withSelectedSalonContext({
-        barberId: selectedBarberId,
-        serviceId: selectedServiceEntityId,
-        bookingDate: selectedDate,
-        dayKey: selectedDateDayKey,
-        time: selectedTime,
-        voucherCode: voucherCode || undefined,
-      }));
-      setBookingQuote(quote);
-    } catch (requestError) {
-      const message =
-        requestError.response?.data?.message ||
-        requestError.message ||
-          "Could not refresh service price. Please try again."
-      setQuoteError(message);
-      setError(message);
-    } finally {
-      setIsPreparingConfirmation(false);
-      setIsQuoteLoading(false);
-    }
-  };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [setShowWaitlistForm, showWaitlistForm]);
 
   return (
-    <Card className="rounded-2xl shadow-card sm:rounded-3xl">
-      <CardContent className="p-4 sm:p-6">
-        {/* Salon context banner */}
-        {selectedSalonName && (
-          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
-            <div className="flex items-center gap-2 text-sm text-blue-800">
-              <Store className="h-4 w-4 shrink-0 text-blue-500" aria-hidden="true" />
-              <span>
-                Booking at <strong>{selectedSalonName}</strong>
-                {hasMultipleSalons && (
-                  <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                    Selected salon
-                  </span>
-                )}
-              </span>
-            </div>
-            <p className="ml-6 mt-1 text-xs text-blue-600">
-              Availability is based on this salon's schedule.
-            </p>
-          </div>
-        )}
-
-        {step === 2 && (
-          <ServiceStep
-            services={services}
-            selectedServiceId={selectedServiceId}
-            onSelectService={(serviceId) => {
-              setConfirmationService(null);
-              setSelectedServiceId(serviceId);
-              setSelectedTime("");
-            }}
-            onContinue={handleContinueAfterService}
-          />
-        )}
-
-        {step === 3 && hasActiveServices && (
-          <div className="space-y-5">
-            <div>
-              <h2 className="text-xl font-bold sm:text-2xl">Ընտրիր օրը և ժամը</h2>
-              <p className="mt-1 text-sm text-neutral-500">
-                Available times update after service and date selection.
-              </p>
-            </div>
-
-            {/* Selected service summary */}
-            {selectedService && !isRebooking && (
-              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-medium text-neutral-500">SELECTED SERVICE</span>
-                    <div className="mt-0.5 font-semibold text-neutral-950">
-                      {selectedService.name || "Service"}
-                    </div>
-                    <div className="mt-0.5 text-sm text-neutral-600">
-                      {selectedServicePriceInfo.hasDiscount && (
-                        <span className="mr-1.5 text-neutral-400 line-through">
-                          {selectedServicePriceInfo.originalPrice.toLocaleString()} դրամ
-                        </span>
-                      )}
-                      <span className={selectedServicePriceInfo.hasDiscount ? "font-semibold text-emerald-700" : ""}>
-                        {selectedServicePriceInfo.discountedPrice.toLocaleString()} դրամ
-                      </span>{" "}
-                      ·{" "}
-                      {selectedService.duration || 20} min
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setStep(2)}
-                    className="text-xs font-medium text-neutral-500 underline underline-offset-2 hover:text-neutral-900"
-                  >
-                    Change
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {rebookServiceSummary}
-
-            {/* Date selection */}
-            <div>
-              <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                Select date
-              </span>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(dateOptions || []).map((day) => (
-                  <div key={day.value} className="flex-1 sm:flex-none">
-                    <Button
-                      className="w-full"
-                      variant={selectedDate === day.value ? "default" : "outline"}
-                      onClick={() => selectDate(day.value)}
-                    >
-                      {day.label}
-                    </Button>
-                    {safeNonWorkingDays.includes(day.value) && (
-                      <div className="mt-1 text-center text-xs text-neutral-500">
-                        Day off
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Date picker fallback */}
-            <label className="grid gap-2 text-sm font-semibold sm:max-w-xs">
-              Or pick a custom date
-              <input
-                className="rounded-2xl border p-3 font-normal"
-                min={todayKey}
-                type="date"
-                value={selectedDate}
-                onChange={(event) => selectDate(event.target.value)}
-              />
-            </label>
-
-            {/* Selected date/time display */}
-            {selectedDate && selectedTime && (
-              <div className="rounded-2xl border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-800">
-                Selected: {selectedDateLabel || selectedDate} at {selectedTime}
-              </div>
-            )}
-
-            {/* Time slots */}
-            <div>
-              <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                Available times
-              </span>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
-                {safeAvailableSlots.length > 0 ? (
-                  safeAvailableSlots.map((time) => (
-                    <Button
-                      key={time}
-                      variant={selectedTime === time ? "default" : "outline"}
-                      onClick={() => selectTime(time)}
-                    >
-                      {time}
-                    </Button>
-                  ))
-                ) : (
-                  <div className="col-span-full space-y-3">
-                    <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-5 text-center text-sm text-neutral-500">
-                      {selectedDate && safeNonWorkingDays.includes(selectedDate)
-                        ? "This is a non-working day — no slots available."
-                        : slotMessage}
-                    </div>
-
-                    {selectedDate && selectedService && !safeNonWorkingDays.includes(selectedDate) && (
-                      <div className="text-center">
-                        {waitlistSuccess ? (
-                          <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                            You'll be notified when a time opens.
-                          </p>
-                        ) : (
-                          <button
-                            className="text-sm font-medium text-amber-600 underline underline-offset-2 hover:text-amber-800"
-                            onClick={() => setShowWaitlistForm(true)}
-                            type="button"
-                          >
-                            Notify me when a time opens
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="grid gap-2 sm:flex">
-              <Button className="w-full sm:w-auto" variant="outline" onClick={() => setStep(2)}>
-                Հետ
-              </Button>
-
-              <Button
-                className="w-full sm:w-auto"
-                disabled={!isSelectedTimeValid}
-                onClick={goToClientDetails}
-              >
-                Շարունակել
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && hasActiveServices && (
-          <ClientDetailsStep
-            client={client}
-            canConfirm={canPrepareConfirmation}
-            error={error}
-            onChange={setClient}
-            onBack={() => setStep(3)}
-            onContinue={openConfirmation}
-            rebookSummary={rebookServiceSummary}
-            referenceFiles={referenceFiles}
-            onReferenceFilesChange={setReferenceFiles}
-            consultation={consultation}
-            onConsultationChange={setConsultation}
-            consent={consent}
-            onConsentChange={setConsent}
-            publicVouchers={publicVouchers}
-            voucherCode={voucherCode}
-            voucherPreview={voucherPreview}
-            discountPreview={discountPreview}
-            voucherError={voucherError}
-            voucherLoading={voucherLoading}
-            onVoucherCodeChange={voucherCodeChange}
-            onApplyVoucher={applyVoucher}
-            onRemoveVoucher={removeVoucher}
-            isPreparingConfirmation={isPreparingConfirmation}
-          />
-        )}
-
-        {/* Salon selector modal */}
-        {salonSelectorOpen && (
-          <div className="fixed inset-0 z-40 flex items-end justify-center overflow-y-auto bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
-            <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-2rem)] sm:rounded-3xl sm:p-6">
-              <div>
-                <h2 className="text-xl font-bold sm:text-2xl">Choose a salon</h2>
-                <p className="mt-1 text-sm text-neutral-500">
-                  This specialist works at multiple salons. Select one for your booking.
-                </p>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {approvedSalons.map((salonEntry) => {
-                  const salonData = salonEntry?.salon || salonEntry;
-                  const salonId = salonData?.id || salonData?._id;
-                  const salonName = salonData?.name || "Salon";
-                  const isPrimary = salonEntry?.isPrimary;
-
-                  return (
-                    <button
-                      key={salonId}
-                      onClick={() => handleSalonSelect(salonEntry)}
-                      className="w-full rounded-2xl border border-neutral-200 p-4 text-left shadow-sm transition hover:bg-neutral-50"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-semibold text-neutral-950">
-                            {salonName}
-                          </div>
-                          {salonData?.city && (
-                            <div className="mt-1 text-sm text-neutral-500">
-                              {salonData.city}
-                              {salonData?.address ? `, ${salonData.address}` : ""}
-                            </div>
-                          )}
-                        </div>
-                        {isPrimary && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                            ⭐ Primary
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5">
-                <Button
-                  className="w-full"
-                  onClick={() => setSalonSelectorOpen(false)}
-                  variant="outline"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <BookingConfirmationModal
-          isOpen={canRenderConfirmationModal}
-          onClose={resetBookingFlow}
-          onConfirm={submitBooking}
-          selectedService={confirmationService || selectedService}
-          isServiceLoading={isServiceDataLoading}
-          selectedDate={selectedDateLabel || selectedDate}
-          selectedTime={selectedTime}
-          selectedSalonName={selectedSalonName}
-          barberName={barber?.name || "Specialist"}
-          canConfirm={canSubmitConfirmation}
-          isSubmitting={isSaving}
-          error={error}
-          consultation={consultation}
-          consent={consent}
-          voucherCode={voucherCode}
-          discountPreview={discountPreview}
-          pricingQuote={bookingQuote}
-          isQuoteLoading={isQuoteLoading}
-          quoteError={quoteError}
-          depositSettings={barber?.depositSettings}
-          disabledReason={confirmDisabledReason}
-        />
-
-        {showWaitlistForm && selectedBarberId && selectedService && selectedDate && (
-          <WaitlistForm
-            barberId={selectedBarberId}
-            salonId={selectedBookingSalonId}
-            serviceId={selectedServiceEntityId}
-            date={selectedDate}
-            onClose={() => setShowWaitlistForm(false)}
-            onSuccess={() => {
-              setShowWaitlistForm(false);
-              setWaitlistSuccess(true);
-            }}
-          />
-        )}
-      </CardContent>
-    </Card>
+    <ClientBookingStepContent
+      barber={barber}
+      step={step}
+      bookingState={bookingState}
+      canPrepareConfirmation={canPrepareConfirmation}
+      client={client}
+      confirmation={confirmation}
+      isRebooking={isRebooking}
+      isSelectedTimeValid={isSelectedTimeValid}
+      isServiceDataLoading={isServiceDataLoading}
+      nonWorkingDays={nonWorkingDays}
+      onBackToServiceSelection={handleBackToServiceSelection}
+      onChangeService={handleChangeRebookService}
+      onCancelSalonSelector={handleCancelSalonSelector}
+      onCloseWaitlistForm={handleCloseWaitlistForm}
+      onClientChange={setClient}
+      onConfirmBooking={submission.submitBooking}
+      onContinueToClientDetails={handleContinueToClientDetails}
+      onOpenWaitlistForm={handleOpenWaitlistForm}
+      onOpenConfirmation={handleOpenConfirmation}
+      onResetBookingFlow={handleResetBookingFlow}
+      onSelectCustomDate={handleSelectCustomDate}
+      onSelectDate={handleSelectDate}
+      onSelectService={handleSelectService}
+      onSelectTime={handleSelectTime}
+      onWaitlistSuccess={handleWaitlistSuccess}
+      availableSlots={availableSlots}
+      dateOptions={salon.dateOptions}
+      selectedDate={selectedDate}
+      selectedDateLabel={selectedDateLabel}
+      selectedService={selectedService}
+      selectedServiceId={selectedServiceId}
+      selectedServicePriceInfo={selectedServicePriceInfo}
+      selectedSalon={salon.selectedSalon}
+      selectedSalonName={salon.selectedSalonName}
+      selectedTime={selectedTime}
+      salon={salon}
+      services={safeServices}
+      showWaitlistForm={showWaitlistForm}
+      slotMessage={slotMessage}
+      todayKey={todayKey}
+      voucher={voucher}
+    />
   );
 }
