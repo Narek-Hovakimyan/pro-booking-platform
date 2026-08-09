@@ -1,6 +1,22 @@
 import net from "node:net";
 
 export const VALID_NODE_ENVS = new Set(["development", "test", "production"]);
+const UNSAFE_JWT_SECRETS = new Set([
+  "changeme",
+  "default",
+  "default-jwt-secret",
+  "dev-secret",
+  "development-secret",
+  "example",
+  "example-secret",
+  "jwt-secret",
+  "replace-me",
+  "secret",
+  "test-secret",
+  "your-jwt-secret",
+  "your-secret",
+  "your_secret",
+]);
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -8,6 +24,15 @@ function normalizeString(value) {
 
 function makeFailure(variable, reason) {
   return { variable, reason };
+}
+
+function validateProductionJwtSecret(value) {
+  const jwtSecret = normalizeString(value);
+  if (!jwtSecret) {
+    return "missing";
+  }
+
+  return UNSAFE_JWT_SECRETS.has(jwtSecret.toLowerCase()) ? "unsafe_default" : "";
 }
 
 function normalizeHostname(hostname) {
@@ -150,6 +175,11 @@ export function validateRuntimeConfig(env = process.env) {
     }
     if (trustProxy !== "true") {
       failures.push(makeFailure("TRUST_PROXY", "required_true"));
+    }
+
+    const jwtSecretFailure = validateProductionJwtSecret(env.JWT_SECRET);
+    if (jwtSecretFailure) {
+      failures.push(makeFailure("JWT_SECRET", jwtSecretFailure));
     }
   }
 

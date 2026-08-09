@@ -11,6 +11,7 @@ function validEnv(overrides = {}) {
     NODE_ENV: "production",
     CLIENT_URL: "https://app.example.com",
     TRUST_PROXY: "true",
+    JWT_SECRET: "super-secure-production-secret",
     ...overrides,
   };
 }
@@ -139,6 +140,37 @@ test("production preserves multiple valid origins after normalization", () => {
   assert.equal(config.clientUrl, "https://app.example.com,https://admin.example.com");
 });
 
+test("production rejects missing JWT_SECRET", () => {
+  assert.throws(
+    () => validateRuntimeConfig(validEnv({ JWT_SECRET: undefined })),
+    /JWT_SECRET:missing/
+  );
+});
+
+test("production rejects blank JWT_SECRET", () => {
+  assert.throws(
+    () => validateRuntimeConfig(validEnv({ JWT_SECRET: "   " })),
+    /JWT_SECRET:missing/
+  );
+});
+
+test("production rejects unsafe default JWT_SECRET values", () => {
+  for (const JWT_SECRET of ["secret", "jwt-secret", "your-jwt-secret", "CHANGEme"]) {
+    assert.throws(
+      () => validateRuntimeConfig(validEnv({ JWT_SECRET })),
+      /JWT_SECRET:unsafe_default/
+    );
+  }
+});
+
+test("production accepts a non-default JWT_SECRET", () => {
+  const config = validateRuntimeConfig(
+    validEnv({ JWT_SECRET: "super-secure-production-secret" })
+  );
+
+  assert.equal(config.nodeEnv, "production");
+});
+
 test("errors never include secret or configuration values", () => {
   const env = validEnv({
     NODE_ENV: "staging-secret-value",
@@ -157,6 +189,29 @@ test("errors never include secret or configuration values", () => {
       assert.ok(!error.message.includes(env.JWT_SECRET));
       assert.match(error.message, /NODE_ENV:unsupported/);
       assert.match(error.message, /CLIENT_URL:origin_must_not_include_path/);
+      return true;
+    }
+  );
+});
+
+test("JWT_SECRET failures never include the secret value in error metadata", () => {
+  const env = validEnv({
+    JWT_SECRET: "your-jwt-secret",
+  });
+
+  assert.throws(
+    () => validateRuntimeConfig(env),
+    (error) => {
+      assert.ok(error instanceof RuntimeConfigError);
+      assert.equal(error.failures.length, 1);
+      assert.deepEqual(error.failures[0], {
+        variable: "JWT_SECRET",
+        reason: "unsafe_default",
+      });
+      assert.ok(!error.message.includes(env.JWT_SECRET));
+      assert.ok(
+        !JSON.stringify(error.failures).includes(env.JWT_SECRET)
+      );
       return true;
     }
   );
