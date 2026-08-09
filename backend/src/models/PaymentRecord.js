@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+const SUPPORTED_CURRENCY = "AMD";
+
 const paymentRecordSchema = new mongoose.Schema(
   {
     subscriptionId: {
@@ -14,11 +16,13 @@ const paymentRecordSchema = new mongoose.Schema(
     },
     ownerType: {
       type: String,
+      required: [true, 'Owner type is required'],
       enum: ['barber', 'salon'],
       default: null,
     },
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
+      required: [true, 'Owner ID is required'],
       default: null,
     },
     amount: {
@@ -28,6 +32,7 @@ const paymentRecordSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
+      required: [true, 'Currency is required'],
       default: 'AMD',
       trim: true,
       uppercase: true,
@@ -38,17 +43,21 @@ const paymentRecordSchema = new mongoose.Schema(
     },
     periodStart: {
       type: Date,
+      required: [true, 'Period start is required'],
     },
     periodEnd: {
       type: Date,
+      required: [true, 'Period end is required'],
     },
     status: {
       type: String,
+      required: [true, 'Status is required'],
       enum: ['pending', 'paid', 'failed', 'refunded'],
       default: 'pending',
     },
     provider: {
       type: String,
+      required: [true, 'Provider is required'],
       enum: ['manual', 'stripe', 'idram', 'telcell', 'bank'],
       default: 'manual',
     },
@@ -64,6 +73,15 @@ const paymentRecordSchema = new mongoose.Schema(
   {
     timestamps: true,
   }
+);
+
+paymentRecordSchema.path("currency").validate(
+  (value) => value === SUPPORTED_CURRENCY,
+  "currency is not supported"
+);
+paymentRecordSchema.path("seatCount").validate(
+  (value) => Number.isFinite(value) && Number.isInteger(value) && value >= 0,
+  "seatCount must be a non-negative integer"
 );
 
 paymentRecordSchema.index({ payerId: 1, paidAt: -1, createdAt: -1 });

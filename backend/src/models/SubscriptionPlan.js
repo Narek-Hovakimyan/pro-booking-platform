@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
 
+const SUPPORTED_CURRENCY = "AMD";
+const SUPPORTED_INTERVAL = "month";
+
 const subscriptionPlanSchema = new mongoose.Schema(
   {
     name: {
@@ -21,12 +24,14 @@ const subscriptionPlanSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
+      required: [true, 'Currency is required'],
       default: 'AMD',
       trim: true,
       uppercase: true,
     },
     interval: {
       type: String,
+      required: [true, 'Billing interval is required'],
       enum: ['month'],
       default: 'month',
     },
@@ -42,6 +47,15 @@ const subscriptionPlanSchema = new mongoose.Schema(
   {
     timestamps: true,
   }
+);
+
+subscriptionPlanSchema.path("currency").validate(
+  (value) => value === SUPPORTED_CURRENCY,
+  "currency is not supported"
+);
+subscriptionPlanSchema.path("interval").validate(
+  (value) => value === SUPPORTED_INTERVAL,
+  "billing interval is not supported"
 );
 
 const SubscriptionPlan = mongoose.model('SubscriptionPlan', subscriptionPlanSchema);

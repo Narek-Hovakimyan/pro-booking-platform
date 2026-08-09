@@ -415,7 +415,12 @@ test("default plan creation is idempotent", async () => {
     return null;
   };
 
-  SubscriptionPlan.create = async (data) => ({ ...defaultPlanDoc, ...data });
+  SubscriptionPlan.create = async (data) => {
+    const plan = new SubscriptionPlan(data);
+    const validationError = plan.validateSync();
+    assert.equal(validationError, undefined);
+    return { ...defaultPlanDoc, ...data };
+  };
 
   const first = await getOrCreateDefaultSubscriptionPlan();
   assert.ok(first);

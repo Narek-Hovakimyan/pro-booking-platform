@@ -4,13 +4,42 @@ import mongoose from "mongoose";
 
 import Booking from "../../models/Booking.js";
 import PaymentEvent from "../../models/PaymentEvent.js";
+import PaymentRecord from "../../models/PaymentRecord.js";
 import PaymentTransaction from "../../models/PaymentTransaction.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import {
   serializeAvailabilityBooking,
   serializeBookingForResponse,
 } from "../../utils/bookingUtils.js";
 
 const objectId = () => new mongoose.Types.ObjectId();
+
+const makePaymentRecord = (overrides = {}) =>
+  new PaymentRecord({
+    subscriptionId: objectId(),
+    payerId: objectId(),
+    ownerType: "barber",
+    ownerId: objectId(),
+    amount: 5000,
+    currency: "AMD",
+    seatCount: 1,
+    periodStart: new Date("2026-01-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-02-01T00:00:00.000Z"),
+    status: "paid",
+    provider: "manual",
+    paidAt: new Date("2026-01-01T00:00:00.000Z"),
+    ...overrides,
+  });
+
+const makeSubscriptionPlan = (overrides = {}) =>
+  new SubscriptionPlan({
+    name: "Barber Monthly",
+    code: `barber-monthly-${new mongoose.Types.ObjectId()}`,
+    pricePerSeat: 5000,
+    currency: "AMD",
+    interval: "month",
+    ...overrides,
+  });
 
 const makeBooking = (overrides = {}) =>
   new Booking({
@@ -105,6 +134,60 @@ test("PaymentEvent defines provider event uniqueness and safe status fields", ()
       options?.unique === true
   );
   assert.ok(uniqueEventIndex, "provider/providerEventId unique index exists");
+});
+
+test("PaymentRecord rejects missing or null business-required fields", () => {
+  const cases = [
+    { ownerType: undefined, path: "ownerType" },
+    { ownerType: null, path: "ownerType" },
+    { ownerId: undefined, path: "ownerId" },
+    { ownerId: null, path: "ownerId" },
+    { periodStart: undefined, path: "periodStart" },
+    { periodStart: null, path: "periodStart" },
+    { periodEnd: undefined, path: "periodEnd" },
+    { periodEnd: null, path: "periodEnd" },
+    { status: null, path: "status" },
+    { provider: null, path: "provider" },
+  ];
+
+  for (const { path, ...overrides } of cases) {
+    const error = makePaymentRecord(overrides).validateSync();
+    assert.ok(error?.errors?.[path], `${path} should be required`);
+  }
+});
+
+test("PaymentRecord rejects unsupported currency and invalid seatCount", () => {
+  const invalidCurrency = makePaymentRecord({ currency: "USD" }).validateSync();
+  assert.ok(invalidCurrency?.errors?.currency);
+
+  for (const seatCount of [-1, 1.5, Number.NaN]) {
+    const error = makePaymentRecord({ seatCount }).validateSync();
+    assert.ok(error?.errors?.seatCount, `seatCount ${seatCount} should be invalid`);
+  }
+
+  assert.equal(makePaymentRecord({ seatCount: 0 }).validateSync(), undefined);
+});
+
+test("PaymentRecord keeps manual records valid without providerPaymentId", () => {
+  const record = makePaymentRecord({
+    provider: "manual",
+    providerPaymentId: undefined,
+  });
+
+  assert.equal(record.validateSync(), undefined);
+  assert.equal(record.providerPaymentId, null);
+});
+
+test("SubscriptionPlan rejects missing or invalid currency and interval values", () => {
+  for (const overrides of [
+    { currency: null },
+    { currency: "USD" },
+    { interval: null },
+    { interval: "year" },
+  ]) {
+    const error = makeSubscriptionPlan(overrides).validateSync();
+    assert.ok(error, `${JSON.stringify(overrides)} should be invalid`);
+  }
 });
 
 test("public booking availability serialization does not expose payment internals", () => {
