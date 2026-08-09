@@ -1,20 +1,20 @@
 import {
   Building2,
   CalendarDays,
-  CalendarRange,
-  RefreshCw,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 
 import api from "@/shared/api/axios";
 import { getSalonCalendar } from "@/shared/api/salonCalendar";
 import StatusBadge from "@/shared/components/StatusBadge";
-import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { formatDateKey, parseDateKey } from "@/shared/utils/dates";
+
+import SalonCalendarControls from "./salon-calendar/SalonCalendarControls";
+import SalonCalendarHeader from "./salon-calendar/SalonCalendarHeader";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -30,11 +30,6 @@ const getSalonList = (data) => {
 };
 
 const getSalonId = (salon) => getIdString(salon?.salon || salon);
-
-const getSalonName = (salon) => {
-  const salonData = salon?.salon || salon;
-  return salonData?.name || salon?.name || "Salon";
-};
 
 const isSalonOwnerOrAdmin = (salon, userId) => {
   const currentUserId = getIdString(userId);
@@ -280,29 +275,11 @@ export default function SalonCalendarPage() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Salon Calendar
-          </h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            View salon-managed staff bookings without exposing chair renter
-            private activity.
-          </p>
-        </div>
-
-        <Button
-          className="gap-2"
-          disabled={!selectedSalonId || loadingCalendar}
-          onClick={handleRefresh}
-          variant="outline"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${loadingCalendar ? "animate-spin" : ""}`}
-          />
-          Refresh
-        </Button>
-      </div>
+      <SalonCalendarHeader
+        loadingCalendar={loadingCalendar}
+        onRefresh={handleRefresh}
+        selectedSalonId={selectedSalonId}
+      />
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -334,111 +311,23 @@ export default function SalonCalendarPage() {
         </Card>
       ) : (
         <>
-          <Card>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <label className="block">
-                    <span className="text-sm font-medium text-neutral-700">
-                      Salon
-                    </span>
-                    <select
-                      className="mt-1 h-11 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
-                      onChange={(event) => {
-                        setSelectedSalonId(event.target.value);
-                        setSelectedBarberId("");
-                      }}
-                      value={selectedSalonId}
-                    >
-                      {salons.map((salon) => (
-                        <option key={getSalonId(salon)} value={getSalonId(salon)}>
-                          {getSalonName(salon)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="text-sm font-medium text-neutral-700">
-                      Date
-                    </span>
-                    <input
-                      className="mt-1 h-11 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
-                      onChange={(event) => setSelectedDate(event.target.value)}
-                      type="date"
-                      value={selectedDate}
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="text-sm font-medium text-neutral-700">
-                      View
-                    </span>
-                    <div className="mt-1 flex rounded-xl border border-neutral-200 bg-neutral-50 p-1">
-                      <button
-                        className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                          view === "day"
-                            ? "bg-neutral-900 text-white"
-                            : "text-neutral-600 hover:bg-white"
-                        }`}
-                        onClick={() => setView("day")}
-                        type="button"
-                      >
-                        Day
-                      </button>
-                      <button
-                        className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                          view === "week"
-                            ? "bg-neutral-900 text-white"
-                            : "text-neutral-600 hover:bg-white"
-                        }`}
-                        onClick={() => setView("week")}
-                        type="button"
-                      >
-                        Week
-                      </button>
-                    </div>
-                  </label>
-
-                  <label className="block">
-                    <span className="text-sm font-medium text-neutral-700">
-                      Staff
-                    </span>
-                    <select
-                      className="mt-1 h-11 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10"
-                      onChange={(event) => setSelectedBarberId(event.target.value)}
-                      value={selectedBarberId}
-                    >
-                      <option value="">All staff</option>
-                      {(calendar?.staff || []).map((member) => (
-                        <option key={member.id} value={member.id}>
-                          {member.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <Link
-                  className="text-sm font-semibold text-neutral-700 underline underline-offset-2 transition hover:text-neutral-950"
-                  to="/admin/salon/dashboard"
-                >
-                  Back to Salon Dashboard
-                </Link>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-                <CalendarRange className="h-4 w-4" />
-                <span>{periodLabel}</span>
-                {calendar?.salon?.name && (
-                  <>
-                    <span className="text-neutral-300">•</span>
-                    <span>{calendar.salon.name}</span>
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <SalonCalendarControls
+            calendar={calendar}
+            onBarberChange={setSelectedBarberId}
+            onDateChange={setSelectedDate}
+            onSalonChange={(value) => {
+              setSelectedSalonId(value);
+              setSelectedBarberId("");
+            }}
+            onViewChange={setView}
+            periodLabel={periodLabel}
+            salons={salons}
+            selectedBarberId={selectedBarberId}
+            selectedDate={selectedDate}
+            selectedSalonId={selectedSalonId}
+            staff={calendar?.staff || []}
+            view={view}
+          />
 
           {loadingCalendar ? (
             <Card>
