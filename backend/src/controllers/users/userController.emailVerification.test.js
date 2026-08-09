@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { Writable } from "node:stream";
+import mongoose from "mongoose";
 
 import {
   getMyProfile,
@@ -26,6 +27,7 @@ import {
   sendEmailVerification,
   setResendClientFactoryForTesting,
 } from "../../services/auth/emailService.js";
+import { createUserProfileUpdateService } from "../../services/users/userProfileUpdateService.js";
 
 const originalUserMethods = {
   findById: User.findById,
@@ -244,6 +246,54 @@ test("getMyProfile returns canAccessPlatform false for normal user", async () =>
   assert.equal(res.body.platformRole, undefined);
 });
 
+test("getMyProfile returns legacy single-salon fallback without leaking private salon fields", async () => {
+  const salonId = new mongoose.Types.ObjectId();
+  const res = createResponse();
+  const req = createRequest({
+    user: createBaseUser({
+      role: "barber",
+      salon: salonId,
+      salonStatus: "approved",
+      salons: [],
+    }),
+  });
+
+  BarberProfile.findOne = async () => null;
+  Salon.findById = async (id) => {
+    assert.equal(String(id), String(salonId));
+    return {
+      select: async (projection) => {
+        assert.equal(
+          projection,
+          "name city address phone image averageRating totalReviews"
+        );
+        return {
+          _id: salonId,
+          name: "Legacy Salon",
+          city: "Yerevan",
+          address: "Main 1",
+          phone: "555",
+          image: "/uploads/legacy.png",
+          averageRating: 4.8,
+          totalReviews: 12,
+          toObject() {
+            return { ...this };
+          },
+        };
+      },
+    };
+  };
+
+  await getMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.salons.length, 1);
+  assert.equal(res.body.salons[0].status, "approved");
+  assert.equal(res.body.salons[0].isPrimary, true);
+  assert.equal(res.body.salons[0].ownerId, undefined);
+  assert.equal(res.body.salons[0].admins, undefined);
+});
+
 test("updateMyProfile – adding email normalizes trim/lowercase and response excludes token hash", async () => {
   const res = createResponse();
   const req = createRequest({ body: { email: "  Test@Example.COM  " } });
@@ -297,6 +347,51 @@ test("updateMyProfile – updating profile fields without media keeps existing a
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.avatarUrl, "/uploads/avatars/existing.png");
   assert.equal(Object.hasOwn(updatesSeen, "avatarUrl"), false);
+});
+
+test("updateMyProfile – non-barber profile update does not upsert BarberProfile", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    body: { name: "Updated Client", city: "Yerevan" },
+  });
+  let upsertCalls = 0;
+
+  BarberProfile.findOneAndUpdate = async () => {
+    upsertCalls += 1;
+    return null;
+  };
+  Salon.find = async () => ({ select: async () => [] });
+  Salon.findById = async () => null;
+  User.findByIdAndUpdate = (_id, updates) =>
+    updateAndSelect(applyUpdate(createBaseUser(), updates));
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(upsertCalls, 0);
+  assert.equal(res.body.name, "Updated Client");
+});
+
+test("updateMyProfile – duplicate phone key returns 400", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    body: { phone: "+37411111111" },
+  });
+  const duplicate = new Error("duplicate key");
+  duplicate.code = 11000;
+  duplicate.keyPattern = { phone: 1 };
+
+  BarberProfile.findOneAndUpdate = async () => null;
+  Salon.find = async () => ({ select: async () => [] });
+  Salon.findById = async () => null;
+  User.findByIdAndUpdate = async () => {
+    throw duplicate;
+  };
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Phone already exists");
 });
 
 test("updateMyProfile – explicitly empty avatarUrl still clears avatar", async () => {
@@ -538,6 +633,90 @@ test("updateMyProfile – changing email from verified marks unverified and clea
   assert.equal(res.body.emailVerifiedAt, null);
 });
 
+test("updateMyProfile – failed email send prevents barber profile upsert", async () => {
+  const sentError = new Error("mail failed");
+  let upsertCalls = 0;
+  const service = createUserProfileUpdateService({
+    UserModel: {
+      findOne: async () => null,
+      findByIdAndUpdate: () =>
+        updateAndSelect(applyUpdate(
+          createBaseUser({
+            role: "barber",
+            email: "newemail@example.com",
+          }),
+          {
+            email: "newemail@example.com",
+            emailVerified: false,
+            emailVerifiedAt: null,
+          }
+        )),
+    },
+    BarberProfileModel: {
+      findOneAndUpdate: async () => {
+        upsertCalls += 1;
+        return { barberId: userId };
+      },
+    },
+    sendEmailVerification: async () => {
+      throw sentError;
+    },
+  });
+
+  await assert.rejects(
+    service({
+      user: createBaseUser({ role: "barber", email: "old@example.com" }),
+      body: { email: "newemail@example.com", bio: "Fresh bio" },
+      req: createRequest(),
+    }),
+    sentError
+  );
+
+  assert.equal(upsertCalls, 0);
+});
+
+test("updateMyProfile – barber profile upsert failure happens after verification email send", async () => {
+  const calls = [];
+  const service = createUserProfileUpdateService({
+    UserModel: {
+      findOne: async () => null,
+      findByIdAndUpdate: () =>
+        updateAndSelect(applyUpdate(
+          createBaseUser({
+            role: "barber",
+            email: "newemail@example.com",
+          }),
+          {
+            email: "newemail@example.com",
+            emailVerified: false,
+            emailVerifiedAt: null,
+          }
+        )),
+    },
+    BarberProfileModel: {
+      findOneAndUpdate: async () => {
+        calls.push("upsert");
+        throw new Error("write failed");
+      },
+    },
+    sendEmailVerification: async () => {
+      calls.push("email");
+      return { delivered: true, provider: "test" };
+    },
+  });
+
+  await assert.rejects(
+    service({
+      user: createBaseUser({ role: "barber", email: "old@example.com" }),
+      body: { email: "newemail@example.com", bio: "Fresh bio" },
+      req: createRequest(),
+    }),
+    (error) => error?.name === "BarberProfileWriteError"
+  );
+
+  assert.deepEqual(calls, ["email", "upsert"]);
+});
+
 // ── updateMyProfile – duplicate email ─────────────────────────────────
 
 test("updateMyProfile – duplicate email returns 409", async () => {
@@ -570,6 +749,7 @@ test("updateMyProfile – invalid email returns 400", async () => {
 test("updateMyProfile – unchanged verified email stays verified", async () => {
   const verifiedAt = new Date("2025-06-01");
   const res = createResponse();
+  let updatesSeen;
   const req = createRequest({
     user: {
       _id: userId,
@@ -589,8 +769,9 @@ test("updateMyProfile – unchanged verified email stays verified", async () => 
   BarberProfile.findOneAndUpdate = async () => null;
   Salon.find = async () => ({ select: async () => [] });
   Salon.findById = async () => null;
-  User.findByIdAndUpdate = (_id, _updates, _opts) =>
-    updateAndSelect(applyUpdate(
+  User.findByIdAndUpdate = (_id, _updates, _opts) => {
+    updatesSeen = _updates;
+    return updateAndSelect(applyUpdate(
       createBaseUser({
         email: "same@example.com",
         emailVerified: true,
@@ -598,6 +779,7 @@ test("updateMyProfile – unchanged verified email stays verified", async () => 
       }),
       _updates
     ));
+  };
 
   await updateMyProfile(req, res);
 
@@ -606,6 +788,9 @@ test("updateMyProfile – unchanged verified email stays verified", async () => 
   assert.equal(res.body.emailVerified, true);
   assert.equal(res.body.emailVerifiedAt, verifiedAt);
   assert.equal(duplicateLookupCalled, false);
+  assert.equal(Object.hasOwn(updatesSeen || {}, "emailVerificationTokenHash"), false);
+  assert.equal(Object.hasOwn(updatesSeen || {}, "emailVerificationExpires"), false);
+  assert.equal(Object.hasOwn(updatesSeen || {}, "emailVerificationSentAt"), false);
 });
 
 // ── updateMyProfile – clearing email ──────────────────────────────────
@@ -680,6 +865,33 @@ test("sendEmailVerificationController – throttled if sent too recently", async
 
   assert.equal(res.statusCode, 429);
   assert.ok(res.body.message.includes("Please wait"));
+});
+
+test("sendEmailVerificationController – success returns message only and keeps token fields private", async () => {
+  const res = createResponse();
+  const req = createRequest();
+  let updatesSeen;
+
+  User.findById = () =>
+    selectable(createBaseUser({
+      email: "test@example.com",
+      emailVerified: false,
+      emailVerificationSentAt: null,
+      emailVerificationExpires: null,
+    }));
+  User.findByIdAndUpdate = (_id, updates) => {
+    updatesSeen = updates;
+    return Promise.resolve({});
+  };
+
+  await sendEmailVerificationController(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { message: "Verification email sent" });
+  assert.equal(Object.hasOwn(updatesSeen, "emailVerificationTokenHash"), true);
+  assert.equal(Object.hasOwn(res.body, "emailVerificationTokenHash"), false);
+  assert.equal(Object.hasOwn(res.body, "emailVerificationExpires"), false);
+  assert.equal(Object.hasOwn(res.body, "emailVerificationSentAt"), false);
 });
 
 // ── verifyEmailController – valid token ──────────────────────────────

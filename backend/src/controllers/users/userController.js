@@ -1,112 +1,27 @@
-import { sanitizeMediaUrl } from "../../utils/mediaUrl.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Salon from "../../models/Salon.js";
-import User, { MAX_PHONE_LENGTH } from "../../models/User.js";
+import User from "../../models/User.js";
 import {
   createEmailVerificationToken,
   EMAIL_VERIFICATION_EXPIRY_MS,
   EMAIL_VERIFICATION_RESEND_THROTTLE_MS,
   hashEmailVerificationToken,
-  isValidEmail,
-  normalizeEmail,
 } from "../../utils/emailVerification.js";
 import { sendEmailVerification } from "../../services/auth/emailService.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import { getPaidAccessByBarberIds } from "../../services/subscriptionService.js";
-import { isPlatformSuperuser } from "../../middleware/platformMiddleware.js";
 import { serializePublicBarberDirectory } from "../../utils/publicBarberSerializer.js";
 import { getPublicBarberReadinessByIds } from "../../services/barber/publicBarberReadinessService.js";
 import {
   BarberProfileConflictError,
   BarberProfileWriteError,
-  retryBarberProfileUpsertOnDuplicate,
 } from "../../utils/barberProfileDuplicateConflict.js";
-
-const getUserData = (user) => ({
-  id: user._id,
-  name: user.name,
-  phone: user.phone,
-  email: user.email || "",
-  emailVerified: user.emailVerified || false,
-  emailVerifiedAt: user.emailVerifiedAt || null,
-  city: user.city || "",
-  avatarUrl: user.avatarUrl || "",
-  role: user.role,
-  salon: user.salon || null,
-  salonStatus: user.salonStatus || "none",
-  salons: user.salons || [],
-  profession: user.profession || "barber",
-  barberType: user.barberType || "",
-  specialty: user.specialty || "unisex",
-  workHistory: user.workHistory || [],
-  favoriteBarbers: user.favoriteBarbers || [],
-  favoriteSalons: user.favoriteSalons || [],
-  canAccessPlatform: isPlatformSuperuser(user),
-  createdAt: user.createdAt,
-});
-
-const normalizePhone = (phone) =>
-  typeof phone === "string" ? phone.trim() : "";
-
-const defaultScheduleFallback = {
-  startTime: "09:00",
-  endTime: "18:00",
-  hasBreak: false,
-  breakStart: "",
-  breakEnd: "",
-};
-
-const getDefaultSchedule = (profile) => ({
-
-  ...defaultScheduleFallback,
-  ...(profile?.defaultSchedule || {}),
-});
-
-const getUploadedAvatarPath = (file) =>
-  file ? `/uploads/avatars/${file.filename}` : "";
-
-/**
- * Build enriched salon objects from the barber's salons array.
- */
-const buildSalonsData = async (barber) => {
-  if (!Array.isArray(barber.salons) || barber.salons.length === 0) {
-    // Fallback to legacy single salon
-    if (barber.salonStatus === "approved" && barber.salon) {
-      const salon = await Salon.findById(barber.salon).select(
-        "name city address phone image averageRating totalReviews"
-      );
-      if (salon) {
-        return [
-          {
-            ...salon.toObject(),
-            id: salon._id,
-            status: "approved",
-            isPrimary: true,
-            joinedAt: barber.createdAt || new Date(),
-          },
-        ];
-      }
-    }
-    return [];
-  }
-
-  const salonIds = barber.salons.map((s) => s.salon);
-  const salons = await Salon.find({ _id: { $in: salonIds } }).select(
-    "name city address phone image averageRating totalReviews"
-  );
-  const salonsById = new Map(salons.map((s) => [String(s._id), s]));
-
-  return barber.salons.map((entry) => {
-    const salonData = salonsById.get(String(entry.salon));
-    return {
-      ...(salonData ? salonData.toObject() : { _id: entry.salon, id: entry.salon }),
-      id: entry.salon,
-      status: entry.status,
-      isPrimary: entry.isPrimary,
-      joinedAt: entry.joinedAt,
-    };
-  });
-};
+import { serializeMyProfileResponse, serializeUserData } from "./userSerializers.js";
+import { buildSalonsData } from "../../services/users/userSalonProfileService.js";
+import {
+  UserProfileUpdateError,
+  updateSelfProfile,
+} from "../../services/users/userProfileUpdateService.js";
 
 export const getBarbers = async (_req, res) => {
   try {
@@ -204,23 +119,7 @@ export const getMyProfile = async (req, res) => {
 
     const salonsData = await buildSalonsData(req.user);
 
-    return res.json({
-      ...getUserData(req.user),
-      salon: req.user.salon || null,
-      salonStatus: req.user.salonStatus || "none",
-      salons: salonsData,
-      approvedSalons: salonsData.filter((s) => s.status === "approved"),
-      primarySalon: salonsData.find((s) => s.isPrimary && s.status === "approved") ||
-        salonsData.find((s) => s.status === "approved") || null,
-      salonName: profile?.salonName || "",
-      bio: profile?.bio || "",
-      city: profile?.city || req.user.city || "",
-      address: profile?.address || "",
-      instagram: profile?.instagram || "",
-      imageUrl: profile?.imageUrl || req.user.avatarUrl || "",
-      galleryImages: profile?.galleryImages || [],
-      defaultSchedule: getDefaultSchedule(profile),
-    });
+    return res.json(serializeMyProfileResponse({ user: req.user, profile, salonsData }));
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch profile");
   }
@@ -228,192 +127,20 @@ export const getMyProfile = async (req, res) => {
 
 export const updateMyProfile = async (req, res) => {
   try {
-    const {
-      name,
-      phone,
-      city,
-      email,
-      avatarUrl: bodyAvatarUrl,
-      imageUrl: bodyImageUrl,
-      bio,
-    } = req.body;
-    const uploadedAvatarPath = getUploadedAvatarPath(req.file);
-    const hasUploadedAvatar = Boolean(uploadedAvatarPath);
-    const hasBodyAvatarUrl = Object.hasOwn(req.body, "avatarUrl");
-    const hasBodyImageUrl = Object.hasOwn(req.body, "imageUrl");
-    const avatarUrl = hasUploadedAvatar
-      ? uploadedAvatarPath
-      : hasBodyAvatarUrl
-        ? sanitizeMediaUrl(bodyAvatarUrl)
-        : undefined;
-    const imageUrl = hasUploadedAvatar
-      ? uploadedAvatarPath
-      : hasBodyImageUrl
-        ? sanitizeMediaUrl(bodyImageUrl)
-        : undefined;
-
-    const userUpdates = {};
-    const userUnsets = {};
-
-    if (name !== undefined) userUpdates.name = name;
-    if (phone !== undefined) {
-      const normalizedPhone = normalizePhone(phone);
-
-      if (!normalizedPhone) {
-        return res.status(400).json({ message: "Phone is required" });
-      }
-
-      if (normalizedPhone.length > MAX_PHONE_LENGTH) {
-        return res.status(400).json({
-          message: `Phone must be ${MAX_PHONE_LENGTH} characters or less`,
-        });
-      }
-
-      userUpdates.phone = normalizedPhone;
-    }
-    if (city !== undefined) userUpdates.city = city;
-    if (avatarUrl !== undefined || imageUrl !== undefined) {
-      userUpdates.avatarUrl = avatarUrl ?? imageUrl;
-    }
-
-    // Handle email change
-    if (email !== undefined) {
-      const normalizedEmail = normalizeEmail(email);
-      const currentEmail = normalizeEmail(req.user.email);
-
-      if (normalizedEmail === "") {
-        // Clearing email — remove all verification state
-        userUnsets.email = "";
-        userUnsets.emailVerificationTokenHash = "";
-        userUnsets.emailVerificationExpires = "";
-        userUnsets.emailVerificationSentAt = "";
-        userUpdates.emailVerified = false;
-        userUpdates.emailVerifiedAt = null;
-      } else if (normalizedEmail === currentEmail) {
-        userUpdates.email = normalizedEmail;
-      } else {
-        // Validate format
-        if (!isValidEmail(normalizedEmail)) {
-          return res.status(400).json({ message: "Invalid email format" });
-        }
-
-        // Check duplicate email (exclude current user)
-        const existingUser = await User.findOne({
-          email: normalizedEmail,
-          _id: { $ne: req.user._id },
-        });
-        if (existingUser) {
-          return res.status(409).json({ message: "Email already in use" });
-        }
-
-        const { rawToken, tokenHash } = createEmailVerificationToken();
-        userUpdates.email = normalizedEmail;
-        userUpdates.emailVerified = false;
-        userUpdates.emailVerifiedAt = null;
-        userUpdates.emailVerificationTokenHash = tokenHash;
-        userUpdates.emailVerificationExpires = new Date(
-          Date.now() + EMAIL_VERIFICATION_EXPIRY_MS
-        );
-        userUpdates.emailVerificationSentAt = new Date();
-
-        const user = await User.findByIdAndUpdate(req.user._id, userUpdates, {
-          returnDocument: "after",
-          runValidators: true,
-        }).select("-password -emailVerificationTokenHash -emailVerificationExpires -emailVerificationSentAt");
-
-        // Send verification email
-        await sendEmailVerification({ user, token: rawToken, req });
-
-        // Reload profile/barber data
-        let profile = null;
-        if (user.role === "barber") {
-          const profileUpdates = {};
-          if (city !== undefined) profileUpdates.city = city;
-          if (bio !== undefined) profileUpdates.bio = bio;
-          if (avatarUrl !== undefined || imageUrl !== undefined) {
-            profileUpdates.imageUrl = imageUrl ?? avatarUrl;
-          }
-          profile = await retryBarberProfileUpsertOnDuplicate({
-            BarberProfileModel: BarberProfile,
-            barberId: user._id,
-            update: { ...profileUpdates, barberId: user._id },
-            options: { returnDocument: "after", runValidators: true, upsert: true },
-          });
-
-          if (!profile) throw new BarberProfileConflictError();
-        }
-
-        const salonsData = await buildSalonsData(user);
-        return res.json({
-          ...getUserData(user),
-          salon: user.salon || null,
-          salonStatus: user.salonStatus || "none",
-          salons: salonsData,
-          approvedSalons: salonsData.filter((s) => s.status === "approved"),
-          primarySalon: salonsData.find((s) => s.isPrimary && s.status === "approved") ||
-            salonsData.find((s) => s.status === "approved") || null,
-          salonName: profile?.salonName || "",
-          bio: profile?.bio || "",
-          city: profile?.city || user.city || "",
-          address: profile?.address || "",
-          instagram: profile?.instagram || "",
-          imageUrl: profile?.imageUrl || user.avatarUrl || "",
-          galleryImages: profile?.galleryImages || [],
-          defaultSchedule: getDefaultSchedule(profile),
-        });
-      }
-    }
-
-    const updateOperation = Object.keys(userUnsets).length > 0
-      ? { $set: userUpdates, $unset: userUnsets }
-      : userUpdates;
-
-    const user = await User.findByIdAndUpdate(req.user._id, updateOperation, {
-      returnDocument: "after",
-      runValidators: true,
-    }).select("-password -emailVerificationTokenHash -emailVerificationExpires -emailVerificationSentAt");
-
-    let profile = null;
-
-    if (user.role === "barber") {
-      const profileUpdates = {};
-
-      if (city !== undefined) profileUpdates.city = city;
-      if (bio !== undefined) profileUpdates.bio = bio;
-      if (avatarUrl !== undefined || imageUrl !== undefined) {
-        profileUpdates.imageUrl = imageUrl ?? avatarUrl;
-      }
-
-      profile = await retryBarberProfileUpsertOnDuplicate({
-        BarberProfileModel: BarberProfile,
-        barberId: user._id,
-        update: { ...profileUpdates, barberId: user._id },
-        options: { returnDocument: "after", runValidators: true, upsert: true },
-      });
-
-      if (!profile) throw new BarberProfileConflictError();
-    }
+    const { user, profile } = await updateSelfProfile({
+      user: req.user,
+      body: req.body,
+      file: req.file,
+      req,
+    });
 
     const salonsData = await buildSalonsData(user);
-
-    return res.json({
-      ...getUserData(user),
-      salon: user.salon || null,
-      salonStatus: user.salonStatus || "none",
-      salons: salonsData,
-      approvedSalons: salonsData.filter((s) => s.status === "approved"),
-      primarySalon: salonsData.find((s) => s.isPrimary && s.status === "approved") ||
-        salonsData.find((s) => s.status === "approved") || null,
-      salonName: profile?.salonName || "",
-      bio: profile?.bio || "",
-      city: profile?.city || user.city || "",
-      address: profile?.address || "",
-      instagram: profile?.instagram || "",
-      imageUrl: profile?.imageUrl || user.avatarUrl || "",
-      galleryImages: profile?.galleryImages || [],
-      defaultSchedule: getDefaultSchedule(profile),
-    });
+    return res.json(serializeMyProfileResponse({ user, profile, salonsData }));
   } catch (error) {
+    if (error instanceof UserProfileUpdateError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
     if (error instanceof BarberProfileConflictError) {
       return res.status(409).json({
         code: "BARBER_PROFILE_CONFLICT",
@@ -524,7 +251,7 @@ export const verifyEmailController = async (req, res) => {
 
     return res.json({
       message: "Email verified successfully",
-      user: getUserData(user),
+      user: serializeUserData(user),
     });
   } catch (error) {
     return sendControllerError(res, error, "Verification failed");
