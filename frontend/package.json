@@ -38,16 +38,19 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "jsdom": "^29.1.1",
-    "postcss": "^8.5.10",
+    "postcss": "8.5.23",
     "tailwindcss": "^3.4.19",
-    "vite": "^8.0.10",
+    "vite": "8.0.16",
     "vitest": "^4.1.10"
   },
   "overrides": {
+    "@babel/core": "7.29.6",
     "form-data": "4.0.6",
     "engine.io-client": "6.6.6",
+    "nanoid": "3.3.17",
     "socket.io-parser": "4.2.7",
+    "undici": "7.29.0",
     "ws": "8.21.0",
-    "brace-expansion": "5.0.6"
+    "brace-expansion": "5.0.9"
   }
 }
