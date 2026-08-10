@@ -12,9 +12,11 @@ import {
   resetWaitlistServiceModelMocks,
 } from "./waitlistService.testUtils.js";
 import { offerWaitlistEntry } from "./waitlistService.js";
+import { __waitlistNotificationTestHooks } from "./waitlistNotificationService.js";
 
 afterEach(() => {
   resetWaitlistServiceModelMocks();
+  __waitlistNotificationTestHooks.resetLogger();
 });
 
 test("barber can offer time for own active waitlist entry", async () => {
@@ -178,7 +180,11 @@ test("offer succeeds even if client notification fails after status becomes offe
   const entry = createMockEntry({ _id: "offer-notif-fail" });
   const logs = [];
 
-  console.warn = (...args) => logs.push(args);
+  __waitlistNotificationTestHooks.setLogger({
+    warn(payload, message) {
+      logs.push({ payload, message });
+    },
+  });
   WaitlistEntry.findById = async () => entry;
   WaitlistEntry.findOneAndUpdate = async (query, update) => {
     Object.assign(entry, update.$set || {});
@@ -194,6 +200,8 @@ test("offer succeeds even if client notification fails after status becomes offe
   assert.equal(offered.offeredTime, "14:00");
   assert.ok(offered.offeredAt);
   assert.equal(logs.length, 1);
-  assert.equal(logs[0][0], "Waitlist notification failed (non-fatal):");
-  assert.equal(logs[0][1], "notification service unavailable");
+  assert.equal(logs[0].message, "waitlist.notification_failed");
+  assert.equal(logs[0].payload.event, "waitlist.notification_failed");
+  assert.equal(logs[0].payload.err.message, "notification service unavailable");
+  assert.deepEqual(Object.keys(logs[0].payload).sort(), ["err", "event"]);
 });

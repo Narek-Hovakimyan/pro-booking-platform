@@ -58,6 +58,7 @@ afterEach(() => {
   __bookingSideEffectsTestHooks.resetGetIO();
   __bookingSideEffectsTestHooks.resetNotifyMatchingWaitlistEntries();
   __bookingSideEffectsTestHooks.resetCreateNotification();
+  __bookingSideEffectsTestHooks.resetLogger();
   User.findById = originalUserFindById;
   console.error = originalConsoleError;
 });
@@ -249,10 +250,9 @@ test("preserves missing salonId when notifying waitlist", () => {
 
 test("waitlist notification errors are caught and logged without throwing", async () => {
   const logs = [];
+  const logger = { warn: (...args) => logs.push(args) };
 
-  console.error = (...args) => {
-    logs.push(args);
-  };
+  __bookingSideEffectsTestHooks.setLogger(logger);
   __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries(() =>
     Promise.reject(new Error("waitlist failed"))
   );
@@ -261,8 +261,28 @@ test("waitlist notification errors are caught and logged without throwing", asyn
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(logs.length, 1);
-  assert.equal(logs[0][0], "Waitlist notification error:");
-  assert.equal(logs[0][1], "waitlist failed");
+  assert.equal(logs[0][0].event, "booking.waitlist_notification_failed");
+  assert.equal(logs[0][0].err.message, "waitlist failed");
+  assert.equal(logs[0][0].bookingId, "booking-1");
+  assert.equal(logs[0][0].barberId, barberId);
+  assert.equal(logs[0][0].salonId, "64b000000000000000000004");
+  assert.equal(logs[0][0].serviceId, "64b000000000000000000005");
+  assert.equal(logs[0][1], "booking.waitlist_notification_failed");
+  assert.doesNotMatch(JSON.stringify(logs), /secret_123|txn_123|reference-1|toner-7a/i);
+});
+
+test("waitlist notification logging failures stay non-fatal", async () => {
+  __bookingSideEffectsTestHooks.setLogger({
+    warn() {
+      throw new Error("logger unavailable");
+    },
+  });
+  __bookingSideEffectsTestHooks.setNotifyMatchingWaitlistEntries(() =>
+    Promise.reject(new Error("waitlist failed"))
+  );
+
+  assert.doesNotThrow(() => notifyWaitlistForReleasedBookingSlot(createBooking()));
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("accepted status change sends same client notification", async () => {

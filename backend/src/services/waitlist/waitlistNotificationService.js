@@ -3,12 +3,38 @@ import User from "../../models/User.js";
 import { createNotification } from "../notification/notificationService.js";
 import { exactWaitlistNotificationPredicate } from "./waitlistQueries.js";
 import { getArmeniaDateKey, timeToMinutes } from "../../utils/bookingDateTime.js";
+import { getLogger } from "../../config/logger.js";
 
-export const sendNotificationSafe = async (payload) => {
+let getLoggerForWaitlistNotifications = getLogger;
+
+const getSafeLogContext = (context = {}) =>
+  Object.fromEntries(
+    ["waitlistEntryId", "barberId", "salonId", "serviceId", "bookingId"]
+      .map((key) => [key, context[key]])
+      .filter(([, value]) => value !== undefined && value !== null)
+  );
+
+const logWaitlistNotificationFailure = (err, context = {}) => {
+  try {
+    const logger = getLoggerForWaitlistNotifications?.();
+    logger?.warn?.(
+      {
+        err,
+        event: "waitlist.notification_failed",
+        ...getSafeLogContext(context),
+      },
+      "waitlist.notification_failed"
+    );
+  } catch {
+    // Waitlist notification failures are non-fatal.
+  }
+};
+
+export const sendNotificationSafe = async (payload, context) => {
   try {
     await createNotification(payload);
   } catch (err) {
-    console.warn("Waitlist notification failed (non-fatal):", err.message);
+    logWaitlistNotificationFailure(err, context);
   }
 };
 
@@ -130,4 +156,13 @@ export const notifyMatchingWaitlistEntries = async ({
   }
 
   return notificationsSent;
+};
+
+export const __waitlistNotificationTestHooks = {
+  setLogger(nextLogger) {
+    getLoggerForWaitlistNotifications = () => nextLogger;
+  },
+  resetLogger() {
+    getLoggerForWaitlistNotifications = getLogger;
+  },
 };

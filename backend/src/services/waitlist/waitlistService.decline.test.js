@@ -13,9 +13,11 @@ import {
   resetWaitlistServiceModelMocks,
 } from "./waitlistService.testUtils.js";
 import { declineWaitlistOffer } from "./waitlistService.js";
+import { __waitlistNotificationTestHooks } from "./waitlistNotificationService.js";
 
 afterEach(() => {
   resetWaitlistServiceModelMocks();
+  __waitlistNotificationTestHooks.resetLogger();
 });
 
 test("client can decline own offered waitlist entry", async () => {
@@ -106,7 +108,11 @@ test("decline succeeds if barber notification fails after rejected", async () =>
   });
   const logs = [];
 
-  console.warn = (...args) => logs.push(args);
+  __waitlistNotificationTestHooks.setLogger({
+    warn(payload, message) {
+      logs.push({ payload, message });
+    },
+  });
   WaitlistEntry.findOne = async (query) => {
     if (String(query._id) === "decline-notif-fail" && query.status === "offered" && String(query.clientId) === clientId) {
       return entry;
@@ -134,8 +140,10 @@ test("decline succeeds if barber notification fails after rejected", async () =>
   assert.equal(declined.status, "rejected");
   assert.ok(declined.rejectedAt);
   assert.equal(logs.length, 1);
-  assert.equal(logs[0][0], "Waitlist notification failed (non-fatal):");
-  assert.equal(logs[0][1], "notification service unavailable");
+  assert.equal(logs[0].message, "waitlist.notification_failed");
+  assert.equal(logs[0].payload.event, "waitlist.notification_failed");
+  assert.equal(logs[0].payload.err.message, "notification service unavailable");
+  assert.deepEqual(Object.keys(logs[0].payload).sort(), ["err", "event"]);
 });
 
 test("declined offer creates no Booking", async () => {

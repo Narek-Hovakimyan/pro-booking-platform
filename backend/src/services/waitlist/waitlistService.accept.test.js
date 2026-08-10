@@ -24,6 +24,7 @@ import {
   BookingSlotProtectionUnavailableError,
 } from "../booking/bookingSlotHoldService.js";
 import { acceptWaitlistOffer, approveWaitlistEntry } from "./waitlistService.js";
+import { __waitlistNotificationTestHooks } from "./waitlistNotificationService.js";
 
 const mockBarberPaidAccess = () => {
   Subscription.findOne = async () => ({
@@ -57,6 +58,7 @@ afterEach(() => {
   __bookingSlotHoldServiceTestHooks.supportsTransactions =
     originalSlotHoldMethods.supportsTransactions;
   __bookingSlotHoldServiceTestHooks.startSession = originalSlotHoldMethods.startSession;
+  __waitlistNotificationTestHooks.resetLogger();
 });
 
 const installProtectionUnavailableHooks = (startSession) => {
@@ -293,7 +295,11 @@ test("accept succeeds if barber notification fails after booking and conversion"
   });
   const logs = [];
 
-  console.warn = (...args) => logs.push(args);
+  __waitlistNotificationTestHooks.setLogger({
+    warn(payload, message) {
+      logs.push({ payload, message });
+    },
+  });
   WaitlistEntry.findOne = async (query) => {
     if (String(query._id) === "accept-notif-fail" && query.status === "offered") return entry;
     return null;
@@ -334,8 +340,10 @@ test("accept succeeds if barber notification fails after booking and conversion"
   assert.equal(result.entry.convertedBooking, "booking-notif-fail");
   assert.equal(result.booking.status, "accepted");
   assert.equal(logs.length, 1);
-  assert.equal(logs[0][0], "Waitlist notification failed (non-fatal):");
-  assert.equal(logs[0][1], "notification service unavailable");
+  assert.equal(logs[0].message, "waitlist.notification_failed");
+  assert.equal(logs[0].payload.event, "waitlist.notification_failed");
+  assert.equal(logs[0].payload.err.message, "notification service unavailable");
+  assert.deepEqual(Object.keys(logs[0].payload).sort(), ["err", "event"]);
 });
 
 test("acceptWaitlistOffer fails closed with 503 when slot protection is unavailable", async () => {

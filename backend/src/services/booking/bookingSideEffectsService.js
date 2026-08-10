@@ -8,10 +8,12 @@ import {
 } from "../../utils/bookingUtils.js";
 import { createNotification } from "../notification/notificationService.js";
 import { notifyMatchingWaitlistEntries } from "../waitlist/waitlistService.js";
+import { getLogger } from "../../config/logger.js";
 
 let getIOForBookingSideEffects = getIO;
 let notifyMatchingWaitlistEntriesForBookingSideEffects = notifyMatchingWaitlistEntries;
 let createNotificationForBookingSideEffects = createNotification;
+let getLoggerForBookingSideEffects = getLogger;
 
 const getClientName = async (booking, fallbackUser) => {
   if (booking.clientName) return booking.clientName;
@@ -59,7 +61,7 @@ export const emitBookingUpdated = (booking, action = "updated") => {
   }
 };
 
-export const notifyWaitlistForReleasedBookingSlot = (booking) => {
+export const notifyWaitlistForReleasedBookingSlot = (booking, requestLogger) => {
   notifyMatchingWaitlistEntriesForBookingSideEffects({
     barberId: booking.barberId,
     salonId: booking.salonId,
@@ -67,7 +69,22 @@ export const notifyWaitlistForReleasedBookingSlot = (booking) => {
     serviceId: booking.serviceId,
     time: booking.time,
   }).catch((err) => {
-    console.error("Waitlist notification error:", err.message);
+    try {
+      const logger = requestLogger || getLoggerForBookingSideEffects?.();
+      logger?.warn?.(
+        {
+          err,
+          event: "booking.waitlist_notification_failed",
+          bookingId: booking._id,
+          barberId: booking.barberId,
+          salonId: booking.salonId || undefined,
+          serviceId: booking.serviceId,
+        },
+        "booking.waitlist_notification_failed"
+      );
+    } catch {
+      // Waitlist fan-out is non-critical and logging must stay best-effort.
+    }
   });
 };
 
@@ -130,5 +147,11 @@ export const __bookingSideEffectsTestHooks = {
   },
   resetCreateNotification() {
     createNotificationForBookingSideEffects = createNotification;
+  },
+  setLogger(nextLogger) {
+    getLoggerForBookingSideEffects = () => nextLogger;
+  },
+  resetLogger() {
+    getLoggerForBookingSideEffects = getLogger;
   },
 };

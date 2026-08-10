@@ -712,7 +712,44 @@ test("accept or reject without pending request returns 400", async () => {
 });
 
 test("notification failure is non-fatal for reschedule request flow", async () => {
-  const originalConsoleError = console.error;
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  const logs = [];
+
+  Booking.findById = async () => booking;
+  mockRescheduleDependencies([]);
+  Notification.create = async () => {
+    throw new Error("notification unavailable");
+  };
+
+  await createRescheduleRequest(
+    {
+      id: "req-reschedule-notification",
+      log: { warn: (...args) => logs.push(args) },
+      user: client,
+      params: { id: booking._id },
+      body: createRequestBody({
+        note: "Sensitive note with phone +37499111222",
+        token: "secret-token",
+      }),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.rescheduleRequest.status, "pending");
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][0].event, "booking_reschedule.notification_failed");
+  assert.equal(logs[0][0].err.message, "notification unavailable");
+  assert.equal(logs[0][0].bookingId, booking._id);
+  assert.equal(logs[0][0].barberId, booking.barberId);
+  assert.equal(logs[0][0].salonId, booking.salonId);
+  assert.equal(logs[0][0].serviceId, booking.serviceId);
+  assert.equal(logs[0][1], "booking_reschedule.notification_failed");
+  assert.doesNotMatch(JSON.stringify(logs), /Sensitive note|secret-token|\+37499111222/);
+});
+
+test("reschedule notification logging failure is non-fatal", async () => {
   const booking = createMutableBooking({ status: "accepted" });
   const res = createResponse();
 
@@ -721,20 +758,21 @@ test("notification failure is non-fatal for reschedule request flow", async () =
   Notification.create = async () => {
     throw new Error("notification unavailable");
   };
-  console.error = () => {};
 
-  try {
-    await createRescheduleRequest(
-      {
-        user: client,
-        params: { id: booking._id },
-        body: createRequestBody(),
+  await createRescheduleRequest(
+    {
+      id: "req-reschedule-logger-failure",
+      log: {
+        warn() {
+          throw new Error("logger unavailable");
+        },
       },
-      res
-    );
-  } finally {
-    console.error = originalConsoleError;
-  }
+      user: client,
+      params: { id: booking._id },
+      body: createRequestBody(),
+    },
+    res
+  );
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.rescheduleRequest.status, "pending");

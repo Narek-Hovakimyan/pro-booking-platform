@@ -59,11 +59,19 @@ const isClientForBooking = (requester, booking) =>
 const hasPendingRescheduleRequest = (booking) =>
   booking?.rescheduleRequest?.status === "pending";
 
-const createNotificationNonFatal = async (payload) => {
+const logNotificationError = (req, err, context) => {
+  try {
+    req?.log?.warn({ err, ...context }, context.event);
+  } catch {
+    // Notification logging must not affect the primary booking flow.
+  }
+};
+
+const createNotificationNonFatal = async (req, payload, context) => {
   try {
     await createNotification(payload);
   } catch (error) {
-    console.error("Booking reschedule notification error:", error.message);
+    logNotificationError(req, error, context);
   }
 };
 
@@ -129,12 +137,22 @@ export const createRescheduleRequest = async (req, res) => {
 
     await booking.save();
 
-    await createNotificationNonFatal({
-      userId: booking.barberId,
-      type: "booking_reschedule_requested",
-      message: `Client requested to reschedule booking from ${booking.bookingDate} at ${booking.time} to ${requestedBookingDate} at ${requestedTime}.`,
-      data: getBookingNotificationData(booking),
-    });
+    await createNotificationNonFatal(
+      req,
+      {
+        userId: booking.barberId,
+        type: "booking_reschedule_requested",
+        message: `Client requested to reschedule booking from ${booking.bookingDate} at ${booking.time} to ${requestedBookingDate} at ${requestedTime}.`,
+        data: getBookingNotificationData(booking),
+      },
+      {
+        event: "booking_reschedule.notification_failed",
+        bookingId: booking._id,
+        barberId: booking.barberId,
+        salonId: booking.salonId || undefined,
+        serviceId: booking.serviceId,
+      }
+    );
 
     emitBookingUpdated(booking, "updated");
 
@@ -278,16 +296,26 @@ export const acceptRescheduleRequest = async (req, res) => {
     const updatedBooking = acceptResult.booking;
 
     if (acceptResult.releasedSlot) {
-      notifyWaitlistForReleasedBookingSlot(acceptResult.releasedSlot);
+      notifyWaitlistForReleasedBookingSlot(acceptResult.releasedSlot, req.log);
     }
 
     if (updatedBooking.clientId) {
-      await createNotificationNonFatal({
-        userId: updatedBooking.clientId,
-        type: "booking_reschedule_accepted",
-        message: `Your reschedule request was accepted. Booking moved to ${updatedBooking.bookingDate} at ${updatedBooking.time}.`,
-        data: getBookingNotificationData(updatedBooking),
-      });
+      await createNotificationNonFatal(
+        req,
+        {
+          userId: updatedBooking.clientId,
+          type: "booking_reschedule_accepted",
+          message: `Your reschedule request was accepted. Booking moved to ${updatedBooking.bookingDate} at ${updatedBooking.time}.`,
+          data: getBookingNotificationData(updatedBooking),
+        },
+        {
+          event: "booking_reschedule.notification_failed",
+          bookingId: updatedBooking._id,
+          barberId: updatedBooking.barberId,
+          salonId: updatedBooking.salonId || undefined,
+          serviceId: updatedBooking.serviceId,
+        }
+      );
     }
 
     emitBookingUpdated(updatedBooking, "updated");
@@ -326,14 +354,24 @@ export const rejectRescheduleRequest = async (req, res) => {
     await booking.save();
 
     if (booking.clientId) {
-      await createNotificationNonFatal({
-        userId: booking.clientId,
-        type: "booking_reschedule_rejected",
-        message: rejectionReason
-          ? `Your reschedule request was rejected. Reason: ${rejectionReason}`
-          : "Your reschedule request was rejected.",
-        data: getBookingNotificationData(booking),
-      });
+      await createNotificationNonFatal(
+        req,
+        {
+          userId: booking.clientId,
+          type: "booking_reschedule_rejected",
+          message: rejectionReason
+            ? `Your reschedule request was rejected. Reason: ${rejectionReason}`
+            : "Your reschedule request was rejected.",
+          data: getBookingNotificationData(booking),
+        },
+        {
+          event: "booking_reschedule.notification_failed",
+          bookingId: booking._id,
+          barberId: booking.barberId,
+          salonId: booking.salonId || undefined,
+          serviceId: booking.serviceId,
+        }
+      );
     }
 
     emitBookingUpdated(booking, "updated");

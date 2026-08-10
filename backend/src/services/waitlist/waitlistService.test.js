@@ -33,9 +33,14 @@ import {
   approveWaitlistEntry,
   rejectWaitlistEntry,
 } from "./waitlistService.js";
+import {
+  sendNotificationSafe,
+  __waitlistNotificationTestHooks,
+} from "./waitlistNotificationService.js";
 
 afterEach(() => {
   resetWaitlistServiceModelMocks();
+  __waitlistNotificationTestHooks.resetLogger();
 });
 
 // ─── 1. client can create waitlist entry ───
@@ -624,8 +629,94 @@ test("reject sends client notification", async () => {
 test("reject succeeds if client notification fails after rejected", async () => {
   const entry = createMockEntry();
   const logs = [];
+  const originalConsoleWarn = console.warn;
+  let consoleWarnCalls = 0;
 
-  console.warn = (...args) => logs.push(args);
+  __waitlistNotificationTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+  console.warn = () => {
+    consoleWarnCalls += 1;
+  };
+  WaitlistEntry.findById = async () => entry;
+  mockFindOneAndUpdateForEntries([entry]);
+  Notification.create = async () => {
+    throw new Error("notification service unavailable");
+  };
+
+  let rejectedEntry;
+  try {
+    rejectedEntry = await rejectWaitlistEntry({ entryId: waitlistEntryId, barberId });
+  } finally {
+    console.warn = originalConsoleWarn;
+  }
+
+  assert.equal(rejectedEntry.status, "rejected");
+  assert.ok(rejectedEntry.rejectedAt);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][0].event, "waitlist.notification_failed");
+  assert.equal(logs[0][0].err.message, "notification service unavailable");
+  assert.equal(logs[0][1], "waitlist.notification_failed");
+  assert.equal(consoleWarnCalls, 0);
+  assert.doesNotMatch(
+    JSON.stringify(logs),
+    /Any time in this window|token|credential|email|phone/i
+  );
+});
+
+test("waitlist notification logging keeps safe identifiers and excludes payload data", async () => {
+  const logs = [];
+
+  __waitlistNotificationTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+  Notification.create = async () => {
+    throw new Error("notification service unavailable");
+  };
+
+  await sendNotificationSafe(
+    {
+      userId: clientId,
+      message: "secret body token=private-token",
+      data: { email: "client@example.com" },
+    },
+    {
+      waitlistEntryId,
+      barberId,
+      salonId,
+      serviceId,
+      bookingId: "booking-1",
+      body: "must not be logged",
+      token: "private-token",
+    }
+  );
+
+  assert.equal(logs.length, 1);
+  assert.deepEqual(Object.keys(logs[0][0]).sort(), [
+    "barberId",
+    "bookingId",
+    "err",
+    "event",
+    "salonId",
+    "serviceId",
+    "waitlistEntryId",
+  ]);
+  assert.equal(logs[0][0].waitlistEntryId, waitlistEntryId);
+  assert.equal(logs[0][0].barberId, barberId);
+  assert.equal(logs[0][0].salonId, salonId);
+  assert.equal(logs[0][0].serviceId, serviceId);
+  assert.equal(logs[0][0].bookingId, "booking-1");
+  assert.doesNotMatch(JSON.stringify(logs), /secret body|private-token|client@example.com/i);
+});
+
+test("reject remains non-fatal when waitlist notification logger fails", async () => {
+  const entry = createMockEntry();
+
+  __waitlistNotificationTestHooks.setLogger({
+    warn() {
+      throw new Error("logger unavailable");
+    },
+  });
   WaitlistEntry.findById = async () => entry;
   mockFindOneAndUpdateForEntries([entry]);
   Notification.create = async () => {
@@ -636,9 +727,22 @@ test("reject succeeds if client notification fails after rejected", async () => 
 
   assert.equal(rejectedEntry.status, "rejected");
   assert.ok(rejectedEntry.rejectedAt);
-  assert.equal(logs.length, 1);
-  assert.equal(logs[0][0], "Waitlist notification failed (non-fatal):");
-  assert.equal(logs[0][1], "notification service unavailable");
+});
+
+test("reject remains non-fatal when waitlist logger is unavailable", async () => {
+  const entry = createMockEntry();
+
+  __waitlistNotificationTestHooks.setLogger(undefined);
+  WaitlistEntry.findById = async () => entry;
+  mockFindOneAndUpdateForEntries([entry]);
+  Notification.create = async () => {
+    throw new Error("notification service unavailable");
+  };
+
+  const rejectedEntry = await rejectWaitlistEntry({ entryId: waitlistEntryId, barberId });
+
+  assert.equal(rejectedEntry.status, "rejected");
+  assert.ok(rejectedEntry.rejectedAt);
 });
 
 test("barber can approve own active waitlist entry", async () => {
