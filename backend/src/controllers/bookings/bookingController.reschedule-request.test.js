@@ -72,6 +72,16 @@ const createRequestBody = (overrides = {}) => ({
   ...overrides,
 });
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    logger: {
+      error: (...args) => calls.push(args),
+    },
+  };
+};
+
 afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
   Booking.countDocuments = originalMethods.bookingCountDocuments;
@@ -709,6 +719,197 @@ test("accept or reject without pending request returns 400", async () => {
     assert.equal(res.statusCode, 400);
     assert.equal(res.body.message, "No pending reschedule request");
   }
+});
+
+test("create reschedule request logs structured safe context and preserves 400 response", async () => {
+  const booking = createMutableBooking({ status: "accepted" });
+  const res = createResponse();
+  const { calls, logger } = createRequestLogger();
+  const safeBookingId = "64b000000000000000000099";
+  const validationError = {
+    name: "ValidationError",
+    message:
+      "Bad reschedule body /var/app/private token secret@example.com +37499111222",
+    statusCode: 400,
+    code: "ENOENT:/srv/private",
+    path: "/srv/private/request.json",
+  };
+
+  Booking.findById = async () => booking;
+  Booking.find = async () => {
+    throw validationError;
+  };
+  Schedule.findOne = async () => null;
+  User.findById = () => ({
+    select: async () => barberWithSalon,
+  });
+
+  await createRescheduleRequest(
+    {
+      log: logger,
+      user: client,
+      params: { id: safeBookingId },
+      body: createRequestBody({
+        note: "Sensitive note with +37499111222",
+        token: "secret-token",
+      }),
+      headers: { authorization: "Bearer secret" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, validationError.message);
+  assert.deepEqual(calls, [[
+    {
+      err: { name: "Error" },
+      event: "booking_reschedule.request_failed",
+      bookingId: safeBookingId,
+      userId: clientId,
+      statusCode: 400,
+    },
+    "booking_reschedule.request_failed",
+  ]]);
+  assert.doesNotMatch(JSON.stringify(calls), /Sensitive note|secret-token|Bearer secret|private|srv|ENOENT/);
+});
+
+test("accept reschedule logs structured safe context and preserves 500 response", async () => {
+  const booking = createMutableBooking({
+    status: "accepted",
+    rescheduleRequest: createPendingRescheduleRequest(),
+  });
+  const res = createResponse();
+  const { calls, logger } = createRequestLogger();
+  const safeBookingId = "64b000000000000000000098";
+
+  Booking.findById = async () => {
+    throw {
+      name: "../../etc/passwd",
+      message: "db exploded at /srv/app/bookings",
+      code: "EPERM:/srv/app/bookings",
+      stack: "stack /srv/app/bookings",
+    };
+  };
+
+  await acceptRescheduleRequest(
+    {
+      log: logger,
+      user: barber,
+      params: { id: safeBookingId },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not accept reschedule request");
+  assert.deepEqual(calls, [[
+    {
+      err: { name: "Error" },
+      event: "booking_reschedule.accept_failed",
+      bookingId: safeBookingId,
+      userId: barberId,
+      statusCode: 500,
+    },
+    "booking_reschedule.accept_failed",
+  ]]);
+  assert.doesNotMatch(JSON.stringify(calls), /passwd|srv|EPERM|stack/);
+});
+
+test("reschedule error logging omits path-like IDs and arbitrary status metadata", async () => {
+  const res = createResponse();
+  const { calls, logger } = createRequestLogger();
+  const pathLikeId = "../../etc/passwd";
+  const pathLikeStatus = "/srv/private/status";
+
+  Booking.findById = async () => {
+    throw {
+      message: "database failure",
+      statusCode: pathLikeStatus,
+    };
+  };
+
+  await acceptRescheduleRequest(
+    {
+      log: logger,
+      user: { ...barber, _id: pathLikeId },
+      params: { id: pathLikeId },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, pathLikeStatus);
+  assert.equal(res.body.message, "database failure");
+  assert.deepEqual(calls, [[
+    {
+      err: { name: "Error" },
+      event: "booking_reschedule.accept_failed",
+      statusCode: 500,
+    },
+    "booking_reschedule.accept_failed",
+  ]]);
+  const serializedCalls = JSON.stringify(calls);
+  assert.equal(serializedCalls.includes(pathLikeId), false);
+  assert.equal(serializedCalls.includes(pathLikeStatus), false);
+});
+
+test("reject reschedule logging is non-fatal when logger is missing or throws", async () => {
+  const createRejectBooking = () =>
+    createMutableBooking({
+      status: "accepted",
+      rescheduleRequest: createPendingRescheduleRequest(),
+    });
+  const error = new Error("db down");
+
+  const bookingWithoutLogger = createRejectBooking();
+  const resWithoutLogger = createResponse();
+  Booking.findById = async () => {
+    throw error;
+  };
+
+  await rejectRescheduleRequest(
+    {
+      user: barber,
+      params: { id: bookingWithoutLogger._id },
+      body: {
+        reason: "Contains phone +37499111222",
+      },
+    },
+    resWithoutLogger
+  );
+
+  assert.equal(resWithoutLogger.statusCode, 500);
+  assert.equal(resWithoutLogger.body.message, "Could not reject reschedule request");
+
+  const bookingWithThrowingLogger = createRejectBooking();
+  const resWithThrowingLogger = createResponse();
+  Booking.findById = async () => {
+    throw error;
+  };
+
+  await rejectRescheduleRequest(
+    {
+      log: {
+        error() {
+          throw new Error("logger unavailable");
+        },
+      },
+      user: barber,
+      params: { id: bookingWithThrowingLogger._id },
+      body: {
+        reason: "Contains token secret-token",
+      },
+      headers: { authorization: "Bearer secret" },
+    },
+    resWithThrowingLogger
+  );
+
+  assert.equal(resWithThrowingLogger.statusCode, 500);
+  assert.equal(
+    resWithThrowingLogger.body.message,
+    "Could not reject reschedule request"
+  );
 });
 
 test("notification failure is non-fatal for reschedule request flow", async () => {

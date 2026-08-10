@@ -31,9 +31,36 @@ const getRescheduleErrorStatusCode = (error) => {
   return 500;
 };
 
-const sendRescheduleError = (res, error, fallbackMessage) => {
-  console.error(fallbackMessage, error);
+const getSafeObjectId = (value) =>
+  typeof value === "string" && /^[a-f\d]{24}$/i.test(value) ? value : undefined;
+
+const logRescheduleError = (req, context) => {
+  try {
+    const safeContext = {
+      event: context.event,
+      statusCode: context.statusCode === 400 ? 400 : 500,
+    };
+    const bookingId = getSafeObjectId(context.bookingId);
+    const userId = getSafeObjectId(context.userId);
+
+    if (bookingId) safeContext.bookingId = bookingId;
+    if (userId) safeContext.userId = userId;
+
+    req?.log?.error(
+      {
+        err: { name: "Error" },
+        ...safeContext,
+      },
+      safeContext.event
+    );
+  } catch {
+    // Error logging must not affect request behavior.
+  }
+};
+
+const sendRescheduleError = (req, res, error, fallbackMessage, context) => {
   const statusCode = getRescheduleErrorStatusCode(error);
+  logRescheduleError(req, { ...context, statusCode });
   const message = statusCode === 500
     ? fallbackMessage
     : error?.message || fallbackMessage;
@@ -158,7 +185,11 @@ export const createRescheduleRequest = async (req, res) => {
 
     return res.status(201).json(serializeBookingForResponse(booking, req.user));
   } catch (error) {
-    return sendRescheduleError(res, error, "Could not request reschedule");
+    return sendRescheduleError(req, res, error, "Could not request reschedule", {
+      event: "booking_reschedule.request_failed",
+      bookingId: req.params.id,
+      userId: req.user?._id,
+    });
   }
 };
 
@@ -322,7 +353,17 @@ export const acceptRescheduleRequest = async (req, res) => {
 
     return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
-    return sendRescheduleError(res, error, "Could not accept reschedule request");
+    return sendRescheduleError(
+      req,
+      res,
+      error,
+      "Could not accept reschedule request",
+      {
+        event: "booking_reschedule.accept_failed",
+        bookingId: req.params.id,
+        userId: req.user?._id,
+      }
+    );
   }
 };
 
@@ -378,6 +419,16 @@ export const rejectRescheduleRequest = async (req, res) => {
 
     return res.json(serializeBookingForResponse(booking, req.user));
   } catch (error) {
-    return sendRescheduleError(res, error, "Could not reject reschedule request");
+    return sendRescheduleError(
+      req,
+      res,
+      error,
+      "Could not reject reschedule request",
+      {
+        event: "booking_reschedule.reject_failed",
+        bookingId: req.params.id,
+        userId: req.user?._id,
+      }
+    );
   }
 };
