@@ -177,15 +177,18 @@ test("delayBooking rejects invalid bookingDate or time before grace bypass", asy
 
 test("delayBooking unexpected error returns 500", async () => {
   const res = createResponse();
-  console.error = () => {};
+  const logger = createRequestLogger();
   Booking.findById = async () => {
-    throw new Error("database unavailable");
+    const error = new Error("database unavailable at /private/tmp/booking");
+    error.name = "../../secrets";
+    throw error;
   };
 
   await delayBooking(
     {
       user: client,
-      params: { id: "booking-1" },
+      log: logger,
+      params: { id: barberId },
       body: { delayMinutes: 10 },
     },
     res
@@ -193,6 +196,15 @@ test("delayBooking unexpected error returns 500", async () => {
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not delay booking");
+  assert.deepEqual(logger.calls, [[{
+    err: { name: "Error" },
+    event: "booking.controller_error",
+    statusCode: 500,
+    bookingId: barberId,
+    userId: client._id,
+  }]]);
+  assert.equal(JSON.stringify(logger.calls).includes("/private/tmp/booking"), false);
+  assert.equal(JSON.stringify(logger.calls).includes("../../secrets"), false);
 });
 
 test("GET reference image unauthenticated returns 401", async () => {
@@ -1398,6 +1410,38 @@ test("booking not found returns 404 for treatmentRecord", async () => {
   );
 
   assert.equal(res.statusCode, 404);
+});
+
+test("treatmentRecord validation failure logs only controlled identifiers and status", async () => {
+  const res = createResponse();
+  const logger = createRequestLogger();
+  Booking.findById = async () => {
+    const error = new Error("validation failed for ../../treatment");
+    error.name = "ValidationError";
+    throw error;
+  };
+
+  await updateTreatmentRecord(
+    {
+      user: barber,
+      log: logger,
+      params: { id: barberId },
+      body: { colorFormula: "secret-formula" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "validation failed for ../../treatment");
+  assert.deepEqual(logger.calls, [[{
+    err: { name: "Error" },
+    event: "booking.controller_error",
+    statusCode: 400,
+    bookingId: barberId,
+    userId: barber._id,
+  }]]);
+  assert.equal(JSON.stringify(logger.calls).includes("../../treatment"), false);
+  assert.equal(JSON.stringify(logger.calls).includes("secret-formula"), false);
 });
 
 test("client booking read excludes treatmentRecord", async () => {

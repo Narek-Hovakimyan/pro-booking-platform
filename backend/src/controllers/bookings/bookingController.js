@@ -109,7 +109,10 @@ export const createBooking = async (req, res) => {
   } catch (error) {
     // DB or unexpected failure — cleanup uploaded files
     cleanup();
-    return sendControllerError(res, error, "Could not create booking");
+    return sendControllerError(res, error, "Could not create booking", {
+      req,
+      userId: req.user?._id,
+    });
   }
 };
 
@@ -122,7 +125,10 @@ export const quoteBookingPrice = async (req, res) => {
 
     return res.status(result.status).json(result.body);
   } catch (error) {
-    return sendControllerError(res, error, "Could not quote booking price");
+    return sendControllerError(res, error, "Could not quote booking price", {
+      req,
+      userId: req.user?._id,
+    });
   }
 };
 
@@ -565,7 +571,11 @@ export const updateBooking = async (req, res) => {
 
     return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
-    return sendControllerError(res, error, "Could not update booking");
+    return sendControllerError(res, error, "Could not update booking", {
+      req,
+      bookingId: req.params?.id,
+      userId: req.user?._id,
+    });
   }
 };
 
@@ -579,7 +589,11 @@ export const delayBooking = async (req, res) => {
 
     return res.json(serializeBookingForResponse(updatedBooking, req.user));
   } catch (error) {
-    return sendControllerError(res, error, "Could not delay booking");
+    return sendControllerError(res, error, "Could not delay booking", {
+      req,
+      bookingId: req.params?.id,
+      userId: req.user?._id,
+    });
   }
 };
 
@@ -597,7 +611,11 @@ export const updateTreatmentRecord = async (req, res) => {
 
     return res.json(serializeBookingForResponse(result.booking, req.user));
   } catch (error) {
-    return sendControllerError(res, error, "Could not update treatment record");
+    return sendControllerError(res, error, "Could not update treatment record", {
+      req,
+      bookingId: req.params?.id,
+      userId: req.user?._id,
+    });
   }
 };
 

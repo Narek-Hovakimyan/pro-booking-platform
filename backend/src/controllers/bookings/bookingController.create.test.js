@@ -72,6 +72,16 @@ const oldAutoClosedWeeklySchedule = {
 };
 const tuesdayBookingDate = getFutureBookingDateForDay("tue");
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
 afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
   Booking.countDocuments = originalMethods.bookingCountDocuments;
@@ -1954,11 +1964,13 @@ test("booking create cleans uploaded reference files on database error", async (
   const filename = "ref-db-error.jpg";
   const filePath = createReferenceUploadFile(filename);
   const createdBookings = [];
+  const logger = createRequestLogger();
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
   installTransactionalBookingCreate({ createdBookings });
-  console.error = () => {};
   Booking.findOneAndUpdate = async () => {
-    throw new Error("database unavailable");
+    const error = new Error("database unavailable at /srv/uploads/reference");
+    error.name = "../filesystem";
+    throw error;
   };
 
   const res = createResponse();
@@ -1966,6 +1978,7 @@ test("booking create cleans uploaded reference files on database error", async (
   await createBooking(
     {
       user: client,
+      log: logger,
       files: [{ filename }],
       body: {
         barberId,
@@ -1983,6 +1996,15 @@ test("booking create cleans uploaded reference files on database error", async (
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not create booking");
   assert.equal(fs.existsSync(filePath), false);
+  assert.deepEqual(logger.calls, [[{
+    err: { name: "Error" },
+    event: "booking.controller_error",
+    statusCode: 500,
+    userId: client._id,
+  }]]);
+  assert.equal(JSON.stringify(logger.calls).includes("/srv/uploads/reference"), false);
+  assert.equal(JSON.stringify(logger.calls).includes("../filesystem"), false);
+  assert.equal(JSON.stringify(logger.calls).includes(filename), false);
 });
 
 test("booking create returns 503 and compensates promoted media when binding fails", async () => {
@@ -2432,7 +2454,11 @@ test("transaction rollback compensates promoted booking reference media before r
 test("createBooking validation error returns 400", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
-  console.error = () => {};
+  const logger = {
+    error() {
+      throw new Error("logger failure");
+    },
+  };
   Booking.create = async () => {
     const error = new Error("Booking validation failed");
     error.name = "ValidationError";
@@ -2449,6 +2475,7 @@ test("createBooking validation error returns 400", async () => {
   await createBooking(
     {
       user: client,
+      log: logger,
       body: {
         barberId,
         clientId,

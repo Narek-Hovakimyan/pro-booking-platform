@@ -36,6 +36,16 @@ const originalVoucherMethods = {
   findOneAndUpdate: Voucher.findOneAndUpdate,
 };
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
 afterEach(() => {
   Booking.create = originalMethods.bookingCreate;
   Booking.countDocuments = originalMethods.bookingCountDocuments;
@@ -174,6 +184,36 @@ test("quoteBookingPrice and createBooking make the same readiness decisions", as
     assert.deepEqual(quoteRes.body, createRes.body);
     assert.equal(createdBookings.length, 0);
   }
+});
+
+test("quoteBookingPrice unexpected error logs only safe request context", async () => {
+  const res = createResponse();
+  const logger = createRequestLogger();
+  User.findById = async () => {
+    const error = new Error("quote failure at ../../pricing");
+    error.name = "/srv/pricing";
+    throw error;
+  };
+
+  await quoteBookingPrice(
+    {
+      user: client,
+      log: logger,
+      body: { barberId, serviceId, salonId, notes: "do not log me" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not quote booking price" });
+  assert.deepEqual(logger.calls, [[{
+    err: { name: "Error" },
+    event: "booking.controller_error",
+    statusCode: 500,
+    userId: client._id,
+  }]]);
+  assert.equal(JSON.stringify(logger.calls).includes("../../pricing"), false);
+  assert.equal(JSON.stringify(logger.calls).includes("do not log me"), false);
 });
 
 test("createBooking with discounted service (percent) uses discountedPrice as booking.price", async () => {

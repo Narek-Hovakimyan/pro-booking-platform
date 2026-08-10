@@ -74,12 +74,37 @@ export const getErrorStatusCode = (error) => {
   return 500;
 };
 
+const BOOKING_CONTROLLER_ERROR_EVENT = "booking.controller_error";
+
+const getSafeControllerStatusCode = (statusCode) =>
+  statusCode === 400 ? 400 : 500;
+
+const getSafeLoggerId = (value) =>
+  isValidObjectId(value) ? String(value) : undefined;
+
+const logBookingControllerError = ({ req, statusCode, bookingId, userId }) => {
+  try {
+    req?.log?.error?.({
+      err: { name: "Error" },
+      event: BOOKING_CONTROLLER_ERROR_EVENT,
+      statusCode: getSafeControllerStatusCode(statusCode),
+      ...(getSafeLoggerId(bookingId) ? { bookingId: String(bookingId) } : {}),
+      ...(getSafeLoggerId(userId) ? { userId: String(userId) } : {}),
+    });
+  } catch {}
+};
+
 /**
  * Send a controller error response.
  */
-export const sendControllerError = (res, error, fallbackMessage) => {
-  console.error(fallbackMessage, error);
+export const sendControllerError = (
+  res,
+  error,
+  fallbackMessage,
+  { req, bookingId, userId } = {}
+) => {
   const statusCode = getErrorStatusCode(error);
+  logBookingControllerError({ req, statusCode, bookingId, userId });
   const message = statusCode === 500
     ? fallbackMessage
     : error?.message || fallbackMessage;

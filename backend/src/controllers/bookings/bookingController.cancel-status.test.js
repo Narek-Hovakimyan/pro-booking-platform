@@ -24,6 +24,16 @@ import {
 
 const originalConsoleError = console.error;
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
 beforeEach(() => {
   Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
   SubscriptionSeat.find = () => ({
@@ -253,15 +263,18 @@ test("unauthorized user cannot update another user's booking", async () => {
 
 test("updateBooking unexpected error returns 500", async () => {
   const res = createResponse();
-  console.error = () => {};
+  const logger = createRequestLogger();
   Booking.findById = async () => {
-    throw new Error("database unavailable");
+    const error = new Error("database unavailable for ../booking");
+    error.name = "/var/tmp/update";
+    throw error;
   };
 
   await updateBooking(
     {
       user: client,
-      params: { id: "booking-1" },
+      log: logger,
+      params: { id: "../booking-1" },
       body: { status: "cancelled", cancelReason: "Plans changed" },
     },
     res
@@ -269,6 +282,14 @@ test("updateBooking unexpected error returns 500", async () => {
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not update booking");
+  assert.deepEqual(logger.calls, [[{
+    err: { name: "Error" },
+    event: "booking.controller_error",
+    statusCode: 500,
+    userId: client._id,
+  }]]);
+  assert.equal(JSON.stringify(logger.calls).includes("../booking-1"), false);
+  assert.equal(JSON.stringify(logger.calls).includes("/var/tmp/update"), false);
 });
 
 test("assigned barber can cancel manual booking without clientId", async () => {
