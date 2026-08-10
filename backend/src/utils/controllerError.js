@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 export const getControllerErrorStatusCode = (
   error,
   { duplicateKeyStatus = 409, fallbackStatus = 500 } = {}
@@ -8,6 +10,34 @@ export const getControllerErrorStatusCode = (
     return 400;
   }
   return fallbackStatus;
+};
+
+const CONTROLLER_ERROR_EVENT = "controller.error";
+
+const isValidObjectId = (value) =>
+  Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
+
+const getSafeLoggerUserId = (res) => {
+  const userId = res?.req?.user?._id;
+  return isValidObjectId(userId) ? String(userId) : undefined;
+};
+
+const getSafeLoggerStatusCode = (statusCode) =>
+  Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599
+    ? statusCode
+    : 500;
+
+const logControllerError = (res, statusCode) => {
+  try {
+    res?.req?.log?.error?.({
+      err: { name: "Error" },
+      event: CONTROLLER_ERROR_EVENT,
+      statusCode: getSafeLoggerStatusCode(statusCode),
+      ...(getSafeLoggerUserId(res)
+        ? { userId: getSafeLoggerUserId(res) }
+        : {}),
+    });
+  } catch {}
 };
 
 export const sendControllerError = (
@@ -21,9 +51,7 @@ export const sendControllerError = (
     fallbackStatus,
   });
 
-  if (statusCode === 500) {
-    console.error(fallbackMessage, error);
-  }
+  logControllerError(res, statusCode);
 
   const message =
     statusCode === 500
