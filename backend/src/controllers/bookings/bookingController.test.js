@@ -103,6 +103,16 @@ const createSendFileResponse = ({ sendFileError, headersSent = false } = {}) => 
   },
 });
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
 // ── Plain object validation tests ──────────────────────────────────
 
 test("barber sees their own booking list", async () => {
@@ -324,16 +334,20 @@ test("GET reference image missing on disk returns 404 without leaking path", asy
       referenceImages: [`uploads/booking-references/${imageName}`],
       salonId: null,
     });
-  console.error = () => {};
+  const log = createRequestLogger();
+  const relativePath = `uploads/booking-references/${imageName}`;
   const res = createSendFileResponse({
-    sendFileError: Object.assign(
-      new Error(`ENOENT: no such file, open ${path.join(bookingReferenceDir, imageName)}`),
-      { code: "ENOENT" }
-    ),
+    sendFileError: Object.assign(new Error(`ENOENT: no such file, open ${relativePath}`), {
+      code: "ENOENT",
+      name: `MissingFile:${path.join(bookingReferenceDir, imageName)}`,
+      path: path.join(bookingReferenceDir, imageName),
+      syscall: "open",
+    }),
   });
 
   await getReferenceImage(
     {
+      log,
       user: client,
       params: { bookingId: barberId, imageName },
     },
@@ -343,6 +357,20 @@ test("GET reference image missing on disk returns 404 without leaking path", asy
   assert.equal(res.statusCode, 404);
   assert.equal(res.body.message, "Image file not found");
   assert.equal(res.body.message.includes(bookingReferenceDir), false);
+  assert.equal(log.calls.length, 1);
+  assert.equal(log.calls[0][1], "Could not serve reference image");
+  assert.equal(log.calls[0][0].event, "booking.reference_image_serve_failed");
+  assert.equal(log.calls[0][0].bookingId, barberId);
+  assert.equal(log.calls[0][0].userId, client.id);
+  assert.equal(log.calls[0][0].imageName, imageName);
+  assert.equal(log.calls[0][0].err.name, "Error");
+  assert.equal(log.calls[0][0].err.code, "ENOENT");
+  assert.equal("message" in log.calls[0][0].err, false);
+  assert.equal("path" in log.calls[0][0].err, false);
+  assert.equal("syscall" in log.calls[0][0].err, false);
+  assert.equal("body" in log.calls[0][0], false);
+  assert.equal(JSON.stringify(log.calls).includes(bookingReferenceDir), false);
+  assert.equal(JSON.stringify(log.calls).includes(relativePath), false);
 });
 
 test("GET reference image sendFile error returns 500 without leaking raw message", async () => {
@@ -353,13 +381,22 @@ test("GET reference image sendFile error returns 500 without leaking raw message
       referenceImages: [`uploads/booking-references/${imageName}`],
       salonId: null,
     });
-  console.error = () => {};
+  const log = createRequestLogger();
+  const relativePath = `uploads/booking-references/${imageName}`;
   const res = createSendFileResponse({
-    sendFileError: new Error(`raw filesystem failure at ${bookingReferenceDir}`),
+    sendFileError: Object.assign(
+      new Error(`raw filesystem failure at ${bookingReferenceDir}/${relativePath}`),
+      {
+        name: `FilesystemError:${bookingReferenceDir}`,
+        code: `EACCES:${relativePath}`,
+        dest: path.join(bookingReferenceDir, "dest.jpg"),
+      }
+    ),
   });
 
   await getReferenceImage(
     {
+      log,
       user: client,
       params: { bookingId: barberId, imageName },
     },
@@ -370,18 +407,36 @@ test("GET reference image sendFile error returns 500 without leaking raw message
   assert.equal(res.body.message, "Could not serve reference image");
   assert.equal(res.body.message.includes("raw filesystem failure"), false);
   assert.equal(res.body.message.includes(bookingReferenceDir), false);
+  assert.equal(log.calls.length, 1);
+  assert.equal(log.calls[0][1], "Could not serve reference image");
+  assert.equal(log.calls[0][0].event, "booking.reference_image_serve_failed");
+  assert.equal(log.calls[0][0].bookingId, barberId);
+  assert.equal(log.calls[0][0].userId, client.id);
+  assert.equal(log.calls[0][0].imageName, imageName);
+  assert.equal(log.calls[0][0].err.name, "Error");
+  assert.equal("code" in log.calls[0][0].err, false);
+  assert.equal("message" in log.calls[0][0].err, false);
+  assert.equal("dest" in log.calls[0][0].err, false);
+  assert.equal("headers" in log.calls[0][0], false);
+  assert.equal(JSON.stringify(log.calls).includes(bookingReferenceDir), false);
+  assert.equal(JSON.stringify(log.calls).includes(relativePath), false);
 });
 
 test("GET reference image unexpected lookup error returns 500 without leaking raw message", async () => {
   const imageName = "ref-lookup-error.jpg";
+  const relativePath = `uploads/booking-references/${imageName}`;
   Booking.findById = async () => {
-    throw new Error("raw booking lookup failure");
+    throw Object.assign(new Error(`raw booking lookup failure at ${bookingReferenceDir}`), {
+      name: `LookupError:${relativePath}`,
+      code: `ELOOKUP:${bookingReferenceDir}`,
+    });
   };
-  console.error = () => {};
+  const log = createRequestLogger();
   const res = createResponse();
 
   await getReferenceImage(
     {
+      log,
       user: client,
       params: { bookingId: barberId, imageName },
     },
@@ -391,6 +446,142 @@ test("GET reference image unexpected lookup error returns 500 without leaking ra
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not serve reference image");
   assert.equal(res.body.message.includes("raw booking lookup failure"), false);
+  assert.equal(log.calls.length, 1);
+  assert.equal(log.calls[0][1], "Could not serve reference image");
+  assert.equal(log.calls[0][0].event, "booking.reference_image_serve_failed");
+  assert.equal(log.calls[0][0].bookingId, barberId);
+  assert.equal(log.calls[0][0].userId, client.id);
+  assert.equal(log.calls[0][0].imageName, imageName);
+  assert.equal(log.calls[0][0].err.name, "Error");
+  assert.equal("code" in log.calls[0][0].err, false);
+  assert.equal("message" in log.calls[0][0].err, false);
+  assert.equal(JSON.stringify(log.calls).includes(bookingReferenceDir), false);
+  assert.equal(JSON.stringify(log.calls).includes(relativePath), false);
+});
+
+test("GET reference image stream error logging is best-effort and preserves 500 response", async () => {
+  const imageName = "ref-stream-error.png";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+  MediaObject.find = () => ({
+    sort() {
+      return {
+        async lean() {
+          return [{ _id: "media-1", status: MEDIA_OBJECT_STATES.ACTIVE }];
+        },
+      };
+    },
+  });
+  MediaObject.findOne = () => ({
+    async lean() {
+      return {
+        _id: "media-1",
+        status: MEDIA_OBJECT_STATES.ACTIVE,
+        mediaClass: "booking-reference",
+        access: "private",
+        storageKey: "active-storage-key.png",
+        contentType: "image/png",
+      };
+    },
+  });
+  const relativePath = `uploads/booking-references/${imageName}`;
+  const streamError = Object.assign(
+    new Error(`stream failure at ${bookingReferenceDir}/${relativePath}`),
+    {
+      name: `StreamError:${bookingReferenceDir}`,
+      code: `ESTREAM:${relativePath}`,
+    }
+  );
+  const log = createRequestLogger();
+  __bookingReferenceMediaTestHooks.setMediaStore({
+    async createReadStream() {
+      return {
+        on(eventName, handler) {
+          if (eventName === "error") {
+            handler(streamError);
+          }
+          return this;
+        },
+        pipe() {
+          return this;
+        },
+      };
+    },
+  });
+  const res = {
+    ...createResponse(),
+    headers: {},
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+  };
+
+  await getReferenceImage(
+    {
+      log,
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not serve reference image");
+  assert.equal(log.calls.length, 1);
+  assert.equal(log.calls[0][1], "Could not serve reference image");
+  assert.equal(log.calls[0][0].event, "booking.reference_image_serve_failed");
+  assert.equal(log.calls[0][0].bookingId, barberId);
+  assert.equal(log.calls[0][0].userId, client.id);
+  assert.equal(log.calls[0][0].imageName, imageName);
+  assert.deepEqual(log.calls[0][0].err, { name: "Error" });
+  assert.equal("body" in log.calls[0][0], false);
+  assert.equal(JSON.stringify(log.calls).includes(bookingReferenceDir), false);
+  assert.equal(JSON.stringify(log.calls).includes(relativePath), false);
+});
+
+test("GET reference image remains non-fatal when logger is missing or throws", async () => {
+  const imageName = "ref-logger-failure.jpg";
+  Booking.findById = async () =>
+    createMutableBooking({
+      _id: barberId,
+      referenceImages: [`uploads/booking-references/${imageName}`],
+      salonId: null,
+    });
+
+  const missingLoggerRes = createSendFileResponse({
+    sendFileError: new Error("raw sendFile failure"),
+  });
+  await getReferenceImage(
+    {
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    missingLoggerRes
+  );
+  assert.equal(missingLoggerRes.statusCode, 500);
+  assert.equal(missingLoggerRes.body.message, "Could not serve reference image");
+
+  const throwingLoggerRes = createSendFileResponse({
+    sendFileError: new Error("raw sendFile failure"),
+  });
+  await getReferenceImage(
+    {
+      log: {
+        error() {
+          throw new Error("logger failure");
+        },
+      },
+      user: client,
+      params: { bookingId: barberId, imageName },
+    },
+    throwingLoggerRes
+  );
+  assert.equal(throwingLoggerRes.statusCode, 500);
+  assert.equal(throwingLoggerRes.body.message, "Could not serve reference image");
 });
 
 test("GET reference image by assigned barber returns 200", async () => {

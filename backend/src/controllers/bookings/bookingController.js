@@ -8,6 +8,7 @@ import {
   collectReferenceImageUploads,
   collectReferenceImagePaths,
   cleanupReferenceImages,
+  isSafeBookingReferenceImageName,
 } from "../../services/booking/bookingReferenceImageHelpers.js";
 import { updateBookingTreatmentRecord } from "../../services/booking/bookingTreatmentRecordService.js";
 import { delayBookingService } from "../../services/booking/bookingDelayService.js";
@@ -603,6 +604,32 @@ export const updateTreatmentRecord = async (req, res) => {
 export const getReferenceImage = async (req, res, next) => {
   try {
     const { bookingId, imageName } = req.params;
+    const safeReferenceImageErrorCodes = new Set(["ENOENT", "EACCES", "EPERM"]);
+    const getSafeErrorMetadata = (error) => {
+      const safeError = { name: "Error" };
+      if (safeReferenceImageErrorCodes.has(error?.code)) {
+        safeError.code = error.code;
+      }
+      return safeError;
+    };
+    const getSafeImageName = (value) =>
+      typeof value === "string" && isSafeBookingReferenceImageName(value) ? value : undefined;
+    const logReferenceImageError = (error) => {
+      try {
+        req.log?.error(
+          {
+            err: getSafeErrorMetadata(error),
+            event: "booking.reference_image_serve_failed",
+            bookingId,
+            userId: req.user?._id || req.user?.id,
+            imageName: getSafeImageName(imageName),
+          },
+          "Could not serve reference image"
+        );
+      } catch {
+        // Logging must not affect request behavior.
+      }
+    };
     const result = await resolveReferenceImageRequest({
       bookingId,
       imageName,
@@ -627,7 +654,7 @@ export const getReferenceImage = async (req, res, next) => {
       }
 
       media.stream.on("error", (error) => {
-        console.error("Could not serve reference image", error);
+        logReferenceImageError(error);
         if (!res.headersSent) {
           res.status(500).json({ message: "Could not serve reference image" });
         }
@@ -640,7 +667,7 @@ export const getReferenceImage = async (req, res, next) => {
     return res.sendFile(result.absolutePath, (error) => {
       if (!error) return;
 
-      console.error("Could not serve reference image", error);
+      logReferenceImageError(error);
 
       if (res.headersSent) {
         if (typeof next === "function") return next(error);
@@ -654,7 +681,29 @@ export const getReferenceImage = async (req, res, next) => {
       return res.status(500).json({ message: "Could not serve reference image" });
     });
   } catch (error) {
-    console.error("Could not serve reference image", error);
+    try {
+      const safeReferenceImageErrorCodes = new Set(["ENOENT", "EACCES", "EPERM"]);
+      const safeError = { name: "Error" };
+      if (safeReferenceImageErrorCodes.has(error?.code)) {
+        safeError.code = error.code;
+      }
+      const imageName = req.params?.imageName;
+      req.log?.error(
+        {
+          err: safeError,
+          event: "booking.reference_image_serve_failed",
+          bookingId: req.params?.bookingId,
+          userId: req.user?._id || req.user?.id,
+          imageName:
+            typeof imageName === "string" && isSafeBookingReferenceImageName(imageName)
+              ? imageName
+              : undefined,
+        },
+        "Could not serve reference image"
+      );
+    } catch {
+      // Logging must not affect request behavior.
+    }
     return res.status(500).json({ message: "Could not serve reference image" });
   }
 };
