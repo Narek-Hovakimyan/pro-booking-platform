@@ -12,6 +12,14 @@ const isValidObjectId = (value) =>
 const sameId = (left, right) =>
   String(left || "") === String(right || "");
 
+const logRequestError = (req, context, message) => {
+  try {
+    req.log?.error(context, message);
+  } catch {
+    // Logging must not affect response behavior.
+  }
+};
+
 /* ── Helpers ─────────────────────────────────────────────────── */
 
 /**
@@ -54,7 +62,11 @@ export const getSalonPromotions = async (req, res) => {
 
     return res.json(promotions);
   } catch (error) {
-    console.error("Could not fetch promotions", error);
+    logRequestError(
+      req,
+      { err: error, event: "promotion.fetch_failed", salonId: req.params?.salonId },
+      "Could not fetch promotions"
+    );
     return res.status(500).json({ message: "Could not fetch promotions" });
   }
 };
@@ -184,7 +196,11 @@ export const createSalonPromotion = async (req, res) => {
     if (error?.code === 11000) {
       return res.status(400).json({ message: "A promotion with this code already exists" });
     }
-    console.error("Could not create promotion", error);
+    logRequestError(
+      req,
+      { err: error, event: "promotion.create_failed", salonId: req.params?.salonId },
+      "Could not create promotion"
+    );
     return res.status(500).json({ message: "Could not create promotion" });
   }
 };
@@ -277,7 +293,16 @@ export const updateSalonPromotion = async (req, res) => {
     await promotion.save();
     return res.json(promotion);
   } catch (error) {
-    console.error("Could not update promotion", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "promotion.update_failed",
+        salonId: req.params?.salonId,
+        promotionId: req.params?.promotionId,
+      },
+      "Could not update promotion"
+    );
     return res.status(500).json({ message: "Could not update promotion" });
   }
 };
@@ -395,7 +420,11 @@ export const validateSalonPromotion = async (req, res) => {
       finalPrice,
     });
   } catch (error) {
-    console.error("Could not validate promotion", error);
+    logRequestError(
+      req,
+      { err: error, event: "promotion.validate_failed", salonId: req.params?.salonId },
+      "Could not validate promotion"
+    );
     return res.status(500).json({ message: "Could not validate promotion" });
   }
 };

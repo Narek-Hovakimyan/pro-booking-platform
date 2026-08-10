@@ -7,6 +7,8 @@ import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
 import {
   createSalonPromotion,
+  getSalonPromotions,
+  updateSalonPromotion,
   validateSalonPromotion,
 } from "./salonPromotionController.js";
 
@@ -39,6 +41,34 @@ const createResponse = () => ({
     return this;
   },
 });
+
+const createLog = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
+const assertSafeStructuredLog = (log, { err, event, salonId: expectedSalonId, promotionId }) => {
+  assert.equal(log.calls.length, 1);
+  const [context, message] = log.calls[0];
+  assert.equal(context.err, err);
+  assert.equal(context.event, event);
+  assert.equal(context.salonId, expectedSalonId);
+  if (promotionId !== undefined) {
+    assert.equal(context.promotionId, promotionId);
+  }
+  assert.equal(typeof message, "string");
+
+  const logged = JSON.stringify(log.calls);
+  assert.equal(logged.includes("SAVESECRET"), false);
+  assert.equal(logged.includes("token-123"), false);
+  assert.equal(logged.includes("client@example.com"), false);
+  assert.equal(logged.includes("+15555550123"), false);
+};
 
 const query = (result) => ({
   select() {
@@ -220,6 +250,137 @@ test("duplicate code rejected per salon", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /already exists/);
+});
+
+test("duplicate promotion create race returns 400 without logging sensitive code", async () => {
+  installSalon();
+  Voucher.findOne = () => query(null);
+  Voucher.create = async () => {
+    const error = new Error("duplicate SAVESECRET token-123 client@example.com +15555550123");
+    error.code = 11000;
+    throw error;
+  };
+  const log = createLog();
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody({ code: "SAVESECRET" }),
+      log,
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "A promotion with this code already exists");
+  assert.equal(log.calls.length, 0);
+});
+
+test("promotion fetch failure logs structured err and preserves response", async () => {
+  installSalon();
+  const err = new Error("database unavailable");
+  Voucher.find = () => {
+    throw err;
+  };
+  const log = createLog();
+
+  const res = createResponse();
+  await getSalonPromotions(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      log,
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not fetch promotions" });
+  assertSafeStructuredLog(log, {
+    err,
+    event: "promotion.fetch_failed",
+    salonId,
+  });
+});
+
+test("promotion create failure logs structured safe context", async () => {
+  installSalon();
+  Voucher.findOne = () => query(null);
+  const err = new Error("create failed");
+  Voucher.create = async () => {
+    throw err;
+  };
+  const log = createLog();
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody({ code: "SAVESECRET" }),
+      log,
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not create promotion" });
+  assertSafeStructuredLog(log, {
+    err,
+    event: "promotion.create_failed",
+    salonId,
+  });
+});
+
+test("promotion update failure logs structured record context", async () => {
+  installSalon();
+  const promotionId = "64d000000000000000000099";
+  const err = new Error("update failed");
+  Voucher.findOne = () => {
+    throw err;
+  };
+  const log = createLog();
+
+  const res = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId, promotionId },
+      body: { title: "Renamed" },
+      log,
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not update promotion" });
+  assertSafeStructuredLog(log, {
+    err,
+    event: "promotion.update_failed",
+    salonId,
+    promotionId,
+  });
+});
+
+test("promotion validation failure is unchanged when request logger is absent", async () => {
+  const err = new Error("lookup failed");
+  Voucher.findOne = () => {
+    throw err;
+  };
+
+  const res = createResponse();
+  await validateSalonPromotion(
+    {
+      params: { salonId },
+      body: { code: "SAVESECRET", serviceId, barberId: staffBarberId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not validate promotion" });
 });
 
 test("chair_renter is not included as owner-managed private promotion target", async () => {

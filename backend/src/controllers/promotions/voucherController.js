@@ -14,6 +14,14 @@ const isValidObjectId = (value) =>
 const sameId = (left, right) =>
   String(left || "") === String(right || "");
 
+const logRequestError = (req, context, message) => {
+  try {
+    req.log?.error(context, message);
+  } catch {
+    // Logging must not affect response behavior.
+  }
+};
+
 const codeLength = 8;
 const codeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const generateCode = () =>
@@ -192,7 +200,11 @@ export const createVoucher = async (req, res) => {
     if (error?.code === 11000 && error?.keyPattern?.code) {
       return res.status(400).json({ message: "A voucher with this code already exists" });
     }
-    console.error("Could not create voucher", error);
+    logRequestError(
+      req,
+      { err: error, event: "voucher.create_failed", ownerType: req.body?.ownerType },
+      "Could not create voucher"
+    );
     return res.status(500).json({ message: "Could not create voucher" });
   }
 };
@@ -216,7 +228,16 @@ export const getOwnerVouchers = async (req, res) => {
 
     return res.json(vouchers);
   } catch (error) {
-    console.error("Could not fetch vouchers", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "voucher.owner_fetch_failed",
+        ownerType: req.params?.ownerType,
+        ownerId: req.params?.ownerId,
+      },
+      "Could not fetch vouchers"
+    );
     return res.status(500).json({ message: "Could not fetch vouchers" });
   }
 };
@@ -245,7 +266,11 @@ export const getVoucherById = async (req, res) => {
 
     return res.json(voucher);
   } catch (error) {
-    console.error("Could not fetch voucher", error);
+    logRequestError(
+      req,
+      { err: error, event: "voucher.fetch_failed", voucherId: req.params?.id },
+      "Could not fetch voucher"
+    );
     return res.status(500).json({ message: "Could not fetch voucher" });
   }
 };
@@ -355,7 +380,11 @@ export const updateVoucher = async (req, res) => {
     await voucher.save();
     return res.json(voucher);
   } catch (error) {
-    console.error("Could not update voucher", error);
+    logRequestError(
+      req,
+      { err: error, event: "voucher.update_failed", voucherId: req.params?.id },
+      "Could not update voucher"
+    );
     return res.status(500).json({ message: "Could not update voucher" });
   }
 };
@@ -386,7 +415,11 @@ export const deleteVoucher = async (req, res) => {
     await Voucher.findByIdAndUpdate(id, { $set: { active: false } });
     return res.json({ message: "Voucher deactivated" });
   } catch (error) {
-    console.error("Could not delete voucher", error);
+    logRequestError(
+      req,
+      { err: error, event: "voucher.delete_failed", voucherId: req.params?.id },
+      "Could not delete voucher"
+    );
     return res.status(500).json({ message: "Could not delete voucher" });
   }
 };
@@ -524,7 +557,11 @@ export const validateVoucherCode = async (req, res) => {
       discountPreview,
     });
   } catch (error) {
-    console.error("Could not validate voucher", error);
+    logRequestError(
+      req,
+      { err: error, event: "voucher.validate_failed" },
+      "Could not validate voucher"
+    );
     return res.status(500).json({ message: "Could not validate voucher" });
   }
 };
@@ -585,7 +622,16 @@ export const getPublicVouchers = async (req, res) => {
 
     return res.json(safeVouchers);
   } catch (error) {
-    console.error("Could not fetch public vouchers", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "voucher.public_fetch_failed",
+        ownerType: req.params?.ownerType,
+        ownerId: req.params?.ownerId,
+      },
+      "Could not fetch public vouchers"
+    );
     return res.status(500).json({ message: "Could not fetch public vouchers" });
   }
 };

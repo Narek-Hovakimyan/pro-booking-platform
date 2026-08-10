@@ -75,6 +75,33 @@ const createResponse = () => ({
   },
 });
 
+const createLog = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
+const assertSafeStructuredLog = (log, { err, event, ownerType, ownerId, voucherId }) => {
+  assert.equal(log.calls.length, 1);
+  const [context, message] = log.calls[0];
+  assert.equal(context.err, err);
+  assert.equal(context.event, event);
+  if (ownerType !== undefined) assert.equal(String(context.ownerType), String(ownerType));
+  if (ownerId !== undefined) assert.equal(String(context.ownerId), String(ownerId));
+  if (voucherId !== undefined) assert.equal(String(context.voucherId), String(voucherId));
+  assert.equal(typeof message, "string");
+
+  const logged = JSON.stringify(log.calls);
+  assert.equal(logged.includes("SECRETCODE"), false);
+  assert.equal(logged.includes("token-123"), false);
+  assert.equal(logged.includes("client@example.com"), false);
+  assert.equal(logged.includes("+15555550123"), false);
+};
+
 /* Chainable query stubs for Mongoose `.select().lean()` etc.
  * Must support both:
  *   .findOne().lean()                        (validateVoucherCode)
@@ -285,6 +312,66 @@ test("duplicate manual code returns clean 400", async () => {
   assert.ok(res.body.message.includes("already exists"));
 });
 
+test("duplicate voucher create race returns 400 without noisy sensitive logging", async () => {
+  const req = {
+    user: barberA,
+    body: {
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "client@example.com +15555550123",
+      type: "amount",
+      amount: 1000,
+      code: "SECRETCODE",
+    },
+    log: createLog(),
+  };
+  const res = createResponse();
+
+  Voucher.findOne = () => chainableSelect(null);
+  Voucher.create = async () => {
+    const err = new Error("duplicate key");
+    err.code = 11000;
+    err.keyPattern = { code: 1 };
+    throw err;
+  };
+
+  await createVoucher(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "A voucher with this code already exists" });
+  assert.equal(req.log.calls.length, 0);
+});
+
+test("createVoucher failure logs structured err and safe context", async () => {
+  const err = new Error("create failed");
+  const log = createLog();
+  const req = {
+    user: barberA,
+    body: {
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "client@example.com +15555550123",
+      type: "amount",
+      amount: 1000,
+      code: "SECRETCODE",
+      token: "token-123",
+    },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.findOne = () => chainableSelect(null);
+  Voucher.create = async () => {
+    throw err;
+  };
+
+  await createVoucher(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not create voucher" });
+  assertSafeStructuredLog(log, { err, event: "voucher.create_failed", ownerType: "barber" });
+});
+
 test("invalid amount rejected", async () => {
   const req = {
     user: barberA,
@@ -385,6 +472,32 @@ test("getOwnerVouchers rejects other barber", async () => {
   assert.equal(res.statusCode, 403);
 });
 
+test("getOwnerVouchers failure logs structured owner context", async () => {
+  const err = new Error("find failed");
+  const log = createLog();
+  const req = {
+    user: barberA,
+    params: { ownerType: "barber", ownerId: barberA._id },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.find = () => {
+    throw err;
+  };
+
+  await getOwnerVouchers(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not fetch vouchers" });
+  assertSafeStructuredLog(log, {
+    err,
+    event: "voucher.owner_fetch_failed",
+    ownerType: "barber",
+    ownerId: barberA._id,
+  });
+});
+
 /* ── getVoucherById ─────────────────────────────────────── */
 
 test("getVoucherById returns voucher for owner barber", async () => {
@@ -416,6 +529,28 @@ test("getVoucherById rejects stranger barber", async () => {
   await getVoucherById(req, res);
 
   assert.equal(res.statusCode, 403);
+});
+
+test("getVoucherById failure logs structured voucher id", async () => {
+  const err = new Error("lookup failed");
+  const log = createLog();
+  const id = new mongoose.Types.ObjectId();
+  const req = {
+    user: barberA,
+    params: { id },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.findById = () => {
+    throw err;
+  };
+
+  await getVoucherById(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not fetch voucher" });
+  assertSafeStructuredLog(log, { err, event: "voucher.fetch_failed", voucherId: id });
 });
 
 /* ── updateVoucher ──────────────────────────────────────── */
@@ -480,6 +615,29 @@ test("updateVoucher can update title, amount, active", async () => {
   assert.ok(saved);
 });
 
+test("updateVoucher failure logs structured voucher id", async () => {
+  const err = new Error("update lookup failed");
+  const log = createLog();
+  const id = new mongoose.Types.ObjectId();
+  const req = {
+    user: barberA,
+    params: { id },
+    body: { title: "client@example.com SECRETCODE" },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.findById = () => {
+    throw err;
+  };
+
+  await updateVoucher(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not update voucher" });
+  assertSafeStructuredLog(log, { err, event: "voucher.update_failed", voucherId: id });
+});
+
 /* ── deleteVoucher ──────────────────────────────────────── */
 
 test("deleteVoucher sets active=false", async () => {
@@ -502,6 +660,28 @@ test("deleteVoucher sets active=false", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.ok(updated);
+});
+
+test("deleteVoucher failure logs structured voucher id", async () => {
+  const err = new Error("delete lookup failed");
+  const log = createLog();
+  const id = new mongoose.Types.ObjectId();
+  const req = {
+    user: barberA,
+    params: { id },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.findById = () => {
+    throw err;
+  };
+
+  await deleteVoucher(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not delete voucher" });
+  assertSafeStructuredLog(log, { err, event: "voucher.delete_failed", voucherId: id });
 });
 
 /* ── validateVoucherCode ────────────────────────────────── */
@@ -684,6 +864,34 @@ test("validate returns safe payload and caps discountPreview against discounted 
   assert.equal(res.body.discountPreview, 5000);
   // Confirm no sensitive fields leaked
   assert.equal(res.body.voucher.redemptionBookingIds, undefined);
+});
+
+test("validateVoucherCode failure logs structured err without sensitive body values", async () => {
+  const err = new Error("lookup failed");
+  const log = createLog();
+  const req = {
+    user: client,
+    body: {
+      code: "SECRETCODE",
+      barberId: barberA._id,
+      serviceId,
+      token: "token-123",
+      email: "client@example.com",
+      phone: "+15555550123",
+    },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.findOne = () => {
+    throw err;
+  };
+
+  await validateVoucherCode(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not validate voucher" });
+  assertSafeStructuredLog(log, { err, event: "voucher.validate_failed" });
 });
 
 /* ── Visibility & createVoucher ─────────────────────────── */
@@ -888,4 +1096,29 @@ test("getPublicVouchers returns empty array for private vouchers", async () => {
   assert.equal(res.statusCode, 200);
   assert.ok(Array.isArray(res.body));
   assert.equal(res.body.length, 0);
+});
+
+test("getPublicVouchers failure logs structured public owner context", async () => {
+  const err = new Error("aggregate failed");
+  const log = createLog();
+  const req = {
+    params: { ownerType: "barber", ownerId: barberA._id },
+    log,
+  };
+  const res = createResponse();
+
+  Voucher.aggregate = async () => {
+    throw err;
+  };
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not fetch public vouchers" });
+  assertSafeStructuredLog(log, {
+    err,
+    event: "voucher.public_fetch_failed",
+    ownerType: "barber",
+    ownerId: barberA._id,
+  });
 });
