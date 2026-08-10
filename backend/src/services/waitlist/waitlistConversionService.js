@@ -17,6 +17,60 @@ import {
 import { createWaitlistActionError } from "./waitlistValidation.js";
 import { sendNotificationSafe } from "./waitlistNotificationService.js";
 import { getDayKeyFromDate } from "../../utils/bookingDateTime.js";
+import { getLogger } from "../../config/logger.js";
+
+const WAITLIST_ROLLBACK_EVENT = "waitlist.rollback_cleanup_failed";
+
+const getSafeWaitlistRollbackContext = (context = {}) =>
+  Object.fromEntries(
+    ["waitlistEntryId", "bookingId", "barberId", "salonId", "serviceId"]
+      .map((key) => [key, context[key]])
+      .filter(([, value]) => value !== undefined && value !== null)
+  );
+
+const logWaitlistRollbackCleanupFailure = (operation, context = {}) => {
+  try {
+    const logger = getLogger?.();
+    logger?.warn?.(
+      {
+        err: { name: "Error" },
+        event: WAITLIST_ROLLBACK_EVENT,
+        operation,
+        ...getSafeWaitlistRollbackContext(context),
+      },
+      WAITLIST_ROLLBACK_EVENT
+    );
+  } catch {
+    // Rollback cleanup failures are best-effort and must not mask the original error.
+  }
+};
+
+const cleanupFailedWaitlistBooking = async (bookingId, context = {}) => {
+  if (!bookingId) return;
+  try {
+    await runBookingSlotTransaction(async ({ session }) => {
+      try {
+        await Booking.findByIdAndDelete?.(bookingId, { session });
+      } catch {
+        logWaitlistRollbackCleanupFailure("delete_booking", {
+          ...context,
+          bookingId,
+        });
+      }
+
+      try {
+        await releaseBookingSlotHolds({ bookingId, session });
+      } catch {
+        logWaitlistRollbackCleanupFailure("release_slot_holds", {
+          ...context,
+          bookingId,
+        });
+      }
+    });
+  } catch {
+    // Cleanup remains best-effort and must not mask the original error.
+  }
+};
 
 export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
   const entry = await WaitlistEntry.findOne({
@@ -66,11 +120,8 @@ export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
 
   let booking;
   let convertedEntry;
-  let usedSession = false;
-
   try {
     ({ booking, convertedEntry } = await runBookingSlotTransaction(async ({ session }) => {
-      usedSession = Boolean(session);
       const context = await getValidatedWaitlistConversionContext(
         claimedEntry,
         claimedEntry.offeredTime
@@ -128,9 +179,13 @@ export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
       return { booking, convertedEntry };
     }));
   } catch (error) {
-    if (!usedSession && booking?._id) {
-      await Booking.findByIdAndDelete?.(booking._id).catch(() => {});
-      await releaseBookingSlotHolds({ bookingId: booking._id }).catch(() => {});
+    if (!convertedEntry && booking?._id) {
+      await cleanupFailedWaitlistBooking(booking._id, {
+        waitlistEntryId: claimedEntry?._id,
+        barberId: claimedEntry?.barberId,
+        salonId: claimedEntry?.salonId || null,
+        serviceId: claimedEntry?.serviceId,
+      });
     }
     if (isBookingSlotConflictError(error)) {
       error = createWaitlistActionError(
@@ -205,11 +260,8 @@ export const approveWaitlistEntry = async ({ entryId, barberId, time }) => {
 
   let booking;
   let convertedEntry;
-  let usedSession = false;
-
   try {
     ({ booking, convertedEntry } = await runBookingSlotTransaction(async ({ session }) => {
-      usedSession = Boolean(session);
       const bookingId = new Booking()._id;
 
       await createBookingSlotHolds({
@@ -263,9 +315,13 @@ export const approveWaitlistEntry = async ({ entryId, barberId, time }) => {
       return { booking, convertedEntry };
     }));
   } catch (error) {
-    if (!usedSession && booking?._id) {
-      await Booking.findByIdAndDelete?.(booking._id).catch(() => {});
-      await releaseBookingSlotHolds({ bookingId: booking._id }).catch(() => {});
+    if (!convertedEntry && booking?._id) {
+      await cleanupFailedWaitlistBooking(booking._id, {
+        waitlistEntryId: claimedEntry?._id,
+        barberId: claimedEntry?.barberId,
+        salonId: claimedEntry?.salonId || null,
+        serviceId: claimedEntry?.serviceId,
+      });
     }
     if (isBookingSlotConflictError(error)) {
       error = createWaitlistActionError(

@@ -25,6 +25,8 @@ import {
 } from "../booking/bookingSlotHoldService.js";
 import { acceptWaitlistOffer, approveWaitlistEntry } from "./waitlistService.js";
 import { __waitlistNotificationTestHooks } from "./waitlistNotificationService.js";
+import { getLogger } from "../../config/logger.js";
+import * as waitlistConversionService from "./waitlistConversionService.js";
 
 const mockBarberPaidAccess = () => {
   Subscription.findOne = async () => ({
@@ -50,6 +52,8 @@ const originalSlotHoldMethods = {
   supportsTransactions: __bookingSlotHoldServiceTestHooks.supportsTransactions,
   startSession: __bookingSlotHoldServiceTestHooks.startSession,
 };
+const rollbackLogger = getLogger();
+const originalRollbackLoggerWarn = rollbackLogger.warn;
 
 afterEach(() => {
   resetWaitlistServiceModelMocks();
@@ -59,6 +63,7 @@ afterEach(() => {
     originalSlotHoldMethods.supportsTransactions;
   __bookingSlotHoldServiceTestHooks.startSession = originalSlotHoldMethods.startSession;
   __waitlistNotificationTestHooks.resetLogger();
+  rollbackLogger.warn = originalRollbackLoggerWarn;
 });
 
 const installProtectionUnavailableHooks = (startSession) => {
@@ -741,4 +746,274 @@ test("accept restores offered entry when booking creation fails", async () => {
 
   assert.equal(entry.status, "offered");
   assert.equal(entry.convertedBooking, null);
+});
+
+const installRollbackCleanupFailureScenario = ({
+  mode,
+  failingOperation,
+  loggerThrows = false,
+  logger,
+}) => {
+  mockBarberPaidAccess();
+
+  const entry = createMockEntry({
+    _id: `${mode}-${failingOperation}-entry`,
+    status: mode === "accept" ? "offered" : "active",
+    offeredTime: mode === "accept" ? "11:00" : "",
+    offeredAt: mode === "accept" ? new Date() : null,
+  });
+  entry.salonId = "salon-rollback";
+  entry.serviceId = serviceId;
+
+  let bookingDeleteCalls = 0;
+  let releaseCalls = 0;
+  let bookingCreateCalls = 0;
+  let restoreCalls = 0;
+  let notificationCalls = 0;
+  const logs = [];
+  const bookingId = mode === "accept"
+    ? failingOperation === "delete_booking"
+      ? "64b000000000000000000101"
+      : "64b000000000000000000102"
+    : failingOperation === "delete_booking"
+      ? "64b000000000000000000103"
+      : "64b000000000000000000104";
+  const sessions = [];
+  let endedSessionCleanupCalls = 0;
+  __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
+  __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
+  __bookingSlotHoldServiceTestHooks.startSession = async () => {
+    const session = {
+      ended: false,
+      async withTransaction(task) {
+        await task({ session });
+      },
+      async endSession() {
+        session.ended = true;
+      },
+    };
+    sessions.push(session);
+    return session;
+  };
+  if (logger === null) {
+    rollbackLogger.warn = undefined;
+  } else {
+    rollbackLogger.warn = (payload, message) => {
+      logs.push({ payload, message });
+      if (loggerThrows) {
+        throw new Error("logger failed");
+      }
+    };
+  }
+
+  WaitlistEntry.findOne = async (query) => {
+    if (mode === "accept" && String(query._id) === String(entry._id) && query.status === "offered") {
+      return entry;
+    }
+    if (mode === "approve" && String(query._id) === String(entry._id)) {
+      return entry;
+    }
+    return null;
+  };
+
+  let claimed = false;
+  WaitlistEntry.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(entry._id)) return null;
+    if (mode === "accept" && query.status === "offered" && !claimed) {
+      claimed = true;
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    if (mode === "approve" && query.status?.$in?.includes("active") && !claimed) {
+      claimed = true;
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    if (query.status === "converting") {
+      if (Object.prototype.hasOwnProperty.call(update.$set || {}, "convertedBooking")) {
+        return null;
+      }
+      restoreCalls += 1;
+      Object.assign(entry, update.$set || {});
+      return entry;
+    }
+    return null;
+  };
+
+  User.findById = (id) => ({
+    select: async () => {
+      if (String(id) === String(clientId)) return { _id: clientId, name: "Client" };
+      if (String(id) === String(barberId)) return { _id: barberId, name: "Barber", role: "barber" };
+      return null;
+    },
+  });
+  Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
+  Salon.findById = async (id) =>
+    String(id) === "salon-rollback" ? { _id: "salon-rollback", name: "Rollback Salon" } : null;
+  Booking.find = async () => [];
+  Booking.create = async (payload) => {
+    bookingCreateCalls += 1;
+    return createBookingResult(payload, { _id: bookingId });
+  };
+  Booking.findByIdAndDelete = async (id, options) => {
+    bookingDeleteCalls += 1;
+    if (!options?.session || options.session.ended) endedSessionCleanupCalls += 1;
+    if (failingOperation === "delete_booking") {
+      throw Object.assign(new Error("/tmp/private/path"), {
+        code: "EACCES",
+        stack: "stack /tmp/private/path",
+      });
+    }
+    return { _id: bookingId };
+  };
+  BookingSlotHold.deleteMany = async (query, options) => {
+    releaseCalls += 1;
+    if (!options?.session || options.session.ended) endedSessionCleanupCalls += 1;
+    if (failingOperation === "release_slot_holds") {
+      throw Object.assign(new Error("../secret/holds"), {
+        code: "ENOENT",
+        stack: "stack ../secret/holds",
+      });
+    }
+    return { acknowledged: true };
+  };
+  Notification.create = async () => {
+    notificationCalls += 1;
+    return null;
+  };
+
+  return {
+    entry,
+    logs,
+    bookingId,
+    getCounts() {
+      return {
+        bookingCreateCalls,
+        bookingDeleteCalls,
+        releaseCalls,
+        restoreCalls,
+        notificationCalls,
+        sessions: sessions.length,
+        endedSessionCleanupCalls,
+      };
+    },
+  };
+};
+
+const runRollbackCleanupFailureFlow = ({ mode, failingOperation, loggerThrows = false, logger }) => {
+  const scenario = installRollbackCleanupFailureScenario({
+    mode,
+    failingOperation,
+    loggerThrows,
+    logger,
+  });
+  const action = mode === "accept"
+    ? acceptWaitlistOffer({ entryId: scenario.entry._id, clientId })
+    : approveWaitlistEntry({ entryId: scenario.entry._id, barberId, time: "11:00" });
+  return { scenario, action };
+};
+
+for (const mode of ["accept", "approve"]) {
+  for (const failingOperation of ["delete_booking", "release_slot_holds"]) {
+    test(`${mode} logs rollback cleanup failure for ${failingOperation} and preserves rollback state`, async () => {
+      const { scenario, action } = runRollbackCleanupFailureFlow({ mode, failingOperation });
+
+      await assert.rejects(
+        () => action,
+        (error) => {
+          assert.equal(error.code, "CONFLICT");
+          assert.equal(error.message, "Waitlist entry could not be converted");
+          return true;
+        }
+      );
+
+      const counts = scenario.getCounts();
+      assert.equal(counts.bookingCreateCalls, 1);
+      assert.equal(counts.bookingDeleteCalls, 1);
+      assert.equal(counts.releaseCalls, 1);
+      assert.equal(counts.restoreCalls, 1);
+      assert.equal(counts.notificationCalls, 0);
+      assert.equal(counts.sessions, 2);
+      assert.equal(counts.endedSessionCleanupCalls, 0);
+      assert.equal(scenario.entry.status, mode === "accept" ? "offered" : "active");
+      assert.equal(scenario.entry.convertedBooking, null);
+      const matchingLog = scenario.logs.find(
+        ({ payload }) => payload.operation === failingOperation
+      );
+      assert.ok(matchingLog);
+      assert.equal(matchingLog.message, "waitlist.rollback_cleanup_failed");
+      assert.deepEqual(matchingLog.payload, {
+        err: { name: "Error" },
+        event: "waitlist.rollback_cleanup_failed",
+        operation: failingOperation,
+        waitlistEntryId: scenario.entry._id,
+        bookingId: scenario.bookingId,
+        barberId,
+        salonId: "salon-rollback",
+        serviceId,
+      });
+      assert.equal(JSON.stringify(scenario.logs).includes("/tmp/private/path"), false);
+      assert.equal(JSON.stringify(scenario.logs).includes("../secret/holds"), false);
+    });
+  }
+}
+
+test("accept rollback cleanup logging failure does not mask original error", async () => {
+  const { scenario, action } = runRollbackCleanupFailureFlow({
+    mode: "approve",
+    failingOperation: "delete_booking",
+    loggerThrows: true,
+  });
+
+  await assert.rejects(
+    () => action,
+    (error) => {
+      assert.equal(error.code, "CONFLICT");
+      assert.equal(error.message, "Waitlist entry could not be converted");
+      return true;
+    }
+  );
+
+  const counts = scenario.getCounts();
+  assert.equal(counts.bookingCreateCalls, 1);
+  assert.equal(counts.bookingDeleteCalls, 1);
+  assert.equal(counts.releaseCalls, 1);
+  assert.equal(counts.restoreCalls, 1);
+  assert.equal(counts.notificationCalls, 0);
+  assert.equal(counts.sessions, 2);
+  assert.equal(counts.endedSessionCleanupCalls, 0);
+  assert.equal(scenario.entry.status, "active");
+  assert.equal(scenario.logs.length, 1);
+});
+
+test("approve rollback cleanup succeeds when rollback logger is absent", async () => {
+  const { scenario, action } = runRollbackCleanupFailureFlow({
+    mode: "approve",
+    failingOperation: "release_slot_holds",
+    logger: null,
+  });
+
+  await assert.rejects(
+    () => action,
+    (error) => {
+      assert.equal(error.code, "CONFLICT");
+      assert.equal(error.message, "Waitlist entry could not be converted");
+      return true;
+    }
+  );
+
+  const counts = scenario.getCounts();
+  assert.equal(counts.bookingCreateCalls, 1);
+  assert.equal(counts.bookingDeleteCalls, 1);
+  assert.equal(counts.releaseCalls, 1);
+  assert.equal(counts.restoreCalls, 1);
+  assert.equal(counts.notificationCalls, 0);
+  assert.equal(counts.sessions, 2);
+  assert.equal(counts.endedSessionCleanupCalls, 0);
+  assert.equal(scenario.entry.status, "active");
+  assert.equal(scenario.logs.length, 0);
+});
+
+test("rollback cleanup does not add a production test hook export", () => {
+  assert.equal("__waitlistConversionTestHooks" in waitlistConversionService, false);
 });
