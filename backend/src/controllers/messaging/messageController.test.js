@@ -41,6 +41,16 @@ const createResponse = () => ({
   },
 });
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
 const createFindChain = (messages, captured) => {
   let sortedMessages = messages;
 
@@ -171,6 +181,39 @@ test("getConversation returns newest limited messages in ascending response orde
     res.body.map((message) => message._id),
     ["middle", "new"]
   );
+});
+
+test("getConversation logs structured safe context and preserves 400 response", async () => {
+  const log = createRequestLogger();
+  const res = createResponse();
+  Message.find = () => {
+    throw Object.assign(new Error("invalid other user"), { name: "CastError" });
+  };
+
+  await getConversation(
+    {
+      log,
+      user: { id: "user-1" },
+      params: { otherUserId: "user-2" },
+      query: { limit: "2", text: "do not log me" },
+      headers: { authorization: "secret" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "invalid other user");
+  assert.equal(log.calls.length, 1);
+  assert.equal(log.calls[0][1], "messaging.fetch_conversation_failed");
+  assert.deepEqual(log.calls[0][0], {
+    err: { name: "Error" },
+    event: "messaging.fetch_conversation_failed",
+    userId: "user-1",
+    otherUserId: "user-2",
+    statusCode: 400,
+  });
+  assert.equal(JSON.stringify(log.calls).includes("do not log me"), false);
+  assert.equal(JSON.stringify(log.calls).includes("secret"), false);
 });
 
 test("createMessage rejects text over max length before creating message", async () => {
@@ -416,4 +459,78 @@ test("createMessage returns 404 for missing receiver", async () => {
   assert.equal(res.statusCode, 404);
   assert.equal(res.body.message, "Receiver not found");
   assert.equal(createCalled, false);
+});
+
+test("createMessage logs structured safe context and preserves 500 response", async () => {
+  const log = createRequestLogger();
+  const res = createResponse();
+  stubReceiver(makeUser(barberId, "barber"));
+  __messageAccessTestHooks.setHasBookingRelationship(async () => true);
+  Message.create = async () => {
+    throw new Error("database exploded");
+  };
+
+  await createMessage(
+    {
+      log,
+      user: makeUser(clientId, "client"),
+      body: {
+        receiverId: barberId,
+        text: "super secret message",
+        attachments: [{ url: "private-file" }],
+      },
+      headers: { authorization: "top-secret" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not send message");
+  assert.equal(log.calls.length, 1);
+  assert.equal(log.calls[0][1], "messaging.send_message_failed");
+  assert.deepEqual(log.calls[0][0], {
+    err: { name: "Error" },
+    event: "messaging.send_message_failed",
+    userId: clientId,
+    receiverId: barberId,
+    statusCode: 500,
+  });
+  assert.equal(JSON.stringify(log.calls).includes("super secret message"), false);
+  assert.equal(JSON.stringify(log.calls).includes("private-file"), false);
+  assert.equal(JSON.stringify(log.calls).includes("top-secret"), false);
+});
+
+test("createMessage error handling is unchanged when logger is missing or throws", async () => {
+  stubReceiver(makeUser(barberId, "barber"));
+  __messageAccessTestHooks.setHasBookingRelationship(async () => true);
+  Message.create = async () => {
+    throw new Error("database exploded");
+  };
+
+  const missingLoggerRes = createResponse();
+  await createMessage(
+    {
+      user: makeUser(clientId, "client"),
+      body: { receiverId: barberId, text: "Hello" },
+    },
+    missingLoggerRes
+  );
+  assert.equal(missingLoggerRes.statusCode, 500);
+  assert.equal(missingLoggerRes.body.message, "Could not send message");
+
+  const throwingLoggerRes = createResponse();
+  await createMessage(
+    {
+      log: {
+        error() {
+          throw new Error("logger failed");
+        },
+      },
+      user: makeUser(clientId, "client"),
+      body: { receiverId: barberId, text: "Hello" },
+    },
+    throwingLoggerRes
+  );
+  assert.equal(throwingLoggerRes.statusCode, 500);
+  assert.equal(throwingLoggerRes.body.message, "Could not send message");
 });

@@ -19,9 +19,23 @@ const getMessageErrorStatusCode = (error) => {
   return 500;
 };
 
-const sendMessageError = (res, error, fallbackMessage) => {
-  console.error(fallbackMessage, error);
+const logMessageError = (req, error, context) => {
+  try {
+    req?.log?.error(
+      {
+        err: { name: "Error" },
+        ...context,
+      },
+      context.event
+    );
+  } catch {
+    // Logging must not affect request behavior.
+  }
+};
+
+const sendMessageError = (req, res, error, fallbackMessage, context = {}) => {
   const statusCode = getMessageErrorStatusCode(error);
+  logMessageError(req, error, { ...context, statusCode });
   const message = statusCode === 500
     ? fallbackMessage
     : error?.message || fallbackMessage;
@@ -49,7 +63,10 @@ export const getMyMessages = async (req, res) => {
 
     return res.json([...messages].reverse());
   } catch (error) {
-    return sendMessageError(res, error, "Could not fetch messages");
+    return sendMessageError(req, res, error, "Could not fetch messages", {
+      event: "messaging.fetch_messages_failed",
+      userId: req.user?.id,
+    });
   }
 };
 
@@ -72,7 +89,11 @@ export const getConversation = async (req, res) => {
 
     return res.json([...messages].reverse());
   } catch (error) {
-    return sendMessageError(res, error, "Could not fetch conversation");
+    return sendMessageError(req, res, error, "Could not fetch conversation", {
+      event: "messaging.fetch_conversation_failed",
+      userId: req.user?.id,
+      otherUserId: req.params?.otherUserId,
+    });
   }
 };
 
@@ -94,7 +115,11 @@ export const markConversationRead = async (req, res) => {
       modifiedCount: result.modifiedCount,
     });
   } catch (error) {
-    return sendMessageError(res, error, "Could not mark messages as read");
+    return sendMessageError(req, res, error, "Could not mark messages as read", {
+      event: "messaging.mark_read_failed",
+      userId: req.user?.id,
+      otherUserId: req.params?.otherUserId,
+    });
   }
 };
 
@@ -164,6 +189,10 @@ export const createMessage = async (req, res) => {
 
     return res.status(201).json(populatedMessage);
   } catch (error) {
-    return sendMessageError(res, error, "Could not send message");
+    return sendMessageError(req, res, error, "Could not send message", {
+      event: "messaging.send_message_failed",
+      userId: req.user?.id,
+      receiverId: req.body?.receiverId,
+    });
   }
 };
