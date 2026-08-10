@@ -42,7 +42,15 @@ const getJobApplicationNotificationData = (application, job = null) => {
   return Object.keys(data).length > 0 ? data : undefined;
 };
 
-const notifyApplicationStatusChange = async (application, status) => {
+const logNotificationFailure = (req, context, message) => {
+  try {
+    req.log?.error(context, message);
+  } catch {
+    // Logging must not affect request behavior.
+  }
+};
+
+const notifyApplicationStatusChange = async (req, application, status) => {
   try {
     await createNotification({
       userId: application.applicantId,
@@ -51,14 +59,20 @@ const notifyApplicationStatusChange = async (application, status) => {
       data: getJobApplicationNotificationData(application),
     });
   } catch (error) {
-    console.warn(
-      "Salon job application notification failed (non-fatal):",
-      error.message
+    logNotificationFailure(
+      req,
+      {
+        err: error,
+        event: "salon_job_application.notification_failed",
+        ...getJobApplicationNotificationData(application),
+        status,
+      },
+      "Salon job application notification failed"
     );
   }
 };
 
-const notifyApplicationSubmitted = async ({ application, job, applicant }) => {
+const notifyApplicationSubmitted = async (req, { application, job, applicant }) => {
   try {
     const salon = await Salon.findById(job.salonId);
     const applicantId = getId(application.applicantId);
@@ -88,9 +102,14 @@ const notifyApplicationSubmitted = async ({ application, job, applicant }) => {
       )
     );
   } catch (error) {
-    console.warn(
-      "Salon job application submitted notification failed (non-fatal):",
-      error.message
+    logNotificationFailure(
+      req,
+      {
+        err: error,
+        event: "salon_job_application.notification_failed",
+        ...getJobApplicationNotificationData(application, job),
+      },
+      "Salon job application submitted notification failed"
     );
   }
 };
@@ -188,7 +207,7 @@ export const applyToSalonJob = async (req, res) => {
       contactInfo: (contactInfo || "").trim() || req.user.phone || "",
     });
 
-    await notifyApplicationSubmitted({
+    await notifyApplicationSubmitted(req, {
       application,
       job,
       applicant: req.user,
@@ -321,7 +340,7 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
     await application.save();
 
     if (previousStatus !== status) {
-      await notifyApplicationStatusChange(application, status);
+      await notifyApplicationStatusChange(req, application, status);
     }
 
     const populated = await applyApplicantPopulate(

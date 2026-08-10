@@ -33,7 +33,6 @@ const originalMethods = {
   applicationFindOne: SalonJobApplication.findOne,
   applicationCreate: SalonJobApplication.create,
   notificationCreate: Notification.create,
-  consoleWarn: console.warn,
 };
 
 afterEach(() => {
@@ -45,7 +44,6 @@ afterEach(() => {
   SalonJobApplication.findOne = originalMethods.applicationFindOne;
   SalonJobApplication.create = originalMethods.applicationCreate;
   Notification.create = originalMethods.notificationCreate;
-  console.warn = originalMethods.consoleWarn;
 });
 
 /* ── Helpers ── */
@@ -409,6 +407,88 @@ test("application submitted notification skips applicant recipient", async () =>
 
   assert.equal(res.statusCode, 201);
   assert.deepEqual(notifications, []);
+});
+
+test("application submit notification failure logs safe structured context and stays non-fatal", async () => {
+  const res = createResponse();
+  const logged = [];
+
+  SalonJobPost.findById = async () => createActiveJob();
+  Salon.findById = async () => createSalon();
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async () => {
+    throw new Error("Notification failed");
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser({ name: "Applicant Name", email: "applicant@example.com" }),
+      params: { id: jobId },
+      body: {
+        message: "Sensitive message body",
+        experience: "3 years",
+        contactInfo: "+37499000001",
+      },
+      log: {
+        error(context, message) {
+          logged.push({ context, message });
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].message, "Salon job application submitted notification failed");
+  assert.equal(logged[0].context.event, "salon_job_application.notification_failed");
+  assert.equal(logged[0].context.jobApplicationId, applicationId);
+  assert.equal(logged[0].context.jobId, jobId);
+  assert.equal(logged[0].context.salonId, salonId);
+  assert.ok(logged[0].context.err instanceof Error);
+  assert.deepEqual(
+    Object.keys(logged[0].context).sort(),
+    ["err", "event", "jobApplicationId", "jobId", "salonId"]
+  );
+  assert.equal("status" in logged[0].context, false);
+  assert.equal("message" in logged[0].context, false);
+  assert.equal("contactInfo" in logged[0].context, false);
+  assert.equal("email" in logged[0].context, false);
+  assert.equal("phone" in logged[0].context, false);
+});
+
+test("application submit notification failure remains non-fatal when logger throws", async () => {
+  const res = createResponse();
+
+  SalonJobPost.findById = async () => createActiveJob();
+  Salon.findById = async () => createSalon();
+  SalonJobApplication.findOne = async () => null;
+  SalonJobApplication.create = async (payload) =>
+    createApplication({ ...payload, _id: applicationId });
+  SalonJobApplication.findById = () => mockQuery(mockPopulateApplication(createApplication({ _id: applicationId })));
+  Notification.create = async () => {
+    throw new Error("Notification failed");
+  };
+
+  await applyToSalonJob(
+    {
+      user: createBarberUser(),
+      params: { id: jobId },
+      body: { message: "I am interested" },
+      log: {
+        error() {
+          throw new Error("logger exploded");
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.id, applicationId);
 });
 
 test("client cannot apply", async () => {
@@ -942,17 +1022,87 @@ test("unauthorized status update does not create notification", async () => {
 test("notification failure does not undo status update", async () => {
   const res = createResponse();
   const app = mockStatusUpdateDependencies();
+  const logged = [];
 
   Notification.create = async () => {
     throw new Error("Notification failed");
   };
-  console.warn = () => {};
 
   await updateSalonJobApplicationStatus(
     {
       user: { _id: ownerId, role: "barber" },
       params: { applicationId },
       body: { status: "accepted" },
+      log: {
+        error(context, message) {
+          logged.push({ context, message });
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(app.status, "accepted");
+  assert.equal(res.body.status, "accepted");
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].message, "Salon job application notification failed");
+  assert.equal(logged[0].context.event, "salon_job_application.notification_failed");
+  assert.equal(logged[0].context.jobApplicationId, applicationId);
+  assert.equal(logged[0].context.jobId, jobId);
+  assert.equal(logged[0].context.salonId, salonId);
+  assert.equal(logged[0].context.status, "accepted");
+  assert.ok(logged[0].context.err instanceof Error);
+  assert.deepEqual(
+    Object.keys(logged[0].context).sort(),
+    ["err", "event", "jobApplicationId", "jobId", "salonId", "status"]
+  );
+  assert.equal("message" in logged[0].context, false);
+  assert.equal("contactInfo" in logged[0].context, false);
+  assert.equal("email" in logged[0].context, false);
+  assert.equal("phone" in logged[0].context, false);
+});
+
+test("status update notification failure remains non-fatal when logger is absent", async () => {
+  const res = createResponse();
+  const app = mockStatusUpdateDependencies();
+
+  Notification.create = async () => {
+    throw new Error("Notification failed");
+  };
+
+  await updateSalonJobApplicationStatus(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { applicationId },
+      body: { status: "accepted" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(app.status, "accepted");
+  assert.equal(res.body.status, "accepted");
+});
+
+test("status update notification failure remains non-fatal when logger throws", async () => {
+  const res = createResponse();
+  const app = mockStatusUpdateDependencies();
+
+  Notification.create = async () => {
+    throw new Error("Notification failed");
+  };
+
+  await updateSalonJobApplicationStatus(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { applicationId },
+      body: { status: "accepted" },
+      log: {
+        error() {
+          throw new Error("logger exploded");
+        },
+      },
     },
     res
   );
