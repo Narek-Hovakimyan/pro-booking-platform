@@ -1,5 +1,13 @@
 import { barberHasPaidAccess } from "../services/subscriptionService.js";
 
+const logRequestError = (req, context, message) => {
+  try {
+    req.log?.error(context, message);
+  } catch {
+    // Logging must not affect request behavior.
+  }
+};
+
 /**
  * Middleware that blocks requests from unpaid barbers.
  *
@@ -31,7 +39,16 @@ export const requireBarberSubscription = async (req, res, next) => {
 
     return next();
   } catch (error) {
-    console.error("requireBarberSubscription error:", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "subscription.access_check_failed",
+        userId: req.user?._id || req.user?.id,
+        requestId: req.id,
+      },
+      "Could not verify subscription status"
+    );
     return res.status(500).json({
       message: "Could not verify subscription status",
     });

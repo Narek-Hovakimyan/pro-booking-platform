@@ -19,6 +19,14 @@ import {
 
 const isProduction = () => process.env.NODE_ENV === "production";
 
+const logRequestError = (req, context, message) => {
+  try {
+    req.log?.error(context, message);
+  } catch {
+    // Logging must not affect request behavior.
+  }
+};
+
 /**
  * GET /api/subscriptions/me
  * Protected — barber only.
@@ -29,7 +37,16 @@ export const getMySubscription = async (req, res) => {
     const result = await getMySubscriptionAccess(req.user);
     return res.json(result);
   } catch (error) {
-    console.error("Could not fetch subscription access", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "subscription.access_fetch_failed",
+        userId: req.user?._id || req.user?.id,
+        requestId: req.id,
+      },
+      "Could not fetch subscription access"
+    );
     return res.status(500).json({ message: "Could not fetch subscription access" });
   }
 };
@@ -43,7 +60,15 @@ export const getDefaultPlan = async (req, res) => {
     const plan = await getOrCreateDefaultSubscriptionPlan();
     return res.json(plan);
   } catch (error) {
-    console.error("Could not fetch default plan", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "subscription.default_plan_fetch_failed",
+        requestId: req.id,
+      },
+      "Could not fetch default plan"
+    );
     return res.status(500).json({ message: "Could not fetch default plan" });
   }
 };
@@ -83,7 +108,18 @@ export const devGrantSubscription = async (req, res) => {
 
     return res.status(201).json(subscription);
   } catch (error) {
-    console.error("Could not grant subscription", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "subscription.dev_grant_failed",
+        requesterId: req.user?._id || req.user?.id,
+        ownerType: req.body?.ownerType,
+        ownerId: req.body?.ownerId,
+        requestId: req.id,
+      },
+      "Could not grant subscription"
+    );
     const status = error.statusCode || 500;
     return res.status(status).json({
       code: error.code,
