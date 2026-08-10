@@ -6,6 +6,14 @@ import { canManageSalon, sameId } from "../../utils/salonPermissions.js";
 
 export const MAX_NO_SHOW_POLICY_TEXT_LENGTH = 1000;
 
+const logRequestError = (req, context, message) => {
+  try {
+    req.log?.error(context, message);
+  } catch {
+    // Logging must not affect request behavior.
+  }
+};
+
 const parseOptionalNonNegativeNumber = (value) => {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -143,7 +151,16 @@ export const getMyDepositSettings = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Could not fetch deposit settings", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "deposit_settings.fetch_failed",
+        requestId: req.id,
+        userId: req.user?._id || req.user?.id,
+      },
+      "Could not fetch deposit settings"
+    );
     return res.status(500).json({ message: "Could not fetch deposit settings" });
   }
 };
@@ -180,7 +197,16 @@ export const updateMyDepositSettings = async (req, res) => {
       depositSettings: profile.depositSettings,
     });
   } catch (error) {
-    console.error("Could not update deposit settings", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "deposit_settings.update_failed",
+        requestId: req.id,
+        userId: req.user?._id || req.user?.id,
+      },
+      "Could not update deposit settings"
+    );
     return res.status(500).json({ message: "Could not update deposit settings" });
   }
 };
@@ -254,7 +280,18 @@ export const updateStaffDepositSettingsBySalonOwner = async (req, res) => {
       depositSettings: profile.depositSettings,
     });
   } catch (error) {
-    console.error("Could not update staff deposit settings", error);
+    logRequestError(
+      req,
+      {
+        err: error,
+        event: "deposit_settings.staff_update_failed",
+        requestId: req.id,
+        userId: req.user?._id || req.user?.id,
+        salonId: req.params?.salonId,
+        barberId: req.params?.barberId,
+      },
+      "Could not update staff deposit settings"
+    );
     return res.status(500).json({ message: "Could not update staff deposit settings" });
   }
 };

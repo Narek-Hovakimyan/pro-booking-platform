@@ -29,6 +29,35 @@ const createResponse = () => ({
   },
 });
 
+const createRequestLogger = () => {
+  const calls = [];
+  return {
+    calls,
+    error(...args) {
+      calls.push(args);
+    },
+  };
+};
+
+const assertNoSensitiveLeak = (value) => {
+  const logged = JSON.stringify(value);
+  assert.equal(logged.includes("hidden@example.com"), false);
+  assert.equal(logged.includes("+37400000000"), false);
+  assert.equal(logged.includes("payer-secret"), false);
+  assert.equal(logged.includes("secret-token"), false);
+  assert.equal(logged.includes("authorization"), false);
+  assert.equal(logged.includes("private policy text"), false);
+  assert.equal(logged.includes("customer policy text"), false);
+};
+
+const createRequest = (overrides = {}) => ({
+  user: { _id: "barber-1", role: "barber" },
+  params: {},
+  body: {},
+  id: "req-1",
+  ...overrides,
+});
+
 const createProfile = (settings = {}) => ({
   depositSettings: {
     enabled: false,
@@ -260,6 +289,88 @@ describe("deposit settings controller", () => {
     assert.equal(res.body.depositSettings.value, 25);
   });
 
+  it("logs structured safe context and preserves 500 response for own deposit read errors", async () => {
+    const error = new Error("db failed");
+    BarberProfile.findOne = async () => {
+      throw error;
+    };
+    const reqLog = createRequestLogger();
+    const req = createRequest({
+      user: { _id: "barber-500", role: "barber", email: "hidden@example.com" },
+      id: "req-read-1",
+      log: reqLog,
+    });
+    const res = createResponse();
+
+    await getMyDepositSettings(req, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.body, { message: "Could not fetch deposit settings" });
+    assert.equal(reqLog.calls.length, 1);
+    const [context, message] = reqLog.calls[0];
+    assert.equal(message, "Could not fetch deposit settings");
+    assert.equal(context.event, "deposit_settings.fetch_failed");
+    assert.equal(context.requestId, "req-read-1");
+    assert.equal(context.userId, "barber-500");
+    assert.equal(context.err, error);
+    assert.equal("email" in context, false);
+    assertNoSensitiveLeak(reqLog.calls);
+  });
+
+  it("preserves 500 response when deposit update logger is absent", async () => {
+    BarberProfile.findOne = async () => {
+      throw new Error("save lookup failed");
+    };
+    const res = createResponse();
+
+    await updateMyDepositSettings(
+      createRequest({
+        user: {
+          _id: "barber-no-log",
+          role: "barber",
+          email: "hidden@example.com",
+          phone: "+37400000000",
+          token: "secret-token",
+        },
+        body: {
+          enabled: true,
+          mode: "fixed",
+          value: 10,
+          noShowPolicyText: "customer policy text",
+        },
+        log: undefined,
+      }),
+      res
+    );
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.body, { message: "Could not update deposit settings" });
+  });
+
+  it("preserves 500 response when deposit update logger throws", async () => {
+    BarberProfile.findOne = async () => {
+      throw new Error("lookup failed");
+    };
+    const res = createResponse();
+
+    await updateMyDepositSettings(
+      createRequest({
+        user: { _id: "barber-logger-throws", role: "barber" },
+        id: "req-update-1",
+        body: { enabled: true, mode: "fixed", value: 10 },
+        log: {
+          error() {
+            throw new Error("logger exploded");
+          },
+        },
+      }),
+      res
+    );
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.body, { message: "Could not update deposit settings" });
+  });
+
   const setupStaffUpdate = ({ relationshipType = "staff", relationshipStatus = "accepted" } = {}) => {
     const profile = createProfile();
     Salon.findById = async () => ({
@@ -299,6 +410,59 @@ describe("deposit settings controller", () => {
     assert.equal(res.statusCode, 200);
     assert.equal(profile.saveCalled, true);
     assert.equal(res.body.depositSettings.value, 20);
+  });
+
+  it("logs structured safe context and preserves 500 response for staff deposit update errors", async () => {
+    Salon.findById = async () => ({
+      _id: "salon-1",
+      ownerId: "owner-1",
+      admins: [],
+    });
+    User.findById = async () => ({
+      _id: "barber-2",
+      role: "barber",
+      salons: [
+        {
+          salon: "salon-1",
+          status: "approved",
+          relationshipType: "staff",
+          relationshipStatus: "accepted",
+        },
+      ],
+    });
+    const error = new Error("write failed");
+    BarberProfile.findOne = async () => {
+      throw error;
+    };
+    const reqLog = createRequestLogger();
+    const req = createRequest({
+      user: { _id: "owner-1", role: "barber", phone: "+37400000000" },
+      params: { salonId: "salon-1", barberId: "barber-2" },
+      body: {
+        enabled: true,
+        mode: "fixed",
+        value: 15,
+        noShowPolicyText: "private policy text",
+      },
+      id: "req-staff-1",
+      log: reqLog,
+    });
+    const res = createResponse();
+
+    await updateStaffDepositSettingsBySalonOwner(req, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.body, { message: "Could not update staff deposit settings" });
+    assert.equal(reqLog.calls.length, 1);
+    const [context, message] = reqLog.calls[0];
+    assert.equal(message, "Could not update staff deposit settings");
+    assert.equal(context.event, "deposit_settings.staff_update_failed");
+    assert.equal(context.requestId, "req-staff-1");
+    assert.equal(context.userId, "owner-1");
+    assert.equal(context.salonId, "salon-1");
+    assert.equal(context.barberId, "barber-2");
+    assert.equal(context.err, error);
+    assertNoSensitiveLeak(reqLog.calls);
   });
 
   it("owner cannot update chair renter deposit settings", async () => {
