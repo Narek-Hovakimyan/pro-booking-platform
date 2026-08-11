@@ -1,9 +1,46 @@
 import Voucher from "../../models/Voucher.js";
 import { calculateServiceDiscountedPrice } from "../../controllers/services/serviceController.js";
 import { calculateLoyaltyDiscountForBooking } from "../barberClientService.js";
+import { getLogger } from "../../config/logger.js";
 
 const sameId = (left, right) =>
   String(left || "") === String(right || "");
+
+const SAFE_ID_PATTERN = /^[a-f\d]{24}$/i;
+const VOUCHER_LOG_EVENT = "booking.voucher_secondary_write_failed";
+
+const getSafeLogId = (value) => {
+  const normalized = String(value || "");
+  return SAFE_ID_PATTERN.test(normalized) ? normalized : undefined;
+};
+
+const logVoucherMutationFailure = ({ operation, voucherId, bookingId }) => {
+  try {
+    getLogger?.()?.warn?.(
+      {
+        err: { name: "Error" },
+        event: VOUCHER_LOG_EVENT,
+        operation,
+        voucherId: getSafeLogId(voucherId),
+        bookingId: getSafeLogId(bookingId),
+      },
+      VOUCHER_LOG_EVENT
+    );
+  } catch {}
+};
+
+const runVoucherSecondaryWrite = async ({
+  operation,
+  voucherId,
+  bookingId,
+  update,
+}) => {
+  try {
+    await Voucher.findByIdAndUpdate(voucherId, update);
+  } catch {
+    logVoucherMutationFailure({ operation, voucherId, bookingId });
+  }
+};
 
 /**
  * Calculate voucher discount amount (pure calculation).
@@ -217,9 +254,13 @@ export const buildBookingPricing = async ({
  */
 export const rollbackVoucherClaim = async (voucherId) => {
   if (!voucherId) return;
-  await Voucher.findByIdAndUpdate(voucherId, {
-    $inc: { currentUses: -1 },
-  }).catch(() => {});
+  await runVoucherSecondaryWrite({
+    operation: "rollback_claim",
+    voucherId,
+    update: {
+      $inc: { currentUses: -1 },
+    },
+  });
 };
 
 /**
@@ -227,9 +268,14 @@ export const rollbackVoucherClaim = async (voucherId) => {
  */
 export const recordVoucherRedemption = async (voucherId, bookingId) => {
   if (!voucherId || !bookingId) return;
-  await Voucher.findByIdAndUpdate(voucherId, {
-    $addToSet: { redemptionBookingIds: bookingId },
-  }).catch(() => {});
+  await runVoucherSecondaryWrite({
+    operation: "record_redemption",
+    voucherId,
+    bookingId,
+    update: {
+      $addToSet: { redemptionBookingIds: bookingId },
+    },
+  });
 };
 
 /**
@@ -240,8 +286,13 @@ export const restoreVoucherOnCancel = async (booking, previousStatus) => {
   const terminalStatuses = new Set(["cancelled", "rejected"]);
   if (terminalStatuses.has(previousStatus)) return;
 
-  await Voucher.findByIdAndUpdate(booking.voucherId, {
-    $inc: { currentUses: -1 },
-    $pull: { redemptionBookingIds: booking._id },
-  }).catch(() => {});
+  await runVoucherSecondaryWrite({
+    operation: "restore_on_cancel",
+    voucherId: booking.voucherId,
+    bookingId: booking._id,
+    update: {
+      $inc: { currentUses: -1 },
+      $pull: { redemptionBookingIds: booking._id },
+    },
+  });
 };
