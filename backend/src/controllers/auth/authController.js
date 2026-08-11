@@ -15,8 +15,10 @@ import { createInitialSpecialistOnboardingState } from "../../utils/specialistOn
 import { getLogger, safeErrorSerializer } from "../../config/logger.js";
 
 const RESET_TOKEN_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+const SAFE_OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 
 let dependencies = {
+  getLogger,
   issueAuthSession,
   revokeAllUserRefreshSessionsBestEffort,
   disconnectUserSocketsBestEffort,
@@ -28,19 +30,66 @@ export function __setAuthControllerDependencies(overrides = {}) {
 
 export function __resetAuthControllerDependencies() {
   dependencies = {
+    getLogger,
     issueAuthSession,
     revokeAllUserRefreshSessionsBestEffort,
     disconnectUserSocketsBestEffort,
   };
 }
 
-const getAuthLogger = () => getLogger().child({ component: "auth" });
+const getAuthLogger = () => {
+  try {
+    const logger = dependencies.getLogger();
+    if (!logger || typeof logger.child !== "function") return null;
+    return logger.child({ component: "auth" });
+  } catch {
+    return null;
+  }
+};
+
+const logAuth = (method, payload, message) => {
+  try {
+    const logger = getAuthLogger();
+    if (!logger || typeof logger[method] !== "function") return;
+    logger[method](payload, message);
+  } catch {}
+};
 
 const logAuthError = (event, error, metadata = {}) => {
-  getAuthLogger().error(
+  logAuth(
+    "error",
     { event, err: safeErrorSerializer(error), ...metadata },
     "Authentication operation failed"
   );
+};
+
+const logAuthInfo = (payload, message) => logAuth("info", payload, message);
+
+const getSafeObjectId = (value) => {
+  const normalized = String(value || "");
+  return SAFE_OBJECT_ID_PATTERN.test(normalized) ? normalized : undefined;
+};
+
+const logRegistrationCleanupFailure = (operation, userId) => {
+  try {
+    getAuthLogger().error(
+      {
+        event: "auth.registration_cleanup_failed",
+        operation,
+        userId: getSafeObjectId(userId),
+        err: { name: "Error" },
+      },
+      "Authentication operation failed"
+    );
+  } catch {}
+};
+
+const rollbackCreatedUserBestEffort = async (userId, operation) => {
+  try {
+    await User.findByIdAndDelete(userId);
+  } catch {
+    logRegistrationCleanupFailure(operation, userId);
+  }
 };
 
 const getPasswordResetClientUrl = () => {
@@ -171,7 +220,7 @@ export const registerUser = async (req, res) => {
           seatCount: 1,
         });
       } catch (subscriptionError) {
-        await User.findByIdAndDelete(user._id).catch(() => {});
+        await rollbackCreatedUserBestEffort(user._id, "trial_subscription_cleanup");
         logAuthError("auth.registration_failed", subscriptionError, {
           operation: "trial_subscription",
           userId: String(user._id),
@@ -343,7 +392,7 @@ export const googleAuth = async (req, res) => {
           seatCount: 1,
         });
       } catch (subscriptionError) {
-        await User.findByIdAndDelete(user._id).catch(() => {});
+        await rollbackCreatedUserBestEffort(user._id, "google_trial_subscription_cleanup");
         logAuthError("auth.registration_failed", subscriptionError, {
           operation: "google_trial_subscription",
           userId: String(user._id),
@@ -391,7 +440,7 @@ export const forgotPassword = async (req, res) => {
 
     // Find user without exposing existence
     const user = await User.findOne({ phone }).select("+resetPasswordTokenHash +resetPasswordExpires +resetPasswordSentAt");
-    getAuthLogger().info(
+    logAuthInfo(
       { event: "auth.password_reset_requested" },
       "Password reset request processed"
     );

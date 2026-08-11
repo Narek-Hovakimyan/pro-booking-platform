@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { afterEach, beforeEach, test } from "node:test";
-
+import { getLogger, resetLogger } from "../../config/logger.js";
 import User from "../../models/User.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
@@ -11,6 +11,7 @@ import { setGoogleAuthClientFactoryForTesting } from "../../services/auth/google
 import {
   __resetAuthControllerDependencies,
   __setAuthControllerDependencies,
+  forgotPassword,
   googleAuth,
   loginUser,
   registerUser,
@@ -43,6 +44,7 @@ let issuedSessionCalls;
 
 beforeEach(() => {
   issuedSessionCalls = [];
+  getLogger({ level: "silent" });
   __setAuthControllerDependencies({
     issueAuthSession: ({ req, res, user }) => {
       issuedSessionCalls.push({ req, res, user });
@@ -63,6 +65,7 @@ afterEach(() => {
   Subscription.create = originalSubscriptionMethods.create;
   SubscriptionPlan.findOne = originalSubscriptionPlanMethods.findOne;
   SubscriptionPlan.create = originalSubscriptionPlanMethods.create;
+  resetLogger();
   setGoogleAuthClientFactoryForTesting();
   console.log = originalConsoleLog;
   console.warn = originalConsoleWarn;
@@ -773,4 +776,254 @@ test("normal registration creates barber fields and trial subscription", async (
   assert.equal(rawUser.salonStatus, "none");
   assert.deepEqual(rawUser.workHistory, []);
   assert.equal(rawUser.loyaltyDiscountSettings.enabled, false);
+});
+
+test("normal barber registration logs sanitized cleanup failure once when user rollback delete fails", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
+  let deleteAttempts = 0;
+  const loggerCalls = [];
+  const logger = getLogger();
+  logger.child = () => ({
+    error(payload, message) {
+      loggerCalls.push({ payload, message });
+    },
+  });
+
+  User.findOne = () => null;
+  User.create = async (payload) => createPersistedUser(payload);
+  User.findByIdAndDelete = async (id) => {
+    deleteAttempts += 1;
+    assert.equal(String(id), userId);
+    throw Object.assign(new Error("unlink /srv/app/uploads/user.json"), {
+      name: "PathLeak",
+      code: "ENOENT/../../etc/passwd",
+    });
+  };
+  Subscription.findOne = async () => null;
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.create = async () => {
+    throw new Error("subscription provisioning failed");
+  };
+
+  const res = createResponse();
+  await registerUser(
+    {
+      body: {
+        name: "Password Barber",
+        phone: "+37400111222",
+        email: "barber@example.com",
+        password: "password123",
+        role: "barber",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Registration failed" });
+  assert.equal(deleteAttempts, 1);
+  assert.equal(loggerCalls.length, 2);
+  assert.deepEqual(loggerCalls[0].message, "Authentication operation failed");
+  assert.deepEqual(loggerCalls[0].payload, {
+    event: "auth.registration_cleanup_failed",
+    operation: "trial_subscription_cleanup",
+    userId,
+    err: { name: "Error" },
+  });
+  const output = JSON.stringify(loggerCalls[0]);
+  assert.equal(output.includes("barber@example.com"), false);
+  assert.equal(output.includes("+37400111222"), false);
+  assert.equal(output.includes("unlink"), false);
+  assert.equal(output.includes("/srv/app"), false);
+  assert.equal(output.includes("ENOENT/../../etc/passwd"), false);
+});
+
+test("normal barber registration keeps failure response when cleanup logger is unavailable", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
+  let deleteAttempts = 0;
+
+  __setAuthControllerDependencies({ getLogger: () => null });
+  User.findOne = () => null;
+  User.create = async (payload) => createPersistedUser(payload);
+  User.findByIdAndDelete = async (id) => {
+    deleteAttempts += 1;
+    assert.equal(String(id), userId);
+    throw new Error("cleanup failed");
+  };
+  Subscription.findOne = async () => null;
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.create = async () => {
+    throw new Error("subscription provisioning failed");
+  };
+
+  const res = createResponse();
+  await registerUser(
+    {
+      body: {
+        name: "Password Barber",
+        phone: "+37400111222",
+        email: "barber@example.com",
+        password: "password123",
+        role: "barber",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Registration failed" });
+  assert.equal(deleteAttempts, 1);
+});
+
+test("normal barber registration keeps failure response when auth error method is missing", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
+  let deleteAttempts = 0;
+  let consoleCalls = 0;
+  const originalError = console.error;
+
+  User.findOne = () => null;
+  User.create = async (payload) => createPersistedUser(payload);
+  User.findByIdAndDelete = async (id) => {
+    deleteAttempts += 1;
+    assert.equal(String(id), userId);
+    throw new Error("cleanup failed");
+  };
+  Subscription.findOne = async () => null;
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.create = async () => {
+    throw new Error("subscription provisioning failed");
+  };
+
+  const logger = getLogger();
+  logger.child = () => ({ info() {} });
+  console.error = () => {
+    consoleCalls += 1;
+  };
+
+  const res = createResponse();
+  await registerUser(
+    {
+      body: {
+        name: "Password Barber",
+        phone: "+37400111222",
+        email: "barber@example.com",
+        password: "password123",
+        role: "barber",
+      },
+    },
+    res
+  );
+  console.error = originalError;
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Registration failed" });
+  assert.equal(deleteAttempts, 1);
+  assert.equal(consoleCalls, 0);
+});
+
+test("password reset keeps its generic response when auth info method is missing", async () => {
+  User.findOne = () => selectable(null);
+  const logger = getLogger();
+  logger.child = () => ({ error() {} });
+
+  const res = createResponse();
+  await forgotPassword({ body: { phone: "+37400999000" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    message: "If an account exists, password reset instructions have been sent.",
+  });
+});
+
+test("google barber registration keeps failure response when cleanup logger is unavailable", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
+  let deleteAttempts = 0;
+
+  mockGooglePayload(baseGooglePayload);
+  User.findOne = () => null;
+  User.create = async (payload) => createPersistedUser(payload);
+  User.findByIdAndDelete = async (id) => {
+    deleteAttempts += 1;
+    assert.equal(String(id), userId);
+    throw new Error("cleanup failed");
+  };
+  Subscription.findOne = async () => null;
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.create = async () => {
+    throw new Error("subscription provisioning failed");
+  };
+
+  const logger = getLogger();
+  logger.child = undefined;
+
+  const res = createResponse();
+  await googleAuth(
+    {
+      body: {
+        credential: "valid-google-token",
+        role: "barber",
+        phone: "+37400111222",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Google registration failed" });
+  assert.equal(deleteAttempts, 1);
+});
+
+test("google barber registration keeps failure response when cleanup logger throws", async () => {
+  process.env.JWT_SECRET = "test-secret";
+  const plan = { _id: "plan-1", pricePerSeat: 5000, currency: "AMD" };
+  let deleteAttempts = 0;
+  let cleanupLogAttempts = 0;
+
+  mockGooglePayload(baseGooglePayload);
+  User.findOne = () => null;
+  User.create = async (payload) => createPersistedUser(payload);
+  User.findByIdAndDelete = async (id) => {
+    deleteAttempts += 1;
+    assert.equal(String(id), userId);
+    throw Object.assign(new Error("cleanup failed ./tmp/user.json"), {
+      name: "CleanupError",
+      code: "relative/path",
+    });
+  };
+  Subscription.findOne = async () => null;
+  SubscriptionPlan.findOne = async () => plan;
+  Subscription.create = async () => {
+    throw new Error("subscription provisioning failed");
+  };
+
+  const logger = getLogger();
+  logger.child = () => ({
+    error(payload) {
+      if (payload?.event === "auth.registration_cleanup_failed") {
+        cleanupLogAttempts += 1;
+        throw new Error("logger stream down");
+      }
+    },
+  });
+
+  const res = createResponse();
+  await googleAuth(
+    {
+      body: {
+        credential: "valid-google-token",
+        role: "barber",
+        phone: "+37400111222",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Google registration failed" });
+  assert.equal(deleteAttempts, 1);
+  assert.equal(cleanupLogAttempts, 1);
 });
