@@ -15,6 +15,38 @@ let notifyMatchingWaitlistEntriesForBookingSideEffects = notifyMatchingWaitlistE
 let createNotificationForBookingSideEffects = createNotification;
 let getLoggerForBookingSideEffects = getLogger;
 
+const MONGO_OBJECT_ID_REGEX = /^[a-f\d]{24}$/i;
+
+const getSafeIdentifier = (value) => {
+  if (typeof value !== "string") return undefined;
+  return MONGO_OBJECT_ID_REGEX.test(value) ? value : undefined;
+};
+
+const getSafeSocketErrorMetadata = (err) => {
+  if (!err || typeof err !== "object") return undefined;
+  return { name: "Error" };
+};
+
+const logBookingSocketFailure = ({ booking, userId, err }) => {
+  try {
+    const logger = getLoggerForBookingSideEffects?.();
+    logger?.warn?.(
+      {
+        event: "booking.socket_emit_failed",
+        operation: "emitBookingUpdated",
+        bookingId: getSafeIdentifier(booking?._id),
+        barberId: getSafeIdentifier(booking?.barberId),
+        salonId: getSafeIdentifier(booking?.salonId),
+        userId: getSafeIdentifier(userId),
+        error: getSafeSocketErrorMetadata(err),
+      },
+      "booking.socket_emit_failed"
+    );
+  } catch {
+    // Booking socket fan-out is non-critical and logging must stay best-effort.
+  }
+};
+
 const getClientName = async (booking, fallbackUser) => {
   if (booking.clientName) return booking.clientName;
   if (fallbackUser?.name) return fallbackUser.name;
@@ -32,6 +64,8 @@ const getBookingNotificationData = (booking) =>
   booking?._id ? { bookingId: booking._id } : undefined;
 
 export const emitBookingUpdated = (booking, action = "updated") => {
+  let recipientUserId = booking?.barberId;
+
   try {
     const io = getIOForBookingSideEffects();
     if (!io) return;
@@ -46,6 +80,7 @@ export const emitBookingUpdated = (booking, action = "updated") => {
 
     io.to(`user:${booking.barberId}`).emit("bookingUpdated", barberPayload);
     if (booking.clientId) {
+      recipientUserId = booking.clientId;
       const clientPayload = {
         booking: serializeBookingForResponse(booking, {
           _id: booking.clientId,
@@ -56,8 +91,8 @@ export const emitBookingUpdated = (booking, action = "updated") => {
 
       io.to(`user:${booking.clientId}`).emit("bookingUpdated", clientPayload);
     }
-  } catch {
-    // Socket emit is non-critical
+  } catch (err) {
+    logBookingSocketFailure({ booking, userId: recipientUserId, err });
   }
 };
 

@@ -197,6 +197,7 @@ test("no-ops when getIO returns null or undefined", () => {
 });
 
 test("socket errors do not throw", () => {
+  __bookingSideEffectsTestHooks.setLogger(null);
   __bookingSideEffectsTestHooks.setGetIO(() => {
     throw new Error("socket unavailable");
   });
@@ -210,6 +211,159 @@ test("socket errors do not throw", () => {
   }));
 
   assert.doesNotThrow(() => emitBookingUpdated(createBooking()));
+});
+
+test("logs sanitized getIO failures without changing booking success semantics", () => {
+  const logs = [];
+
+  __bookingSideEffectsTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+  __bookingSideEffectsTestHooks.setGetIO(() => {
+    const err = new Error("socket unavailable");
+    err.code = "SOCKET_DOWN";
+    throw err;
+  });
+
+  assert.doesNotThrow(() =>
+    emitBookingUpdated(createBooking({ _id: "64b000000000000000000010" }), "created")
+  );
+
+  assert.equal(logs.length, 1);
+  assert.deepEqual(logs[0][0], {
+    event: "booking.socket_emit_failed",
+    operation: "emitBookingUpdated",
+    bookingId: "64b000000000000000000010",
+    barberId,
+    salonId: "64b000000000000000000004",
+    userId: barberId,
+    error: {
+      name: "Error",
+    },
+  });
+  assert.equal(logs[0][1], "booking.socket_emit_failed");
+  assert.doesNotMatch(
+    JSON.stringify(logs),
+    /socket unavailable|SOCKET_DOWN|secret_123|txn_123|reference-1|toner-7a|allergies|photography/i
+  );
+});
+
+test("logs one sanitized warning for socket emit failures after a single attempted emission", () => {
+  const logs = [];
+  const attempts = [];
+  const booking = createBooking();
+
+  __bookingSideEffectsTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+  __bookingSideEffectsTestHooks.setGetIO(() => ({
+    to(room) {
+      return {
+        emit(event) {
+          attempts.push({ room, event });
+          const err = new TypeError("emit failed");
+          err.code = "EMIT_FAIL";
+          throw err;
+        },
+      };
+    },
+  }));
+
+  assert.doesNotThrow(() => emitBookingUpdated(booking, "updated"));
+
+  assert.deepEqual(attempts, [
+    {
+      room: `user:${barberId}`,
+      event: "bookingUpdated",
+    },
+  ]);
+  assert.equal(logs.length, 1);
+  assert.deepEqual(logs[0][0], {
+    event: "booking.socket_emit_failed",
+    operation: "emitBookingUpdated",
+    bookingId: undefined,
+    barberId,
+    salonId: "64b000000000000000000004",
+    userId: barberId,
+    error: {
+      name: "Error",
+    },
+  });
+  assert.equal(logs[0][1], "booking.socket_emit_failed");
+  const serializedLogs = JSON.stringify(logs);
+  assert.equal(serializedLogs.includes("EMIT_FAIL"), false);
+  assert.equal(serializedLogs.includes("emit failed"), false);
+  assert.equal(serializedLogs.includes("TypeError"), false);
+});
+
+test("socket failure logging remains harmless when logger is missing or throws", () => {
+  __bookingSideEffectsTestHooks.setLogger(null);
+  __bookingSideEffectsTestHooks.setGetIO(() => {
+    throw new Error("socket unavailable");
+  });
+
+  assert.doesNotThrow(() => emitBookingUpdated(createBooking()));
+
+  __bookingSideEffectsTestHooks.setLogger({
+    warn() {
+      throw new Error("logger unavailable");
+    },
+  });
+
+  assert.doesNotThrow(() => emitBookingUpdated(createBooking()));
+});
+
+test("omits hostile error metadata and invalid identifiers from socket failure logs", () => {
+  const logs = [];
+  const hostileIdentifier = {
+    toString() {
+      throw new Error("should not stringify");
+    },
+  };
+  const booking = createBooking({
+    _id: "../booking-secrets.txt",
+    barberId: hostileIdentifier,
+    clientId: "../../client",
+    salonId: "/tmp/salon",
+  });
+
+  __bookingSideEffectsTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+  __bookingSideEffectsTestHooks.setGetIO(() => {
+    const err = new Error("socket unavailable");
+    err.name = "../../TypeError";
+    err.code = "../EMIT_FAIL";
+    err.message = "leak me";
+    err.stack = "private stack";
+    err.details = { token: "secret_123" };
+    throw err;
+  });
+
+  assert.doesNotThrow(() => emitBookingUpdated(booking));
+
+  assert.equal(logs.length, 1);
+  assert.deepEqual(logs[0][0], {
+    event: "booking.socket_emit_failed",
+    operation: "emitBookingUpdated",
+    bookingId: undefined,
+    barberId: undefined,
+    salonId: undefined,
+    userId: undefined,
+    error: {
+      name: "Error",
+    },
+  });
+  assert.equal(logs[0][1], "booking.socket_emit_failed");
+  const serializedLogs = JSON.stringify(logs);
+  assert.equal(serializedLogs.includes("../../TypeError"), false);
+  assert.equal(serializedLogs.includes("../EMIT_FAIL"), false);
+  assert.equal(serializedLogs.includes("leak me"), false);
+  assert.equal(serializedLogs.includes("private stack"), false);
+  assert.equal(serializedLogs.includes("secret_123"), false);
+  assert.equal(serializedLogs.includes("../booking-secrets.txt"), false);
+  assert.equal(serializedLogs.includes("../../client"), false);
+  assert.equal(serializedLogs.includes("/tmp/salon"), false);
 });
 
 test("passes exact released booking slot fields to waitlist notification", () => {
