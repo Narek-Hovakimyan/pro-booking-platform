@@ -452,6 +452,10 @@ describe("User Google auth foundation", () => {
     assert.ok(passwordUser.validateSync()?.errors?.password);
     assert.equal(googleUser.validateSync(), undefined);
   });
+
+  test("password is excluded from queries unless explicitly selected", () => {
+    assert.equal(User.schema.path("password").options.select, false);
+  });
 });
 
 describe("User role-specific defaults", () => {

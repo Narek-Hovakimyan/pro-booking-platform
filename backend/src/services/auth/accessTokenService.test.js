@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 
 import {
   ACCESS_TOKEN_EXPIRES_IN,
+  ACCESS_TOKEN_ALGORITHM,
   assertAccessTokenMatchesUser,
   signAccessTokenForUser,
   verifyAccessToken,
@@ -26,8 +27,10 @@ test("signs a versioned 15-minute token with string id and integer auth version"
 
   assert.equal(decoded.id, userId);
   assert.equal(decoded.av, 7);
+  assert.equal(jwt.decode(token, { complete: true }).header.alg, ACCESS_TOKEN_ALGORITHM);
   assert.ok(Math.abs(decoded.exp - decoded.iat - 15 * 60) <= 5);
   assert.equal(ACCESS_TOKEN_EXPIRES_IN, "15m");
+  assert.equal(ACCESS_TOKEN_ALGORITHM, "HS256");
 });
 
 test("existing users with absent authVersion sign as version zero", () => {
@@ -73,6 +76,20 @@ test("rejects expired and invalid-signature tokens", () => {
 
   const otherSecretToken = jwt.sign({ id: userId, av: 0 }, "other-secret");
   assert.throws(() => verifyAccessToken(otherSecretToken));
+
+  const wrongAlgorithmToken = jwt.sign(
+    { id: userId, av: 0 },
+    jwtSecret,
+    { algorithm: "HS384" }
+  );
+  assert.throws(() => verifyAccessToken(wrongAlgorithmToken));
+
+  const unsignedToken = jwt.sign(
+    { id: userId, av: 0 },
+    "",
+    { algorithm: "none" }
+  );
+  assert.throws(() => verifyAccessToken(unsignedToken));
 });
 
 test("compares token version to current user authVersion exactly", () => {

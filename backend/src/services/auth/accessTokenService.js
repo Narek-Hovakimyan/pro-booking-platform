@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 
 export const ACCESS_TOKEN_EXPIRES_IN = "15m";
+export const ACCESS_TOKEN_ALGORITHM = "HS256";
 
 export class AccessTokenError extends Error {
   constructor(message = "Access token is invalid.") {
@@ -50,7 +51,7 @@ export function signAccessTokenForUser(user) {
       av: normalizeAuthVersion(user.authVersion, { allowMissing: true }),
     },
     process.env.JWT_SECRET,
-    { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
+    { expiresIn: ACCESS_TOKEN_EXPIRES_IN, algorithm: ACCESS_TOKEN_ALGORITHM }
   );
 }
 
@@ -59,7 +60,9 @@ export function verifyAccessToken(token) {
     throw accessTokenError();
   }
 
-  const decoded = jwt.verify(token.trim(), process.env.JWT_SECRET);
+  const decoded = jwt.verify(token.trim(), process.env.JWT_SECRET, {
+    algorithms: [ACCESS_TOKEN_ALGORITHM],
+  });
 
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
     throw accessTokenError();

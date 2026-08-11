@@ -120,7 +120,7 @@ const addAuthProvider = (user, provider) => {
   return false;
 };
 
-const selectAuthVersion = (query, selection = "+authVersion") =>
+const selectAuthVersion = (query, selection = "+password +authVersion") =>
   query && typeof query.select === "function" ? query.select(selection) : query;
 
 const applyGoogleLink = (user, googlePayload) => {

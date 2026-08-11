@@ -138,7 +138,7 @@ test("register and password login issue exactly once with no response cookie hel
   const loginRes = response();
   await loginUser(loginReq, loginRes);
   assert.equal(loginRes.statusCode, 200);
-  assert.equal(loginSelection, "+authVersion");
+  assert.equal(loginSelection, "+password +authVersion");
   assert.equal(calls.length, 2);
   assertIssuanceCall(calls[1], { req: loginReq, res: loginRes, user: loginUserDocument });
 });
