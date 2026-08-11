@@ -7,6 +7,7 @@ import MediaObject, {
   buildMediaLifecycleTimestamps,
   MEDIA_OBJECT_STATES,
 } from "../../models/MediaObject.js";
+import { getLogger } from "../../config/logger.js";
 import { LocalMediaStore } from "../media/localMediaStore.js";
 import { isMediaStoreError, resolveMediaStageKeys } from "../media/mediaStore.js";
 import {
@@ -26,6 +27,10 @@ const mediaStoreRoot = path.join(
 );
 
 let defaultMediaStore;
+let getLoggerForBookingReferenceMedia = getLogger;
+
+const SAFE_OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+const SAFE_MEDIA_STATUSES = new Set(Object.values(MEDIA_OBJECT_STATES));
 
 const getMediaStore = () => {
   if (!defaultMediaStore) {
@@ -36,6 +41,46 @@ const getMediaStore = () => {
 
 const checksumBuffer = (buffer) =>
   createHash("sha256").update(buffer).digest("hex");
+
+const getBookingReferenceMediaLogger = () => {
+  try {
+    const logger = getLoggerForBookingReferenceMedia?.();
+    if (!logger || typeof logger.child !== "function") return logger || null;
+    return logger.child({ component: "booking-reference-media" });
+  } catch {
+    return null;
+  }
+};
+
+const getSafeObjectId = (value) => {
+  if (typeof value !== "string") return undefined;
+  return SAFE_OBJECT_ID_PATTERN.test(value) ? value : undefined;
+};
+
+const getSafeMediaStatus = (value) =>
+  typeof value === "string" && SAFE_MEDIA_STATUSES.has(value) ? value : undefined;
+
+const logBookingReferencePersistenceFailure = ({
+  event,
+  operation,
+  mediaObjectId,
+  bookingId,
+  status,
+}) => {
+  try {
+    getBookingReferenceMediaLogger()?.warn?.(
+      {
+        event,
+        operation,
+        mediaObjectId: getSafeObjectId(mediaObjectId),
+        bookingId: getSafeObjectId(bookingId),
+        status: getSafeMediaStatus(status),
+        err: { name: "Error" },
+      },
+      event
+    );
+  } catch {}
+};
 
 const readUploadBytes = async (file) => {
   if (Buffer.isBuffer(file?.buffer)) {
@@ -282,7 +327,14 @@ export const stageBookingReferenceMedia = async ({
               }),
         },
       };
-    }).catch(() => {});
+    }).catch(() => {
+      logBookingReferencePersistenceFailure({
+        event: "booking_reference_media.stage_failure_persist_failed",
+        operation: "stageBookingReferenceMedia",
+        mediaObjectId: failedMediaId || undefined,
+        status: MEDIA_OBJECT_STATES.FAILED,
+      });
+    });
     throw error;
   }
 };
@@ -374,7 +426,14 @@ export const compensateBookingReferenceMediaFailure = async ({
             "Booking reference media remained staged after booking failure"
           ),
         },
-      }).catch(() => {});
+      }).catch(() => {
+        logBookingReferencePersistenceFailure({
+          event: "booking_reference_media.compensation_status_persist_failed",
+          operation: "compensateBookingReferenceMediaFailure",
+          mediaObjectId: entry.mediaObjectId,
+          status: MEDIA_OBJECT_STATES.STAGED,
+        });
+      });
       continue;
     }
 
@@ -471,7 +530,15 @@ export const compensateBookingReferenceMediaFailure = async ({
             "Could not delete orphaned booking reference media"
           ),
         },
-      }).catch(() => {});
+      }).catch(() => {
+        logBookingReferencePersistenceFailure({
+          event: "booking_reference_media.cleanup_finalize_persist_failed",
+          operation: "compensateBookingReferenceMediaFailure",
+          mediaObjectId: entry.mediaObjectId,
+          bookingId,
+          status: MEDIA_OBJECT_STATES.DELETE_PENDING,
+        });
+      });
     }
   }
 };
@@ -558,5 +625,11 @@ export const __bookingReferenceMediaTestHooks = {
   },
   setMediaStore(store) {
     defaultMediaStore = store;
+  },
+  setLogger(nextLogger) {
+    getLoggerForBookingReferenceMedia = nextLogger ? () => nextLogger : getLogger;
+  },
+  resetLogger() {
+    getLoggerForBookingReferenceMedia = getLogger;
   },
 };

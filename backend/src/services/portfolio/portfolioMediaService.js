@@ -8,6 +8,7 @@ import MediaObject, {
   MEDIA_OBJECT_STATES,
 } from "../../models/MediaObject.js";
 import PortfolioPhoto from "../../models/PortfolioPhoto.js";
+import { getLogger } from "../../config/logger.js";
 import { LocalMediaStore } from "../media/localMediaStore.js";
 import { isMediaStoreError, resolveMediaStageKeys } from "../media/mediaStore.js";
 
@@ -24,9 +25,53 @@ const MEDIA_FIELDS = Object.freeze({
 });
 
 let defaultMediaStore;
+let getLoggerForPortfolioMedia = getLogger;
+
+const SAFE_OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+const SAFE_MEDIA_STATUSES = new Set(Object.values(MEDIA_OBJECT_STATES));
 
 const getMediaStore = () =>
   defaultMediaStore || (defaultMediaStore = new LocalMediaStore({ root: PORTFOLIO_MEDIA_ROOT }));
+
+const getPortfolioMediaLogger = () => {
+  try {
+    const logger = getLoggerForPortfolioMedia?.();
+    if (!logger || typeof logger.child !== "function") return logger || null;
+    return logger.child({ component: "portfolio-media" });
+  } catch {
+    return null;
+  }
+};
+
+const getSafeObjectId = (value) => {
+  if (typeof value !== "string") return undefined;
+  return SAFE_OBJECT_ID_PATTERN.test(value) ? value : undefined;
+};
+
+const getSafeMediaStatus = (value) =>
+  typeof value === "string" && SAFE_MEDIA_STATUSES.has(value) ? value : undefined;
+
+const logPortfolioMediaPersistenceFailure = ({
+  event,
+  operation,
+  mediaObjectId,
+  photoId,
+  status,
+}) => {
+  try {
+    getPortfolioMediaLogger()?.warn?.(
+      {
+        event,
+        operation,
+        mediaObjectId: getSafeObjectId(mediaObjectId),
+        photoId: getSafeObjectId(photoId),
+        status: getSafeMediaStatus(status),
+        err: { name: "Error" },
+      },
+      event
+    );
+  } catch {}
+};
 
 const getLogicalSessionTimeoutMinutes = (description) => {
   if (Number.isInteger(description?.logicalSessionTimeoutMinutes)) {
@@ -208,7 +253,14 @@ const markStageFailure = async (MediaObjectModel, mediaObjectId, status, error, 
             failureCode: code,
             failureReason: createFailureReason(error, "Could not stage portfolio media"),
           },
-  }).catch(() => {});
+  }).catch(() => {
+    logPortfolioMediaPersistenceFailure({
+      event: "portfolio_media.stage_failure_persist_failed",
+      operation: "markStageFailure",
+      mediaObjectId,
+      status,
+    });
+  });
 
 const stagePortfolioMedia = async ({ filesByKind, mediaStore, MediaObjectModel }) => {
   const staged = [];
@@ -340,7 +392,15 @@ const finalizeDeletedMedia = async ({ media, photoId, mediaStore, MediaObjectMod
           failureCode: "PORTFOLIO_MEDIA_DELETE_PENDING",
           failureReason: createFailureReason(error, "Could not delete portfolio media"),
         },
-      }).catch(() => {});
+      }).catch(() => {
+        logPortfolioMediaPersistenceFailure({
+          event: "portfolio_media.cleanup_finalize_persist_failed",
+          operation: "finalizeDeletedMedia",
+          mediaObjectId: entry.mediaObjectId,
+          photoId,
+          status: MEDIA_OBJECT_STATES.DELETE_PENDING,
+        });
+      });
     }
   }
 };
@@ -413,10 +473,27 @@ export const createPortfolioPhotoWithMedia = async ({
             failureCode: "PORTFOLIO_MEDIA_STAGED",
             failureReason: createFailureReason(error, "Portfolio media remained staged after create failure"),
           },
-        }).catch(() => {});
+        }).catch(() => {
+          logPortfolioMediaPersistenceFailure({
+            event: "portfolio_media.compensation_status_persist_failed",
+            operation: "createPortfolioPhotoWithMedia",
+            mediaObjectId: entry.mediaObjectId,
+            photoId,
+            status: MEDIA_OBJECT_STATES.STAGED,
+          });
+        });
         continue;
       }
-      const marked = await markDeletePending({ MediaObjectModel, entry, photoId, error }).catch(() => null);
+      const marked = await markDeletePending({ MediaObjectModel, entry, photoId, error }).catch(() => {
+        logPortfolioMediaPersistenceFailure({
+          event: "portfolio_media.delete_pending_persist_failed",
+          operation: "markDeletePending",
+          mediaObjectId: entry.mediaObjectId,
+          photoId,
+          status: MEDIA_OBJECT_STATES.DELETE_PENDING,
+        });
+        return null;
+      });
       if (marked) {
         await finalizeDeletedMedia({ media: [entry], photoId, mediaStore, MediaObjectModel });
       }
@@ -500,6 +577,12 @@ export const __portfolioMediaServiceTestHooks = {
   },
   setMediaStore(store) {
     defaultMediaStore = store;
+  },
+  setLogger(nextLogger) {
+    getLoggerForPortfolioMedia = nextLogger ? () => nextLogger : getLogger;
+  },
+  resetLogger() {
+    getLoggerForPortfolioMedia = getLogger;
   },
   supportsTransactions() {
     return portfolioMediaHooks.supportsTransactions();

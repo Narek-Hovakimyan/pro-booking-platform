@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 
 import { MEDIA_OBJECT_STATES } from "../../models/MediaObject.js";
 import {
@@ -11,6 +11,10 @@ import {
   resolveBookingReferenceMedia,
   stageBookingReferenceMedia,
 } from "./bookingReferenceMediaService.js";
+
+afterEach(() => {
+  __bookingReferenceMediaTestHooks.resetLogger();
+});
 
 const matchesQuery = (doc, query) =>
   Object.entries(query).every(([key, value]) => {
@@ -458,4 +462,286 @@ test("compensation skips deletion when delete-pending CAS does not persist", asy
 
   assert.deepEqual(mediaStore.deleted, []);
   assert.equal(MediaObjectModel.docs[0].status, MEDIA_OBJECT_STATES.ACTIVE);
+});
+
+test("logs one sanitized warning when staged failure persistence cannot be recorded", async () => {
+  const logs = [];
+  const MediaObjectModel = createMediaObjectModel();
+  let updateAttempts = 0;
+  MediaObjectModel.findByIdAndUpdate = async () => {
+    updateAttempts += 1;
+    throw new Error("write failed at /srv/private/ref-a.jpg");
+  };
+  const mediaStore = createMediaStore({
+    async stage() {
+      throw new Error("storage offline with token secret_123");
+    },
+  });
+
+  __bookingReferenceMediaTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+
+  await assert.rejects(
+    () =>
+      stageBookingReferenceMedia({
+        files: [
+          {
+            filename: "ref-a.jpg",
+            originalname: "before.jpg",
+            buffer: Buffer.from("before"),
+          },
+        ],
+        mediaStore,
+        MediaObjectModel,
+      }),
+    /storage offline/
+  );
+
+  assert.equal(updateAttempts, 1);
+  assert.deepEqual(logs, [
+    [
+      {
+        event: "booking_reference_media.stage_failure_persist_failed",
+        operation: "stageBookingReferenceMedia",
+        mediaObjectId: String(MediaObjectModel.docs[0]._id),
+        bookingId: undefined,
+        status: MEDIA_OBJECT_STATES.FAILED,
+        err: { name: "Error" },
+      },
+      "booking_reference_media.stage_failure_persist_failed",
+    ],
+  ]);
+  assert.doesNotMatch(JSON.stringify(logs), /secret_123|storage offline|\/srv\/private|ref-a\.jpg/i);
+  assert.equal(MediaObjectModel.docs[0].status, MEDIA_OBJECT_STATES.STAGED);
+});
+
+test("logger absence or throws do not mask staged failure persistence problems", async () => {
+  const MediaObjectModel = createMediaObjectModel();
+  MediaObjectModel.findByIdAndUpdate = async () => {
+    throw new Error("write failed");
+  };
+
+  __bookingReferenceMediaTestHooks.setLogger(null);
+  await assert.rejects(
+    () =>
+      stageBookingReferenceMedia({
+        files: [{ filename: "ref-a.jpg", originalname: "before.jpg", buffer: Buffer.from("a") }],
+        mediaStore: createMediaStore({
+          async stage() {
+            throw new Error("storage offline");
+          },
+        }),
+        MediaObjectModel,
+      }),
+    /storage offline/
+  );
+
+  __bookingReferenceMediaTestHooks.setLogger({
+    warn() {
+      throw new Error("logger unavailable");
+    },
+  });
+  await assert.rejects(
+    () =>
+      stageBookingReferenceMedia({
+        files: [{ filename: "ref-b.jpg", originalname: "after.jpg", buffer: Buffer.from("b") }],
+        mediaStore: createMediaStore({
+          async stage() {
+            throw new Error("storage offline");
+          },
+        }),
+        MediaObjectModel: createMediaObjectModel(),
+      }),
+    /storage offline/
+  );
+});
+
+test("logs sanitized warning when staged compensation status update fails", async () => {
+  const logs = [];
+  const MediaObjectModel = createMediaObjectModel();
+  const mediaStore = createMediaStore();
+  const staged = await stageBookingReferenceMedia({
+    files: [{ filename: "ref-a.jpg", originalname: "before.jpg", buffer: Buffer.from("before") }],
+    mediaStore,
+    MediaObjectModel,
+  });
+
+  let updateAttempts = 0;
+  MediaObjectModel.findByIdAndUpdate = async (id, update) => {
+    if (update?.$set?.failureCode === "BOOKING_REFERENCE_MEDIA_STAGED") {
+      updateAttempts += 1;
+      throw new Error("persist failed at /tmp/write.log");
+    }
+    const doc = MediaObjectModel.docs.find((entry) => entry._id === id);
+    if (!doc) return null;
+    Object.assign(doc, update.$set || {});
+    return doc;
+  };
+
+  __bookingReferenceMediaTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+
+  await compensateBookingReferenceMediaFailure({
+    media: staged,
+    promotedMedia: [],
+    bookingId: "../bad-booking-id",
+    error: new Error("rollback failed secret_123"),
+    mediaStore,
+    MediaObjectModel,
+  });
+
+  assert.equal(updateAttempts, 1);
+  assert.deepEqual(logs, [
+    [
+      {
+        event: "booking_reference_media.compensation_status_persist_failed",
+        operation: "compensateBookingReferenceMediaFailure",
+        mediaObjectId: undefined,
+        bookingId: undefined,
+        status: MEDIA_OBJECT_STATES.STAGED,
+        err: { name: "Error" },
+      },
+      "booking_reference_media.compensation_status_persist_failed",
+    ],
+  ]);
+  assert.doesNotMatch(JSON.stringify(logs), /secret_123|rollback failed|\/tmp\/write\.log|\.\.\/bad-booking-id/i);
+  assert.equal(MediaObjectModel.docs[0].status, MEDIA_OBJECT_STATES.STAGED);
+  assert.deepEqual(mediaStore.deleted, []);
+});
+
+test("logs sanitized warning when delete-pending cleanup metadata update fails", async () => {
+  const logs = [];
+  const MediaObjectModel = createMediaObjectModel();
+  const mediaStore = createMediaStore();
+  const staged = await stageBookingReferenceMedia({
+    files: [{ filename: "ref-a.jpg", originalname: "before.jpg", buffer: Buffer.from("before") }],
+    mediaStore,
+    MediaObjectModel,
+  });
+
+  await promoteBookingReferenceMedia({ media: staged, mediaStore, MediaObjectModel });
+  await activateBookingReferenceMedia({
+    media: staged,
+    bookingId: "64c000000000000000000123",
+    MediaObjectModel,
+  });
+
+  let updateAttempts = 0;
+  MediaObjectModel.findByIdAndUpdate = async (id, update) => {
+    if (update?.$set?.failureCode === "BOOKING_REFERENCE_MEDIA_DELETE_PENDING") {
+      updateAttempts += 1;
+      throw new Error("write failed at /srv/private/delete");
+    }
+    const doc = MediaObjectModel.docs.find((entry) => entry._id === id);
+    if (!doc) return null;
+    Object.assign(doc, update.$set || {});
+    return doc;
+  };
+
+  __bookingReferenceMediaTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+
+  await compensateBookingReferenceMediaFailure({
+    media: staged,
+    promotedMedia: staged,
+    bookingId: "64c000000000000000000123",
+    error: new Error("delete failed secret_123"),
+    mediaStore: createMediaStore({
+      async delete() {
+        throw new Error("storage delete failed /srv/private/blob");
+      },
+    }),
+    MediaObjectModel,
+  });
+
+  assert.equal(updateAttempts, 1);
+  assert.deepEqual(logs, [
+    [
+      {
+        event: "booking_reference_media.cleanup_finalize_persist_failed",
+        operation: "compensateBookingReferenceMediaFailure",
+        mediaObjectId: undefined,
+        bookingId: "64c000000000000000000123",
+        status: MEDIA_OBJECT_STATES.DELETE_PENDING,
+        err: { name: "Error" },
+      },
+      "booking_reference_media.cleanup_finalize_persist_failed",
+    ],
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(logs),
+    /secret_123|delete failed|storage delete failed|\/srv\/private\/blob|\/srv\/private\/delete/i
+  );
+  assert.equal(MediaObjectModel.docs[0].status, MEDIA_OBJECT_STATES.DELETE_PENDING);
+});
+
+test("hostile booking logger identifiers are neither coerced nor logged", async () => {
+  const logs = [];
+  const coercionCounters = {
+    bookingToString: 0,
+    bookingValueOf: 0,
+    bookingPrimitive: 0,
+  };
+  const hostileBookingId = {
+    toString() {
+      coercionCounters.bookingToString += 1;
+      return "../secrets/customer@example.com";
+    },
+    valueOf() {
+      coercionCounters.bookingValueOf += 1;
+      return "64c000000000000000000999";
+    },
+    [Symbol.toPrimitive]() {
+      coercionCounters.bookingPrimitive += 1;
+      return "64c000000000000000000999";
+    },
+  };
+
+  const MediaObjectModel = createMediaObjectModel();
+
+  let updateAttempts = 0;
+  MediaObjectModel.findByIdAndUpdate = async (id, update) => {
+    if (update?.$set?.failureCode === "BOOKING_REFERENCE_MEDIA_STAGED") {
+      updateAttempts += 1;
+      throw new Error("persist failed");
+    }
+    return null;
+  };
+
+  __bookingReferenceMediaTestHooks.setLogger({
+    warn: (...args) => logs.push(args),
+  });
+
+  await compensateBookingReferenceMediaFailure({
+    media: [{ mediaObjectId: "64c000000000000000000555" }],
+    promotedMedia: [],
+    bookingId: hostileBookingId,
+    error: new Error("rollback failed secret_123"),
+    mediaStore: createMediaStore(),
+    MediaObjectModel,
+  });
+
+  assert.equal(updateAttempts, 1);
+  assert.deepEqual(coercionCounters, {
+    bookingToString: 0,
+    bookingValueOf: 0,
+    bookingPrimitive: 0,
+  });
+  assert.deepEqual(logs, [
+    [
+      {
+        event: "booking_reference_media.compensation_status_persist_failed",
+        operation: "compensateBookingReferenceMediaFailure",
+        mediaObjectId: "64c000000000000000000555",
+        bookingId: undefined,
+        status: MEDIA_OBJECT_STATES.STAGED,
+        err: { name: "Error" },
+      },
+      "booking_reference_media.compensation_status_persist_failed",
+    ],
+  ]);
+  assert.doesNotMatch(JSON.stringify(logs), /secret_123|customer@example\.com|64c000000000000000000999/i);
 });
