@@ -22,10 +22,18 @@ import {
   UserProfileUpdateError,
   updateSelfProfile,
 } from "../../services/users/userProfileUpdateService.js";
+import { parseOptionalPagination } from "../../utils/requestValidation.js";
 
-export const getBarbers = async (_req, res) => {
+export const getBarbers = async (req, res) => {
   try {
-    const barbers = await User.find({ role: "barber" }).select("-password");
+    const pagination = parseOptionalPagination(req.query);
+    if (!pagination.ok) {
+      return res.status(400).json({ message: pagination.error });
+    }
+
+    const barbers = await User.find({ role: "barber" })
+      .sort({ createdAt: 1, _id: 1 })
+      .select("-password");
     const paidAccessByBarberId = await getPaidAccessByBarberIds(
       barbers.map((barber) => barber._id)
     );
@@ -34,6 +42,12 @@ export const getBarbers = async (_req, res) => {
     );
     const readinessByBarberId = await getPublicBarberReadinessByIds(paidBarbers.map((barber) => barber._id));
     paidBarbers = paidBarbers.filter((barber) => readinessByBarberId.get(String(barber._id))?.publicReady);
+    if (pagination.value.enabled) {
+      paidBarbers = paidBarbers.slice(
+        pagination.value.skip,
+        pagination.value.skip + pagination.value.limit
+      );
+    }
     const profiles = await BarberProfile.find({
       barberId: { $in: paidBarbers.map((barber) => barber._id) },
     });

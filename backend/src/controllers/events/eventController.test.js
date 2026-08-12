@@ -1110,6 +1110,127 @@ test("future event appears in public Events page", async () => {
   assert.equal(res.body[0].title, "Color Workshop");
 });
 
+test("public Events page accepts optional pagination without changing array shape", async () => {
+  const res = createResponse();
+  const events = [
+    { ...baseEvent, _id: "64b000000000000000000010", title: "One", date: "2099-01-01" },
+    { ...baseEvent, _id: "64b000000000000000000011", title: "Past", date: "2020-01-01" },
+    { ...baseEvent, _id: "64b000000000000000000012", title: "Two", date: "2099-01-02" },
+    { ...baseEvent, _id: "64b000000000000000000013", title: "Three", date: "2099-01-03" },
+  ];
+
+  Event.find = () => createQuery(events);
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  await getEvents({ query: { page: "2", limit: "2" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(Array.isArray(res.body), true);
+  assert.deepEqual(res.body.map((event) => event.title), ["Three"]);
+});
+
+test("public Events pagination uses _id tie-breaker for equal date and time values", async () => {
+  const events = [
+    { ...baseEvent, _id: "64b000000000000000000012", title: "Third", date: "2099-01-01", time: "10:00" },
+    { ...baseEvent, _id: "64b000000000000000000010", title: "First", date: "2099-01-01", time: "10:00" },
+    { ...baseEvent, _id: "64b000000000000000000011", title: "Second", date: "2099-01-01", time: "10:00" },
+  ];
+
+  const compareBySortSpec = (left, right, sortSpec) => {
+    for (const [field, direction] of Object.entries(sortSpec)) {
+      const leftValue = String(left[field]);
+      const rightValue = String(right[field]);
+      if (leftValue === rightValue) continue;
+      return leftValue > rightValue ? direction : -direction;
+    }
+    return 0;
+  };
+
+  Event.find = () => {
+    let sortedEvents = events;
+    return {
+      populate() {
+        return this;
+      },
+      sort(sortSpec) {
+        sortedEvents = [...events].sort((left, right) =>
+          compareBySortSpec(left, right, sortSpec)
+        );
+        return this;
+      },
+      lean: async () => sortedEvents,
+      then(resolve, reject) {
+        return Promise.resolve(sortedEvents).then(resolve, reject);
+      },
+    };
+  };
+  EventRegistration.aggregate = async () => [];
+  EventReview.aggregate = async () => [];
+
+  const pageOne = createResponse();
+  const pageTwo = createResponse();
+
+  await getEvents({ query: { page: "1", limit: "2" } }, pageOne);
+  await getEvents({ query: { page: "2", limit: "2" } }, pageTwo);
+
+  assert.equal(pageOne.statusCode, 200);
+  assert.equal(pageTwo.statusCode, 200);
+  assert.deepEqual(pageOne.body.map((event) => event.title), ["First", "Second"]);
+  assert.deepEqual(pageTwo.body.map((event) => event.title), ["Third"]);
+  assert.equal(
+    new Set([...pageOne.body, ...pageTwo.body].map((event) => event._id)).size,
+    3
+  );
+});
+
+test("public Events page rejects malformed pagination before stats queries", async () => {
+  const res = createResponse();
+  let statsQueryCount = 0;
+
+  Event.find = () => createQuery([{ ...baseEvent }]);
+  EventRegistration.aggregate = async () => {
+    statsQueryCount++;
+    return [];
+  };
+  EventReview.aggregate = async () => {
+    statsQueryCount++;
+    return [];
+  };
+
+  await getEvents({ query: { page: "0", limit: "2" } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Pagination page and limit must be positive integers");
+  assert.equal(statsQueryCount, 0);
+});
+
+test("public Events page rejects malformed salonId and non-string search before querying", async () => {
+  for (const query of [
+    { salonId: "not-an-id" },
+    {
+      search: {
+        toString() {
+          throw new Error("coercion should not run");
+        },
+      },
+    },
+  ]) {
+    const res = createResponse();
+    let eventQueryCount = 0;
+
+    Event.find = () => {
+      eventQueryCount++;
+      return createQuery([{ ...baseEvent }]);
+    };
+
+    await getEvents({ query }, res);
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(eventQueryCount, 0);
+  }
+});
+
 test("past event does not appear in public Events page", async () => {
   const res = createResponse();
   const pastEvent = {

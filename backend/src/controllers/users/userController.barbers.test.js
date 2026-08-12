@@ -32,6 +32,9 @@ afterEach(() => {
 });
 
 const chainableQuery = (result) => ({
+  sort() {
+    return this;
+  },
   select() {
     return this;
   },
@@ -345,6 +348,121 @@ test("getBarbers returns barber with grace-granted active subscription", async (
     res.body.map((barber) => barber.name),
     ["Grace Barber"]
   );
+});
+
+test("getBarbers supports optional bounded pagination without changing array shape", async () => {
+  const barbers = [
+    makeBarber({ name: "First" }),
+    makeBarber({ name: "Second" }),
+    makeBarber({ name: "Third" }),
+  ];
+
+  User.find = () => chainableQuery(barbers);
+  Subscription.find = () =>
+    chainableQuery(barbers.map((barber) => ({ ownerId: barber._id, status: "active" })));
+  SubscriptionSeat.find = () => chainableQuery([]);
+  BarberProfile.find = async () =>
+    barbers.map((barber) => ({ barberId: barber._id, address: `${barber.name} Street` }));
+  Schedule.find = async () => barbers.map((barber) => workingSchedule(barber._id));
+  Service.find = async () => barbers.map((barber) => ({ barberId: barber._id }));
+  Salon.find = async () => [];
+
+  const res = createResponse();
+  await getBarbers({ query: { page: "2", limit: "2" } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(Array.isArray(res.body), true);
+  assert.deepEqual(res.body.map((barber) => barber.name), ["Third"]);
+});
+
+test("getBarbers pagination uses deterministic createdAt and _id ordering across pages", async () => {
+  const createdAt = new Date("2026-01-01T00:00:00Z");
+  const firstBarber = makeBarber({
+    _id: new mongoose.Types.ObjectId("64b000000000000000000010"),
+    name: "First",
+    createdAt,
+  });
+  const secondBarber = makeBarber({
+    _id: new mongoose.Types.ObjectId("64b000000000000000000011"),
+    name: "Second",
+    createdAt,
+  });
+  const thirdBarber = makeBarber({
+    _id: new mongoose.Types.ObjectId("64b000000000000000000012"),
+    name: "Third",
+    createdAt,
+  });
+  const unorderedBarbers = [thirdBarber, firstBarber, secondBarber];
+
+  const compareBySortSpec = (left, right, sortSpec) => {
+    for (const [field, direction] of Object.entries(sortSpec)) {
+      const leftValue = String(left[field]);
+      const rightValue = String(right[field]);
+      if (leftValue === rightValue) continue;
+      return leftValue > rightValue ? direction : -direction;
+    }
+    return 0;
+  };
+
+  User.find = () => {
+    let sortedBarbers = unorderedBarbers;
+    return {
+      sort(sortSpec) {
+        sortedBarbers = [...unorderedBarbers].sort((left, right) =>
+          compareBySortSpec(left, right, sortSpec)
+        );
+        return this;
+      },
+      select() {
+        return this;
+      },
+      then(resolve) {
+        return Promise.resolve(sortedBarbers).then(resolve);
+      },
+    };
+  };
+  Subscription.find = () =>
+    chainableQuery(unorderedBarbers.map((barber) => ({ ownerId: barber._id, status: "active" })));
+  SubscriptionSeat.find = () => chainableQuery([]);
+  BarberProfile.find = async () =>
+    unorderedBarbers.map((barber) => ({
+      barberId: barber._id,
+      address: `${barber.name} Street`,
+    }));
+  Schedule.find = async () => unorderedBarbers.map((barber) => workingSchedule(barber._id));
+  Service.find = async () => unorderedBarbers.map((barber) => ({ barberId: barber._id }));
+  Salon.find = async () => [];
+
+  const pageOne = createResponse();
+  const pageTwo = createResponse();
+
+  await getBarbers({ query: { page: "1", limit: "2" } }, pageOne);
+  await getBarbers({ query: { page: "2", limit: "2" } }, pageTwo);
+
+  assert.equal(pageOne.statusCode, 200);
+  assert.equal(pageTwo.statusCode, 200);
+  assert.deepEqual(pageOne.body.map((barber) => barber.name), ["First", "Second"]);
+  assert.deepEqual(pageTwo.body.map((barber) => barber.name), ["Third"]);
+  assert.equal(
+    new Set([...pageOne.body, ...pageTwo.body].map((barber) => barber.id)).size,
+    3
+  );
+});
+
+test("getBarbers rejects malformed pagination before querying users", async () => {
+  const res = createResponse();
+  let userQueryCount = 0;
+
+  User.find = () => {
+    userQueryCount++;
+    return chainableQuery([]);
+  };
+
+  await getBarbers({ query: { page: [], limit: "2" } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Pagination page and limit must be positive integers");
+  assert.equal(userQueryCount, 0);
 });
 
 test("getBarbers hides unfinalized v1 barber despite paid access", async () => {

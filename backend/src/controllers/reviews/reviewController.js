@@ -1,6 +1,7 @@
 import Booking from "../../models/Booking.js";
 import Review from "../../models/Review.js";
 import { sendControllerError } from "../../utils/controllerError.js";
+import { isValidObjectIdString } from "../../utils/requestValidation.js";
 
 const serializeReply = (reply) => {
   if (!reply || !reply.message) return null;
@@ -28,6 +29,10 @@ const serializeReview = (review) => {
 
 export const getReviewsByBarber = async (req, res) => {
   try {
+    if (!isValidObjectIdString(req.params.barberId)) {
+      return res.status(400).json({ message: "Invalid barber ID" });
+    }
+
     const reviews = await Review.find({ barberId: req.params.barberId })
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
@@ -40,7 +45,10 @@ export const getReviewsByBarber = async (req, res) => {
 
 export const createReview = async (req, res) => {
   try {
-    const { barberId, bookingId, rating, comment = "" } = req.body;
+    const requestBody = req.body && typeof req.body === "object" ? req.body : {};
+    const { barberId, bookingId, rating } = requestBody;
+    const hasComment = Object.hasOwn(requestBody, "comment");
+    const reviewComment = hasComment ? requestBody.comment : "";
 
     if (!barberId || !bookingId || rating === undefined) {
       return res.status(400).json({
@@ -56,6 +64,18 @@ export const createReview = async (req, res) => {
     ) {
       return res.status(400).json({
         message: "Rating must be a number from 1 to 5",
+      });
+    }
+
+    if (hasComment && typeof reviewComment !== "string") {
+      return res.status(400).json({
+        message: "Comment must be a string",
+      });
+    }
+
+    if (!isValidObjectIdString(barberId) || !isValidObjectIdString(bookingId)) {
+      return res.status(400).json({
+        message: "barberId and bookingId must be valid IDs",
       });
     }
 
@@ -95,7 +115,7 @@ export const createReview = async (req, res) => {
       barberId,
       bookingId,
       rating,
-      comment,
+      comment: reviewComment,
       isVerified: true,
       clientId: req.user._id,
     });
@@ -117,12 +137,18 @@ export const createReview = async (req, res) => {
 export const addReplyToReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
-    const { message } = req.body;
+    const requestBody = req.body && typeof req.body === "object" ? req.body : {};
+    const { message } = requestBody;
+    const replyMessage = typeof message === "string" ? message.trim() : "";
 
-    if (!message || !message.trim()) {
+    if (!replyMessage) {
       return res.status(400).json({
         message: "Reply message is required",
       });
+    }
+
+    if (!isValidObjectIdString(reviewId)) {
+      return res.status(400).json({ message: "Invalid review ID" });
     }
 
     const review = await Review.findById(reviewId);
@@ -139,7 +165,7 @@ export const addReplyToReview = async (req, res) => {
     }
 
     review.reply = {
-      message: message.trim(),
+      message: replyMessage,
       repliedBy: req.user._id,
       updatedAt: new Date(),
     };
@@ -157,6 +183,10 @@ export const addReplyToReview = async (req, res) => {
 export const deleteReplyFromReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
+
+    if (!isValidObjectIdString(reviewId)) {
+      return res.status(400).json({ message: "Invalid review ID" });
+    }
 
     const review = await Review.findById(reviewId);
 

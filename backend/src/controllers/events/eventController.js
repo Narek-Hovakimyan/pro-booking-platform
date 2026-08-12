@@ -15,6 +15,10 @@ import {
   userHasAnyManageableSalon,
 } from "../../services/salon/salonMembershipService.js";
 import {
+  getOrganizerEventsWithStats,
+  getPublicEventsWithStats,
+} from "../../services/events/publicEventListingService.js";
+import {
   getId,
   APPROVED_REGISTRATION_STATUS,
   PENDING_REGISTRATION_STATUS,
@@ -23,11 +27,10 @@ import {
   buildUserRegistrationQuery,
   mapRegistrationResponse,
   parseEventPayload,
-  isEventInPast,
   validateEventDateTime,
   validateEventNumbers,
 } from "../../utils/eventUtils.js";
-import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/controllerError.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 /**
  * GET /api/events
@@ -36,83 +39,8 @@ import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/c
  */
 export const getEvents = async (req, res) => {
   try {
-    const { salonId, search } = req.query;
-    const filter = { visibility: "public" };
-
-    if (salonId) filter.salonId = salonId;
-    if (search) {
-      const { term, isTooLong } = normalizeSearch(search);
-      if (isTooLong) {
-        return res.status(400).json({ message: "Search term is too long" });
-      }
-      if (term) {
-        const escaped = escapeRegex(term);
-        filter.$or = [
-          { title: { $regex: escaped, $options: "i" } },
-          { instructor: { $regex: escaped, $options: "i" } },
-          { location: { $regex: escaped, $options: "i" } },
-        ];
-      }
-    }
-
-    const events = await Event.find(filter)
-      .populate("salonId", "name")
-      .populate("organizerId", "name")
-      .sort({ date: 1, time: 1 })
-      .lean();
-
-    // Exclude past events from public listing
-    const upcomingEvents = events.filter((event) => !isEventInPast(event));
-
-    // Get registration counts only for upcoming events (past events are excluded)
-    const eventIds = upcomingEvents.map((e) => e._id);
-
-    let regCountMap = {};
-    let reviewStatsMap = {};
-
-    if (upcomingEvents.length > 0) {
-      const [registrations, reviewStats] = await Promise.all([
-        EventRegistration.aggregate([
-          {
-            $match: {
-              eventId: { $in: eventIds },
-              status: APPROVED_REGISTRATION_STATUS,
-            },
-          },
-          { $group: { _id: "$eventId", count: { $sum: 1 } } },
-        ]),
-        EventReview.aggregate([
-          { $match: { eventId: { $in: eventIds } } },
-          {
-            $group: {
-              _id: "$eventId",
-              averageRating: { $avg: "$rating" },
-              reviewsCount: { $sum: 1 },
-            },
-          },
-        ]),
-      ]);
-      regCountMap = {};
-      for (const r of registrations) {
-        regCountMap[r._id.toString()] = r.count;
-      }
-      reviewStatsMap = {};
-      for (const stat of reviewStats) {
-        reviewStatsMap[stat._id.toString()] = {
-          averageRating: Number(stat.averageRating || 0),
-          reviewsCount: Number(stat.reviewsCount || 0),
-        };
-      }
-    }
-
-    const result = upcomingEvents.map((event) => ({
-      ...event,
-      registrationCount: regCountMap[event._id.toString()] || 0,
-      averageRating: reviewStatsMap[event._id.toString()]?.averageRating || 0,
-      reviewsCount: reviewStatsMap[event._id.toString()]?.reviewsCount || 0,
-    }));
-
-    return res.json(result);
+    const result = await getPublicEventsWithStats(req.query);
+    return res.status(result.statusCode).json(result.body);
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch events");
   }
@@ -125,90 +53,7 @@ export const getEvents = async (req, res) => {
  */
 export const getMyEvents = async (req, res) => {
   try {
-    const events = await Event.find({ organizerId: req.user._id })
-      .populate("salonId", "name")
-      .populate("organizerId", "name")
-      .sort({ date: 1, time: 1 })
-      .lean();
-
-    const eventIds = events.map((event) => event._id);
-
-    let regCountMap = new Map();
-    let attendedCountMap = new Map();
-    let certificatesCountMap = new Map();
-    let reviewStatsMap = new Map();
-
-    if (eventIds.length > 0) {
-      const [registrations, attendedRegs, certificates, reviewStats] = await Promise.all([
-        EventRegistration.aggregate([
-          {
-            $match: {
-              eventId: { $in: eventIds },
-              status: APPROVED_REGISTRATION_STATUS,
-            },
-          },
-          { $group: { _id: "$eventId", count: { $sum: 1 } } },
-        ]),
-        EventRegistration.aggregate([
-          {
-            $match: {
-              eventId: { $in: eventIds },
-              attended: true,
-            },
-          },
-          { $group: { _id: "$eventId", count: { $sum: 1 } } },
-        ]),
-        EventCertificate.aggregate([
-          {
-            $match: {
-              eventId: { $in: eventIds },
-              status: "issued",
-            },
-          },
-          { $group: { _id: "$eventId", count: { $sum: 1 } } },
-        ]),
-        EventReview.aggregate([
-          { $match: { eventId: { $in: eventIds } } },
-          {
-            $group: {
-              _id: "$eventId",
-              averageRating: { $avg: "$rating" },
-              reviewsCount: { $sum: 1 },
-            },
-          },
-        ]),
-      ]);
-
-      regCountMap = new Map(
-        registrations.map((r) => [String(r._id), Number(r.count || 0)])
-      );
-      attendedCountMap = new Map(
-        attendedRegs.map((r) => [String(r._id), Number(r.count || 0)])
-      );
-      certificatesCountMap = new Map(
-        certificates.map((c) => [String(c._id), Number(c.count || 0)])
-      );
-      reviewStatsMap = new Map(
-        reviewStats.map((s) => [
-          String(s._id),
-          {
-            averageRating: Number(s.averageRating || 0),
-            reviewsCount: Number(s.reviewsCount || 0),
-          },
-        ])
-      );
-    }
-
-    return res.json(
-      events.map((event) => ({
-        ...event,
-        registrationCount: regCountMap.get(String(event._id)) || 0,
-        attendedCount: attendedCountMap.get(String(event._id)) || 0,
-        certificatesCount: certificatesCountMap.get(String(event._id)) || 0,
-        averageRating: reviewStatsMap.get(String(event._id))?.averageRating || 0,
-        reviewsCount: reviewStatsMap.get(String(event._id))?.reviewsCount || 0,
-      }))
-    );
+    return res.json(await getOrganizerEventsWithStats(req.user._id));
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch your events");
   }

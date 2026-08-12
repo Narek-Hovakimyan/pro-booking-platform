@@ -188,6 +188,97 @@ test("createReview rejects invalid rating values before DB lookup", async () => 
   }
 });
 
+test("createReview rejects malformed IDs before DB lookup", async () => {
+  const hostileId = {
+    toString() {
+      throw new Error("coercion should not run");
+    },
+    valueOf() {
+      throw new Error("valueOf should not run");
+    },
+  };
+
+  for (const ids of [
+    { barberId: "not-an-id", bookingId },
+    { barberId, bookingId: "not-an-id" },
+    { barberId: hostileId, bookingId },
+  ]) {
+    const res = createResponse();
+    let bookingLookupCount = 0;
+    let createCount = 0;
+
+    Booking.findById = async () => {
+      bookingLookupCount++;
+      return null;
+    };
+    Review.create = async () => {
+      createCount++;
+      return {};
+    };
+
+    await createReview(
+      {
+        user: { _id: clientId },
+        body: {
+          ...ids,
+          rating: 5,
+          comment: "Great",
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, "barberId and bookingId must be valid IDs");
+    assert.equal(bookingLookupCount, 0);
+    assert.equal(createCount, 0);
+  }
+});
+
+test("createReview rejects malformed comments before DB lookup", async () => {
+  const hostileComment = {
+    toString() {
+      throw new Error("coercion should not run");
+    },
+    valueOf() {
+      throw new Error("valueOf should not run");
+    },
+  };
+
+  for (const comment of [hostileComment, [], 5, false, Symbol("comment")]) {
+    const res = createResponse();
+    let bookingLookupCount = 0;
+    let createCount = 0;
+
+    Booking.findById = async () => {
+      bookingLookupCount++;
+      return null;
+    };
+    Review.create = async () => {
+      createCount++;
+      return {};
+    };
+
+    await createReview(
+      {
+        user: { _id: clientId },
+        body: {
+          barberId,
+          bookingId,
+          rating: 5,
+          comment,
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, "Comment must be a string");
+    assert.equal(bookingLookupCount, 0);
+    assert.equal(createCount, 0);
+  }
+});
+
 test("createReview unexpected error returns 500 generic without leaking raw message", async () => {
   const res = createResponse();
 
@@ -343,6 +434,64 @@ test("empty reply message is rejected", async () => {
   assert.equal(res.body.message, "Reply message is required");
 });
 
+test("reply rejects non-string message without coercion", async () => {
+  const res = createResponse();
+  let reviewLookupCount = 0;
+  Review.findById = async () => {
+    reviewLookupCount++;
+    return createMockReview({ barberId });
+  };
+
+  await addReplyToReview(
+    {
+      user: { _id: barberId },
+      params: { reviewId },
+      body: {
+        message: {
+          trim() {
+            throw new Error("trim should not run");
+          },
+        },
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Reply message is required");
+  assert.equal(reviewLookupCount, 0);
+});
+
+test("reply mutations reject malformed review IDs before DB lookup", async () => {
+  const hostileReviewId = {
+    toString() {
+      throw new Error("coercion should not run");
+    },
+  };
+
+  for (const action of [addReplyToReview, deleteReplyFromReview]) {
+    const res = createResponse();
+    let reviewLookupCount = 0;
+    Review.findById = async () => {
+      reviewLookupCount++;
+      return createMockReview({ barberId });
+    };
+
+    await action(
+      {
+        user: { _id: barberId },
+        params: { reviewId: hostileReviewId },
+        body: { message: "Hello" },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.message, "Invalid review ID");
+    assert.equal(reviewLookupCount, 0);
+  }
+});
+
 test("review not found returns 404 for add reply", async () => {
   const res = createResponse();
   Review.findById = async () => null;
@@ -417,6 +566,27 @@ test("getReviewsByBarber includes reply field", async () => {
   assert.equal(res.body.length, 1);
   assert.ok(res.body[0].reply);
   assert.equal(res.body[0].reply.message, "Thanks!");
+});
+
+test("getReviewsByBarber rejects malformed barberId before DB lookup", async () => {
+  const { getReviewsByBarber } = await import("./reviewController.js");
+  const res = createResponse();
+  let findCount = 0;
+  Review.find = () => {
+    findCount++;
+    return { populate: () => ({ sort: async () => [] }) };
+  };
+
+  await getReviewsByBarber(
+    {
+      params: { barberId: "not-an-id" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid barber ID");
+  assert.equal(findCount, 0);
 });
 
 test("review without reply serializes reply as null", async () => {
