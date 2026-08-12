@@ -1,18 +1,17 @@
-import crypto from "crypto";
 import mongoose from "mongoose";
-import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
-import { calculateServiceDiscountedPrice } from "../services/serviceController.js";
-
-
 import Voucher from "../../models/Voucher.js";
-import { canManageSalonRequest } from "../../utils/salonPermissions.js";
-
-const isValidObjectId = (value) =>
-  Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
-
-const sameId = (left, right) =>
-  String(left || "") === String(right || "");
+import {
+  assertVoucherOwnerAccess,
+  calculateVoucherDiscountPreview,
+  generateVoucherCode,
+  getActiveVoucherService,
+  isValidObjectId,
+  validateManagedVoucherServiceReference,
+  validateManualVoucherCode,
+  validateVoucherApplicability,
+  validateVoucherCreateInput,
+} from "../../services/voucherValidation.js";
 
 const logRequestError = (req, context, message) => {
   try {
@@ -20,99 +19,6 @@ const logRequestError = (req, context, message) => {
   } catch {
     // Logging must not affect response behavior.
   }
-};
-
-const codeLength = 8;
-const codeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-const generateCode = () =>
-  Array.from(crypto.randomBytes(codeLength), (byte) =>
-    codeAlphabet[byte % codeAlphabet.length]
-  ).join("");
-const codeAlphanumeric = /^[A-Z0-9]+$/;
-const minCodeLength = 4;
-const maxCodeLength = 20;
-
-/* ── Permission helpers ───────────────────────────────────── */
-
-/**
- * Assert that req.user is a barber and can manage the voucher owner scope.
- * Returns { allowed, error }
- */
-const assertOwnerAccess = async (req, ownerType, ownerId) => {
-  if (!req.user || req.user.role !== "barber") {
-    return { error: "Only barbers can manage vouchers", code: 403 };
-  }
-
-  const reqOwnerId = String(ownerId || "");
-
-  if (ownerType === "barber") {
-    if (!sameId(req.user._id, ownerId)) {
-      return { error: "You can only manage barber-scoped vouchers for yourself", code: 403 };
-    }
-    return { allowed: true };
-  }
-
-  if (ownerType === "salon") {
-    if (!isValidObjectId(reqOwnerId)) {
-      return { error: "Invalid salon ID", code: 400 };
-    }
-    const salon = await Salon.findById(reqOwnerId).select("ownerId admins").lean();
-    if (!salon) {
-      return { error: "Salon not found", code: 404 };
-    }
-    if (!canManageSalonRequest(salon, req.user._id)) {
-      return { error: "Only salon owner or admin can manage salon-scoped vouchers", code: 403 };
-    }
-    return { allowed: true };
-  }
-
-  return { error: "Invalid ownerType", code: 400 };
-};
-
-/* ── Validation helpers ──────────────────────────────────── */
-
-const validateCreateInput = async (req) => {
-  const { ownerType, ownerId, title, type, amount, serviceId, maxUses, expiresAt } = req.body;
-  const errors = [];
-
-  if (!ownerType || !["barber", "salon"].includes(ownerType)) {
-    errors.push("ownerType must be 'barber' or 'salon'");
-  }
-  if (!ownerId) {
-    errors.push("ownerId is required");
-  }
-  if (!title || !title.trim()) {
-    errors.push("title is required");
-  }
-  if (!type || !["amount", "service"].includes(type)) {
-    errors.push("type must be 'amount' or 'service'");
-  }
-  const numericAmount = Number(amount ?? 0);
-  if (!Number.isFinite(numericAmount) || numericAmount < 0) {
-    errors.push("amount must be a valid non-negative number");
-  } else if (type === "amount" && numericAmount <= 0) {
-    errors.push("amount must be greater than 0");
-  }
-  if (type === "service" && !serviceId) {
-    errors.push("serviceId is required when type is 'service'");
-  }
-  if (maxUses !== undefined && (Number(maxUses) < 1 || !Number.isFinite(Number(maxUses)))) {
-    errors.push("maxUses must be >= 1");
-  }
-  if (expiresAt) {
-    const expiry = new Date(expiresAt);
-    if (isNaN(expiry.getTime())) {
-      errors.push("expiresAt must be a valid date");
-    } else if (expiry <= new Date()) {
-      errors.push("expiresAt must be a future date");
-    }
-  }
-
-  if (req.body.visibility !== undefined && !["private", "public"].includes(req.body.visibility)) {
-    errors.push("visibility must be 'private' or 'public'");
-  }
-
-  return errors;
 };
 
 /* ── Handlers ─────────────────────────────────────────────── */
@@ -123,7 +29,7 @@ const validateCreateInput = async (req) => {
  */
 export const createVoucher = async (req, res) => {
   try {
-    const validationErrors = await validateCreateInput(req);
+    const validationErrors = validateVoucherCreateInput(req.body);
     if (validationErrors.length > 0) {
       return res.status(400).json({ message: validationErrors.join("; ") });
     }
@@ -131,32 +37,35 @@ export const createVoucher = async (req, res) => {
     const { ownerType, ownerId, title, type, amount, serviceId, maxUses, expiresAt, code, visibility } = req.body;
 
     // Owner permission check
-    const access = await assertOwnerAccess(req, ownerType, ownerId);
+    const access = await assertVoucherOwnerAccess({
+      user: req.user,
+      ownerType,
+      ownerId,
+    });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
     }
 
     // If type=service, verify the service belongs to this barber
     if (type === "service") {
-      if (!isValidObjectId(serviceId)) {
-        return res.status(400).json({ message: "Invalid serviceId" });
-      }
-      const service = await Service.findOne({ _id: serviceId, barberId: req.user._id }).select("_id").lean();
-      if (!service) {
-        return res.status(400).json({ message: "Service not found or does not belong to you" });
+      const serviceValidation = await validateManagedVoucherServiceReference({
+        serviceId,
+        barberId: req.user._id,
+        ServiceModel: Service,
+      });
+      if (serviceValidation.error) {
+        return res.status(serviceValidation.code).json({ message: serviceValidation.error });
       }
     }
 
     // Generate or validate code
     let voucherCode;
     if (code) {
-      const normalized = String(code).toUpperCase().trim();
-      if (normalized.length < minCodeLength || normalized.length > maxCodeLength) {
-        return res.status(400).json({ message: `Code must be between ${minCodeLength} and ${maxCodeLength} characters` });
+      const manualCodeValidation = validateManualVoucherCode(code);
+      if (manualCodeValidation.error) {
+        return res.status(400).json({ message: manualCodeValidation.error });
       }
-      if (!codeAlphanumeric.test(normalized)) {
-        return res.status(400).json({ message: "Code must be alphanumeric" });
-      }
+      const normalized = manualCodeValidation.value;
       // Check uniqueness
       const existing = await Voucher.findOne({ code: normalized }).select("_id").lean();
       if (existing) {
@@ -168,7 +77,7 @@ export const createVoucher = async (req, res) => {
       let attempts = 0;
       const maxAttempts = 10;
       while (attempts < maxAttempts) {
-        const candidate = generateCode();
+        const candidate = generateVoucherCode();
         const existing = await Voucher.findOne({ code: candidate }).select("_id").lean();
         if (!existing) {
           voucherCode = candidate;
@@ -217,7 +126,11 @@ export const getOwnerVouchers = async (req, res) => {
   try {
     const { ownerType, ownerId } = req.params;
 
-    const access = await assertOwnerAccess(req, ownerType, ownerId);
+    const access = await assertVoucherOwnerAccess({
+      user: req.user,
+      ownerType,
+      ownerId,
+    });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
     }
@@ -259,7 +172,11 @@ export const getVoucherById = async (req, res) => {
       return res.status(404).json({ message: "Voucher not found" });
     }
 
-    const access = await assertOwnerAccess(req, voucher.ownerType, voucher.ownerId);
+    const access = await assertVoucherOwnerAccess({
+      user: req.user,
+      ownerType: voucher.ownerType,
+      ownerId: voucher.ownerId,
+    });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
     }
@@ -293,7 +210,11 @@ export const updateVoucher = async (req, res) => {
     }
 
     // Owner permission check
-    const access = await assertOwnerAccess(req, voucher.ownerType, voucher.ownerId);
+    const access = await assertVoucherOwnerAccess({
+      user: req.user,
+      ownerType: voucher.ownerType,
+      ownerId: voucher.ownerId,
+    });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
     }
@@ -332,9 +253,13 @@ export const updateVoucher = async (req, res) => {
         return res.status(400).json({ message: "Invalid serviceId" });
       }
       if (serviceId !== null) {
-        const service = await Service.findOne({ _id: serviceId, barberId: req.user._id }).select("_id").lean();
-        if (!service) {
-          return res.status(400).json({ message: "Service not found or does not belong to you" });
+        const serviceValidation = await validateManagedVoucherServiceReference({
+          serviceId,
+          barberId: req.user._id,
+          ServiceModel: Service,
+        });
+        if (serviceValidation.error) {
+          return res.status(serviceValidation.code).json({ message: serviceValidation.error });
         }
       }
       voucher.serviceId = serviceId;
@@ -407,7 +332,11 @@ export const deleteVoucher = async (req, res) => {
       return res.status(404).json({ message: "Voucher not found" });
     }
 
-    const access = await assertOwnerAccess(req, voucher.ownerType, voucher.ownerId);
+    const access = await assertVoucherOwnerAccess({
+      user: req.user,
+      ownerType: voucher.ownerType,
+      ownerId: voucher.ownerId,
+    });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
     }
@@ -443,97 +372,27 @@ export const validateVoucherCode = async (req, res) => {
       return res.status(400).json({ message: "Invalid voucher code" });
     }
 
-    // Active check
-    if (!voucher.active) {
-      return res.status(400).json({ message: "This voucher is no longer active" });
+    const applicability = validateVoucherApplicability({
+      voucher,
+      barberId,
+      salonId,
+      serviceId,
+    });
+    if (applicability.error) {
+      return res.status(applicability.code).json({ message: applicability.error });
     }
 
-    // Expiry check
-    if (voucher.expiresAt) {
-      const now = new Date();
-      if (now > new Date(voucher.expiresAt)) {
-        return res.status(400).json({ message: "This voucher has expired" });
-      }
+    const activeService = await getActiveVoucherService({
+      serviceId,
+      ServiceModel: Service,
+    });
+    if (activeService.error) {
+      return res.status(activeService.code).json({ message: activeService.error });
     }
-
-    if (voucher.startDate && new Date() < new Date(voucher.startDate)) {
-      return res.status(400).json({ message: "This promotion is not yet active" });
-    }
-
-    // Usage check
-    if (voucher.currentUses >= voucher.maxUses) {
-      return res.status(400).json({ message: "This voucher has been fully redeemed" });
-    }
-
-    // Owner context check
-    if (voucher.ownerType === "barber") {
-      if (!barberId) {
-        return res.status(400).json({ message: "barberId is required for barber-scoped vouchers" });
-      }
-      if (!sameId(voucher.ownerId, barberId)) {
-        return res.status(400).json({ message: "This voucher does not apply to this barber" });
-      }
-    }
-
-    if (voucher.ownerType === "salon") {
-      if (!salonId) {
-        return res.status(400).json({ message: "salonId is required for salon-scoped vouchers" });
-      }
-      if (!sameId(voucher.ownerId, salonId)) {
-        return res.status(400).json({ message: "This voucher does not apply to this salon" });
-      }
-    }
-
-    // Service-specific check
-    if (voucher.serviceId) {
-      if (!serviceId) {
-        return res.status(400).json({ message: "serviceId is required for service-specific vouchers" });
-      }
-      if (!sameId(voucher.serviceId, serviceId)) {
-        return res.status(400).json({ message: "This voucher does not apply to this service" });
-      }
-    }
-
-    if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
-      if (!serviceId) {
-        return res.status(400).json({ message: "serviceId is required for this promotion" });
-      }
-      const matches = voucher.applicableServiceIds.some((id) => sameId(id, serviceId));
-      if (!matches) {
-        return res.status(400).json({ message: "This promotion does not apply to this service" });
-      }
-    }
-
-    if (voucher.applicableBarberIds && voucher.applicableBarberIds.length > 0) {
-      if (!barberId) {
-        return res.status(400).json({ message: "barberId is required for this promotion" });
-      }
-      const matches = voucher.applicableBarberIds.some((id) => sameId(id, barberId));
-      if (!matches) {
-        return res.status(400).json({ message: "This promotion does not apply to this barber" });
-      }
-    }
-
-    if (!serviceId) {
-      return res.status(400).json({ message: "serviceId is required" });
-    }
-
-    // Verify the requested service exists and is active
-    const service = await Service.findOne({ _id: serviceId, active: true })
-      .select("price discountType discountValue")
-      .lean();
-    if (!service) {
-      return res.status(400).json({ message: "Service not found or inactive" });
-    }
-    // discountPreview is capped against the service's discounted price (not raw price)
-    const { discountedPrice: serviceDiscountedPrice } = calculateServiceDiscountedPrice(service);
-    const discountPreview =
-      voucher.discountType === "percentage"
-        ? Math.round(
-            (serviceDiscountedPrice * Math.min(Number(voucher.amount), 100)) / 100
-          )
-        : Math.min(Number(voucher.amount), serviceDiscountedPrice);
-
+    const discountPreview = calculateVoucherDiscountPreview({
+      voucher,
+      service: activeService.service,
+    });
 
     return res.json({
       valid: true,

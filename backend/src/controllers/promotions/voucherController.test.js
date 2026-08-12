@@ -7,6 +7,10 @@ import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
 import Voucher from "../../models/Voucher.js";
 import {
+  calculateVoucherDiscountPreview,
+  validateVoucherCreateInput,
+} from "../../services/voucherValidation.js";
+import {
   createVoucher,
   deleteVoucher,
   getOwnerVouchers,
@@ -975,6 +979,32 @@ test("create voucher rejects invalid visibility", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.ok(res.body.message.includes("visibility"));
+});
+
+test("controller uses extracted voucher validation helpers without API drift", async () => {
+  assert.deepEqual(
+    validateVoucherCreateInput({
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "Public Voucher",
+      type: "amount",
+      amount: 1000,
+      visibility: "public",
+    }),
+    []
+  );
+
+  assert.equal(
+    calculateVoucherDiscountPreview({
+      voucher: makeVoucherDoc({ amount: 10000 }),
+      service: {
+        price: 12000,
+        discountType: "fixed",
+        discountValue: 7000,
+      },
+    }),
+    5000
+  );
 });
 
 test("updateVoucher can update visibility", async () => {
