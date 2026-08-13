@@ -6,7 +6,6 @@ import {
   isAcceptedSalonStaffMember,
   isAcceptedStaffSeat,
   sanitizeBillingSeat,
-  countActiveAcceptedStaffSeats,
 } from "./subscription/seatHelpers.js";
 import { requireSalonOwnerOrAdmin } from "./subscription/subscriptionAuthorization.js";
 import {
@@ -14,6 +13,11 @@ import {
   subscriptionHasPaidAccess,
 } from "./subscription/subscriptionHelpers.js";
 import { getOrCreateDefaultSubscriptionPlan } from "./subscription/subscriptionPlanHelpers.js";
+import {
+  assignActiveSeat,
+  revokeActiveSeat,
+  updateSubscriptionSeatCount,
+} from "./subscription/seatCapacityMutations.js";
 // Re-exports for modules that import from subscriptionService.js
 export { getDaysRemaining } from "./subscription/subscriptionHelpers.js";
 export { serializeSubscriptionStatus } from "./subscription/subscriptionSerializers.js";
@@ -55,10 +59,14 @@ export const revokeSalonSeatsForRemovedMember = async ({
   for (const seat of activeSeats || []) {
     if (getSeatSalonId(seat) !== getIdString(salonId)) continue;
 
-    seat.status = "revoked";
-    seat.revokedAt = now;
-    await seat.save();
-    revokedSeats.push(seat);
+    const revoked = await revokeActiveSeat({
+      seatId: seat._id,
+      subscriptionId: seat.subscriptionId?._id || seat.subscriptionId,
+      now,
+      subscription: seat.subscriptionId,
+      seatDocument: seat,
+    });
+    if (revoked) revokedSeats.push(revoked);
   }
 
   return {
@@ -117,59 +125,15 @@ export const assignSalonSubscriptionSeat = async ({
     throw err;
   }
 
-  // Check for existing active seat for this subscription + barber
-  const existingActive = await SubscriptionSeat.findOne({
-    subscriptionId: subscription._id,
-    barberId,
-    status: "active",
-  });
-
-  if (existingActive) {
-    return existingActive;
-  }
-
-  // Count currently active seats after duplicate detection so repeated
-  // assignment attempts for the same barber remain idempotent.
-  const activeSeatCount = await countActiveAcceptedStaffSeats({
-    subscriptionId: subscription._id,
-    salonId: salon._id,
-  });
-
-  if (activeSeatCount >= subscription.seatCount) {
-    const err = new Error(
-      `Cannot assign more than ${subscription.seatCount} active seats. Please increase your paid seat count first.`
-    );
-    err.statusCode = 400;
-    throw err;
-  }
-
-  // Check for existing revoked seat for this subscription + barber — reactivate
-  const existingRevoked = await SubscriptionSeat.findOne({
-    subscriptionId: subscription._id,
-    barberId,
-    status: "revoked",
-  });
-
-  if (existingRevoked) {
-    existingRevoked.status = "active";
-    existingRevoked.revokedAt = null;
-    existingRevoked.assignedBy = assignedBy._id;
-    existingRevoked.assignedAt = new Date();
-    await existingRevoked.save();
-    return existingRevoked;
-  }
-
-  // Create new seat
   try {
-    const seat = await SubscriptionSeat.create({
+    const { seat } = await assignActiveSeat({
       subscriptionId: subscription._id,
       salonId: salon._id,
       barberId: barber._id,
       assignedBy: assignedBy._id,
-      status: "active",
-      assignedAt: new Date(),
+      subscription,
+      capacityMessage: `Cannot assign more than ${subscription.seatCount} active seats. Please increase your paid seat count first.`,
     });
-
     return seat;
   } catch (error) {
     if (error?.code === 11000) {
@@ -217,12 +181,18 @@ export const revokeSalonSubscriptionSeat = async ({ seatId, requester }) => {
   const salonId = seat.subscriptionId?.ownerId || seat.salonId;
   await requireSalonOwnerOrAdmin(salonId, requester._id);
 
-  // Revoke
-  seat.status = "revoked";
-  seat.revokedAt = new Date();
-  await seat.save();
+  const revoked = await revokeActiveSeat({
+    seatId: seat._id,
+    subscriptionId: seat.subscriptionId?._id || seat.subscriptionId,
+    subscription: seat.subscriptionId,
+  });
+  if (!revoked) {
+    const err = new Error("Only active seats can be revoked");
+    err.statusCode = 400;
+    throw err;
+  }
 
-  return seat;
+  return revoked;
 };
 
 export const updateSalonSubscriptionSeatCount = async ({
@@ -259,26 +229,22 @@ export const updateSalonSubscriptionSeatCount = async ({
     throw err;
   }
 
-  // Cannot reduce below current active seat count
-  const activeSeatCount = await SubscriptionSeat.countDocuments({
-    subscriptionId: subscription._id,
-    status: "active",
-  });
-
-  if (seatCount < activeSeatCount) {
+  if (Number(subscription.activeSeatCount || 0) > seatCount) {
     const err = new Error(
-      `Cannot reduce seat count below ${activeSeatCount} active seats currently assigned. Please revoke seats first.`
+      `Cannot reduce seat count below ${subscription.activeSeatCount} active seats currently assigned. Please revoke seats first.`
     );
     err.statusCode = 400;
     throw err;
   }
 
-  // Update seat count and total price
   const plan = await getOrCreateDefaultSubscriptionPlan();
-  subscription.seatCount = seatCount;
-  subscription.totalPrice = plan.pricePerSeat * seatCount;
-  subscription.pricePerSeat = plan.pricePerSeat;
-  await subscription.save();
-
-  return subscription;
+  return updateSubscriptionSeatCount({
+    subscriptionId: subscription._id,
+    seatCount,
+    updates: {
+      totalPrice: plan.pricePerSeat * seatCount,
+      pricePerSeat: plan.pricePerSeat,
+    },
+    subscription,
+  });
 };

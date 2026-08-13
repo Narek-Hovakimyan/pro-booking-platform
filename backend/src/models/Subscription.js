@@ -36,6 +36,11 @@ const subscriptionSchema = new mongoose.Schema(
       default: 1,
       min: [1, 'Seat count must be at least 1'],
     },
+    activeSeatCount: {
+      type: Number,
+      default: 0,
+      min: [0, 'Active seat count cannot be negative'],
+    },
     pricePerSeat: {
       type: Number,
       required: [true, 'Price per seat is required'],

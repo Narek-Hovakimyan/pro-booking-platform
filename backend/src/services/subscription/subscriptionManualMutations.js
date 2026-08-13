@@ -19,6 +19,7 @@ import {
   addDays,
   addMonths,
 } from "./subscriptionHelpers.js";
+import { assertSeatCountCanContainActiveSeats } from "./seatCapacityMutations.js";
 
 const createWithOptionalSession = async (Model, payload, session) => {
   if (!session) return Model.create(payload);
@@ -97,8 +98,21 @@ const updateSubscriptionWithCompareAndSet = async (
     return subscription;
   }
 
+  const filter = { _id: subscription._id, __v: subscription.__v };
+  if (Number.isInteger(updates.seatCount)) {
+    // The version key does not change when a seat claim atomically increments
+    // activeSeatCount. Keep the capacity invariant in the same DB write as a
+    // manual/platform seat-count mutation rather than trusting the stale read.
+    filter.$expr = {
+      $lte: [
+        { $ifNull: ["$activeSeatCount", 0] },
+        updates.seatCount,
+      ],
+    };
+  }
+
   return Subscription.findOneAndUpdate(
-    { _id: subscription._id, __v: subscription.__v },
+    filter,
     { $set: updates, $inc: { __v: 1 } },
     { returnDocument: "after", ...(session ? { session } : {}) }
   );
@@ -429,6 +443,7 @@ export const extendManualSubscription = async ({
       };
     },
     updatePayload: (subscription) => {
+      assertSeatCountCanContainActiveSeats(subscription, normalizedSeatCount);
       const isContinuingSubscription =
         ["trialing", "active"].includes(subscription.status) &&
         subscription.currentPeriodEnd &&

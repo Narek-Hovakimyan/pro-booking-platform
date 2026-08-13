@@ -6,6 +6,7 @@ import { getSalonBillingDetail } from "./platformBillingSalonReadService.js";
 import {
   mutateCanonicalSubscription,
 } from "../subscription/subscriptionManualMutations.js";
+import { assertSeatCountCanContainActiveSeats } from "../subscription/seatCapacityMutations.js";
 
 /**
  * Activate or renew a salon subscription.
@@ -67,6 +68,7 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
       };
     },
     updatePayload: (subscription) => {
+      assertSeatCountCanContainActiveSeats(subscription, normalizedSeatCount);
       const isContinuing =
         ["trialing", "active"].includes(subscription.status) &&
         subscription.currentPeriodEnd &&
@@ -136,8 +138,17 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
     async () => {
       if (oldSubscriptionState) {
         if (Number.isInteger(subscription.__v)) {
+          const rollbackFilter = { _id: subscription._id, __v: subscription.__v };
+          if (Number.isInteger(oldSubscriptionState.seatCount)) {
+            rollbackFilter.$expr = {
+              $lte: [
+                { $ifNull: ["$activeSeatCount", 0] },
+                oldSubscriptionState.seatCount,
+              ],
+            };
+          }
           await Subscription.findOneAndUpdate(
-            { _id: subscription._id, __v: subscription.__v },
+            rollbackFilter,
             { $set: oldSubscriptionState, $inc: { __v: 1 } },
             { returnDocument: "after" }
           );

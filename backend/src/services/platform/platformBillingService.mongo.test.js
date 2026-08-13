@@ -14,6 +14,7 @@ import {
   activateSalonSubscription,
   confirmSalonPayment,
 } from "./platformBillingService.js";
+import { assignActiveSeat } from "../subscription/seatCapacityMutations.js";
 
 const REAL_MONGO_TESTS_ENABLED =
   process.env.RUN_REAL_MONGO_TRANSACTION_TESTS === "true";
@@ -21,6 +22,7 @@ const REAL_MONGO_TESTS_ENABLED =
 const originals = {
   platformAuditLogCreate: PlatformAuditLog.create,
   startSession: mongoose.startSession,
+  subscriptionFindOneAndUpdate: Subscription.findOneAndUpdate,
 };
 
 const actorId = new mongoose.Types.ObjectId();
@@ -55,12 +57,14 @@ const connectIsolatedDb = async (suffix) => {
     SubscriptionPaymentAttempt.createIndexes(),
     SubscriptionPlan.createIndexes(),
     Subscription.createIndexes(),
+    SubscriptionSeat.createIndexes(),
   ]);
 };
 
 afterEach(async () => {
   PlatformAuditLog.create = originals.platformAuditLogCreate;
   mongoose.startSession = originals.startSession;
+  Subscription.findOneAndUpdate = originals.subscriptionFindOneAndUpdate;
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect().catch(() => {});
   }
@@ -192,6 +196,59 @@ test(
       await PlatformAuditLog.countDocuments({ action: "salon_subscription.activate", salonId }),
       2
     );
+  }
+);
+
+test(
+  "real Mongo platform activation reduction cannot bypass current seat capacity with a stale __v",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_seat_reduction_race");
+    const ownerId = new mongoose.Types.ObjectId();
+    const salonId = new mongoose.Types.ObjectId();
+    await User.create({
+      _id: ownerId,
+      name: "Seat Race Owner",
+      phone: `+374${String(Date.now()).slice(-7)}2`,
+      email: `seat-race-${Date.now()}@example.com`,
+      password: "hashed-password",
+      role: "barber",
+    });
+    await Salon.create({ _id: salonId, name: "Seat Race Salon", city: "Yerevan", address: "1 Test St", phone: "+37410000002", ownerId });
+    const plan = await SubscriptionPlan.create({ name: "Barber Monthly", code: "barber_monthly", pricePerSeat: 5000, currency: "AMD", interval: "month", features: [], isActive: true });
+    const subscription = await Subscription.create({
+      ownerType: "salon", ownerId: salonId, ownerRefModel: "Salon", payerId: ownerId, planId: plan._id,
+      status: "active", seatCount: 2, activeSeatCount: 1, pricePerSeat: 5000, totalPrice: 10000,
+      provider: "manual", currentPeriodStart: new Date("2030-01-01T00:00:00.000Z"), currentPeriodEnd: new Date("2030-02-01T00:00:00.000Z"),
+    });
+    await SubscriptionSeat.create({ subscriptionId: subscription._id, salonId, barberId: new mongoose.Types.ObjectId(), assignedBy: ownerId, status: "active" });
+    let entered;
+    const enteredPromise = new Promise((resolve) => { entered = resolve; });
+    let release;
+    const releasePromise = new Promise((resolve) => { release = resolve; });
+    let intercepted = false;
+    Subscription.findOneAndUpdate = function delayedVersionedMutation(filter, ...args) {
+      if (!intercepted && Number.isInteger(filter?.__v)) {
+        intercepted = true;
+        entered();
+        return releasePromise.then(() => originals.subscriptionFindOneAndUpdate.call(this, filter, ...args));
+      }
+      return originals.subscriptionFindOneAndUpdate.call(this, filter, ...args);
+    };
+    const activation = activateSalonSubscription(String(salonId), {
+      actor: { _id: actorId }, seatCount: 1, months: 1, note: "Reduce seats", requestIp,
+    });
+    await enteredPromise;
+    await assignActiveSeat({ subscriptionId: subscription._id, salonId, barberId: new mongoose.Types.ObjectId(), assignedBy: ownerId });
+    release();
+    await assert.rejects(activation, (error) => error.statusCode === 400);
+    const [current, activeSeats] = await Promise.all([
+      Subscription.findById(subscription._id).lean(),
+      SubscriptionSeat.countDocuments({ subscriptionId: subscription._id, status: "active" }),
+    ]);
+    assert.equal(current.seatCount, 2);
+    assert.equal(current.activeSeatCount, activeSeats);
+    assert.ok(current.activeSeatCount <= current.seatCount);
   }
 );
 

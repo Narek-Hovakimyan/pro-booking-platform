@@ -5,10 +5,7 @@ import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
 import { extendManualSubscription } from "../subscription/subscriptionManualMutations.js";
-import {
-  computeSeatUsage,
-  getIdString,
-} from "./platformBillingCalculations.js";
+import { getIdString } from "./platformBillingCalculations.js";
 import {
   serializePaymentAttempt,
 } from "./platformBillingSerializers.js";
@@ -29,7 +26,6 @@ import {
   getSalonPayments,
 } from "./platformBillingSalonPaymentReadService.js";
 import {
-  getSeatUsageForSalon,
   isBarberAcceptedStaffForSalon,
   isBarberChairRenterForSalon,
 } from "./platformBillingSeatHelpers.js";
@@ -37,6 +33,12 @@ import {
   createWithRequiredSession,
   runInRequiredTransaction,
 } from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
+import {
+  assignActiveSeat,
+  deleteActiveSeat,
+  revokeActiveSeat,
+  updateSubscriptionSeatCount,
+} from "../subscription/seatCapacityMutations.js";
 export {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
@@ -98,35 +100,31 @@ export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, re
   }
   const newCount = numericSeatCount;
 
-  // Calculate used seats (accepted staff only)
-  const seatInfo = await getSeatUsageForSalon(getIdString(salon._id), subscription._id);
-  if (newCount < seatInfo.used) {
-    const error = new Error(
-      `Cannot set seat count below ${seatInfo.used} used seats. Revoke seats first.`
-    );
-    error.statusCode = 400;
-    throw error;
-  }
-
   const oldValue = { seatCount: subscription.seatCount };
-
-  subscription.seatCount = newCount;
-  await subscription.save();
+  const updatedSubscription = await updateSubscriptionSeatCount({
+    subscriptionId: subscription._id,
+    seatCount: newCount,
+    capacityMessage: `Cannot set seat count below ${subscription.activeSeatCount || 0} used seats. Revoke seats first.`,
+    subscription,
+  });
 
   await createAuditLogOrRollback(
     {
       actorId: actor._id,
       action: "salon_subscription.seat_count_update",
       salonId: salon._id,
-      subscriptionId: subscription._id,
+      subscriptionId: updatedSubscription._id,
       oldValue,
       newValue: { seatCount: newCount },
       note: note.trim(),
       requestIp,
     },
     async () => {
-      subscription.seatCount = oldValue.seatCount;
-      await subscription.save();
+      await updateSubscriptionSeatCount({
+        subscriptionId: updatedSubscription._id,
+        seatCount: oldValue.seatCount,
+        subscription: updatedSubscription,
+      });
     }
   );
 
@@ -193,25 +191,19 @@ export const assignSalonSeat = async (salonId, { barberId, note, actor, requestI
     throw error;
   }
 
-  // Enforce seat cap
-  const seatInfo = await getSeatUsageForSalon(getIdString(salon._id), subscription._id);
-  if (seatInfo.used >= subscription.seatCount) {
-    const error = new Error(
-      `Seat cap reached (${subscription.seatCount}). Cannot assign more seats.`
-    );
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // Create seat
-  const seat = await SubscriptionSeat.create({
+  const { seat, idempotent } = await assignActiveSeat({
     subscriptionId: subscription._id,
     salonId: salon._id,
     barberId,
     assignedBy: actor._id,
-    status: "active",
-    assignedAt: new Date(),
+    subscription,
+    capacityMessage: `Seat cap reached (${subscription.seatCount}). Cannot assign more seats.`,
   });
+  if (idempotent) {
+    const error = new Error("Barber already has an active seat on this subscription");
+    error.statusCode = 400;
+    throw error;
+  }
 
   await createAuditLogOrRollback(
     {
@@ -226,7 +218,7 @@ export const assignSalonSeat = async (salonId, { barberId, note, actor, requestI
       requestIp,
     },
     async () => {
-      await SubscriptionSeat.deleteOne({ _id: seat._id });
+      await deleteActiveSeat({ seatId: seat._id, subscriptionId: subscription._id, subscription });
     }
   );
 
@@ -278,11 +270,17 @@ export const revokeSalonSeat = async (salonId, { barberId, note, actor, requestI
   }
 
   const oldValue = { seatId: existingSeat._id, barberId, status: existingSeat.status };
-  const oldRevokedAt = existingSeat.revokedAt;
-
-  existingSeat.status = "revoked";
-  existingSeat.revokedAt = new Date();
-  await existingSeat.save();
+  const revokedSeat = await revokeActiveSeat({
+    seatId: existingSeat._id,
+    subscriptionId: subscription._id,
+    subscription,
+    seatDocument: existingSeat,
+  });
+  if (!revokedSeat) {
+    const error = new Error("Barber does not have an active seat on this subscription");
+    error.statusCode = 400;
+    throw error;
+  }
 
   await createAuditLogOrRollback(
     {
@@ -297,9 +295,14 @@ export const revokeSalonSeat = async (salonId, { barberId, note, actor, requestI
       requestIp,
     },
     async () => {
-      existingSeat.status = oldValue.status;
-      existingSeat.revokedAt = oldRevokedAt;
-      await existingSeat.save();
+      await assignActiveSeat({
+        subscriptionId: subscription._id,
+        salonId: salon._id,
+        barberId,
+        assignedBy: existingSeat.assignedBy,
+        now: existingSeat.assignedAt,
+        subscription,
+      });
     }
   );
 

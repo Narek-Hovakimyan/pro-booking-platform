@@ -23,6 +23,7 @@ import {
   getOrCreateDefaultSubscriptionPlanWithSession,
   runInRequiredTransaction,
 } from "./subscriptionPaymentMutationTransactionHelpers.js";
+import { updateSubscriptionSeatCount } from "./seatCapacityMutations.js";
 
 const createWithOptionalSession = async (Model, payload, session) => {
   if (!session) return Model.create(payload);
@@ -395,28 +396,34 @@ export const confirmSubscriptionSeatUpdate = async ({
 
     const oldSeatCount = subscription.seatCount;
     const plan = await getOrCreateDefaultSubscriptionPlanWithSession(session);
-    subscription.seatCount = refreshedAttempt.seatCount || subscription.seatCount;
-    subscription.totalPrice = plan.pricePerSeat * subscription.seatCount;
-    subscription.pricePerSeat = plan.pricePerSeat;
-    subscription.lastPaymentAt = now;
-    await subscription.save(options);
+    const requestedSeatCount = refreshedAttempt.seatCount || subscription.seatCount;
+    const updatedSubscription = await updateSubscriptionSeatCount({
+      subscriptionId: subscription._id,
+      seatCount: requestedSeatCount,
+      updates: {
+        totalPrice: plan.pricePerSeat * requestedSeatCount,
+        pricePerSeat: plan.pricePerSeat,
+        lastPaymentAt: now,
+      },
+      session,
+    });
 
     const extraSeats = Math.max(
       0,
-      (refreshedAttempt.seatCount || subscription.seatCount) - oldSeatCount
+      requestedSeatCount - oldSeatCount
     );
     await createWithOptionalSession(
       PaymentRecord,
       {
-        subscriptionId: subscription._id,
+        subscriptionId: updatedSubscription._id,
         payerId: refreshedAttempt.payerId,
         ownerType: refreshedAttempt.ownerType,
         ownerId: refreshedAttempt.ownerId,
         amount: refreshedAttempt.amount,
         currency: refreshedAttempt.currency,
         seatCount: extraSeats,
-        periodStart: subscription.currentPeriodStart,
-        periodEnd: subscription.currentPeriodEnd,
+        periodStart: updatedSubscription.currentPeriodStart,
+        periodEnd: updatedSubscription.currentPeriodEnd,
         status: "paid",
         provider: refreshedAttempt.provider || "manual",
         paidAt: now,
@@ -425,12 +432,12 @@ export const confirmSubscriptionSeatUpdate = async ({
     );
 
     applyPaymentAttemptTransition(refreshedAttempt, "paid", now);
-    refreshedAttempt.subscriptionId = subscription._id;
+    refreshedAttempt.subscriptionId = updatedSubscription._id;
     await refreshedAttempt.save(options);
 
     return {
       paymentAttempt: serializeUserPaymentAttempt(refreshedAttempt),
-      subscription: serializeSubscriptionStatus(subscription, null, now),
+      subscription: serializeSubscriptionStatus(updatedSubscription, null, now),
       idempotent: false,
     };
   });

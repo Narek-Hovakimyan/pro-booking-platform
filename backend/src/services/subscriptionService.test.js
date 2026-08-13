@@ -1618,6 +1618,7 @@ test("salon pending payment recovery excludes booking deposit attempts by query"
     ownerType: "salon",
     ownerId: salonId,
     seatCount: 1,
+    activeSeatCount: 1,
     totalPrice: 5000,
   });
   let attemptQuery = null;
@@ -1921,20 +1922,19 @@ test("cannot assign salon billing seat to pending staff", async () => {
   );
 });
 
-test("chair renter active seat does not consume accepted staff seat cap", async () => {
+test("active chair-renter seat consumes authoritative subscription capacity", async () => {
   const salonDoc = makeSalonDoc({ ownerId });
   const salonSub = makeSubDoc({
     ownerType: "salon",
     ownerId: salonId,
     seatCount: 1,
+    activeSeatCount: 1,
     totalPrice: 5000,
     status: "active",
   });
 
   Salon.findById = async () => salonDoc;
   Subscription.findOne = () => chainableQuery(salonSub);
-  SubscriptionSeat.find = () =>
-    chainableQuery([makeBillingSeat({ relationshipType: "chair_renter" })]);
   SubscriptionSeat.findOne = async () => null;
   User.findById = async () => makeSalonRelationshipUser();
   SubscriptionSeat.create = async (data) => ({
@@ -1942,13 +1942,14 @@ test("chair renter active seat does not consume accepted staff seat cap", async 
     _id: new mongoose.Types.ObjectId(),
   });
 
-  const seat = await assignSalonSubscriptionSeat({
-    salonId,
-    barberId,
-    assignedBy: { _id: ownerId, role: "barber" },
-  });
-
-  assert.equal(seat.status, "active");
+  await assert.rejects(
+    () => assignSalonSubscriptionSeat({
+      salonId,
+      barberId,
+      assignedBy: { _id: ownerId, role: "barber" },
+    }),
+    { statusCode: 400 }
+  );
 });
 
 test("cannot assign more seats than subscription.seatCount", async () => {
@@ -3231,6 +3232,7 @@ test("cannot reduce seatCount below active seats", async () => {
     ownerType: "salon",
     ownerId: salonId,
     seatCount: 10,
+    activeSeatCount: 5,
     totalPrice: 50000,
     save() {
       return this;

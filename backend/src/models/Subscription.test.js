@@ -13,3 +13,11 @@ test("Subscription enforces one document for each logical owner", () => {
   assert.equal(ownerIndex[1].unique, true);
   assert.equal(ownerIndex[1].sparse, undefined);
 });
+
+test("Subscription defaults activeSeatCount to zero and rejects negative values", () => {
+  const subscription = new Subscription({ activeSeatCount: undefined });
+  assert.equal(subscription.activeSeatCount, 0);
+  subscription.activeSeatCount = -1;
+  const validation = subscription.validateSync();
+  assert.ok(validation.errors.activeSeatCount);
+});

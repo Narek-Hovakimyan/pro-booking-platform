@@ -2107,9 +2107,7 @@ test("updateSalonSeatCount requires note and validates positive integer", async 
 test("updateSalonSeatCount rejects count below used seats and does not audit", async () => {
   let auditCalled = false;
   mockQuery(Salon, "findById", salonDoc);
-  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc({ ...subscriptionDoc, seatCount: 3 })));
-  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc, legacySeatDoc]));
-  mockMethod(User, "find", () => qc([acceptedStaffWithRole, { ...legacyStaffDoc, role: "barber" }]));
+  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc({ ...subscriptionDoc, seatCount: 3, activeSeatCount: 2 })));
   mockMethod(PlatformAuditLog, "create", async () => {
     auditCalled = true;
   });
@@ -2123,7 +2121,7 @@ test("updateSalonSeatCount rejects count below used seats and does not audit", a
 });
 
 test("updateSalonSeatCount audits and rolls back when audit creation fails", async () => {
-  const subscription = saveableDoc({ ...subscriptionDoc, seatCount: 3 });
+  const subscription = saveableDoc({ ...subscriptionDoc, seatCount: 3, activeSeatCount: 0 });
   const savedValues = [];
 
   subscription.save = async function save() {
@@ -2137,8 +2135,6 @@ test("updateSalonSeatCount audits and rolls back when audit creation fails", asy
     subscriptionFindCalls += 1;
     return subscriptionFindCalls === 1 ? Promise.resolve(subscription) : qc(subscription);
   });
-  mockMethod(SubscriptionSeat, "find", () => qc([]));
-  mockMethod(User, "find", () => qc([]));
   mockMethod(PlatformAuditLog, "create", async () => {
     throw new Error("audit unavailable");
   });
@@ -2161,7 +2157,7 @@ test("assignSalonSeat rejects chair_renter, duplicate, and over-cap without audi
   let auditCalls = 0;
   let seatCreates = 0;
   mockQuery(Salon, "findById", salonDoc);
-  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc({ ...subscriptionDoc, seatCount: 1 })));
+  mockMethod(Subscription, "findOne", () => Promise.resolve(saveableDoc({ ...subscriptionDoc, seatCount: 1, activeSeatCount: 1 })));
   mockMethod(PlatformAuditLog, "create", async () => {
     auditCalls += 1;
   });
@@ -2210,7 +2206,7 @@ test("assignSalonSeat creates active seat and audit log for accepted staff", asy
   mockMethod(Subscription, "findOne", () => {
     subscriptionFindCalls += 1;
     return subscriptionFindCalls === 1
-      ? Promise.resolve(saveableDoc(subscriptionDoc))
+      ? Promise.resolve(saveableDoc({ ...subscriptionDoc, activeSeatCount: 0 }))
       : qc(subscriptionDoc);
   });
   let userFindByIdCalls = 0;
@@ -2244,6 +2240,46 @@ test("assignSalonSeat creates active seat and audit log for accepted staff", asy
   assert.equal(auditPayload.requestIp, requestIp);
 });
 
+test("assignSalonSeat audit rollback deletes the seat and releases its capacity claim", async () => {
+  const subscription = saveableDoc({ ...subscriptionDoc, activeSeatCount: 0 });
+  const createdSeat = {
+    _id: oid("64b000000000000000070011"),
+    subscriptionId,
+    salonId,
+    barberId: acceptedStaffId,
+    assignedBy: ownerId,
+    status: "active",
+  };
+  let deleted = false;
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => Promise.resolve(subscription));
+  mockMethod(User, "findById", () => qc(acceptedStaffWithRole));
+  mockMethod(SubscriptionSeat, "findOne", async () => null);
+  mockMethod(SubscriptionSeat, "create", async () => createdSeat);
+  mockMethod(SubscriptionSeat, "findById", async () => createdSeat);
+  mockMethod(SubscriptionSeat, "deleteOne", async () => {
+    deleted = true;
+    return { deletedCount: 1 };
+  });
+  mockMethod(PlatformAuditLog, "create", async () => {
+    throw new Error("audit unavailable");
+  });
+
+  await assert.rejects(
+    () => assignSalonSeat(salonIdStr, {
+      actor: platformActor,
+      barberId: acceptedStaffId,
+      note: "Assign accepted staff",
+      requestIp,
+    }),
+    /audit unavailable/
+  );
+
+  assert.equal(deleted, true);
+  assert.equal(subscription.activeSeatCount, 0);
+});
+
 test("revokeSalonSeat rejects non-assigned staff and audits successful revoke", async () => {
   let auditPayload;
   const activeSeat = saveableDoc({ ...acceptedSeatDoc, barberId: acceptedStaffId, revokedAt: null });
@@ -2261,7 +2297,7 @@ test("revokeSalonSeat rejects non-assigned staff and audits successful revoke", 
   mockMethod(Subscription, "findOne", () => {
     subscriptionFindCalls += 1;
     return subscriptionFindCalls === 1
-      ? Promise.resolve(saveableDoc(subscriptionDoc))
+      ? Promise.resolve(saveableDoc({ ...subscriptionDoc, activeSeatCount: 1 }))
       : qc(subscriptionDoc);
   });
   mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(activeSeat));
