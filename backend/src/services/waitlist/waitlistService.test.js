@@ -237,6 +237,93 @@ test("duplicate check uses the exact preferred time window", async () => {
   });
 });
 
+test("open waitlist unique index excludes closed historical entries", () => {
+  const uniqueIndex = WaitlistEntry.schema.indexes().find(
+    ([fields, options]) =>
+      options.unique === true &&
+      fields.clientId === 1 &&
+      fields.preferredEndTime === 1
+  );
+
+  assert.ok(uniqueIndex);
+  assert.deepEqual(uniqueIndex[0], {
+    clientId: 1,
+    barberId: 1,
+    salonId: 1,
+    serviceId: 1,
+    date: 1,
+    preferredStartTime: 1,
+    preferredEndTime: 1,
+  });
+  assert.deepEqual(uniqueIndex[1].partialFilterExpression, {
+    status: { $in: ["active", "notified", "offered"] },
+  });
+});
+
+test("cross-instance duplicate-key race preserves the duplicate waitlist error", async () => {
+  mockValidWaitlistRelationships();
+  WaitlistEntry.findOne = async () => null;
+  WaitlistEntry.create = async () => {
+    const error = new Error("E11000 duplicate key error");
+    error.code = 11000;
+    throw error;
+  };
+
+  await assert.rejects(
+    () =>
+      createWaitlistEntry({
+        clientId,
+        barberId,
+        serviceId,
+        date: futureDate,
+      }),
+    (error) => {
+      assert.equal(error.code, "DUPLICATE_WAITLIST_ENTRY");
+      assert.equal(
+        error.message,
+        "You already have an active waitlist entry for this barber, service, date, and time window"
+      );
+      return true;
+    }
+  );
+});
+
+test("different preferred windows remain independent waitlist requests", async () => {
+  const createdEntries = [];
+
+  mockValidWaitlistRelationships();
+  WaitlistEntry.findOne = async (query) =>
+    createdEntries.find(
+      (entry) =>
+        entry.preferredStartTime === query.preferredStartTime &&
+        entry.preferredEndTime === query.preferredEndTime
+    ) || null;
+  WaitlistEntry.create = async (payload) => {
+    const entry = { _id: `entry-${createdEntries.length + 1}`, ...payload };
+    createdEntries.push(entry);
+    return entry;
+  };
+
+  await createWaitlistEntry({
+    clientId,
+    barberId,
+    serviceId,
+    date: futureDate,
+    preferredStartTime: "10:00",
+    preferredEndTime: "12:00",
+  });
+  await createWaitlistEntry({
+    clientId,
+    barberId,
+    serviceId,
+    date: futureDate,
+    preferredStartTime: "13:00",
+    preferredEndTime: "15:00",
+  });
+
+  assert.equal(createdEntries.length, 2);
+});
+
 test("concurrent duplicate active waitlist entries create only one entry", async () => {
   const createdEntries = [];
 

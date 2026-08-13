@@ -10,6 +10,7 @@ import {
 import { validateWaitlistRelationships } from "./waitlistQueries.js";
 
 const waitlistCreationLocks = new Map();
+const isDuplicateKeyError = (error) => error?.code === 11000;
 
 const withWaitlistCreationLock = async (lockKey, task) => {
   const previousLock = waitlistCreationLocks.get(lockKey) || Promise.resolve();
@@ -90,17 +91,24 @@ export const createWaitlistEntry = async ({
       throwDuplicateWaitlistEntryError();
     }
 
-    return WaitlistEntry.create({
-      clientId,
-      barberId,
-      salonId: salonId || null,
-      serviceId,
-      date,
-      preferredStartTime: normalizedPreferredStartTime,
-      preferredEndTime: normalizedPreferredEndTime,
-      note: note || "",
-      status: "active",
-    });
+    try {
+      return await WaitlistEntry.create({
+        clientId,
+        barberId,
+        salonId: salonId || null,
+        serviceId,
+        date,
+        preferredStartTime: normalizedPreferredStartTime,
+        preferredEndTime: normalizedPreferredEndTime,
+        note: note || "",
+        status: "active",
+      });
+    } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        throwDuplicateWaitlistEntryError();
+      }
+      throw error;
+    }
   });
 };
 
@@ -123,4 +131,3 @@ export const cancelWaitlistEntry = async (entryId, clientId) => {
 
   return entry;
 };
-

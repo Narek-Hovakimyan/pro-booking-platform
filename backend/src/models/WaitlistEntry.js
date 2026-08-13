@@ -97,7 +97,8 @@ const waitlistEntrySchema = new mongoose.Schema(
 // Compound index to efficiently find active waitlist entries by barber/date
 waitlistEntrySchema.index({ barberId: 1, date: 1, status: 1 });
 
-// Compound index for duplicate detection
+// Only one currently open request may exist for the same logical waitlist slot.
+// Closed historical entries intentionally remain outside this constraint.
 waitlistEntrySchema.index({
   clientId: 1,
   barberId: 1,
@@ -106,7 +107,11 @@ waitlistEntrySchema.index({
   date: 1,
   preferredStartTime: 1,
   preferredEndTime: 1,
-  status: 1,
+}, {
+  unique: true,
+  partialFilterExpression: {
+    status: { $in: ["active", "notified", "offered"] },
+  },
 });
 
 const WaitlistEntry = mongoose.model("WaitlistEntry", waitlistEntrySchema);
