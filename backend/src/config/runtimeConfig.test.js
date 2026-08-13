@@ -12,6 +12,7 @@ function validEnv(overrides = {}) {
     CLIENT_URL: "https://app.example.com",
     TRUST_PROXY: "true",
     JWT_SECRET: "super-secure-production-secret",
+    REDIS_URL: "rediss://cache.example.com:6380",
     ...overrides,
   };
 }
@@ -169,6 +170,34 @@ test("production accepts a non-default JWT_SECRET", () => {
   );
 
   assert.equal(config.nodeEnv, "production");
+});
+
+test("production requires a valid Redis URL without exposing it", () => {
+  for (const REDIS_URL of [undefined, " ", "https://cache.example.com", "redis://"]) {
+    const env = validEnv({ REDIS_URL });
+    assert.throws(
+      () => validateRuntimeConfig(env),
+      (error) =>
+        error instanceof RuntimeConfigError &&
+        error.failures.some((failure) => failure.variable === "REDIS_URL") &&
+        !error.message.includes("cache.example.com")
+    );
+  }
+});
+
+test("Redis namespace is sanitized and defaults without exposing Redis credentials", () => {
+  const config = validateRuntimeConfig(validEnv({
+    REDIS_URL: "rediss://user:secret@cache.example.com:6380/0",
+    REDIS_NAMESPACE: "hairbook:production",
+  }));
+
+  assert.equal(config.redisNamespace, "hairbook:production");
+  assert.equal(config.redisUrl, "rediss://user:secret@cache.example.com:6380/0");
+  assert.equal(validateRuntimeConfig(validEnv()).redisNamespace, "hairbook");
+  assert.throws(
+    () => validateRuntimeConfig(validEnv({ REDIS_NAMESPACE: "bad namespace" })),
+    /REDIS_NAMESPACE:invalid_namespace/
+  );
 });
 
 test("errors never include secret or configuration values", () => {

@@ -1,5 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
+import { redisClientService } from "../services/redisClientService.js";
 import { serverLifecycleService } from "../services/serverLifecycleService.js";
 
 const DEFAULT_PING_TIMEOUT_MS = 1000;
@@ -29,12 +30,21 @@ export const createReadinessStatusGetter = ({
   clearTimeoutFn = clearTimeout,
   pingTimeoutMs = DEFAULT_PING_TIMEOUT_MS,
   commandTimeoutMs = DEFAULT_PING_TIMEOUT_MS,
+  isRedisRequired = () => redisClientService.isRequired(),
+  isRedisReady = () => redisClientService.isReady(),
 } = {}) => async () => {
   const checks = createOkChecks();
 
   if (isShuttingDown()) {
     checks.shutdown = "failed";
     return createUnavailableResponse(checks);
+  }
+
+  if (isRedisRequired()) {
+    checks.redis_connection = isRedisReady() ? "ok" : "failed";
+    if (checks.redis_connection === "failed") {
+      return createUnavailableResponse(checks);
+    }
   }
 
   if (!isDatabaseConnected()) {

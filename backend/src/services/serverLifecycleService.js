@@ -6,6 +6,7 @@ import {
 import { stopBookingReminderScheduler } from "./booking/bookingReminderScheduler.js";
 import { stopSubscriptionExpirationScheduler } from "./subscriptionExpirationScheduler.js";
 import { stopWaitlistExpirationScheduler } from "./waitlist/waitlistExpirationScheduler.js";
+import { redisClientService } from "./redisClientService.js";
 
 const DEFAULT_PING_TIMEOUT_MS = 1000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10000;
@@ -47,7 +48,7 @@ const stopHttpServer = async (server) => {
 const closeSocketServer = async (socketServer) => {
   if (!socketServer) return;
 
-  socketServer.disconnectSockets?.(true);
+  socketServer.local.disconnectSockets(true);
 
   await new Promise((resolve, reject) => {
     socketServer.close((error) => {
@@ -72,6 +73,7 @@ export const createServerLifecycleService = ({
   stopCronTaskFn = stopCronTask,
   closeHttpServerFn = stopHttpServer,
   closeSocketServerFn = closeSocketServer,
+  shutdownRedisFn = () => redisClientService.shutdown(),
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   exitFn = (code) => process.exit(code),
@@ -190,6 +192,12 @@ export const createServerLifecycleService = ({
 
         try {
           await closeSocketServerFn(state.socketServer);
+        } catch (error) {
+          trackFailure(error);
+        }
+
+        try {
+          await shutdownRedisFn();
         } catch (error) {
           trackFailure(error);
         }

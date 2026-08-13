@@ -131,6 +131,9 @@ test("successful shutdown runs every stopper once and exits zero for signal hand
     closeSocketServerFn: async () => {
       calls.push("socket");
     },
+    shutdownRedisFn: async () => {
+      calls.push("redis");
+    },
     disconnectDatabaseFn: async () => {
       calls.push("db");
     },
@@ -148,6 +151,7 @@ test("successful shutdown runs every stopper once and exits zero for signal hand
     "cron",
     "http",
     "socket",
+    "redis",
     "db",
   ]);
   assert.deepEqual(exitCodes, [0]);
@@ -175,6 +179,9 @@ test("repeated signals and shutdown calls reuse the same cleanup run", async () 
     closeSocketServerFn: async () => {
       calls.push("socket");
     },
+    shutdownRedisFn: async () => {
+      calls.push("redis");
+    },
     disconnectDatabaseFn: async () => {
       calls.push("db");
     },
@@ -189,7 +196,15 @@ test("repeated signals and shutdown calls reuse the same cleanup run", async () 
   assert.deepEqual(first, { ok: true, exitCode: 0 });
   assert.deepEqual(second, first);
   assert.deepEqual(third, first);
-  assert.deepEqual(calls, ["booking", "waitlist", "subscription", "http", "socket", "db"]);
+  assert.deepEqual(calls, [
+    "booking",
+    "waitlist",
+    "subscription",
+    "http",
+    "socket",
+    "redis",
+    "db",
+  ]);
   assert.deepEqual(exitCodes, [0]);
 });
 
@@ -347,4 +362,43 @@ test("shutdown awaits async cron stop cleanup", async () => {
     "socket",
     "db",
   ]);
+});
+
+test("shutdown closes Socket.IO before shared Redis and database cleanup", async () => {
+  const calls = [];
+  const service = createServerLifecycleService({
+    stopBookingReminderSchedulerFn: async () => {},
+    stopWaitlistExpirationSchedulerFn: async () => {},
+    stopSubscriptionExpirationSchedulerFn: async () => {},
+    closeHttpServerFn: async () => calls.push("http"),
+    closeSocketServerFn: async () => calls.push("socket"),
+    shutdownRedisFn: async () => calls.push("redis"),
+    disconnectDatabaseFn: async () => calls.push("db"),
+  });
+
+  assert.deepEqual(await service.shutdown("SIGTERM"), { ok: true, exitCode: 0 });
+  assert.deepEqual(calls, ["http", "socket", "redis", "db"]);
+});
+
+test("startup failure after Socket.IO creation cleans unstarted HTTP, socket, Redis, and database once", async () => {
+  const calls = [];
+  const service = createServerLifecycleService({
+    stopBookingReminderSchedulerFn: async () => {},
+    stopWaitlistExpirationSchedulerFn: async () => {},
+    stopSubscriptionExpirationSchedulerFn: async () => {},
+    closeHttpServerFn: async () => calls.push("http-unstarted"),
+    closeSocketServerFn: async () => calls.push("socket"),
+    shutdownRedisFn: async () => calls.push("redis"),
+    disconnectDatabaseFn: async () => calls.push("db"),
+  });
+  service.configure({ server: {}, socketServer: {} });
+
+  const [first, second] = await Promise.all([
+    service.shutdown("startup_failure"),
+    service.shutdown("startup_failure"),
+  ]);
+
+  assert.deepEqual(first, { ok: true, exitCode: 0 });
+  assert.deepEqual(second, first);
+  assert.deepEqual(calls, ["http-unstarted", "socket", "redis", "db"]);
 });

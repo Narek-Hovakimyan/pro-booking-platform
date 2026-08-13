@@ -105,6 +105,44 @@ test("liveness stays dependency-free during database failure or shutdown", () =>
   assert.equal(response.body, "API is running");
 });
 
+test("required Redis makes readiness unavailable without leaking connection details", async () => {
+  const getReadinessStatus = createReadinessStatusGetter({
+    isRedisRequired: () => true,
+    isRedisReady: () => false,
+    isDatabaseConnected: () => true,
+  });
+
+  const readiness = await getReadinessStatus();
+
+  assert.deepEqual(readiness, {
+    statusCode: 503,
+    body: {
+      status: "unavailable",
+      checks: {
+        shutdown: "ok",
+        database_connection: "ok",
+        database_ping: "ok",
+        redis_connection: "failed",
+      },
+    },
+  });
+  assert.equal(JSON.stringify(readiness).includes("redis://"), false);
+});
+
+test("required healthy Redis preserves readiness and reports only generic status", async () => {
+  const getReadinessStatus = createReadinessStatusGetter({
+    isRedisRequired: () => true,
+    isRedisReady: () => true,
+    isDatabaseConnected: () => true,
+    getDatabaseCommandRunner: () => ({ command: async () => ({ ok: 1 }) }),
+  });
+
+  const readiness = await getReadinessStatus();
+
+  assert.equal(readiness.statusCode, 200);
+  assert.equal(readiness.body.checks.redis_connection, "ok");
+});
+
 test("readiness returns 200 for healthy state and clears timeout without aborting", async () => {
   const timers = createTimerHarness();
   const signalRecords = [];

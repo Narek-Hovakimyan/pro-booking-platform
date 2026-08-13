@@ -1,15 +1,63 @@
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 import User from "./models/User.js";
 import {
   assertAccessTokenMatchesUser,
   verifyAccessToken,
 } from "./services/auth/accessTokenService.js";
+import { redisClientService } from "./services/redisClientService.js";
 
 export const SOCKET_AUTH_REQUIRED_CODE = "SOCKET_AUTH_REQUIRED";
 export const SOCKET_AUTH_REFRESH_EVENT = "auth:refresh-required";
 export const SOCKET_AUTH_REFRESH_PAYLOAD = { code: SOCKET_AUTH_REQUIRED_CODE };
 export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+const createSocketCleanupError = () => new Error("Socket cleanup failed");
+
+const closeSocketCandidate = (socketServer) =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      const closeFailed = error && error.code !== "ERR_SERVER_NOT_RUNNING";
+      closeFailed ? reject(createSocketCleanupError()) : resolve();
+    };
+
+    try {
+      const closeResult = socketServer.close?.(finish);
+      if (closeResult?.then) {
+        closeResult.then(() => finish(), () => finish(createSocketCleanupError()));
+      } else if (typeof socketServer.close !== "function") {
+        finish(createSocketCleanupError());
+      }
+    } catch {
+      finish(createSocketCleanupError());
+    }
+  });
+
+const registerPartialSocketCleanup = (server, socketServer) => {
+  if (!server || typeof server.close !== "function") {
+    throw createSocketCleanupError();
+  }
+
+  const originalClose = server.close;
+  let cleanupStarted = false;
+  const closeWithSocketCleanup = function (callback) {
+    if (cleanupStarted) return originalClose.call(this, callback);
+    cleanupStarted = true;
+
+    void closeSocketCandidate(socketServer)
+      .then(() => callback?.(), () => callback?.(createSocketCleanupError()))
+      .finally(() => {
+        if (server.close === closeWithSocketCleanup) server.close = originalClose;
+      });
+    return this;
+  };
+
+  server.close = closeWithSocketCleanup;
+};
 
 let io;
 let dependencies = {
@@ -20,6 +68,14 @@ let dependencies = {
   setTimeout: (callback, delay) => setTimeout(callback, delay),
   clearTimeout: (timer) => clearTimeout(timer),
   getIO: () => io,
+  createSocketAdapter: (pubClient, subClient, options) =>
+    createAdapter(pubClient, subClient, options),
+  createSocketServer: (server, options) => new Server(server, options),
+  getSocketAdapterClients: () => redisClientService.getSocketAdapterClients(),
+  getSocketAdapterKey: () => redisClientService.getSocketAdapterKey(),
+  isRedisReady: () => redisClientService.isReady(),
+  isRedisRequired: () => redisClientService.isRequired(),
+  registerPartialSocketCleanup,
 };
 
 export function __setSocketAuthDependencies(overrides = {}) {
@@ -35,6 +91,14 @@ export function __resetSocketAuthDependencies() {
     setTimeout: (callback, delay) => setTimeout(callback, delay),
     clearTimeout: (timer) => clearTimeout(timer),
     getIO: () => io,
+    createSocketAdapter: (pubClient, subClient, options) =>
+      createAdapter(pubClient, subClient, options),
+    createSocketServer: (server, options) => new Server(server, options),
+    getSocketAdapterClients: () => redisClientService.getSocketAdapterClients(),
+    getSocketAdapterKey: () => redisClientService.getSocketAdapterKey(),
+    isRedisReady: () => redisClientService.isReady(),
+    isRedisRequired: () => redisClientService.isRequired(),
+    registerPartialSocketCleanup,
   };
 }
 
@@ -265,18 +329,43 @@ export function handleAuthenticatedConnection(socket) {
 }
 
 export function initSocket(server) {
-  io = new Server(server, {
+  if (dependencies.isRedisRequired() && !dependencies.isRedisReady()) {
+    throw new Error("Redis is unavailable");
+  }
+
+  let socketAdapter;
+  try {
+    if (dependencies.isRedisReady()) {
+      const { pubClient, subClient } = dependencies.getSocketAdapterClients();
+      socketAdapter = dependencies.createSocketAdapter(pubClient, subClient, {
+        key: dependencies.getSocketAdapterKey(),
+      });
+    }
+  } catch {
+    throw new Error("Socket initialization failed");
+  }
+
+  const socketServer = dependencies.createSocketServer(server, {
     cors: {
       origin: getAllowedSocketOrigins(),
       methods: ["GET", "POST"],
     },
   });
 
-  io.use(socketAuthMiddleware);
+  try {
+    if (socketAdapter) {
+      socketServer.adapter(socketAdapter);
+    }
 
-  io.on("connection", handleAuthenticatedConnection);
+    socketServer.use(socketAuthMiddleware);
+    socketServer.on("connection", handleAuthenticatedConnection);
+  } catch {
+    dependencies.registerPartialSocketCleanup(server, socketServer);
+    throw new Error("Socket initialization failed");
+  }
 
-  return io;
+  io = socketServer;
+  return socketServer;
 }
 
 export function getIO() {

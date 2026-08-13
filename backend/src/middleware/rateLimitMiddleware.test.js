@@ -1,18 +1,65 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import { ipKeyGenerator } from "express-rate-limit";
+import { createErrorMiddleware } from "./errorMiddleware.js";
 
 import {
   createIpRateLimitKeyGenerator,
   createAuthenticatedRateLimitKeyGenerator,
   createAuthenticatedJsonRateLimiter,
   createJsonRateLimiter,
+  __resetRateLimitDependencies,
+  __setRateLimitDependencies,
   emailVerificationLimiter,
   rateLimitCode,
   rateLimitMessage,
+  rateLimitStoreUnavailableCode,
 } from "./rateLimitMiddleware.js";
+
+const createRedisCommandHarness = () => {
+  const counters = new Map();
+  return {
+    call(command, ...args) {
+      if (command === "SCRIPT") {
+        return Promise.resolve(args[1].includes("INCR") ? "increment" : "get");
+      }
+      if (command === "EVALSHA") {
+        const [script, _keyCount, key, windowMs] = args;
+        const entry = counters.get(key) || {
+          hits: 0,
+          expiresAt: Date.now() + Number(windowMs || 60_000),
+        };
+        if (script === "increment") entry.hits += 1;
+        counters.set(key, entry);
+        return Promise.resolve([entry.hits, Math.max(1, entry.expiresAt - Date.now())]);
+      }
+      if (command === "DECR") {
+        const entry = counters.get(args[0]);
+        if (entry) entry.hits -= 1;
+        return Promise.resolve(1);
+      }
+      if (command === "DEL") {
+        counters.delete(args[0]);
+        return Promise.resolve(1);
+      }
+      throw new Error("unexpected Redis command");
+    },
+  };
+};
+
+beforeEach(() => {
+  const client = createRedisCommandHarness();
+  __setRateLimitDependencies({
+    getRedisClient: () => client,
+    getRateLimitKeyPrefix: (namespace) => `hairbook:test:rate-limit:${namespace}:`,
+  });
+});
+
+afterEach(() => {
+  __resetRateLimitDependencies();
+});
 
 const createRequest = ({
   ip = "127.0.0.1",
@@ -67,13 +114,90 @@ const createResponse = () => {
 const runLimiter = async (limiter, req) => {
   const res = createResponse();
   let nextCalled = false;
+  let nextError;
 
-  await limiter(req, res, () => {
-    nextCalled = true;
+  await limiter(req, res, (error) => {
+    nextError = error;
+    nextCalled = !error;
   });
 
-  return { nextCalled, res };
+  return { nextCalled, nextError, res };
 };
+
+test("limiters with the same namespace share Redis counters across middleware instances", async () => {
+  const firstInstance = createJsonRateLimiter({
+    namespace: "shared-counter",
+    windowMs: 60 * 1000,
+    limit: 1,
+    enabled: true,
+  });
+  const secondInstance = createJsonRateLimiter({
+    namespace: "shared-counter",
+    windowMs: 60 * 1000,
+    limit: 1,
+    enabled: true,
+  });
+  const firstRequest = createRequest();
+  const secondRequest = createRequest();
+
+  assert.equal((await runLimiter(firstInstance, firstRequest)).nextCalled, true);
+  assert.equal((await runLimiter(secondInstance, secondRequest)).res.statusCode, 429);
+});
+
+test("Redis store failures fail closed instead of allowing a request", async () => {
+  __setRateLimitDependencies({
+    getRedisClient: () => {
+      throw new Error("redis unavailable");
+    },
+  });
+  const limiter = createJsonRateLimiter({
+    namespace: "failure",
+    windowMs: 60 * 1000,
+    limit: 1,
+    enabled: true,
+  });
+
+  const result = await runLimiter(limiter, createRequest());
+
+  assert.equal(result.nextCalled, false);
+  assert.ok(result.nextError instanceof Error);
+  assert.equal(result.nextError.code, rateLimitStoreUnavailableCode);
+  assert.equal(result.res.statusCode, 200);
+});
+
+test("hostile Redis errors are replaced by fixed safe error metadata before generic logging", async () => {
+  const secret = "rediss://redis-user:redis-secret@cache.internal:6380/0 EVAL payload=private";
+  __setRateLimitDependencies({
+    getRedisClient: () => {
+      throw new Error(secret);
+    },
+  });
+  const limiter = createJsonRateLimiter({
+    namespace: "hostile-store-error",
+    windowMs: 60 * 1000,
+    limit: 1,
+    enabled: true,
+  });
+  const { nextError } = await runLimiter(limiter, createRequest());
+  const records = [];
+  const logger = {
+    error(record) {
+      records.push(record);
+    },
+  };
+  const response = createResponse();
+  response.headersSent = false;
+
+  createErrorMiddleware({ logger })(nextError, createRequest(), response, () => {});
+
+  assert.equal(nextError.message, "Rate limit store unavailable");
+  assert.equal(nextError.code, rateLimitStoreUnavailableCode);
+  assert.equal(records.length, 1);
+  const serialized = JSON.stringify(records[0]);
+  for (const fragment of ["rediss://", "redis-secret", "cache.internal", "EVAL", "payload=private"]) {
+    assert.equal(serialized.includes(fragment), false);
+  }
+});
 
 const createWebhookFailureLimiter = (limit = 2) =>
   createJsonRateLimiter({

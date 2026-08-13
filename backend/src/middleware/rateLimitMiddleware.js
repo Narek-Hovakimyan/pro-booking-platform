@@ -1,8 +1,12 @@
 import { ipKeyGenerator, rateLimit } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
+
+import { redisClientService } from "../services/redisClientService.js";
 
 export const rateLimitMessage = "Too many requests, please try again later.";
 export const rateLimitCode = "RATE_LIMITED";
 export const authenticatedRateLimitNamespace = "auth";
+export const rateLimitStoreUnavailableCode = "RATE_LIMIT_STORE_UNAVAILABLE";
 
 const isProduction = () => process.env.NODE_ENV === "production";
 
@@ -27,6 +31,115 @@ export const isRateLimitEnabled = () => {
   return getBooleanEnv("RATE_LIMIT_ENABLED", true);
 };
 
+const isNodeTestProcess = () =>
+  Boolean(process.env.NODE_TEST_CONTEXT) || process.argv.some((argument) => argument.endsWith(".test.js"));
+
+const createTestRedisCommandClient = () => {
+  const counters = new Map();
+  return {
+    async call(command, ...args) {
+      if (command === "SCRIPT") {
+        return args[1].includes("INCR") ? "increment" : "get";
+      }
+      if (command === "EVALSHA") {
+        const [script, _keyCount, key, windowMs] = args;
+        const current = counters.get(key) || {
+          hits: 0,
+          expiresAt: Date.now() + Number(windowMs || 60_000),
+        };
+        if (script === "increment") current.hits += 1;
+        counters.set(key, current);
+        return [current.hits, Math.max(1, current.expiresAt - Date.now())];
+      }
+      if (command === "DECR") {
+        const current = counters.get(args[0]);
+        if (current) current.hits -= 1;
+        return 1;
+      }
+      if (command === "DEL") {
+        counters.delete(args[0]);
+        return 1;
+      }
+      throw new Error("unsupported test Redis command");
+    },
+  };
+};
+
+let testRedisCommandClient;
+const getTestRedisCommandClient = () => {
+  testRedisCommandClient ||= createTestRedisCommandClient();
+  return testRedisCommandClient;
+};
+
+let dependencies = {
+  getRateLimitKeyPrefix: (namespace) => redisClientService.getRateLimitKeyPrefix(namespace),
+  getRedisClient: () =>
+    isNodeTestProcess() ? getTestRedisCommandClient() : redisClientService.getCommandClient(),
+};
+
+export function __setRateLimitDependencies(overrides = {}) {
+  dependencies = { ...dependencies, ...overrides };
+}
+
+export function __resetRateLimitDependencies() {
+  dependencies = {
+    getRateLimitKeyPrefix: (namespace) => redisClientService.getRateLimitKeyPrefix(namespace),
+    getRedisClient: () =>
+      isNodeTestProcess() ? getTestRedisCommandClient() : redisClientService.getCommandClient(),
+  };
+}
+
+const createRedisRateLimitStore = (namespace = "default") => {
+  let options;
+  let store;
+
+  const createStoreUnavailableError = () => {
+    const error = new Error("Rate limit store unavailable");
+    error.name = "RateLimitStoreUnavailableError";
+    error.code = rateLimitStoreUnavailableCode;
+    return error;
+  };
+
+  const runStoreOperation = async (operation) => {
+    try {
+      return await operation();
+    } catch {
+      throw createStoreUnavailableError();
+    }
+  };
+
+  const getStore = async () => {
+    if (!store) {
+      const candidate = new RedisStore({
+        prefix: dependencies.getRateLimitKeyPrefix(namespace),
+        sendCommand: async (...command) => {
+          const client = dependencies.getRedisClient();
+          return client.call(...command);
+        },
+      });
+      await candidate.init(options);
+      store = candidate;
+    }
+
+    return store;
+  };
+
+  return {
+    async init(nextOptions) {
+      options = nextOptions;
+    },
+    async increment(key) {
+      return runStoreOperation(async () => (await getStore()).increment(key));
+    },
+    async decrement(key) {
+      return runStoreOperation(async () => (await getStore()).decrement(key));
+    },
+    async resetKey(key) {
+      return runStoreOperation(async () => (await getStore()).resetKey(key));
+    },
+  };
+};
+
 export const createJsonRateLimiter = ({
   limit,
   windowMs,
@@ -34,6 +147,7 @@ export const createJsonRateLimiter = ({
   skipSuccessfulRequests = false,
   keyGenerator,
   requestWasSuccessful,
+  namespace,
 }) =>
   rateLimit({
     windowMs,
@@ -42,6 +156,8 @@ export const createJsonRateLimiter = ({
     skip: () => (enabled === undefined ? !isRateLimitEnabled() : !enabled),
     skipSuccessfulRequests,
     requestWasSuccessful,
+    store: createRedisRateLimitStore(namespace),
+    passOnStoreError: false,
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req, res) =>
@@ -86,6 +202,7 @@ export const createAuthenticatedJsonRateLimiter = ({
     windowMs,
     enabled,
     skipSuccessfulRequests,
+    namespace,
     keyGenerator: createAuthenticatedRateLimitKeyGenerator(namespace),
   });
 
@@ -139,22 +256,26 @@ const emailVerificationMax = () =>
   getNumberEnv("RATE_LIMIT_EMAIL_VERIFICATION_MAX", isProduction() ? 30 : 240);
 
 export const authLimiter = createJsonRateLimiter({
+  namespace: "auth",
   windowMs: authWindowMs(),
   limit: authMax(),
   skipSuccessfulRequests: true,
 });
 
 export const publicBookingLimiter = createJsonRateLimiter({
+  namespace: "public-booking",
   windowMs: publicWindowMs(),
   limit: publicMax(),
 });
 
 export const promoValidationLimiter = createJsonRateLimiter({
+  namespace: "promo-validation",
   windowMs: publicWindowMs(),
   limit: publicMax(),
 });
 
 export const messageLimiter = createJsonRateLimiter({
+  namespace: "message",
   windowMs: publicWindowMs(),
   limit: publicMax(),
 });
@@ -196,17 +317,20 @@ export const securityMutationLimiter = createAuthenticatedJsonRateLimiter({
 });
 
 export const emailVerificationLimiter = createJsonRateLimiter({
+  namespace: "email-verification",
   windowMs: emailVerificationWindowMs(),
   limit: emailVerificationMax(),
   keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
 export const uploadLimiter = createJsonRateLimiter({
+  namespace: "upload",
   windowMs: uploadWindowMs(),
   limit: uploadMax(),
 });
 
 export const paymentLimiter = createJsonRateLimiter({
+  namespace: "payment",
   windowMs: paymentWindowMs(),
   limit: paymentMax(),
 });
@@ -214,6 +338,7 @@ export const paymentLimiter = createJsonRateLimiter({
 export const createIpRateLimitKeyGenerator = (req) => ipKeyGenerator(req.ip);
 
 export const webhookFailureLimiter = createJsonRateLimiter({
+  namespace: "webhook-failure",
   windowMs: webhookFailureWindowMs(),
   limit: webhookFailureMax(),
   keyGenerator: createIpRateLimitKeyGenerator,

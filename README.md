@@ -364,6 +364,8 @@ Default ports:
 | `JWT_SECRET` | Secret key for signing JWT tokens | `your-long-random-secret` |
 | `CLIENT_URL` | Frontend origin(s) for CORS (comma-separated) | `http://localhost:5173` |
 | `APP_PUBLIC_URL` | Public URL of this backend | `https://api.example.com` |
+| `REDIS_URL` | Required in production: private Redis URL shared by rate limiting and Socket.IO | `rediss://user:password@redis.internal:6380/0` |
+| `REDIS_NAMESPACE` | Optional safe Redis key/channel namespace; use a distinct value per environment | `hairbook` |
 | `RATE_LIMIT_ENABLED` | Enable API rate limiting outside test env | `true` |
 | `RATE_LIMIT_AUTH_WINDOW_MS` | Auth limiter window | `900000` |
 | `RATE_LIMIT_AUTH_MAX` | Auth attempts per window | `20` |
@@ -534,6 +536,8 @@ must all fall back to `index.html` for page reload or direct navigation to work.
 - The backend also disables `X-Powered-By`, sets `nosniff`, frame-deny, referrer, permissions headers on all responses, and emits JSON instead of HTML for unexpected middleware/CORS errors.
 - Manual/dev payment confirmation is disabled in production. Production webhook handling rejects manual/disabled fake paid events; only a future provider adapter with verified webhook confirmation should mark payment attempts paid.
 - Rate limiting is enabled by default outside `NODE_ENV=test` and returns `{ "message": "Too many requests, please try again later.", "code": "RATE_LIMITED" }` for limited requests. Tune the `RATE_LIMIT_*` values for production traffic patterns.
+- Production requires `REDIS_URL`; HairBook uses it for shared rate-limit counters and the Socket.IO Redis adapter, so a missing/unavailable Redis instance prevents startup and makes readiness unavailable. Use a private network, least-privilege Redis ACL credentials, and TLS (`rediss://`) where supported. Do not put Redis URLs or credentials in logs, client configuration, or source control.
+- Horizontally scaled Socket.IO deployments must use load-balancer session affinity while HTTP long-polling is enabled (the default transport). WebSocket-only mode is not required or enabled by this application.
 - `TRUST_PROXY=true` sets Express `trust proxy` to one hop. Enable it only when the app is behind a trusted reverse proxy/load balancer such as nginx, Render, Railway, or a similar platform that controls forwarded IP headers.
 
 ### Upload persistence

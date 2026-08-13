@@ -6,12 +6,20 @@ import {
   __resetSocketAuthDependencies,
   __setSocketAuthDependencies,
   authenticateSocket,
+  disconnectAuthenticatedUserSockets,
   getSocketToken,
   handleAuthenticatedConnection,
+  initSocket,
   joinAuthenticatedUserRoom,
   socketAuthMiddleware,
 } from "./socket.js";
+import Notification from "./models/Notification.js";
 import { signAccessTokenForUser } from "./services/auth/accessTokenService.js";
+import {
+  __notificationServiceTestHooks,
+  createNotification,
+} from "./services/notification/notificationService.js";
+import { createServerLifecycleService } from "./services/serverLifecycleService.js";
 
 const originalJwtSecret = process.env.JWT_SECRET;
 const jwtSecret = "socket-test-secret";
@@ -110,12 +118,104 @@ async function assertSocketAuthFailure(socket) {
 
 afterEach(() => {
   __resetSocketAuthDependencies();
+  __notificationServiceTestHooks.resetGetIO();
   if (originalJwtSecret === undefined) {
     delete process.env.JWT_SECRET;
   } else {
     process.env.JWT_SECRET = originalJwtSecret;
   }
 });
+
+function createSharedSocketAdapterHarness() {
+  const servers = [];
+  const broadcast = (origin, room, operation) => {
+    for (const server of servers) {
+      if (
+        server !== origin &&
+        (!origin.sharedAdapterInstalled || !server.sharedAdapterInstalled)
+      ) {
+        continue;
+      }
+      for (const socket of server.sockets) {
+        if (socket.joinedRooms.includes(room)) operation(socket, server);
+      }
+    }
+  };
+  const disconnectReachableSockets = (origin, force) => {
+    for (const server of servers) {
+      if (
+        server !== origin &&
+        (!origin.sharedAdapterInstalled || !server.sharedAdapterInstalled)
+      ) {
+        continue;
+      }
+      for (const socket of [...server.sockets]) {
+        socket.disconnect(force);
+        server.sockets.delete(socket);
+      }
+    }
+  };
+
+  const createServer = (name) => {
+    const server = {
+      name,
+      sockets: new Set(),
+      adapter() {
+        this.sharedAdapterInstalled = true;
+      },
+      use(handler) {
+        this.middleware = handler;
+      },
+      on(eventName, handler) {
+        if (eventName === "connection") this.connectionHandler = handler;
+      },
+      connect(socket) {
+        this.sockets.add(socket);
+        this.connectionHandler(socket);
+      },
+      get local() {
+        return {
+          disconnectSockets(force) {
+            server.lifecycleCalls.push("local-disconnect");
+            for (const socket of [...server.sockets]) {
+              socket.disconnect(force);
+              server.sockets.delete(socket);
+            }
+          },
+        };
+      },
+      lifecycleCalls: [],
+      disconnectSockets(force) {
+        disconnectReachableSockets(server, force);
+      },
+      close(callback) {
+        this.lifecycleCalls.push("socket-close");
+        callback?.();
+      },
+      to(room) {
+        return {
+          emit(eventName, payload) {
+            broadcast(server, room, (socket) => socket.emit(eventName, payload));
+          },
+        };
+      },
+      in(room) {
+        return {
+          disconnectSockets(force) {
+            broadcast(server, room, (socket, targetServer) => {
+              socket.disconnect(force);
+              targetServer.sockets.delete(socket);
+            });
+          },
+        };
+      },
+    };
+    servers.push(server);
+    return server;
+  };
+
+  return { createServer };
+}
 
 test("getSocketToken uses only trimmed handshake auth token", () => {
   const token = signVersionedToken();
@@ -133,6 +233,280 @@ test("getSocketToken uses only trimmed handshake auth token", () => {
   assert.equal(getSocketToken(createSocket({ authToken: 42 })), null);
   assert.equal(getSocketToken(createSocket({ authToken: ["token"] })), null);
   assert.equal(getSocketToken(createSocket({ authToken: { token: "x" } })), null);
+});
+
+test("Socket.IO installs the shared Redis adapter with the configured channel key", () => {
+  const calls = [];
+  const fakeIo = {
+    adapter(adapter) {
+      calls.push(["adapter", adapter]);
+    },
+    use(handler) {
+      calls.push(["use", handler]);
+    },
+    on(eventName, handler) {
+      calls.push(["on", eventName, handler]);
+    },
+  };
+  const pubClient = {};
+  const subClient = {};
+  const adapter = { shared: true };
+  __setSocketAuthDependencies({
+    createSocketServer: () => fakeIo,
+    createSocketAdapter: (pub, sub, options) => {
+      assert.equal(pub, pubClient);
+      assert.equal(sub, subClient);
+      assert.deepEqual(options, { key: "hairbook:test:socket.io" });
+      return adapter;
+    },
+    getSocketAdapterClients: () => ({ pubClient, subClient }),
+    getSocketAdapterKey: () => "hairbook:test:socket.io",
+    isRedisReady: () => true,
+    isRedisRequired: () => true,
+  });
+
+  assert.equal(initSocket({}), fakeIo);
+  assert.deepEqual(calls.map(([name]) => name), ["adapter", "use", "on"]);
+  assert.equal(calls[0][1], adapter);
+});
+
+test("required Redis unavailability prevents Socket.IO startup without exposing connection data", () => {
+  __setSocketAuthDependencies({
+    createSocketServer: () => ({ adapter() {}, use() {}, on() {} }),
+    isRedisReady: () => false,
+    isRedisRequired: () => true,
+  });
+
+  assert.throws(() => initSocket({}), (error) =>
+    error instanceof Error && error.message === "Redis is unavailable"
+  );
+});
+
+test("partial initSocket failure registers awaited candidate cleanup ahead of Redis", async () => {
+  const calls = [];
+  const listeners = new Map();
+  let releaseCleanup;
+  const cleanupGate = new Promise((resolve) => {
+    releaseCleanup = resolve;
+  });
+  const httpServer = {
+    close(callback) {
+      calls.push("http");
+      callback?.();
+      return this;
+    },
+  };
+  const candidate = {
+    adapter() {},
+    use() {},
+    on(eventName, handler) {
+      listeners.set(eventName, handler);
+      throw new Error("rediss://user:secret@cache.internal/0 EVAL private-payload");
+    },
+    async close(callback) {
+      calls.push("socket:start");
+      await cleanupGate;
+      listeners.clear();
+      await new Promise((resolve) => {
+        httpServer.close((error) => {
+          calls.push("socket:finish");
+          callback?.(error);
+          resolve();
+        });
+      });
+    },
+  };
+  __setSocketAuthDependencies({
+    createSocketServer: () => candidate,
+    createSocketAdapter: () => ({ shared: true }),
+    getSocketAdapterClients: () => ({ pubClient: {}, subClient: {} }),
+    isRedisReady: () => true,
+    isRedisRequired: () => true,
+  });
+
+  assert.throws(
+    () => initSocket(httpServer),
+    (error) => error.message === "Socket initialization failed" && !error.message.includes("secret")
+  );
+  assert.equal(listeners.has("connection"), true);
+
+  const lifecycle = createServerLifecycleService({
+    stopBookingReminderSchedulerFn: async () => {},
+    stopWaitlistExpirationSchedulerFn: async () => {},
+    stopSubscriptionExpirationSchedulerFn: async () => {},
+    closeSocketServerFn: async () => calls.push("global-socket"),
+    shutdownRedisFn: async () => calls.push("redis"),
+    disconnectDatabaseFn: async () => calls.push("db"),
+  });
+  lifecycle.configure({ server: httpServer });
+  const firstShutdown = lifecycle.shutdown("startup_failure");
+  const secondShutdown = lifecycle.shutdown("startup_failure");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, ["socket:start"]);
+  assert.equal(calls.includes("redis"), false);
+  releaseCleanup();
+
+  assert.deepEqual(await firstShutdown, { ok: true, exitCode: 0 });
+  assert.deepEqual(await secondShutdown, { ok: true, exitCode: 0 });
+  assert.deepEqual(calls, [
+    "socket:start",
+    "http",
+    "socket:finish",
+    "global-socket",
+    "redis",
+    "db",
+  ]);
+  assert.equal(listeners.size, 0);
+  assert.equal(calls.filter((entry) => entry === "socket:start").length, 1);
+});
+
+test("shared adapter semantics deliver remote room emits and auth revocation across instances", () => {
+  const cluster = createSharedSocketAdapterHarness();
+  const instanceA = cluster.createServer("A");
+  const instanceB = cluster.createServer("B");
+  const commonDependencies = {
+    createSocketAdapter: () => ({ shared: true }),
+    getSocketAdapterClients: () => ({ pubClient: {}, subClient: {} }),
+    isRedisReady: () => true,
+    isRedisRequired: () => true,
+  };
+
+  __setSocketAuthDependencies({ ...commonDependencies, createSocketServer: () => instanceA });
+  initSocket({});
+  __setSocketAuthDependencies({ ...commonDependencies, createSocketServer: () => instanceB });
+  initSocket({});
+
+  const remoteSocket = createSocket({ userId: "remote-user" });
+  remoteSocket.accessTokenExpiresAt = Date.now() + 60_000;
+  const unrelatedSocket = createSocket({ userId: "unrelated-user" });
+  unrelatedSocket.accessTokenExpiresAt = Date.now() + 60_000;
+  instanceB.connect(remoteSocket);
+  instanceB.connect(unrelatedSocket);
+
+  instanceA.to("user:remote-user").emit("booking:updated", { id: "booking-1" });
+  assert.deepEqual(remoteSocket.emittedEvents, [
+    ["booking:updated", { id: "booking-1" }],
+  ]);
+
+  __setSocketAuthDependencies({ getIO: () => instanceA });
+  assert.deepEqual(disconnectAuthenticatedUserSockets("remote-user"), {
+    ok: true,
+    room: "user:remote-user",
+    disconnected: true,
+  });
+  assert.deepEqual(remoteSocket.emittedEvents[1], [
+    "auth:refresh-required",
+    { code: "SOCKET_AUTH_REQUIRED" },
+  ]);
+  assert.deepEqual(remoteSocket.disconnected, [true]);
+  assert.deepEqual(unrelatedSocket.disconnected, []);
+
+  instanceA.to("user:unrelated-user").emit("booking:updated", { id: "booking-2" });
+  assert.deepEqual(unrelatedSocket.emittedEvents, [
+    ["booking:updated", { id: "booking-2" }],
+  ]);
+  assert.equal(remoteSocket.emittedEvents.some(([, payload]) => payload?.id === "booking-2"), false);
+});
+
+test("lifecycle shutdown is local while explicit auth revocation remains cross-instance", async () => {
+  const cluster = createSharedSocketAdapterHarness();
+  const instanceA = cluster.createServer("A");
+  const instanceB = cluster.createServer("B");
+  const commonDependencies = {
+    createSocketAdapter: () => ({ shared: true }),
+    getSocketAdapterClients: () => ({ pubClient: {}, subClient: {} }),
+    isRedisReady: () => true,
+    isRedisRequired: () => true,
+  };
+  __setSocketAuthDependencies({ ...commonDependencies, createSocketServer: () => instanceA });
+  initSocket({});
+  __setSocketAuthDependencies({ ...commonDependencies, createSocketServer: () => instanceB });
+  initSocket({});
+
+  const localSocket = createSocket({ userId: "local-user" });
+  const remoteTarget = createSocket({ userId: "remote-target" });
+  const remoteUnrelated = createSocket({ userId: "remote-unrelated" });
+  for (const socket of [localSocket, remoteTarget, remoteUnrelated]) {
+    socket.accessTokenExpiresAt = Date.now() + 60_000;
+  }
+  instanceA.connect(localSocket);
+  instanceB.connect(remoteTarget);
+  instanceB.connect(remoteUnrelated);
+
+  __setSocketAuthDependencies({ getIO: () => instanceA });
+  disconnectAuthenticatedUserSockets("remote-target");
+  assert.deepEqual(remoteTarget.disconnected, [true]);
+  assert.deepEqual(remoteUnrelated.disconnected, []);
+
+  const calls = [];
+  instanceA.lifecycleCalls = calls;
+  const lifecycle = createServerLifecycleService({
+    stopBookingReminderSchedulerFn: async () => {},
+    stopWaitlistExpirationSchedulerFn: async () => {},
+    stopSubscriptionExpirationSchedulerFn: async () => {},
+    closeHttpServerFn: async () => {},
+    shutdownRedisFn: async () => calls.push("redis"),
+    disconnectDatabaseFn: async () => calls.push("db"),
+  });
+  lifecycle.configure({ socketServer: instanceA });
+
+  const [first, second] = await Promise.all([
+    lifecycle.shutdown("SIGTERM"),
+    lifecycle.shutdown("SIGTERM"),
+  ]);
+
+  assert.deepEqual(first, { ok: true, exitCode: 0 });
+  assert.deepEqual(second, first);
+  assert.deepEqual(localSocket.disconnected, [true]);
+  assert.deepEqual(remoteUnrelated.disconnected, []);
+  assert.deepEqual(calls, ["local-disconnect", "socket-close", "redis", "db"]);
+
+  instanceB.to("user:remote-unrelated").emit("booking:updated", { id: "booking-after-shutdown" });
+  assert.deepEqual(remoteUnrelated.emittedEvents, [
+    ["booking:updated", { id: "booking-after-shutdown" }],
+  ]);
+});
+
+test("cross-instance notification delivery persists and emits exactly once", async () => {
+  const cluster = createSharedSocketAdapterHarness();
+  const instanceA = cluster.createServer("A");
+  const instanceB = cluster.createServer("B");
+  const commonDependencies = {
+    createSocketAdapter: () => ({ shared: true }),
+    getSocketAdapterClients: () => ({ pubClient: {}, subClient: {} }),
+    isRedisReady: () => true,
+    isRedisRequired: () => true,
+  };
+  __setSocketAuthDependencies({ ...commonDependencies, createSocketServer: () => instanceA });
+  initSocket({});
+  __setSocketAuthDependencies({ ...commonDependencies, createSocketServer: () => instanceB });
+  initSocket({});
+  const recipient = createSocket({ userId: "recipient-user" });
+  recipient.accessTokenExpiresAt = Date.now() + 60_000;
+  instanceA.connect(recipient);
+
+  const originalCreate = Notification.create;
+  let persistenceCount = 0;
+  Notification.create = async (payload) => {
+    persistenceCount += 1;
+    return { toObject: () => ({ _id: "notification-1", ...payload }) };
+  };
+  __notificationServiceTestHooks.setGetIO(() => instanceB);
+
+  try {
+    await createNotification({
+      userId: "recipient-user",
+      type: "booking_update",
+      message: "Booking updated",
+    });
+  } finally {
+    Notification.create = originalCreate;
+  }
+
+  assert.equal(persistenceCount, 1);
+  assert.equal(recipient.emittedEvents.length, 1);
+  assert.equal(recipient.emittedEvents[0][0], "notification");
 });
 
 test("socket handshake verifies token, loads fresh authVersion, and trusts fetched user identity", async () => {

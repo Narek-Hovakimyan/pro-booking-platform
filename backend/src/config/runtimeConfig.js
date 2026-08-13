@@ -124,6 +124,36 @@ function normalizeOrigin(value) {
   return { origin: parsed.origin, reason: "" };
 }
 
+function normalizeRedisNamespace(value) {
+  const namespace = normalizeString(value);
+
+  if (!namespace) {
+    return { namespace: "hairbook", reason: "" };
+  }
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(namespace)) {
+    return { namespace: "", reason: "invalid_namespace" };
+  }
+
+  return { namespace, reason: "" };
+}
+
+function validateRedisUrl(value) {
+  const redisUrl = normalizeString(value);
+  if (!redisUrl) return "missing";
+
+  try {
+    const parsed = new URL(redisUrl);
+    if ((parsed.protocol !== "redis:" && parsed.protocol !== "rediss:") || !parsed.hostname) {
+      return "invalid";
+    }
+  } catch {
+    return "invalid";
+  }
+
+  return "";
+}
+
 export function parseClientOrigins(value) {
   const origins = normalizeString(value);
   return origins ? origins.split(",").map((origin) => origin.trim()) : [];
@@ -169,6 +199,11 @@ export function validateRuntimeConfig(env = process.env) {
   }
 
   const trustProxy = normalizeString(env.TRUST_PROXY);
+  const redisNamespaceResult = normalizeRedisNamespace(env.REDIS_NAMESPACE);
+  if (redisNamespaceResult.reason) {
+    failures.push(makeFailure("REDIS_NAMESPACE", redisNamespaceResult.reason));
+  }
+
   if (nodeEnv === "production") {
     if (normalizedOrigins.length === 0) {
       failures.push(makeFailure("CLIENT_URL", "missing"));
@@ -180,6 +215,11 @@ export function validateRuntimeConfig(env = process.env) {
     const jwtSecretFailure = validateProductionJwtSecret(env.JWT_SECRET);
     if (jwtSecretFailure) {
       failures.push(makeFailure("JWT_SECRET", jwtSecretFailure));
+    }
+
+    const redisUrlFailure = validateRedisUrl(env.REDIS_URL);
+    if (redisUrlFailure) {
+      failures.push(makeFailure("REDIS_URL", redisUrlFailure));
     }
   }
 
@@ -193,6 +233,8 @@ export function validateRuntimeConfig(env = process.env) {
     clientOrigins: normalizedOrigins,
     clientUrl: normalizedOrigins.join(","),
     trustProxy: trustProxy === "true",
+    redisUrl: normalizeString(env.REDIS_URL),
+    redisNamespace: redisNamespaceResult.namespace,
   };
 }
 
@@ -200,6 +242,7 @@ export function applyRuntimeConfig(config, env = process.env) {
   env.NODE_ENV = config.nodeEnv;
   env.CLIENT_URL = config.clientUrl;
   env.TRUST_PROXY = config.trustProxy ? "true" : normalizeString(env.TRUST_PROXY);
+  env.REDIS_NAMESPACE = config.redisNamespace;
   return env;
 }
 

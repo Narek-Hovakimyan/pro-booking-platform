@@ -44,6 +44,7 @@ import platformRoutes from "./routes/platform/platformRoutes.js";
 import { servePublicPortfolioImage } from "./controllers/portfolio/portfolioPhotoMediaController.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/booking/bookingReminderScheduler.js";
+import { redisClientService } from "./services/redisClientService.js";
 import { serverLifecycleService } from "./services/serverLifecycleService.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
@@ -124,12 +125,9 @@ const corsOptions = {
 app.use(requestContextMiddleware(logger));
 app.use(sentryRequestContextMiddleware);
 
-const socketServer = initSocket(server);
-
 serverLifecycleService.configure({
   logger,
   server,
-  socketServer,
 });
 serverLifecycleService.installSignalHandlers();
 
@@ -210,39 +208,80 @@ app.use("/api/subscriptions", subscriptionRoutes);
 installSentryExpressErrorHandler(app);
 app.use(errorMiddleware);
 
+const listenForStartup = () =>
+  new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(PORT);
+  });
+
 const startServer = async () => {
   await connectDB();
+  let socketServer;
   const cronTasks = [];
 
-  if (process.env.ENABLE_CLEANUP_NON_WORKING_DAYS_CRON === "true") {
-    logger.info("Starting non-working days cleanup cron");
-    cronTasks.push(startCleanupNonWorkingDaysCron());
-  } else {
-    logger.info("Non-working days cleanup cron skipped (ENABLE_CLEANUP_NON_WORKING_DAYS_CRON !== true)");
+  try {
+    await redisClientService.initialize({
+      url: runtimeConfig.redisUrl,
+      namespace: runtimeConfig.redisNamespace,
+      required: runtimeConfig.isProduction,
+    });
+    socketServer = initSocket(server);
+    serverLifecycleService.configure({ socketServer });
+
+    if (process.env.ENABLE_CLEANUP_NON_WORKING_DAYS_CRON === "true") {
+      logger.info("Starting non-working days cleanup cron");
+      cronTasks.push(startCleanupNonWorkingDaysCron());
+    } else {
+      logger.info("Non-working days cleanup cron skipped (ENABLE_CLEANUP_NON_WORKING_DAYS_CRON !== true)");
+    }
+
+    if (process.env.ENABLE_EXPIRE_PENDING_BOOKINGS_CRON === "true") {
+      logger.info("Starting pending booking expiration cron");
+      cronTasks.push(startExpirePendingBookingsCron());
+    } else {
+      logger.info("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== true)");
+    }
+
+    if (process.env.ENABLE_EVENT_REMINDERS_CRON === "true") {
+      logger.info("Starting event reminders cron");
+      cronTasks.push(startEventRemindersCron());
+    } else {
+      logger.info("Event reminders cron skipped (ENABLE_EVENT_REMINDERS_CRON !== true)");
+    }
+
+    serverLifecycleService.setCronTasks(cronTasks);
+    await listenForStartup();
+  } catch {
+    serverLifecycleService.setCronTasks(cronTasks);
+    await serverLifecycleService.shutdown("startup_failure");
+    logger.fatal(
+      { event: "server.initialization_failed", phase: "startup" },
+      "Required shared infrastructure is unavailable"
+    );
+    process.exitCode = 1;
+    return;
   }
 
-  if (process.env.ENABLE_EXPIRE_PENDING_BOOKINGS_CRON === "true") {
-    logger.info("Starting pending booking expiration cron");
-    cronTasks.push(startExpirePendingBookingsCron());
-  } else {
-    logger.info("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== true)");
-  }
-
-  if (process.env.ENABLE_EVENT_REMINDERS_CRON === "true") {
-    logger.info("Starting event reminders cron");
-    cronTasks.push(startEventRemindersCron());
-  } else {
-    logger.info("Event reminders cron skipped (ENABLE_EVENT_REMINDERS_CRON !== true)");
-  }
-
-  serverLifecycleService.setCronTasks(cronTasks);
-
-  server.listen(PORT, () => {
-    logger.info(`Server running on port ${PORT}`);
-    startBookingReminderScheduler();
-    startWaitlistExpirationScheduler();
-    startSubscriptionExpirationScheduler();
-  });
+  logger.info(`Server running on port ${PORT}`);
+  startBookingReminderScheduler();
+  startWaitlistExpirationScheduler();
+  startSubscriptionExpirationScheduler();
 };
 
-startServer();
+void startServer().catch(() => {
+  logger.fatal(
+    { event: "server.initialization_failed", phase: "startup" },
+    "Server initialization failed"
+  );
+  process.exitCode = 1;
+});
