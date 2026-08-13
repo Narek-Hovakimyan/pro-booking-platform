@@ -2355,6 +2355,108 @@ test("duplicate transaction callback execution does not create duplicate booking
   assert.equal(activationAttempts, 2);
 });
 
+test("voucher claim and redemption roll back before a retried booking transaction commits", async () => {
+  const createdBookings = [];
+  const voucher = {
+    _id: "voucher-transaction-retry",
+    code: "RETRY10",
+    ownerType: "barber",
+    ownerId: barberId,
+    amount: 10,
+    discountType: "fixed",
+    active: true,
+    currentUses: 0,
+    maxUses: 1,
+    redemptionBookingIds: [],
+  };
+  let transactionAttempts = 0;
+  let claimAttempts = 0;
+  let pendingHoldWrites = 0;
+  let committedHoldWrites = 0;
+  let notificationWrites = 0;
+  let socketEmits = 0;
+
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({
+    createdBookings,
+    withTransaction: async (callback) => {
+      transactionAttempts += 1;
+      await callback();
+      const transientError = Object.assign(new Error("transient transaction failure"), {
+        hasErrorLabel: (label) => label === "TransientTransactionError",
+      });
+      try {
+        throw transientError;
+      } catch (error) {
+        assert.equal(error.hasErrorLabel("TransientTransactionError"), true);
+      }
+      voucher.currentUses = 0;
+      voucher.redemptionBookingIds = [];
+      pendingHoldWrites = 0;
+      transactionAttempts += 1;
+      const result = await callback();
+      committedHoldWrites = pendingHoldWrites;
+      return result;
+    },
+  });
+  BookingSlotHold.bulkWrite = async (operations, options) => {
+    assert.ok(options?.session);
+    pendingHoldWrites += operations.length;
+    return { ok: 1 };
+  };
+  Voucher.findOne = async (_query, _projection, options) => {
+    assert.ok(options?.session);
+    return voucher;
+  };
+  Voucher.findOneAndUpdate = async (_filter, update, options) => {
+    assert.ok(options?.session);
+    assert.equal(voucher.currentUses, 0);
+    claimAttempts += 1;
+    const claimed = { ...voucher };
+    voucher.currentUses += update.$inc.currentUses;
+    voucher.redemptionBookingIds.push(update.$addToSet.redemptionBookingIds);
+    return claimed;
+  };
+  Notification.create = async () => {
+    notificationWrites += 1;
+  };
+  __bookingSideEffectsTestHooks.setGetIO(() => ({
+    to: () => ({
+      emit: (event) => {
+        if (event === "bookingUpdated") socketEmits += 1;
+      },
+    }),
+  }));
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        voucherCode: "RETRY10",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(transactionAttempts, 2);
+  assert.equal(claimAttempts, 2);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(committedHoldWrites > 0, true);
+  assert.equal(voucher.currentUses, 1);
+  assert.deepEqual(voucher.redemptionBookingIds, [createdBookings[0]._id]);
+  assert.equal(notificationWrites, 1);
+  assert.equal(socketEmits, 2);
+});
+
 test("transaction-capable booking create uses a Mongo session for booking and media activation", async () => {
   const filename = "ref-transaction.jpg";
   createReferenceUploadFile(filename);

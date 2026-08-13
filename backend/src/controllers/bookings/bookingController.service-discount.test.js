@@ -566,14 +566,11 @@ test("contract: voucher quote preview matches create pricing and create claims v
     redemptionBookingIds: [],
   };
   let claimCalls = 0;
-  const redemptionUpdates = [];
+  let claimUpdate = null;
   Voucher.findOne = async () => voucher;
-  Voucher.findOneAndUpdate = async () => {
+  Voucher.findOneAndUpdate = async (_filter, update) => {
     claimCalls += 1;
-    return voucher;
-  };
-  Voucher.findByIdAndUpdate = async (voucherId, update) => {
-    redemptionUpdates.push({ voucherId, update });
+    claimUpdate = update;
     return voucher;
   };
 
@@ -617,11 +614,11 @@ test("contract: voucher quote preview matches create pricing and create claims v
 
   assert.equal(createRes.statusCode, 201);
   assert.equal(claimCalls, 1);
-  assert.equal(redemptionUpdates.length, 1);
-  assert.deepEqual(redemptionUpdates[0], {
-    voucherId: "voucher-contract",
-    update: { $addToSet: { redemptionBookingIds: "booking-1" } },
-  });
+  assert.equal(claimUpdate.$inc.currentUses, 1);
+  assert.equal(
+    mongoose.isObjectIdOrHexString(claimUpdate.$addToSet.redemptionBookingIds),
+    true
+  );
   assert.equal(createdBookings[0].serviceOriginalPrice, quoteRes.body.originalPrice);
   assert.equal(createdBookings[0].serviceDiscountAmount, quoteRes.body.serviceDiscountAmount);
   assert.equal(createdBookings[0].originalPrice, quoteRes.body.serviceDiscountedPrice);

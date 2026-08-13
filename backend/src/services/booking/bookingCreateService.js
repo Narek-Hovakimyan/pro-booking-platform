@@ -10,8 +10,6 @@ import {
 } from "../subscriptionService.js";
 import {
   buildBookingPricing,
-  rollbackVoucherClaim,
-  recordVoucherRedemption,
 } from "./bookingPricingService.js";
 import {
   parseConsultationAndConsent,
@@ -368,6 +366,8 @@ export const createBookingService = async ({
             salonId: bookingReadiness.salonId,
             voucherCode: rawVoucherCode,
             claimVoucher: Boolean(rawVoucherCode),
+            bookingId,
+            session,
           });
         } catch (pricingError) {
           pricingError.bookingPricingError = true;
@@ -454,9 +454,6 @@ export const createBookingService = async ({
 
       await session.withTransaction(createInsideMutation);
     } catch (createErr) {
-      if (voucherClaim) {
-        await rollbackVoucherClaim(voucherClaim.voucher._id).catch(() => {});
-      }
       await bookingCreateHooks.compensateBookingReferenceMediaFailure({
         media: stagedReferenceMedia,
         promotedMedia: promotedReferenceMedia.length
@@ -493,10 +490,6 @@ export const createBookingService = async ({
       throw createErr;
     } finally {
       await session?.endSession?.().catch(() => {});
-    }
-
-    if (voucherClaim) {
-      await recordVoucherRedemption(voucherClaim.voucher._id, booking._id);
     }
 
     let payment = null;

@@ -554,7 +554,7 @@ test("createBooking with voucher amount exceeding service price caps at price=0 
   assert.equal(createdBookings[0].finalPrice, 0);       // audit trail matches
 });
 
-test("voucher claim is rolled back if Booking.create fails after atomic claim", async () => {
+test("failed booking creation does not issue an out-of-transaction voucher rollback", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
 
@@ -580,13 +580,9 @@ test("voucher claim is rolled back if Booking.create fails after atomic claim", 
   };
   Voucher.findOne = async () => claimed;
 
-  let rollbackCalled = false;
-  let rollbackVoucherId = null;
-  Voucher.findByIdAndUpdate = async (id, update) => {
-    if (update && update.$inc && update.$inc.currentUses === -1) {
-      rollbackCalled = true;
-      rollbackVoucherId = id;
-    }
+  let secondaryVoucherWrites = 0;
+  Voucher.findByIdAndUpdate = async () => {
+    secondaryVoucherWrites += 1;
     return { ...voucher };
   };
 
@@ -617,154 +613,7 @@ test("voucher claim is rolled back if Booking.create fails after atomic claim", 
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not create booking");
-  // Confirm rollback was called
-  assert.equal(rollbackCalled, true);
-  assert.equal(rollbackVoucherId, "voucher-rollback");
-});
-
-test("voucher rollback secondary-write failure is logged safely without changing create failure semantics", async () => {
-  const createdBookings = [];
-  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
-
-  const voucher = {
-    _id: validVoucherId,
-    ownerType: "barber",
-    ownerId: barberId,
-    code: "ROLLBACK",
-    title: "Rollback Test",
-    type: "amount",
-    amount: 10,
-    maxUses: 5,
-    currentUses: 0,
-    active: true,
-    expiresAt: null,
-    redemptionBookingIds: [],
-  };
-
-  Voucher.findOne = async () => voucher;
-  Voucher.findOneAndUpdate = async () => voucher;
-
-  const loggerCalls = installVoucherLoggerSpy();
-  let mutationAttempts = 0;
-  Voucher.findByIdAndUpdate = async (id, update) => {
-    mutationAttempts += 1;
-    assert.equal(id, validVoucherId);
-    assert.deepEqual(update, { $inc: { currentUses: -1 } });
-    throw Object.assign(new Error("/srv/vouchers/rollback"), {
-      name: "../../etc/passwd",
-      code: "/tmp/secret",
-    });
-  };
-
-  console.error = () => {};
-  Booking.create = async () => {
-    throw new Error("database unavailable");
-  };
-
-  const res = createResponse();
-  await createBooking(
-    {
-      user: client,
-      body: {
-        barberId,
-        clientId,
-        serviceId,
-        bookingDate,
-        time: "10:00",
-        salonId,
-        clientName: "Client",
-        voucherCode: "ROLLBACK",
-      },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 500);
-  assert.equal(res.body.message, "Could not create booking");
-  assert.equal(mutationAttempts, 1);
-  assert.equal(loggerCalls.length, 1);
-  assert.deepEqual(loggerCalls[0][0], {
-    err: { name: "Error" },
-    event: "booking.voucher_secondary_write_failed",
-    operation: "rollback_claim",
-    voucherId: validVoucherId,
-    bookingId: undefined,
-  });
-});
-
-test("voucher redemption secondary-write failure is logged safely without changing successful booking behavior", async () => {
-  const createdBookings = [];
-  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
-
-  const voucher = {
-    _id: validVoucherId,
-    ownerType: "barber",
-    ownerId: barberId,
-    code: "WELCOME10",
-    title: "Welcome 10",
-    type: "amount",
-    amount: 10,
-    maxUses: 5,
-    currentUses: 0,
-    active: true,
-    expiresAt: null,
-    redemptionBookingIds: [],
-  };
-
-  Voucher.findOne = async () => voucher;
-  Voucher.findOneAndUpdate = async () => voucher;
-
-  const loggerCalls = installVoucherLoggerSpy();
-  let mutationAttempts = 0;
-  Voucher.findByIdAndUpdate = async (id, update) => {
-    mutationAttempts += 1;
-    assert.equal(id, validVoucherId);
-    assert.deepEqual(update, {
-      $addToSet: { redemptionBookingIds: validBookingId },
-    });
-    throw Object.assign(new Error("../redemption-store"), {
-      name: "/unsafe/name",
-      code: "E_PRIVATE:/etc/shadow",
-    });
-  };
-
-  Booking.create = async (payload) => {
-    const booking = {
-      ...(Array.isArray(payload) ? payload[0] : payload),
-      _id: validBookingId,
-    };
-    createdBookings.push(booking);
-    return Array.isArray(payload) ? [booking] : booking;
-  };
-
-  const res = createResponse();
-  await createBooking(
-    {
-      user: client,
-      body: {
-        barberId,
-        clientId,
-        serviceId,
-        bookingDate,
-        time: "10:00",
-        salonId,
-        clientName: "Client",
-        voucherCode: "WELCOME10",
-      },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 201);
-  assert.equal(mutationAttempts, 1);
-  assert.equal(loggerCalls.length, 1);
-  assert.deepEqual(loggerCalls[0][0], {
-    err: { name: "Error" },
-    event: "booking.voucher_secondary_write_failed",
-    operation: "record_redemption",
-    voucherId: validVoucherId,
-    bookingId: validBookingId,
-  });
+  assert.equal(secondaryVoucherWrites, 0);
 });
 
 test("voucher restore secondary-write failure is logged safely without changing cancel behavior", async () => {
@@ -816,66 +665,6 @@ test("voucher restore secondary-write failure is logged safely without changing 
     voucherId: validVoucherId,
     bookingId: validBookingId,
   });
-});
-
-test("voucher secondary-write logging tolerates missing logger and unsafe ids", async () => {
-  const createdBookings = [];
-  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
-
-  const voucher = {
-    _id: "voucher-unsafe",
-    ownerType: "barber",
-    ownerId: barberId,
-    code: "ROLLBACK",
-    title: "Rollback",
-    type: "amount",
-    amount: 10,
-    maxUses: 5,
-    currentUses: 0,
-    active: true,
-    expiresAt: null,
-    redemptionBookingIds: [],
-  };
-
-  Voucher.findOne = async () => voucher;
-  Voucher.findOneAndUpdate = async () => voucher;
-
-  const loggerCalls = installVoucherLoggerSpy({ missing: true });
-  let mutationAttempts = 0;
-  Voucher.findByIdAndUpdate = async (id, update) => {
-    mutationAttempts += 1;
-    assert.equal(id, "voucher-unsafe");
-    assert.deepEqual(update, { $inc: { currentUses: -1 } });
-    throw new Error("secondary write failed");
-  };
-
-  console.error = () => {};
-  Booking.create = async () => {
-    throw new Error("database unavailable");
-  };
-
-  const res = createResponse();
-  await createBooking(
-    {
-      user: client,
-      body: {
-        barberId,
-        clientId,
-        serviceId,
-        bookingDate,
-        time: "10:00",
-        salonId,
-        clientName: "Client",
-        voucherCode: "ROLLBACK",
-      },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 500);
-  assert.equal(res.body.message, "Could not create booking");
-  assert.equal(mutationAttempts, 1);
-  assert.equal(loggerCalls.length, 0);
 });
 
 test("repeated cancel/reject on voucher booking does not double-restore voucher use", async () => {

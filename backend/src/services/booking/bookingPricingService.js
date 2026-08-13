@@ -68,11 +68,16 @@ export const validateVoucherForBooking = async ({
   salonId,
   serviceId,
   servicePrice,
+  session,
 }) => {
   const code = String(rawCode || "").toUpperCase().trim();
   if (!code) return null;
 
-  const voucher = await Voucher.findOne({ code });
+  const voucher = await Voucher.findOne(
+    { code },
+    null,
+    session ? { session } : undefined
+  );
   if (!voucher) {
     throw Object.assign(new Error("Invalid voucher code"), { statusCode: 400 });
   }
@@ -143,6 +148,8 @@ export const claimVoucherForBooking = async ({
   salonId,
   serviceId,
   servicePrice,
+  bookingId,
+  session,
 }) => {
   const preview = await validateVoucherForBooking({
     voucherCode: rawCode,
@@ -150,6 +157,7 @@ export const claimVoucherForBooking = async ({
     salonId,
     serviceId,
     servicePrice,
+    session,
   });
   const voucher = preview.voucher;
 
@@ -164,8 +172,11 @@ export const claimVoucherForBooking = async ({
 
   const claimed = await Voucher.findOneAndUpdate(
     claimFilter,
-    { $inc: { currentUses: 1 } },
-    { new: false }
+    {
+      $inc: { currentUses: 1 },
+      ...(bookingId ? { $addToSet: { redemptionBookingIds: bookingId } } : {}),
+    },
+    { new: false, ...(session ? { session } : {}) }
   );
 
   if (!claimed) {
@@ -203,6 +214,8 @@ export const buildBookingPricing = async ({
   salonId,
   voucherCode,
   claimVoucher = false,
+  bookingId,
+  session,
 }) => {
   const parsedServicePrice = Number(service.price || 0);
   const originalPrice = Number.isFinite(parsedServicePrice)
@@ -221,6 +234,8 @@ export const buildBookingPricing = async ({
       salonId,
       serviceId,
       servicePrice: serviceDiscountedPrice,
+      bookingId,
+      session,
     };
     voucherClaim = claimVoucher
       ? await claimVoucherForBooking(voucherPayload)
