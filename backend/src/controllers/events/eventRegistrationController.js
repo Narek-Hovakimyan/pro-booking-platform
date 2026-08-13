@@ -2,11 +2,19 @@ import Event from "../../models/Event.js";
 import EventCertificate from "../../models/EventCertificate.js";
 import EventRegistration from "../../models/EventRegistration.js";
 import EventReview from "../../models/EventReview.js";
+import {
+  countApprovedRegistrations,
+  loadEventOrError,
+  loadManageableEventOrError,
+  validateApproveTransition,
+  validateCancellationPreconditions,
+  validateRegistrationRequestPreconditions,
+  validateRejectTransition,
+  validateWaitlistTransition,
+} from "../../services/eventRegistrationValidation.js";
 import { createNotification } from "../notifications/notificationController.js";
-import { getEventAuthorization } from "../../utils/eventAuthorization.js";
 import { getEventNotificationData } from "../../utils/eventNotificationData.js";
 import {
-  getId,
   APPROVED_REGISTRATION_STATUS,
   PENDING_REGISTRATION_STATUS,
   CANCELLED_REGISTRATION_STATUS,
@@ -20,34 +28,29 @@ import {
 } from "../../utils/eventUtils.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
-const countApprovedRegistrations = async (eventId) =>
-  EventRegistration.countDocuments({
-    eventId,
-    status: APPROVED_REGISTRATION_STATUS,
-  });
-
 /**
  * POST /api/events/:id/register
  * Auth: authenticated user
  */
 export const registerForEvent = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    const eventResult = await loadEventOrError({ eventId: req.params.id });
+    if (eventResult.error) {
+      return res.status(eventResult.code).json({ message: eventResult.error });
     }
-
-    if (event.status !== "upcoming") {
-      return res.status(400).json({ message: "Event is not open for registration" });
-    }
-
-    // Organizer cannot register for their own event
+    const { event } = eventResult;
     const userId = req.user._id;
-    const eventOrganizerId = getId(event.organizerId);
-    if (eventOrganizerId && String(eventOrganizerId) === String(userId)) {
-      return res.status(400).json({
-        message: "Organizer cannot register for their own event",
-      });
+
+    const earlyPrecondition = validateRegistrationRequestPreconditions({
+      event,
+      userId,
+      existingRegistration: null,
+      includeCapacity: false,
+    });
+    if (earlyPrecondition.error) {
+      return res
+        .status(earlyPrecondition.code)
+        .json({ message: earlyPrecondition.error });
     }
 
     const existing = await EventRegistration.findOne({
@@ -55,34 +58,29 @@ export const registerForEvent = async (req, res) => {
       ...buildUserRegistrationQuery(userId),
     });
     normalizeRegistrationRecord(existing, userId);
-
-    if (existing?.status === PENDING_REGISTRATION_STATUS) {
-      return res.status(400).json({ message: "Registration already pending" });
-    }
-
-    if (existing?.status === APPROVED_REGISTRATION_STATUS) {
-      return res.status(400).json({
-        message: "You are already approved for this event",
-      });
-    }
-
-    if (existing?.status === REJECTED_REGISTRATION_STATUS) {
-      return res.status(400).json({
-        message: "Your registration was already rejected for this event",
-      });
-    }
-
-    if (existing?.status === WAITLISTED_REGISTRATION_STATUS) {
-      return res.status(400).json({
-        message: "You are already on the waiting list for this event",
-      });
+    const existingPrecondition = validateRegistrationRequestPreconditions({
+      event,
+      userId,
+      existingRegistration: existing,
+      includeCapacity: false,
+    });
+    if (existingPrecondition.error) {
+      return res
+        .status(existingPrecondition.code)
+        .json({ message: existingPrecondition.error });
     }
 
     const currentCount = await countApprovedRegistrations(event._id);
-
-    const shouldWaitlist =
-      Number(event.maxParticipants || 0) > 0 &&
-      currentCount >= Number(event.maxParticipants || 0);
+    const precondition = validateRegistrationRequestPreconditions({
+      event,
+      userId,
+      existingRegistration: existing,
+      approvedCount: currentCount,
+    });
+    if (precondition.error) {
+      return res.status(precondition.code).json({ message: precondition.error });
+    }
+    const { shouldWaitlist } = precondition;
 
     let registration;
 
@@ -142,10 +140,11 @@ export const registerForEvent = async (req, res) => {
  */
 export const cancelRegistration = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    const eventResult = await loadEventOrError({ eventId: req.params.id });
+    if (eventResult.error) {
+      return res.status(eventResult.code).json({ message: eventResult.error });
     }
+    const { event } = eventResult;
 
     const registration = await EventRegistration.findOne({
       eventId: event._id,
@@ -157,22 +156,19 @@ export const cancelRegistration = async (req, res) => {
         ],
       },
     });
-
-    if (!registration) {
-      // Check if there is an approved registration that the participant is trying to cancel
-      const approvedRegistration = await EventRegistration.findOne({
-        eventId: event._id,
-        ...buildUserRegistrationQuery(req.user._id),
-        status: APPROVED_REGISTRATION_STATUS,
-      });
-
-      if (approvedRegistration) {
-        return res.status(400).json({
-          message: "Approved registration cannot be cancelled by participant",
+    const approvedRegistration = registration
+      ? null
+      : await EventRegistration.findOne({
+          eventId: event._id,
+          ...buildUserRegistrationQuery(req.user._id),
+          status: APPROVED_REGISTRATION_STATUS,
         });
-      }
-
-      return res.status(404).json({ message: "Registration not found" });
+    const precondition = validateCancellationPreconditions({
+      registration,
+      approvedRegistration,
+    });
+    if (precondition.error) {
+      return res.status(precondition.code).json({ message: precondition.error });
     }
 
     normalizeRegistrationRecord(registration, req.user._id);
@@ -275,17 +271,15 @@ export const getMyRegistrations = async (req, res) => {
  */
 export const getEventRegistrations = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    const eventResult = await loadManageableEventOrError({
+      eventId: req.params.id,
+      user: req.user,
+      unauthorizedMessage: "Not authorized to view registrations",
+    });
+    if (eventResult.error) {
+      return res.status(eventResult.code).json({ message: eventResult.error });
     }
-
-    const { canManage } = await getEventAuthorization(event, req.user);
-    if (!canManage) {
-      return res.status(403).json({
-        message: "Not authorized to view registrations",
-      });
-    }
+    const { event } = eventResult;
 
     const registrations = await EventRegistration.find({
       eventId: event._id,
@@ -324,17 +318,15 @@ export const getEventRegistrations = async (req, res) => {
  */
 export const waitlistRegistration = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    const eventResult = await loadManageableEventOrError({
+      eventId: req.params.id,
+      user: req.user,
+      unauthorizedMessage: "Not authorized to manage registrations",
+    });
+    if (eventResult.error) {
+      return res.status(eventResult.code).json({ message: eventResult.error });
     }
-
-    const { canManage } = await getEventAuthorization(event, req.user);
-    if (!canManage) {
-      return res.status(403).json({
-        message: "Not authorized to manage registrations",
-      });
-    }
+    const { event } = eventResult;
 
     const registration = await EventRegistration.findOne({
       _id: req.params.registrationId,
@@ -346,17 +338,9 @@ export const waitlistRegistration = async (req, res) => {
     }
 
     normalizeRegistrationRecord(registration);
-
-    if (
-      ![
-        PENDING_REGISTRATION_STATUS,
-        APPROVED_REGISTRATION_STATUS,
-        WAITLISTED_REGISTRATION_STATUS,
-      ].includes(registration.status)
-    ) {
-      return res.status(400).json({
-        message: "Only pending or approved registrations can be waitlisted",
-      });
+    const precondition = validateWaitlistTransition(registration);
+    if (precondition.error) {
+      return res.status(precondition.code).json({ message: precondition.error });
     }
 
     registration.status = WAITLISTED_REGISTRATION_STATUS;
@@ -389,17 +373,15 @@ export const waitlistRegistration = async (req, res) => {
  */
 export const approveRegistration = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    const eventResult = await loadManageableEventOrError({
+      eventId: req.params.id,
+      user: req.user,
+      unauthorizedMessage: "Not authorized to approve registrations",
+    });
+    if (eventResult.error) {
+      return res.status(eventResult.code).json({ message: eventResult.error });
     }
-
-    const { canManage } = await getEventAuthorization(event, req.user);
-    if (!canManage) {
-      return res.status(403).json({
-        message: "Not authorized to approve registrations",
-      });
-    }
+    const { event } = eventResult;
 
     const registration = await EventRegistration.findOne({
       _id: req.params.registrationId,
@@ -411,28 +393,28 @@ export const approveRegistration = async (req, res) => {
     }
 
     normalizeRegistrationRecord(registration);
-
-    if (registration.status === APPROVED_REGISTRATION_STATUS) {
-      return res.status(400).json({ message: "Registration is already approved" });
-    }
-
-    if (
-      ![PENDING_REGISTRATION_STATUS, WAITLISTED_REGISTRATION_STATUS].includes(
-        registration.status
-      )
-    ) {
-      return res.status(400).json({
-        message: "Only pending or waitlisted registrations can be approved",
-      });
+    const transitionPrecondition = validateApproveTransition({
+      registration,
+      includeCapacity: false,
+    });
+    if (transitionPrecondition.error) {
+      return res
+        .status(transitionPrecondition.code)
+        .json({ message: transitionPrecondition.error });
     }
 
     const maxParticipants = Number(event.maxParticipants || 0);
-
-    if (maxParticipants > 0) {
-      const approvedCount = await countApprovedRegistrations(event._id);
-      if (approvedCount >= maxParticipants) {
-        return res.status(400).json({ message: "Event is full" });
-      }
+    const approvedCount =
+      maxParticipants > 0
+        ? await countApprovedRegistrations(event._id)
+        : 0;
+    const precondition = validateApproveTransition({
+      registration,
+      approvedCount,
+      maxParticipants,
+    });
+    if (precondition.error) {
+      return res.status(precondition.code).json({ message: precondition.error });
     }
 
     const originalStatus = registration.status;
@@ -514,17 +496,15 @@ export const approveRegistration = async (req, res) => {
  */
 export const rejectRegistration = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    const eventResult = await loadManageableEventOrError({
+      eventId: req.params.id,
+      user: req.user,
+      unauthorizedMessage: "Not authorized to reject registrations",
+    });
+    if (eventResult.error) {
+      return res.status(eventResult.code).json({ message: eventResult.error });
     }
-
-    const { canManage } = await getEventAuthorization(event, req.user);
-    if (!canManage) {
-      return res.status(403).json({
-        message: "Not authorized to reject registrations",
-      });
-    }
+    const { event } = eventResult;
 
     const registration = await EventRegistration.findOne({
       _id: req.params.registrationId,
@@ -536,19 +516,9 @@ export const rejectRegistration = async (req, res) => {
     }
 
     normalizeRegistrationRecord(registration);
-
-    if (registration.status === REJECTED_REGISTRATION_STATUS) {
-      return res.status(400).json({ message: "Registration is already rejected" });
-    }
-
-    if (
-      ![PENDING_REGISTRATION_STATUS, WAITLISTED_REGISTRATION_STATUS].includes(
-        registration.status
-      )
-    ) {
-      return res.status(400).json({
-        message: "Only pending or waitlisted registrations can be rejected",
-      });
+    const precondition = validateRejectTransition(registration);
+    if (precondition.error) {
+      return res.status(precondition.code).json({ message: precondition.error });
     }
 
     const rejectionReason = req.body?.rejectionReason?.trim?.() || "";

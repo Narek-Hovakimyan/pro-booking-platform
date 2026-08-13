@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { approveRegistration } from "./eventRegistrationController.js";
+import {
+  approveRegistration,
+  registerForEvent,
+} from "./eventRegistrationController.js";
 import Event from "../../models/Event.js";
 import EventRegistration from "../../models/EventRegistration.js";
 import Notification from "../../models/Notification.js";
@@ -10,6 +13,7 @@ import Salon from "../../models/Salon.js";
 const originalMethods = {
   eventFindById: Event.findById,
   registrationCountDocuments: EventRegistration.countDocuments,
+  registrationCreate: EventRegistration.create,
   registrationFindOne: EventRegistration.findOne,
   registrationFindOneAndUpdate: EventRegistration.findOneAndUpdate,
   notificationCreate: Notification.create,
@@ -24,6 +28,7 @@ const eventId = "64b000000000000000000004";
 afterEach(() => {
   Event.findById = originalMethods.eventFindById;
   EventRegistration.countDocuments = originalMethods.registrationCountDocuments;
+  EventRegistration.create = originalMethods.registrationCreate;
   EventRegistration.findOne = originalMethods.registrationFindOne;
   EventRegistration.findOneAndUpdate = originalMethods.registrationFindOneAndUpdate;
   Notification.create = originalMethods.notificationCreate;
@@ -48,6 +53,7 @@ const createEvent = (overrides = {}) => ({
   title: "Color Workshop",
   organizerId,
   salonId: null,
+  status: "upcoming",
   maxParticipants: 2,
   ...overrides,
 });
@@ -83,7 +89,8 @@ const setupApproveMocks = ({
   registrations = [],
   notifications = [],
 } = {}) => {
-  Event.findById = async (id) => (String(id) === String(event._id) ? event : null);
+  Event.findById = async (id) =>
+    event && String(id) === String(event._id) ? event : null;
   Salon.findById = async () => null;
   EventRegistration.findOne = async (query) =>
     registrations.find((registration) => matchesQuery(registration, query)) || null;
@@ -105,6 +112,140 @@ const setupApproveMocks = ({
 
   return { event, registrations, notifications };
 };
+
+test("registerForEvent returns deterministic event-status guard before registration/count queries", async () => {
+  const res = createResponse();
+  let findOneCalled = false;
+  let countCalled = false;
+
+  Event.findById = async () => createEvent({ status: "cancelled" });
+  EventRegistration.findOne = async () => {
+    findOneCalled = true;
+    throw new Error("registration lookup should not run");
+  };
+  EventRegistration.countDocuments = async () => {
+    countCalled = true;
+    throw new Error("approved count should not run");
+  };
+
+  await registerForEvent(
+    {
+      params: { id: eventId },
+      user: { _id: attendeeId, name: "Mina" },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "Event is not open for registration" });
+  assert.equal(findOneCalled, false);
+  assert.equal(countCalled, false);
+});
+
+test("registerForEvent returns organizer guard before registration/count queries", async () => {
+  const res = createResponse();
+  let findOneCalled = false;
+  let countCalled = false;
+
+  Event.findById = async () => createEvent();
+  EventRegistration.findOne = async () => {
+    findOneCalled = true;
+    throw new Error("registration lookup should not run");
+  };
+  EventRegistration.countDocuments = async () => {
+    countCalled = true;
+    throw new Error("approved count should not run");
+  };
+
+  await registerForEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, name: "Organizer" },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, {
+    message: "Organizer cannot register for their own event",
+  });
+  assert.equal(findOneCalled, false);
+  assert.equal(countCalled, false);
+});
+
+test("registerForEvent returns duplicate guard before approved-count query", async () => {
+  const res = createResponse();
+  let countCalled = false;
+
+  Event.findById = async () => createEvent();
+  EventRegistration.findOne = async () => createRegistration({ status: "pending" });
+  EventRegistration.countDocuments = async () => {
+    countCalled = true;
+    throw new Error("approved count should not run");
+  };
+
+  await registerForEvent(
+    {
+      params: { id: eventId },
+      user: { _id: attendeeId, name: "Mina" },
+      body: {},
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "Registration already pending" });
+  assert.equal(countCalled, false);
+});
+
+test("registerForEvent preserves successful query and side-effect order", async () => {
+  const res = createResponse();
+  const operations = [];
+  const registration = createRegistration({ _id: "registration-success" });
+
+  Event.findById = async () => {
+    operations.push("find-event");
+    return createEvent();
+  };
+  EventRegistration.findOne = async () => {
+    operations.push("find-registration");
+    return null;
+  };
+  EventRegistration.countDocuments = async () => {
+    operations.push("count-approved");
+    return 0;
+  };
+  EventRegistration.create = async (payload) => {
+    operations.push("create-registration");
+    Object.assign(registration, payload);
+    return registration;
+  };
+  Notification.create = async (payload) => {
+    operations.push("notify");
+    return payload;
+  };
+
+  await registerForEvent(
+    {
+      params: { id: eventId },
+      user: { _id: attendeeId, name: "Mina" },
+      body: { message: "Joining" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.message, "Registration request sent");
+  assert.deepEqual(operations, [
+    "find-event",
+    "find-registration",
+    "count-approved",
+    "create-registration",
+    "notify",
+  ]);
+});
 
 test("approveRegistration allows approval when maxParticipants is 0", async () => {
   const registration = createRegistration();
@@ -129,6 +270,23 @@ test("approveRegistration allows approval when maxParticipants is 0", async () =
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.registration.status, "approved");
   assert.equal(registration.status, "approved");
+});
+
+test("approveRegistration preserves event-not-found behavior", async () => {
+  const res = createResponse();
+
+  setupApproveMocks({ event: null, registrations: [] });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: "missing-registration" },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.body, { message: "Event not found" });
 });
 
 for (const maxParticipants of [undefined, null, -1]) {
@@ -224,6 +382,83 @@ test("approveRegistration returns 400 for already approved registration", async 
   assert.equal(res.body.message, "Registration is already approved");
 });
 
+test("approveRegistration returns transition guard before approved-count query", async () => {
+  const registration = createRegistration({ status: "rejected" });
+  const res = createResponse();
+  let countCalled = false;
+
+  setupApproveMocks({ registrations: [registration] });
+  EventRegistration.countDocuments = async () => {
+    countCalled = true;
+    throw new Error("approved count should not run");
+  };
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(
+    res.body.message,
+    "Only pending or waitlisted registrations can be approved"
+  );
+  assert.equal(countCalled, false);
+});
+
+test("approveRegistration preserves successful query, mutation, and notification order", async () => {
+  const registration = createRegistration();
+  const res = createResponse();
+  const operations = [];
+
+  Event.findById = async () => {
+    operations.push("find-event");
+    return createEvent();
+  };
+  Salon.findById = async () => null;
+  EventRegistration.findOne = async () => {
+    operations.push("find-registration");
+    return registration;
+  };
+  EventRegistration.countDocuments = async () => {
+    operations.push("count-approved");
+    return registration.status === "approved" ? 1 : 0;
+  };
+  EventRegistration.findOneAndUpdate = async (query, update) => {
+    operations.push("approve-registration");
+    assert.deepEqual(query.status, { $in: ["pending", "waitlisted"] });
+    Object.assign(registration, update.$set);
+    return registration;
+  };
+  Notification.create = async (payload) => {
+    operations.push("notify");
+    return payload;
+  };
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: organizerId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.message, "Registration approved");
+  assert.deepEqual(operations, [
+    "find-event",
+    "find-registration",
+    "count-approved",
+    "approve-registration",
+    "count-approved",
+    "notify",
+    "count-approved",
+  ]);
+});
+
 test("approveRegistration atomic status guard returns 400 and does not notify when stale", async () => {
   const registration = createRegistration();
   const notifications = [];
@@ -273,6 +508,33 @@ test("approveRegistration sends notification only after successful approval", as
     eventId,
     eventRegistrationId: registration._id,
   });
+});
+
+test("approveRegistration preserves organizer-or-salon-manager authorization", async () => {
+  const registration = createRegistration();
+  const res = createResponse();
+
+  setupApproveMocks({
+    event: createEvent({ salonId: "64b000000000000000000099" }),
+    registrations: [registration],
+  });
+  Salon.findById = async () => ({
+    _id: "64b000000000000000000099",
+    ownerId: otherUserId,
+    admins: [],
+  });
+
+  await approveRegistration(
+    {
+      params: { id: eventId, registrationId: registration._id },
+      user: { _id: attendeeId, role: "barber" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, { message: "Not authorized to approve registrations" });
+  assert.equal(registration.status, "pending");
 });
 
 test("approveRegistration rolls back and does not notify when post-update recount exceeds capacity", async () => {
