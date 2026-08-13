@@ -162,6 +162,31 @@ export const updateBooking = async (req, res) => {
     const normalizedBookingStatus = normalizeBookingStatus(booking.status);
     const safeUpdates = {};
     let rescheduleSlotRequest = null;
+    const getStateValidationMessage = (bookingToValidate) => {
+      if (isAccepting && bookingToValidate.status !== "pending") {
+        return "Only pending bookings can be accepted";
+      }
+      if (isCompleting && bookingToValidate.status !== "accepted") {
+        return "Only accepted bookings can be completed";
+      }
+      if (
+        (isRejecting || isCancelling) &&
+        bookingToValidate.status !== "pending" &&
+        bookingToValidate.status !== "accepted"
+      ) {
+        return isRejecting
+          ? "Only pending or accepted bookings can be rejected"
+          : "Only pending or accepted bookings can be cancelled";
+      }
+      if (
+        isRescheduling &&
+        bookingToValidate.status !== "pending" &&
+        bookingToValidate.status !== "accepted"
+      ) {
+        return "Cannot reschedule a booking that is not pending or accepted";
+      }
+      return null;
+    };
 
     if (
       isBookingClient &&
@@ -191,10 +216,9 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      if (booking.status !== "pending") {
-        return res.status(400).json({
-          message: "Only pending bookings can be accepted",
-        });
+      const stateValidationMessage = getStateValidationMessage(booking);
+      if (stateValidationMessage) {
+        return res.status(400).json({ message: stateValidationMessage });
       }
 
       const hasPaidAccess = await barberHasPaidAccessForSalon(
@@ -219,10 +243,9 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      if (booking.status !== "accepted") {
-        return res.status(400).json({
-          message: "Only accepted bookings can be completed",
-        });
+      const stateValidationMessage = getStateValidationMessage(booking);
+      if (stateValidationMessage) {
+        return res.status(400).json({ message: stateValidationMessage });
       }
 
       safeUpdates.status = "completed";
@@ -244,10 +267,9 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      if (booking.status !== "pending" && booking.status !== "accepted") {
-        return res.status(400).json({
-          message: "Only pending or accepted bookings can be rejected",
-        });
+      const stateValidationMessage = getStateValidationMessage(booking);
+      if (stateValidationMessage) {
+        return res.status(400).json({ message: stateValidationMessage });
       }
 
       if (!rejectionReason) {
@@ -280,10 +302,9 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      if (booking.status !== "pending" && booking.status !== "accepted") {
-        return res.status(400).json({
-          message: "Only pending or accepted bookings can be cancelled",
-        });
+      const stateValidationMessage = getStateValidationMessage(booking);
+      if (stateValidationMessage) {
+        return res.status(400).json({ message: stateValidationMessage });
       }
 
       if (!cancelReason) {
@@ -315,10 +336,9 @@ export const updateBooking = async (req, res) => {
         });
       }
 
-      if (booking.status !== "pending" && booking.status !== "accepted") {
-        return res.status(400).json({
-          message: "Cannot reschedule a booking that is not pending or accepted",
-        });
+      const stateValidationMessage = getStateValidationMessage(booking);
+      if (stateValidationMessage) {
+        return res.status(400).json({ message: stateValidationMessage });
       }
 
       const nextTime = req.body.time || booking.time;
@@ -372,6 +392,11 @@ export const updateBooking = async (req, res) => {
         return { statusCode: 404, message: "Booking not found" };
       }
 
+      const stateValidationMessage = getStateValidationMessage(bookingToUpdate);
+      if (stateValidationMessage) {
+        return { message: stateValidationMessage };
+      }
+
       if (isRescheduling && rescheduleSlotRequest) {
         const latestSlotValidation = await validateBookingSlot(rescheduleSlotRequest);
 
@@ -414,9 +439,7 @@ export const updateBooking = async (req, res) => {
       return { booking: bookingToUpdate };
     };
 
-    const requiresTransactionalSlotMutation =
-      isRescheduling ||
-      (safeUpdates.status && isTerminalBookingStatus(safeUpdates.status));
+    const requiresTransactionalSlotMutation = isRescheduling || hasStatusAction;
 
     const saveResult =
       requiresTransactionalSlotMutation
