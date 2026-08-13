@@ -1,32 +1,60 @@
 import Event from "../../models/Event.js";
 import EventRegistration from "../../models/EventRegistration.js";
 import EventReview from "../../models/EventReview.js";
+import { getEventDetailAuthorization } from "../../utils/eventAuthorization.js";
 import { getEventDateTime } from "../../utils/eventUtils.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
-const serializeEventReview = (review) => {
+const serializeEventReview = (review, { canViewParticipants = true } = {}) => {
   const plainReview = review.toObject ? review.toObject() : review;
   const user = plainReview.userId;
+  const { userId: _userId, ...reviewFields } = plainReview;
 
   return {
-    ...plainReview,
+    ...reviewFields,
     id: String(plainReview._id),
     eventId: String(plainReview.eventId),
     registrationId: String(plainReview.registrationId),
-    userId: user?._id ? String(user._id) : String(user),
-    userName: user?.name || "User",
-    userAvatarUrl: user?.avatarUrl || "",
+    userId: canViewParticipants
+      ? user?._id
+        ? String(user._id)
+        : String(user)
+      : null,
+    userName: canViewParticipants ? user?.name || "User" : "User",
+    userAvatarUrl: canViewParticipants ? user?.avatarUrl || "" : "",
     isVerified: plainReview.isVerified !== false,
   };
 };
 
 export const getEventReviews = async (req, res) => {
   try {
+    const event = await Event.findById(req.params.id);
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    const { canView, canViewParticipants } = await getEventDetailAuthorization(
+      event,
+      req.user
+    );
+    if (!canView) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
     const reviews = await EventReview.find({ eventId: req.params.id })
       .populate("userId", "name avatarUrl")
       .sort({ createdAt: -1 });
 
-    return res.json(reviews.map(serializeEventReview));
+    const revealReviewerIdentity =
+      event.visibility !== "private" || canViewParticipants;
+
+    return res.json(
+      reviews.map((review) =>
+        serializeEventReview(review, {
+          canViewParticipants: revealReviewerIdentity,
+        })
+      )
+    );
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch event reviews");
   }

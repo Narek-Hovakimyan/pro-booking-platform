@@ -34,7 +34,7 @@ const router = express.Router();
 router.get("/", getEvents);
 router.get("/mine", protect, getMyEvents);
 router.get("/my-registrations", protect, getMyRegistrations);
-router.get("/:id/reviews", getEventReviews);
+router.get("/:id/reviews", optionalAuth, getEventReviews);
 router.get("/:id", optionalAuth, getEventById);
 
 // Protected routes
