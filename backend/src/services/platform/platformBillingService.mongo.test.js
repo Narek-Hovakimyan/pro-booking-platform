@@ -10,7 +10,10 @@ import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
-import { confirmSalonPayment } from "./platformBillingService.js";
+import {
+  activateSalonSubscription,
+  confirmSalonPayment,
+} from "./platformBillingService.js";
 
 const REAL_MONGO_TESTS_ENABLED =
   process.env.RUN_REAL_MONGO_TRANSACTION_TESTS === "true";
@@ -32,7 +35,7 @@ const connectIsolatedDb = async (suffix) => {
   const isolatedUri = new URL(mongoUri);
   const databaseName =
     isolatedUri.pathname.replace(/^\/+|\/+$/g, "") || "hairbook_ci_test";
-  isolatedUri.pathname = `/${databaseName}_${suffix}_${process.pid}`;
+  isolatedUri.pathname = `/aud_${suffix.slice(-20)}_${process.pid}`;
 
   await mongoose.connect(isolatedUri.toString(), {
     serverSelectionTimeoutMS: 5000,
@@ -51,6 +54,7 @@ const connectIsolatedDb = async (suffix) => {
   await Promise.all([
     SubscriptionPaymentAttempt.createIndexes(),
     SubscriptionPlan.createIndexes(),
+    Subscription.createIndexes(),
   ]);
 };
 
@@ -120,6 +124,76 @@ const createFixture = async ({ providerPaymentId, attemptStatus = "pending" }) =
 
   return { attempt, salonId, ownerId, subscriptionId };
 };
+
+test(
+  "real Mongo simultaneous platform activations preserve both extensions",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_race");
+    const ownerId = new mongoose.Types.ObjectId();
+    const salonId = new mongoose.Types.ObjectId();
+    const initialEnd = new Date("2030-01-01T00:00:00.000Z");
+
+    await User.create({
+      _id: ownerId,
+      name: "Platform Salon Owner",
+      phone: `+374${String(Date.now()).slice(-7)}1`,
+      email: `platform-owner-${Date.now()}@example.com`,
+      password: "hashed-password",
+      role: "barber",
+    });
+    await Salon.create({
+      _id: salonId,
+      name: "Concurrent Platform Salon",
+      city: "Yerevan",
+      address: "10 Test St",
+      phone: "+37410000001",
+      ownerId,
+    });
+    await SubscriptionPlan.create({
+      name: "Barber Monthly",
+      code: "barber_monthly",
+      pricePerSeat: 5000,
+      currency: "AMD",
+      interval: "month",
+      features: [],
+      isActive: true,
+    });
+    await Subscription.create({
+      ownerType: "salon",
+      ownerId: salonId,
+      ownerRefModel: "Salon",
+      payerId: ownerId,
+      planId: new mongoose.Types.ObjectId(),
+      status: "active",
+      seatCount: 1,
+      pricePerSeat: 5000,
+      totalPrice: 5000,
+      provider: "manual",
+      currentPeriodStart: new Date("2029-12-01T00:00:00.000Z"),
+      currentPeriodEnd: initialEnd,
+    });
+
+    await Promise.all([
+      activateSalonSubscription(String(salonId), {
+        actor: { _id: actorId }, note: "January extension", requestIp,
+      }),
+      activateSalonSubscription(String(salonId), {
+        actor: { _id: actorId }, note: "February extension", requestIp,
+      }),
+    ]);
+
+    const subscriptions = await Subscription.find({ ownerType: "salon", ownerId: salonId }).lean();
+    assert.equal(subscriptions.length, 1);
+    const expectedEnd = new Date(initialEnd);
+    expectedEnd.setMonth(expectedEnd.getMonth() + 2);
+    assert.equal(subscriptions[0].currentPeriodEnd.getTime(), expectedEnd.getTime());
+    assert.equal(
+      await PlatformAuditLog.countDocuments({ action: "salon_subscription.activate", salonId }),
+      2
+    );
+  }
+);
 
 test(
   "real Mongo confirmSalonPayment fails closed before mutation when a transaction session is unavailable",

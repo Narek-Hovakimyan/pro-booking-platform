@@ -10,8 +10,12 @@ import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import User from "../../models/User.js";
 import { processPaymentWebhook } from "./paymentAttemptService.js";
-import { confirmSubscriptionPaymentAttempt } from "../subscriptionService.js";
+import {
+  confirmSubscriptionPaymentAttempt,
+  grantSubscriptionGraceToExistingBarbers,
+} from "../subscriptionService.js";
 
 const REAL_MONGO_TESTS_ENABLED =
   process.env.RUN_REAL_MONGO_TRANSACTION_TESTS === "true";
@@ -27,6 +31,7 @@ const originals = {
   paymentRecordCreate: PaymentRecord.create,
   subscriptionCreate: Subscription.create,
   subscriptionFindOne: Subscription.findOne,
+  subscriptionFindOneAndUpdate: Subscription.findOneAndUpdate,
   subscriptionSave: Subscription.prototype.save,
   subscriptionPlanFindOne: SubscriptionPlan.findOne,
   subscriptionPlanCreate: SubscriptionPlan.create,
@@ -47,7 +52,7 @@ const connectIsolatedDb = async (suffix) => {
   const isolatedUri = new URL(mongoUri);
   const databaseName =
     isolatedUri.pathname.replace(/^\/+|\/+$/g, "") || "hairbook_ci_test";
-  isolatedUri.pathname = `/${databaseName}_${suffix}_${process.pid}`;
+  isolatedUri.pathname = `/aud_${suffix.slice(-20)}_${process.pid}`;
 
   await mongoose.connect(isolatedUri.toString(), {
     serverSelectionTimeoutMS: 5000,
@@ -65,6 +70,7 @@ const connectIsolatedDb = async (suffix) => {
   await Promise.all([
     SubscriptionPaymentAttempt.createIndexes(),
     SubscriptionPlan.createIndexes(),
+    Subscription.createIndexes(),
   ]);
 };
 
@@ -86,6 +92,7 @@ const restorePatchedMethods = () => {
   PaymentRecord.create = originals.paymentRecordCreate;
   Subscription.create = originals.subscriptionCreate;
   Subscription.findOne = originals.subscriptionFindOne;
+  Subscription.findOneAndUpdate = originals.subscriptionFindOneAndUpdate;
   Subscription.prototype.save = originals.subscriptionSave;
   SubscriptionPlan.findOne = originals.subscriptionPlanFindOne;
   SubscriptionPlan.create = originals.subscriptionPlanCreate;
@@ -221,6 +228,156 @@ const createBookingAttempt = async ({
 
   return { attempt, bookingId };
 };
+
+test(
+  "real Mongo grace applies once to a canonical trial winner and preserves its reference",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("grace_canonical_winner");
+    const ownerId = new mongoose.Types.ObjectId();
+    const now = new Date("2030-01-01T00:00:00.000Z");
+    await User.create({
+      _id: ownerId,
+      name: "Grace Barber",
+      phone: `+374${String(Date.now()).slice(-7)}2`,
+      email: `grace-${Date.now()}@example.com`,
+      password: "hashed-password",
+      role: "barber",
+    });
+    await SubscriptionPlan.create({
+      name: "Barber Monthly",
+      code: "barber_monthly",
+      pricePerSeat: 5000,
+      currency: "AMD",
+      interval: "month",
+      features: [],
+      isActive: true,
+    });
+
+    const originalFindOne = Subscription.findOne;
+    let ownerReads = 0;
+    Subscription.findOne = async function patchedFindOne(filter, projection, options) {
+      if (filter?.ownerType === "barber" && String(filter.ownerId) === String(ownerId)) {
+        ownerReads += 1;
+        if (ownerReads === 2) {
+          await Subscription.create({
+            ownerType: "barber",
+            ownerId,
+            ownerRefModel: "User",
+            payerId: ownerId,
+            planId: new mongoose.Types.ObjectId(),
+            status: "trialing",
+            seatCount: 1,
+            pricePerSeat: 5000,
+            totalPrice: 5000,
+            provider: "manual",
+            currentPeriodStart: now,
+            currentPeriodEnd: new Date("2030-02-15T00:00:00.000Z"),
+          });
+          return null;
+        }
+      }
+      return originalFindOne.call(this, filter, projection, options);
+    };
+
+    const first = await grantSubscriptionGraceToExistingBarbers({ now, graceDays: 30 });
+    const second = await grantSubscriptionGraceToExistingBarbers({ now, graceDays: 30 });
+    const subscriptions = await Subscription.find({ ownerType: "barber", ownerId }).lean();
+    assert.equal(first.grantedCount, 1);
+    assert.equal(second.grantedCount, 0);
+    assert.equal(subscriptions.length, 1);
+    assert.equal(subscriptions[0].status, "active");
+    assert.equal(
+      subscriptions[0].currentPeriodEnd.getTime(),
+      new Date("2030-02-15T00:00:00.000Z").getTime()
+    );
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId: subscriptions[0]._id, ownerId }),
+      1
+    );
+  }
+);
+
+test(
+  "real Mongo concurrent grace requests create one canonical activation and payment record",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("grace_concurrent");
+    const ownerId = new mongoose.Types.ObjectId();
+    const now = new Date("2030-02-01T00:00:00.000Z");
+    await User.create({
+      _id: ownerId,
+      name: "Concurrent Grace Barber",
+      phone: `+374${String(Date.now()).slice(-7)}3`,
+      email: `grace-concurrent-${Date.now()}@example.com`,
+      password: "hashed-password",
+      role: "barber",
+    });
+    await SubscriptionPlan.create({
+      name: "Barber Monthly",
+      code: "barber_monthly",
+      pricePerSeat: 5000,
+      currency: "AMD",
+      interval: "month",
+      features: [],
+      isActive: true,
+    });
+
+    await Promise.all([
+      grantSubscriptionGraceToExistingBarbers({ now, graceDays: 30 }),
+      grantSubscriptionGraceToExistingBarbers({ now, graceDays: 30 }),
+    ]);
+
+    const subscriptions = await Subscription.find({ ownerType: "barber", ownerId }).lean();
+    assert.equal(subscriptions.length, 1);
+    assert.equal(subscriptions[0].status, "active");
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId: subscriptions[0]._id, ownerId }),
+      1
+    );
+  }
+);
+
+test(
+  "real Mongo concurrent paid attempts create one canonical subscription owner",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("canonical_owner_race");
+    setWebhookEnv();
+    const ownerId = new mongoose.Types.ObjectId();
+    const payerId = new mongoose.Types.ObjectId();
+    const firstProviderPaymentId = `canonical-a-${Date.now()}`;
+    const secondProviderPaymentId = `canonical-b-${Date.now()}`;
+
+    await createSubscriptionAttempt({
+      providerPaymentId: firstProviderPaymentId,
+      ownerId,
+      payerId,
+    });
+    await createSubscriptionAttempt({
+      providerPaymentId: secondProviderPaymentId,
+      ownerId,
+      payerId,
+    });
+
+    await Promise.all([
+      processPaymentWebhook(buildWebhookArgs("evt-canonical-a", firstProviderPaymentId)),
+      processPaymentWebhook(buildWebhookArgs("evt-canonical-b", secondProviderPaymentId)),
+    ]);
+
+    const subscriptions = await Subscription.find({ ownerType: "barber", ownerId }).lean();
+    assert.equal(subscriptions.length, 1);
+    const [subscription] = subscriptions;
+    assert.equal(subscription.status, "active");
+    const attempts = await SubscriptionPaymentAttempt.find({ ownerType: "barber", ownerId }).lean();
+    assert.equal(attempts.length, 2);
+    assert.ok(attempts.every((attempt) => String(attempt.subscriptionId) === String(subscription._id)));
+    assert.equal(
+      await PaymentRecord.countDocuments({ subscriptionId: subscription._id, ownerType: "barber", ownerId }),
+      2
+    );
+  }
+);
 
 test(
   "real Mongo duplicate webhook calls with the same event id mutate exactly once",
@@ -443,6 +600,14 @@ test(
     Subscription.create = function patchedSubscriptionCreate(docs, options) {
       capture.subscriptionWrite.add(Boolean(options?.session));
       return originals.subscriptionCreate.call(this, docs, options);
+    };
+    Subscription.findOneAndUpdate = function patchedSubscriptionFindOneAndUpdate(
+      filter,
+      update,
+      options
+    ) {
+      capture.subscriptionWrite.add(Boolean(options?.session));
+      return originals.subscriptionFindOneAndUpdate.call(this, filter, update, options);
     };
     Subscription.prototype.save = function patchedSubscriptionSave(options) {
       capture.subscriptionWrite.add(Boolean(options?.session));

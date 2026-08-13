@@ -82,6 +82,7 @@ const subscriptionSchema = new mongoose.Schema(
   }
 );
 
+subscriptionSchema.index({ ownerType: 1, ownerId: 1 }, { unique: true });
 subscriptionSchema.index({ ownerType: 1, ownerId: 1, status: 1 });
 
 const Subscription = mongoose.model('Subscription', subscriptionSchema);

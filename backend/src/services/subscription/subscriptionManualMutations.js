@@ -1,4 +1,5 @@
 import User from "../../models/User.js";
+import mongoose from "mongoose";
 import Salon from "../../models/Salon.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
@@ -24,6 +25,122 @@ const createWithOptionalSession = async (Model, payload, session) => {
 
   const [document] = await Model.create([payload], { session });
   return document;
+};
+
+export const isSubscriptionOwnerDuplicateKeyError = (error) => {
+  if (error?.code !== 11000) return false;
+
+  const keyPattern = error.keyPattern || {};
+  return (
+    (keyPattern.ownerType === 1 && keyPattern.ownerId === 1) ||
+    /ownerType_1_ownerId_1/.test(error.message || "")
+  );
+};
+
+export const findCanonicalSubscription = ({ ownerType, ownerId, session = null }) =>
+  Subscription.findOne(
+    { ownerType, ownerId },
+    null,
+    session ? { session } : undefined
+  );
+
+export const createCanonicalSubscription = async ({ payload, session = null }) => {
+  const { ownerType, ownerId } = payload;
+
+  // Keep lightweight service tests independent of a database while production
+  // uses one atomic upsert for the only logical subscription owner.
+  if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
+    try {
+      return { subscription: await createWithOptionalSession(Subscription, payload, session), created: true };
+    } catch (error) {
+      if (!isSubscriptionOwnerDuplicateKeyError(error)) throw error;
+      return {
+        subscription: await findCanonicalSubscription({ ownerType, ownerId, session }),
+        created: false,
+      };
+    }
+  }
+
+  try {
+    const result = await Subscription.findOneAndUpdate(
+      { ownerType, ownerId },
+      { $setOnInsert: payload },
+      {
+        returnDocument: "after",
+        upsert: true,
+        includeResultMetadata: true,
+        ...(session ? { session } : {}),
+      }
+    );
+    return {
+      subscription: result?.value ?? result,
+      created: result?.lastErrorObject?.updatedExisting === false,
+    };
+  } catch (error) {
+    if (!isSubscriptionOwnerDuplicateKeyError(error)) throw error;
+    const subscription = await findCanonicalSubscription({ ownerType, ownerId, session });
+    if (!subscription) throw error;
+    return { subscription, created: false };
+  }
+};
+
+const updateSubscriptionWithCompareAndSet = async (
+  subscription,
+  updates,
+  session = null
+) => {
+  // Unit callers use lightweight document doubles. Production Mongoose documents
+  // carry __v, allowing a stale extension to retry from the latest period end.
+  if (!Number.isInteger(subscription.__v)) {
+    Object.assign(subscription, updates);
+    await subscription.save(session ? { session } : undefined);
+    return subscription;
+  }
+
+  return Subscription.findOneAndUpdate(
+    { _id: subscription._id, __v: subscription.__v },
+    { $set: updates, $inc: { __v: 1 } },
+    { returnDocument: "after", ...(session ? { session } : {}) }
+  );
+};
+
+export const mutateCanonicalSubscription = async ({
+  ownerType,
+  ownerId,
+  createPayload,
+  updatePayload,
+  session = null,
+}) => {
+  for (let retry = 0; retry < 8; retry += 1) {
+    const current = await findCanonicalSubscription({ ownerType, ownerId, session });
+
+    if (current) {
+      const mutation = updatePayload(current);
+      if (!mutation) {
+        return { subscription: current, changed: false, previous: current };
+      }
+
+      const subscription = await updateSubscriptionWithCompareAndSet(
+        current,
+        mutation,
+        session
+      );
+      if (!subscription) continue;
+      return { subscription, changed: true, previous: current };
+    }
+
+    const created = await createCanonicalSubscription({
+      payload: createPayload(),
+      session,
+    });
+    if (created.created) {
+      return { subscription: created.subscription, changed: true, previous: null };
+    }
+  }
+
+  const error = new Error("Subscription update could not be completed");
+  error.statusCode = 409;
+  throw error;
 };
 
 const getOrCreateDefaultSubscriptionPlanWithSession = async (session = null) => {
@@ -89,48 +206,82 @@ export const grantSubscriptionGraceToExistingBarbers = async ({
         ownerId: barberId,
         status: { $in: PAID_SUBSCRIPTION_STATUSES },
       });
-
       if (activeSubscription) {
         summary.skippedCount++;
         continue;
       }
 
-      let subscription = await Subscription.findOne({
+      // Existing trial/expired subscriptions retain the established grace
+      // semantics. A canonical winner appearing after this read is a race and
+      // must still receive this grant below.
+      const initialSubscription = await findCanonicalSubscription({
         ownerType: "barber",
         ownerId: barberId,
       });
-
-      if (subscription) {
-        subscription.ownerRefModel = "User";
-        subscription.payerId = barberId;
-        subscription.planId = plan._id;
-        subscription.status = "active";
-        subscription.seatCount = 1;
-        subscription.pricePerSeat = plan.pricePerSeat;
-        subscription.totalPrice = plan.pricePerSeat;
-        subscription.currentPeriodStart = now;
-        subscription.currentPeriodEnd = currentPeriodEnd;
-        subscription.trialEndsAt = undefined;
-        subscription.provider = "manual";
-        subscription.lastPaymentAt = now;
-        await subscription.save();
-      } else {
-        subscription = await Subscription.create({
-          ownerType: "barber",
-          ownerRefModel: "User",
-          ownerId: barberId,
-          payerId: barberId,
-          planId: plan._id,
-          status: "active",
-          seatCount: 1,
-          pricePerSeat: plan.pricePerSeat,
-          totalPrice: plan.pricePerSeat,
-          provider: "manual",
-          currentPeriodStart: now,
-          currentPeriodEnd,
-          lastPaymentAt: now,
-        });
+      if (initialSubscription) {
+        summary.skippedCount++;
+        continue;
       }
+
+      const mutation = await mutateCanonicalSubscription({
+        ownerType: "barber",
+        ownerId: barberId,
+        createPayload: () => ({
+            ownerType: "barber",
+            ownerRefModel: "User",
+            ownerId: barberId,
+            payerId: barberId,
+            planId: plan._id,
+            status: "active",
+            seatCount: 1,
+            pricePerSeat: plan.pricePerSeat,
+            totalPrice: plan.pricePerSeat,
+            provider: "manual",
+            currentPeriodStart: now,
+            currentPeriodEnd,
+            lastPaymentAt: now,
+        }),
+        updatePayload: (subscription) => {
+          if (subscription.status === "active") {
+            return null;
+          }
+
+          const existingPeriodEnd = subscription.currentPeriodEnd
+            ? new Date(subscription.currentPeriodEnd)
+            : null;
+          const effectivePeriodEnd =
+            existingPeriodEnd &&
+            !Number.isNaN(existingPeriodEnd.getTime()) &&
+            existingPeriodEnd > currentPeriodEnd
+              ? existingPeriodEnd
+              : currentPeriodEnd;
+
+          return {
+            ownerRefModel: "User",
+            payerId: barberId,
+            planId: plan._id,
+            status: "active",
+            seatCount: 1,
+            pricePerSeat: plan.pricePerSeat,
+            totalPrice: plan.pricePerSeat,
+            currentPeriodStart: now,
+            currentPeriodEnd: effectivePeriodEnd,
+            trialEndsAt: undefined,
+            provider: "manual",
+            lastPaymentAt: now,
+          };
+        },
+      });
+
+      if (!mutation.changed) {
+        summary.skippedCount++;
+        continue;
+      }
+
+      const subscription = mutation.subscription;
+      const paymentPeriodEnd = subscription.currentPeriodEnd > currentPeriodEnd
+        ? subscription.currentPeriodEnd
+        : currentPeriodEnd;
 
       await PaymentRecord.create({
         subscriptionId: subscription._id,
@@ -141,7 +292,7 @@ export const grantSubscriptionGraceToExistingBarbers = async ({
         currency: plan.currency,
         seatCount: 1,
         periodStart: now,
-        periodEnd: currentPeriodEnd,
+        periodEnd: paymentPeriodEnd,
         status: "paid",
         provider: "manual",
         paidAt: now,
@@ -249,62 +400,61 @@ export const extendManualSubscription = async ({
 
   const plan = await getOrCreateDefaultSubscriptionPlanWithSession(session);
   const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
-  const queryOptions = session ? { session } : undefined;
 
-  let subscription = await Subscription.findOne(
-    {
-      ownerType,
-      ownerId,
-    },
-    null,
-    queryOptions
-  );
-
-  const isContinuingSubscription =
-    subscription &&
-    ["trialing", "active"].includes(subscription.status) &&
-    subscription.currentPeriodEnd &&
-    new Date(subscription.currentPeriodEnd) > now;
-  const periodStart = isContinuingSubscription
-    ? new Date(subscription.currentPeriodEnd)
-    : now;
-  const periodEnd = addMonths(periodStart, normalizedMonths);
-
-  if (subscription) {
-    subscription.status = "active";
-    subscription.seatCount = normalizedSeatCount;
-    subscription.pricePerSeat = plan.pricePerSeat;
-    subscription.totalPrice = monthlyTotal;
-    subscription.currentPeriodStart = periodStart;
-    subscription.currentPeriodEnd = periodEnd;
-    subscription.lastPaymentAt = now;
-    subscription.trialEndsAt = undefined;
-    subscription.cancelledAt = undefined;
-    subscription.payerId = payerId;
-    subscription.planId = plan._id;
-    subscription.provider = MANUAL_PROVIDER;
-    await subscription.save(queryOptions);
-  } else {
-    subscription = await createWithOptionalSession(
-      Subscription,
-      {
+  let periodStart;
+  let periodEnd;
+  const mutation = await mutateCanonicalSubscription({
+    ownerType,
+    ownerId,
+    session,
+    createPayload: () => {
+      periodStart = now;
+      periodEnd = addMonths(periodStart, normalizedMonths);
+      return {
         ownerType,
         ownerId,
         ownerRefModel: ownerType === "barber" ? "User" : "Salon",
-        payerId,
-        planId: plan._id,
         status: "active",
         seatCount: normalizedSeatCount,
         pricePerSeat: plan.pricePerSeat,
         totalPrice: monthlyTotal,
         currentPeriodStart: periodStart,
         currentPeriodEnd: periodEnd,
-        provider: MANUAL_PROVIDER,
         lastPaymentAt: now,
-      },
-      session
-    );
-  }
+        trialEndsAt: undefined,
+        cancelledAt: undefined,
+        payerId,
+        planId: plan._id,
+        provider: MANUAL_PROVIDER,
+      };
+    },
+    updatePayload: (subscription) => {
+      const isContinuingSubscription =
+        ["trialing", "active"].includes(subscription.status) &&
+        subscription.currentPeriodEnd &&
+        new Date(subscription.currentPeriodEnd) > now;
+      periodStart = isContinuingSubscription
+        ? new Date(subscription.currentPeriodEnd)
+        : now;
+      periodEnd = addMonths(periodStart, normalizedMonths);
+
+      return {
+        status: "active",
+        seatCount: normalizedSeatCount,
+        pricePerSeat: plan.pricePerSeat,
+        totalPrice: monthlyTotal,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        lastPaymentAt: now,
+        trialEndsAt: undefined,
+        cancelledAt: undefined,
+        payerId,
+        planId: plan._id,
+        provider: MANUAL_PROVIDER,
+      };
+    },
+  });
+  const subscription = mutation.subscription;
 
   await createWithOptionalSession(
     PaymentRecord,

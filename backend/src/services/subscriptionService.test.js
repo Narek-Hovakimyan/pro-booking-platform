@@ -457,6 +457,80 @@ test("trial subscription creation computes totalPrice correctly", async () => {
   assert.ok(result.trialEndsAt);
 });
 
+test("concurrent trial duplicate-key loser returns the canonical subscription", async () => {
+  const canonical = makeSubDoc({ status: "trialing" });
+  let findCalls = 0;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => {
+    findCalls += 1;
+    return findCalls === 1 ? null : canonical;
+  };
+  Subscription.create = async () => {
+    throw {
+      code: 11000,
+      keyPattern: { ownerType: 1, ownerId: 1 },
+    };
+  };
+
+  const result = await createTrialSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+  });
+
+  assert.equal(result, canonical);
+});
+
+test("manual duplicate-key loser reloads and extends the canonical subscription", async () => {
+  const canonical = makeSubDoc({ status: "trialing" });
+  let findCalls = 0;
+  let payments = 0;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => {
+    findCalls += 1;
+    return findCalls === 1 ? null : canonical;
+  };
+  Subscription.create = async () => {
+    throw {
+      code: 11000,
+      keyPattern: { ownerType: 1, ownerId: 1 },
+    };
+  };
+  PaymentRecord.create = async () => {
+    payments += 1;
+    return {};
+  };
+
+  const result = await extendManualSubscription({
+    ownerType: "barber",
+    ownerId: barberId,
+    payerId,
+  });
+
+  assert.equal(result, canonical);
+  assert.equal(payments, 1);
+  assert.equal(result.status, "active");
+});
+
+test("manual extension does not recover unrelated duplicate keys", async () => {
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  Subscription.findOne = async () => null;
+  const unrelated = Object.assign(new Error("duplicate provider payment"), {
+    code: 11000,
+    keyPattern: { provider: 1, providerPaymentId: 1 },
+  });
+  Subscription.create = async () => {
+    throw unrelated;
+  };
+
+  await assert.rejects(
+    () => extendManualSubscription({ ownerType: "barber", ownerId: barberId, payerId }),
+    (error) => error === unrelated
+  );
+});
+
 test("manual barber subscription grants barberHasPaidAccess true", async () => {
   SubscriptionPlan.findOne = async () => defaultPlanDoc;
 
@@ -1050,6 +1124,62 @@ test("grace skips existing trialing barber", async () => {
 
   assert.equal(summary.grantedCount, 0);
   assert.equal(summary.skippedCount, 1);
+});
+
+test("grace canonical winner preserves a later trial expiry and records it once", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const laterTrialEnd = new Date("2026-06-20T00:00:00.000Z");
+  const canonical = makeSubDoc({
+    status: "trialing",
+    currentPeriodEnd: laterTrialEnd,
+  });
+  let ownerReads = 0;
+  const payments = [];
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  User.find = () => chainableQuery([{ _id: barberId }]);
+  Subscription.findOne = async (query) => {
+    if (query.ownerType !== "barber") return null;
+    ownerReads += 1;
+    if (ownerReads <= 2) return null;
+    return canonical;
+  };
+  PaymentRecord.create = async (payload) => {
+    payments.push(payload);
+    return payload;
+  };
+
+  const first = await grantSubscriptionGraceToExistingBarbers({ now, graceDays: 1 });
+  const second = await grantSubscriptionGraceToExistingBarbers({ now, graceDays: 1 });
+
+  assert.equal(first.grantedCount, 1);
+  assert.equal(second.grantedCount, 0);
+  assert.equal(canonical.status, "active");
+  assert.equal(canonical.currentPeriodEnd.getTime(), laterTrialEnd.getTime());
+  assert.equal(payments.length, 1);
+  assert.equal(payments[0].subscriptionId, canonical._id);
+  assert.equal(payments[0].periodEnd.getTime(), laterTrialEnd.getTime());
+});
+
+test("grace canonical winner applies a later requested expiry", async () => {
+  const now = new Date("2026-06-04T00:00:00.000Z");
+  const trialEnd = new Date("2026-06-05T00:00:00.000Z");
+  const canonical = makeSubDoc({ status: "trialing", currentPeriodEnd: trialEnd });
+  let ownerReads = 0;
+
+  SubscriptionPlan.findOne = async () => defaultPlanDoc;
+  User.find = () => chainableQuery([{ _id: barberId }]);
+  Subscription.findOne = async (query) => {
+    if (query.ownerType !== "barber") return null;
+    ownerReads += 1;
+    return ownerReads <= 2 ? null : canonical;
+  };
+  PaymentRecord.create = async () => ({});
+
+  await grantSubscriptionGraceToExistingBarbers({ now, graceDays: 30 });
+
+  const expectedEnd = new Date("2026-07-04T00:00:00.000Z");
+  assert.equal(canonical.currentPeriodEnd.getTime(), expectedEnd.getTime());
 });
 
 test("after grace, getPaidAccessByBarberIds includes barber", async () => {

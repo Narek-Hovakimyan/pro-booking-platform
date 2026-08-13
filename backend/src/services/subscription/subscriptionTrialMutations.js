@@ -3,6 +3,11 @@ import {
   getOrCreateDefaultSubscriptionPlan,
 } from "./subscriptionPlanHelpers.js";
 import { TRIAL_DAYS } from "./subscriptionHelpers.js";
+import {
+  findCanonicalSubscription,
+  createCanonicalSubscription,
+  isSubscriptionOwnerDuplicateKeyError,
+} from "./subscriptionManualMutations.js";
 
 /**
  * Create a trial subscription for a barber or salon owner.
@@ -14,7 +19,7 @@ export const createTrialSubscription = async ({
   payerId,
   seatCount = 1,
 }) => {
-  const existing = await Subscription.findOne({ ownerType, ownerId });
+  const existing = await findCanonicalSubscription({ ownerType, ownerId });
   if (existing) {
     return existing;
   }
@@ -26,23 +31,27 @@ export const createTrialSubscription = async ({
 
   const totalPrice = plan.pricePerSeat * seatCount;
 
-  const subscription = await Subscription.create({
-    ownerType,
-    ownerId,
-    ownerRefModel: ownerType === "barber" ? "User" : "Salon",
-    payerId,
-    planId: plan._id,
-    status: "trialing",
-    seatCount,
-    pricePerSeat: plan.pricePerSeat,
-    totalPrice,
-    currentPeriodStart: now,
-    currentPeriodEnd: trialEnd,
-    trialEndsAt: trialEnd,
-    provider: "manual",
-  });
-
-  return subscription;
+  try {
+    const created = await createCanonicalSubscription({ payload: {
+      ownerType,
+      ownerId,
+      ownerRefModel: ownerType === "barber" ? "User" : "Salon",
+      payerId,
+      planId: plan._id,
+      status: "trialing",
+      seatCount,
+      pricePerSeat: plan.pricePerSeat,
+      totalPrice,
+      currentPeriodStart: now,
+      currentPeriodEnd: trialEnd,
+      trialEndsAt: trialEnd,
+      provider: "manual",
+    } });
+    return created.subscription;
+  } catch (error) {
+    if (!isSubscriptionOwnerDuplicateKeyError(error)) throw error;
+    return findCanonicalSubscription({ ownerType, ownerId });
+  }
 };
 
 /**

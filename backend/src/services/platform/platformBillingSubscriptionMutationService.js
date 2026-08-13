@@ -3,6 +3,9 @@ import Subscription from "../../models/Subscription.js";
 import { getOrCreateDefaultSubscriptionPlan } from "../subscriptionService.js";
 import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
 import { getSalonBillingDetail } from "./platformBillingSalonReadService.js";
+import {
+  mutateCanonicalSubscription,
+} from "../subscription/subscriptionManualMutations.js";
 
 /**
  * Activate or renew a salon subscription.
@@ -33,84 +36,86 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
   const normalizedSeatCount = Math.max(1, Math.floor(Number(seatCount) || 1));
   const normalizedMonths = Math.max(1, Math.floor(Number(months) || 1));
 
-  let subscription = await Subscription.findOne({
-    ownerType: "salon",
-    ownerId: salon._id,
-  });
-
   const plan = await getOrCreateDefaultSubscriptionPlan();
   const now = new Date();
   const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
+  const extendFrom = (periodStart) => {
+    const periodEnd = new Date(periodStart);
+    periodEnd.setMonth(periodEnd.getMonth() + normalizedMonths);
+    return periodEnd;
+  };
+  const mutation = await mutateCanonicalSubscription({
+    ownerType: "salon",
+    ownerId: salon._id,
+    createPayload: () => {
+      const periodStart = now;
+      const periodEnd = extendFrom(periodStart);
+      return {
+        ownerType: "salon",
+        ownerId: salon._id,
+        ownerRefModel: "Salon",
+        payerId: salon.ownerId,
+        planId: plan._id,
+        status: "active",
+        seatCount: normalizedSeatCount,
+        pricePerSeat: plan.pricePerSeat,
+        totalPrice: monthlyTotal,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        provider: "manual",
+        lastPaymentAt: now,
+      };
+    },
+    updatePayload: (subscription) => {
+      const isContinuing =
+        ["trialing", "active"].includes(subscription.status) &&
+        subscription.currentPeriodEnd &&
+        new Date(subscription.currentPeriodEnd) > now;
+      const periodStart = isContinuing
+        ? new Date(subscription.currentPeriodEnd)
+        : now;
 
-  // If subscription exists and is active/trialing with future end, extend from end date
-  const isContinuing =
-    subscription &&
-    ["trialing", "active"].includes(subscription.status) &&
-    subscription.currentPeriodEnd &&
-    new Date(subscription.currentPeriodEnd) > now;
-
-  const oldValue = subscription
+      return {
+        status: "active",
+        seatCount: normalizedSeatCount,
+        pricePerSeat: plan.pricePerSeat,
+        totalPrice: monthlyTotal,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: extendFrom(periodStart),
+        lastPaymentAt: now,
+        trialEndsAt: undefined,
+        cancelledAt: undefined,
+        payerId: salon.ownerId,
+        planId: plan._id,
+        provider: "manual",
+      };
+    },
+  });
+  const subscription = mutation.subscription;
+  const previous = mutation.previous;
+  const oldValue = previous
     ? {
-        status: subscription.status,
-        seatCount: subscription.seatCount,
-        currentPeriodEnd: subscription.currentPeriodEnd,
+        status: previous.status,
+        seatCount: previous.seatCount,
+        currentPeriodEnd: previous.currentPeriodEnd,
       }
     : null;
-  const oldSubscriptionState = subscription
+  const oldSubscriptionState = previous
     ? {
-        status: subscription.status,
-        seatCount: subscription.seatCount,
-        pricePerSeat: subscription.pricePerSeat,
-        totalPrice: subscription.totalPrice,
-        currentPeriodStart: subscription.currentPeriodStart,
-        currentPeriodEnd: subscription.currentPeriodEnd,
-        lastPaymentAt: subscription.lastPaymentAt,
-        trialEndsAt: subscription.trialEndsAt,
-        cancelledAt: subscription.cancelledAt,
-        payerId: subscription.payerId,
-        planId: subscription.planId,
-        provider: subscription.provider,
+        status: previous.status,
+        seatCount: previous.seatCount,
+        pricePerSeat: previous.pricePerSeat,
+        totalPrice: previous.totalPrice,
+        currentPeriodStart: previous.currentPeriodStart,
+        currentPeriodEnd: previous.currentPeriodEnd,
+        lastPaymentAt: previous.lastPaymentAt,
+        trialEndsAt: previous.trialEndsAt,
+        cancelledAt: previous.cancelledAt,
+        payerId: previous.payerId,
+        planId: previous.planId,
+        provider: previous.provider,
       }
     : null;
-
-  const periodStart = isContinuing
-    ? new Date(subscription.currentPeriodEnd)
-    : now;
-
-  const periodEnd = new Date(periodStart);
-  periodEnd.setMonth(periodEnd.getMonth() + normalizedMonths);
-
-  if (subscription) {
-    subscription.status = "active";
-    subscription.seatCount = normalizedSeatCount;
-    subscription.pricePerSeat = plan.pricePerSeat;
-    subscription.totalPrice = monthlyTotal;
-    subscription.currentPeriodStart = periodStart;
-    subscription.currentPeriodEnd = periodEnd;
-    subscription.lastPaymentAt = now;
-    subscription.trialEndsAt = undefined;
-    subscription.cancelledAt = undefined;
-    subscription.payerId = salon.ownerId;
-    subscription.planId = plan._id;
-    subscription.provider = "manual";
-    await subscription.save();
-  } else {
-    subscription = await Subscription.create({
-      ownerType: "salon",
-      ownerId: salon._id,
-      ownerRefModel: "Salon",
-      payerId: salon.ownerId,
-      planId: plan._id,
-      status: "active",
-      seatCount: normalizedSeatCount,
-      pricePerSeat: plan.pricePerSeat,
-      totalPrice: monthlyTotal,
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-      provider: "manual",
-      lastPaymentAt: now,
-    });
-  }
 
   // Create audit log
   await createAuditLogOrRollback(
@@ -130,10 +135,21 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
     },
     async () => {
       if (oldSubscriptionState) {
-        Object.assign(subscription, oldSubscriptionState);
-        await subscription.save();
+        if (Number.isInteger(subscription.__v)) {
+          await Subscription.findOneAndUpdate(
+            { _id: subscription._id, __v: subscription.__v },
+            { $set: oldSubscriptionState, $inc: { __v: 1 } },
+            { returnDocument: "after" }
+          );
+        } else {
+          Object.assign(subscription, oldSubscriptionState);
+          await subscription.save();
+        }
       } else {
-        await Subscription.deleteOne({ _id: subscription._id });
+        const filter = Number.isInteger(subscription.__v)
+          ? { _id: subscription._id, __v: subscription.__v }
+          : { _id: subscription._id };
+        await Subscription.deleteOne(filter);
       }
     }
   );
