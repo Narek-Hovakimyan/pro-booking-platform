@@ -188,7 +188,7 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
   const staffUsers = await User.find({
     role: "barber",
     $or: [
-      { "salons.salon": salon._id, "salons.status": "approved" },
+      { salons: { $elemMatch: { salon: salon._id, status: "approved" } } },
       { salon: salon._id, salonStatus: "approved" },
     ],
   }).select("name avatarUrl specialty profession barberType city role salons salon salonStatus");
