@@ -40,6 +40,7 @@ For detailed architecture, feature behavior, business rules, high-risk areas, an
 | **node-cron** | Scheduled tasks |
 | **node:test** (built-in) | Testing |
 | **express-rate-limit** | Rate limiting |
+| **Helmet** | HTTP security headers |
 | **resend** | Email provider (optional) |
 
 ---
@@ -533,7 +534,7 @@ must all fall back to `index.html` for page reload or direct navigation to work.
 - The `requireBarberSubscription` middleware enforces paid access — unpaid barbers receive `403 SUBSCRIPTION_REQUIRED`.
 - Debug routes are only available in development.
 - CORS is restricted to `CLIENT_URL` origins in production.
-- The backend also disables `X-Powered-By`, sets `nosniff`, frame-deny, referrer, permissions headers on all responses, and emits JSON instead of HTML for unexpected middleware/CORS errors.
+- The backend disables `X-Powered-By` and uses Helmet for maintained HTTP security defaults. CSP and COEP remain intentionally disabled until frontend origins and runtime resources have an explicit deployment policy. CORP defaults to `same-origin`; only the public upload/portfolio media routes override it to `cross-origin` for separately hosted frontends. Production HSTS remains one year with subdomains and without preload.
 - Manual/dev payment confirmation is disabled in production. Production webhook handling rejects manual/disabled fake paid events; only a future provider adapter with verified webhook confirmation should mark payment attempts paid.
 - Rate limiting is enabled by default outside `NODE_ENV=test` and returns `{ "message": "Too many requests, please try again later.", "code": "RATE_LIMITED" }` for limited requests. Tune the `RATE_LIMIT_*` values for production traffic patterns.
 - Production requires `REDIS_URL`; HairBook uses it for shared rate-limit counters and the Socket.IO Redis adapter, so a missing/unavailable Redis instance prevents startup and makes readiness unavailable. Use a private network, least-privilege Redis ACL credentials, and TLS (`rediss://`) where supported. Do not put Redis URLs or credentials in logs, client configuration, or source control.

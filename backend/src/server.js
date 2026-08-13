@@ -13,6 +13,10 @@ import {
 } from "./config/sentry.js";
 import { requestContextMiddleware } from "./middleware/requestContextMiddleware.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
+import {
+  createSecurityHeadersMiddleware,
+  publicMediaResourcePolicy,
+} from "./middleware/securityHeadersMiddleware.js";
 import authRoutes from "./routes/auth/authRoutes.js";
 import barberOnboardingRoutes from "./routes/barbers/barberOnboardingRoutes.js";
 import barberRoutes from "./routes/barbers/barberRoutes.js";
@@ -131,22 +135,8 @@ serverLifecycleService.configure({
 });
 serverLifecycleService.installSignalHandlers();
 
+app.use(createSecurityHeadersMiddleware({ isProduction }));
 app.use(cors(corsOptions));
-app.use((req, res, next) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-
-  if (isProduction) {
-    res.setHeader(
-      "Strict-Transport-Security",
-      "max-age=31536000; includeSubDomains"
-    );
-  }
-
-  next();
-});
 app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
 app.use("/api/payments", paymentRoutes);
 app.use(express.json());
@@ -159,21 +149,29 @@ const uploadStaticOptions = {
 
 app.use(
   "/uploads/avatars",
+  publicMediaResourcePolicy,
   express.static(path.join(uploadsRoot, "avatars"), uploadStaticOptions)
 );
 app.use(
   "/uploads/certifications",
+  publicMediaResourcePolicy,
   express.static(path.join(uploadsRoot, "certifications"), uploadStaticOptions)
 );
 app.use(
   "/uploads/events",
+  publicMediaResourcePolicy,
   express.static(path.join(uploadsRoot, "events"), uploadStaticOptions)
 );
 app.use(
   "/uploads/certificate-files",
+  publicMediaResourcePolicy,
   express.static(path.join(uploadsRoot, "certificate-files"), uploadStaticOptions)
 );
-app.get("/uploads/portfolio/:filename", servePublicPortfolioImage);
+app.get(
+  "/uploads/portfolio/:filename",
+  publicMediaResourcePolicy,
+  servePublicPortfolioImage
+);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
