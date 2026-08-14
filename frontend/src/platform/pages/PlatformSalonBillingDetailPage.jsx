@@ -3,7 +3,7 @@ import {
   Loader2,
   ShieldAlert,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -28,6 +28,13 @@ import { SalonBillingSummaryCards } from "../components/billing/SalonBillingSumm
 import { SalonBillingStaffTable } from "../components/billing/SalonBillingStaffTable";
 import { SalonBillingPendingPaymentCard } from "../components/billing/SalonBillingPendingPaymentCard";
 import { SalonBillingPaymentHistory } from "../components/billing/SalonBillingPaymentHistory";
+
+const getEntityId = (entity) => entity?.id ?? entity?._id ?? entity ?? null;
+
+const getDetailSalonId = (value) => {
+  const id = getEntityId(value?.salon);
+  return id ? String(id) : "";
+};
 /* ─── Page Component ──────────────────────────────────── */
 export default function PlatformSalonBillingDetailPage() {
   const navigate = useNavigate();
@@ -40,16 +47,37 @@ export default function PlatformSalonBillingDetailPage() {
   const isPlatformAdmin = canAccessPlatform(currentUser);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [errorSalonId, setErrorSalonId] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const detailRequestRef = useRef(0);
+  const paymentsRequestRef = useRef(0);
+  const mutationRequestRef = useRef(0);
+  const currentRouteSalonIdRef = useRef("");
+  const successTimerRef = useRef(null);
   /* ── Modal state ── */
   const [modal, setModal] = useState(null); // { type, extra }
+  const [isSubmitting, setSubmitting] = useState(false);
+  const [modalError, setModalError] = useState("");
   /* ── Data fetching ── */
   const fetchDetail = useCallback(async () => {
+    const targetSalonId = String(salonId || "");
+    const requestId = ++detailRequestRef.current;
+    if (!targetSalonId) {
+      setDetail(null);
+      setIsLoading(false);
+      return null;
+    }
+
     try {
-      const result = await getPlatformBillingSalonDetail(salonId);
+      const result = await getPlatformBillingSalonDetail(targetSalonId);
+      if (detailRequestRef.current !== requestId) return null;
       setDetail(result);
+      setError("");
+      setErrorSalonId("");
       return result;
     } catch (err) {
+      if (detailRequestRef.current !== requestId) return null;
+      setErrorSalonId(targetSalonId);
       if (err.response?.status === 403) {
         setError("Access denied. Platform superuser privileges required.");
       } else if (err.response?.status === 404) {
@@ -58,79 +86,119 @@ export default function PlatformSalonBillingDetailPage() {
         setError(err.response?.data?.message || "Failed to load salon billing detail.");
       }
       return null;
+    } finally {
+      if (detailRequestRef.current === requestId) setIsLoading(false);
     }
   }, [salonId]);
-  const fetchPayments = useCallback(async () => {
-    if (!salonId) return;
+
+  const fetchPayments = useCallback(async (targetSalonId = String(salonId || "")) => {
+    const requestId = ++paymentsRequestRef.current;
+    if (!targetSalonId) return;
+
     try {
-      const result = await getPlatformBillingSalonPayments(salonId, {
+      const result = await getPlatformBillingSalonPayments(targetSalonId, {
         page: paymentsPage,
         limit: 10,
       });
+      if (paymentsRequestRef.current !== requestId) return;
       setPayments(result.payments || []);
       setPaymentsTotal(result.total || 0);
     } catch {
       // Payments fetch is secondary
     }
   }, [salonId, paymentsPage]);
-  // Initial fetch
   useEffect(() => {
-    let isMounted = true;
-    async function load() {
-      if (!isMounted) return;
-      setIsLoading(true);
+    currentRouteSalonIdRef.current = String(salonId || "");
+  }, [salonId]);
+
+  // Route changes invalidate every in-flight request and action tied to the old salon.
+  useEffect(() => {
+    async function loadCurrentSalon() {
+      setDetail(null);
+      setPayments([]);
+      setPaymentsTotal(0);
+      setPaymentsPage(1);
       setError("");
+      setErrorSalonId("");
+      setSuccessMessage("");
+      setModal(null);
+      setModalError("");
+      setSubmitting(false);
+      if (successTimerRef.current) {
+        clearTimeout(successTimerRef.current);
+        successTimerRef.current = null;
+      }
+      setIsLoading(true);
       await fetchDetail();
-      if (!isMounted) return;
-      setIsLoading(false);
     }
-    load();
+
+    loadCurrentSalon();
+
     return () => {
-      isMounted = false;
+      detailRequestRef.current += 1;
+      paymentsRequestRef.current += 1;
+      mutationRequestRef.current += 1;
     };
   }, [fetchDetail]);
+
   // Fetch payments once detail is loaded
   useEffect(() => {
-    if (!salonId || !detail) return;
-    let isMounted = true;
-    async function loadPayments() {
-      if (!isMounted) return;
-      try {
-        const result = await getPlatformBillingSalonPayments(salonId, {
-          page: paymentsPage,
-          limit: 10,
-        });
-        if (!isMounted) return;
-        setPayments(result.payments || []);
-        setPaymentsTotal(result.total || 0);
-      } catch {
-        // Payments fetch is secondary
-      }
+    const targetSalonId = String(salonId || "");
+    if (!targetSalonId || !detail || getDetailSalonId(detail) !== targetSalonId) {
+      return undefined;
     }
-    loadPayments();
+
+    async function loadCurrentPayments() {
+      await fetchPayments(targetSalonId);
+    }
+    loadCurrentPayments();
     return () => {
-      isMounted = false;
+      paymentsRequestRef.current += 1;
     };
-  }, [salonId, paymentsPage, detail]);
+  }, [salonId, paymentsPage, detail, fetchPayments]);
   /* ── Mutation handlers ── */
-  const [isSubmitting, setSubmitting] = useState(false);
-  const [modalError, setModalError] = useState("");
   const closeModal = () => {
     setModal(null);
     setModalError("");
     setSubmitting(false);
   };
-  const handleMutation = async (apiCall, note) => {
+  const handleMutation = async (apiCall, note, targetSalonId) => {
+    const currentSalonId = String(salonId || "");
+    const loadedSalonId = getDetailSalonId(detail);
+    if (
+      currentRouteSalonIdRef.current !== currentSalonId ||
+      !targetSalonId ||
+      targetSalonId !== currentSalonId ||
+      loadedSalonId !== currentSalonId ||
+      modal?.salonId !== currentSalonId
+    ) {
+      return;
+    }
+
+    const mutationId = ++mutationRequestRef.current;
     setSubmitting(true);
     setModalError("");
     try {
       await apiCall(note);
-      await fetchDetail();
-      fetchPayments();
+      if (mutationRequestRef.current !== mutationId) return;
+      const refreshedDetail = await fetchDetail();
+      if (
+        mutationRequestRef.current !== mutationId ||
+        !refreshedDetail ||
+        getDetailSalonId(refreshedDetail) !== targetSalonId
+      ) {
+        return;
+      }
+      await fetchPayments(targetSalonId);
+      if (mutationRequestRef.current !== mutationId) return;
       setSuccessMessage("Action completed successfully.");
       closeModal();
-      setTimeout(() => setSuccessMessage(""), 5000);
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => {
+        if (mutationRequestRef.current === mutationId) setSuccessMessage("");
+      }, 5000);
     } catch (err) {
+      if (mutationRequestRef.current !== mutationId) return;
       const status = err.response?.status;
       if (status === 403 || status === 401) {
         setModalError("Forbidden. Platform superuser privileges required.");
@@ -140,72 +208,78 @@ export default function PlatformSalonBillingDetailPage() {
         setModalError(err.response?.data?.message || "An unexpected error occurred.");
       }
     } finally {
-      setSubmitting(false);
+      if (mutationRequestRef.current === mutationId) setSubmitting(false);
     }
   };
   /* ── Activate / Renew ── */
   const handleActivateConfirm = (note) => {
+    const targetSalonId = modal?.salonId;
     handleMutation(async (n) => {
-      return activatePlatformSalonSubscription(salonId, {
+      return activatePlatformSalonSubscription(targetSalonId, {
         note: n,
-        seatCount: modal.extra?.seatCount || 1,
-        months: modal.extra?.months || 1,
+        seatCount: modal?.extra?.seatCount || 1,
+        months: modal?.extra?.months || 1,
       });
-    }, note);
+    }, note, targetSalonId);
   };
   /* ── Update seat count ── */
   const handleSeatCountConfirm = (note) => {
-    const newCount = Number(modal.extra?.newSeatCount);
+    const targetSalonId = modal?.salonId;
+    const newCount = Number(modal?.extra?.newSeatCount);
     if (!Number.isInteger(newCount) || newCount < 1) {
       setModalError("Seat count must be a positive integer.");
       return;
     }
     handleMutation(async (n) => {
-      return updatePlatformSalonSeatCount(salonId, {
+      return updatePlatformSalonSeatCount(targetSalonId, {
         seatCount: newCount,
         note: n,
       });
-    }, note);
+    }, note, targetSalonId);
   };
   /* ── Assign seat ── */
   const handleAssignConfirm = (note) => {
-    const barberId = modal.extra?.barberId;
+    const targetSalonId = modal?.salonId;
+    const barberId = modal?.extra?.barberId;
     if (!barberId) {
       setModalError("No staff member selected.");
       return;
     }
     handleMutation(async (n) => {
-      return assignPlatformSalonSeat(salonId, {
+      return assignPlatformSalonSeat(targetSalonId, {
         barberId,
         note: n,
       });
-    }, note);
+    }, note, targetSalonId);
   };
   /* ── Revoke seat ── */
   const handleRevokeConfirm = (note) => {
-    const barberId = modal.extra?.barberId;
+    const targetSalonId = modal?.salonId;
+    const barberId = modal?.extra?.barberId;
     if (!barberId) {
       setModalError("No staff member selected.");
       return;
     }
     handleMutation(async (n) => {
-      return revokePlatformSalonSeat(salonId, {
+      return revokePlatformSalonSeat(targetSalonId, {
         barberId,
         note: n,
       });
-    }, note);
+    }, note, targetSalonId);
   };
   /* ── Cancel subscription ── */
   const handleCancelConfirm = (note) => {
+    const targetSalonId = modal?.salonId;
     handleMutation(async (n) => {
-      return cancelPlatformSalonSubscription(salonId, {
+      return cancelPlatformSalonSubscription(targetSalonId, {
         note: n,
       });
-    }, note);
+    }, note, targetSalonId);
   };
   /* ── Confirm payment ── */
   const handlePaymentConfirm = (note) => {
-    const paymentId = modal.extra?.paymentId;
+    const targetSalonId = modal?.salonId;
+    const paymentId = modal?.extra?.paymentId;
     if (!paymentId) {
       setModalError("No payment selected.");
       return;
@@ -214,13 +288,18 @@ export default function PlatformSalonBillingDetailPage() {
       return confirmPlatformSalonPayment(paymentId, {
         note: n,
       });
-    }, note);
+    }, note, targetSalonId);
   };
   /* ── Derived data ── */
-  const subscription = detail?.subscription;
-  const seats = detail?.seats;
-  const acceptedStaff = detail?.acceptedStaff || [];
-  const latestPendingAttempt = detail?.latestPendingAttempt;
+  const routeSalonId = String(salonId || "");
+  const detailMatchesRoute =
+    Boolean(detail) && getDetailSalonId(detail) === routeSalonId;
+  const errorMatchesRoute = Boolean(error) && errorSalonId === routeSalonId;
+  const currentDetail = detailMatchesRoute ? detail : null;
+  const subscription = currentDetail?.subscription;
+  const seats = currentDetail?.seats;
+  const acceptedStaff = currentDetail?.acceptedStaff || [];
+  const latestPendingAttempt = currentDetail?.latestPendingAttempt;
   const subscriptionIsCancelled = subscription?.status === "cancelled";
   const totalPaymentsPages = Math.max(1, Math.ceil(paymentsTotal / 10));
   const assignedBarberIds = new Set(
@@ -233,7 +312,7 @@ export default function PlatformSalonBillingDetailPage() {
         latestPendingAttempt.status === "requires_action")
     : false;
   /* ── Loading ── */
-  if (isLoading) {
+  if (!routeSalonId || isLoading || (!detailMatchesRoute && !errorMatchesRoute)) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
@@ -241,7 +320,7 @@ export default function PlatformSalonBillingDetailPage() {
     );
   }
   /* ── Error state ── */
-  if (error) {
+  if (errorMatchesRoute) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
@@ -259,7 +338,7 @@ export default function PlatformSalonBillingDetailPage() {
       </Card>
     );
   }
-  if (!detail || !isPlatformAdmin) {
+  if (!currentDetail || !isPlatformAdmin) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
@@ -272,17 +351,17 @@ export default function PlatformSalonBillingDetailPage() {
   return (
     <div className="space-y-6">
       <SalonBillingHeader
-        salon={detail.salon}
+        salon={currentDetail.salon}
         subscription={subscription}
         isPlatformAdmin={isPlatformAdmin}
         onBack={() => navigate("/admin/platform/billing")}
         successMessage={successMessage}
-        onActivate={() => setModal({ type: "activate" })}
-        onUpdateSeatCount={() => setModal({ type: "seatCount" })}
-        onCancel={() => setModal({ type: "cancel" })}
+        onActivate={() => setModal({ type: "activate", salonId: String(salonId || "") })}
+        onUpdateSeatCount={() => setModal({ type: "seatCount", salonId: String(salonId || "") })}
+        onCancel={() => setModal({ type: "cancel", salonId: String(salonId || "") })}
       />
       <SalonBillingSummaryCards
-        owner={detail.owner}
+        owner={currentDetail.owner}
         subscription={subscription}
         seats={seats}
         subscriptionIsCancelled={subscriptionIsCancelled}
@@ -293,14 +372,16 @@ export default function PlatformSalonBillingDetailPage() {
         seats={seats}
         isPlatformAdmin={isPlatformAdmin}
         subscription={subscription}
-        onAssign={(extra) => setModal({ type: "assign", extra })}
-        onRevoke={(extra) => setModal({ type: "revoke", extra })}
+        onAssign={(extra) => setModal({ type: "assign", extra, salonId: String(salonId || "") })}
+        onRevoke={(extra) => setModal({ type: "revoke", extra, salonId: String(salonId || "") })}
       />
       <SalonBillingPendingPaymentCard
         latestPendingAttempt={latestPendingAttempt}
         isConfirmablePayment={isConfirmablePayment}
         isPlatformAdmin={isPlatformAdmin}
-        onConfirmPayment={(extra) => setModal({ type: "confirmPayment", extra })}
+        onConfirmPayment={(extra) =>
+          setModal({ type: "confirmPayment", extra, salonId: String(salonId || "") })
+        }
       />
       <SalonBillingPaymentHistory
         payments={payments}
