@@ -24,7 +24,7 @@ export default function LoyaltyProgramManager() {
 
     let mounted = true;
 
-    api.get("/api/loyalty/programs/me")
+    api.get("/loyalty/programs/me")
       .then(({ data }) => {
         if (mounted) setPrograms(data);
       })
@@ -46,7 +46,7 @@ export default function LoyaltyProgramManager() {
     setError("");
 
     try {
-      const { data } = await api.post("/api/loyalty/programs", form);
+      const { data } = await api.post("/loyalty/programs", form);
       setPrograms((prev) => [data, ...prev]);
       setShowForm(false);
       setForm({ title: "", requiredVisits: 5, rewardText: "" });
@@ -59,7 +59,7 @@ export default function LoyaltyProgramManager() {
 
   const handleDeactivate = async (programId) => {
     try {
-      await api.delete(`/api/loyalty/programs/${programId}`);
+      await api.delete(`/loyalty/programs/${programId}`);
       setPrograms((prev) =>
         prev.map((p) =>
           String(p._id) === String(programId) ? { ...p, active: false } : p

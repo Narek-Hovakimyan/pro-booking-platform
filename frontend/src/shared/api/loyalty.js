@@ -1,6 +1,6 @@
 import api from "./axios";
 
 export const getMyLoyaltyProgress = async () => {
-  const { data } = await api.get("/api/loyalty/progress/me");
+  const { data } = await api.get("/loyalty/progress/me");
   return data;
 };
