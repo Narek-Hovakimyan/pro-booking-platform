@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, test } from "node:test";
 
 import {
@@ -59,6 +61,8 @@ const otherUserId = "64b000000000000000000003";
 const eventId = "64b000000000000000000004";
 const salonAId = "64b000000000000000000005";
 const salonBId = "64b000000000000000000006";
+const uploadsRoot = path.resolve(process.cwd(), "uploads");
+const createdFiles = new Set();
 
 afterEach(() => {
   Event.create = originalMethods.eventCreate;
@@ -81,6 +85,12 @@ afterEach(() => {
   SalonJoinRequest.find = originalMethods.joinRequestFind;
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
   User.findById = originalMethods.userFindById;
+  for (const filePath of createdFiles) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {}
+    createdFiles.delete(filePath);
+  }
 });
 
 const createResponse = () => ({
@@ -95,6 +105,14 @@ const createResponse = () => ({
     return this;
   },
 });
+
+const createUploadedFile = (relativePath, contents = relativePath) => {
+  const absolutePath = path.resolve(uploadsRoot, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, contents);
+  createdFiles.add(absolutePath);
+  return absolutePath;
+};
 
 const withSilencedConsoleError = async (task) => {
   const originalConsoleError = console.error;
@@ -347,6 +365,7 @@ test("approved salon member cannot create off-site event without salonId (not ow
 
 test("createEvent unexpected error returns 500 generic without leaking raw message", async () => {
   const res = createResponse();
+  const uploadedPath = createUploadedFile("events/create-failure.webp");
 
   Salon.findById = async () => ({
     _id: salonAId,
@@ -361,6 +380,7 @@ test("createEvent unexpected error returns 500 generic without leaking raw messa
     await createEvent(
       {
         user: { _id: organizerId, role: "barber" },
+        file: { filename: "create-failure.webp" },
         body: {
           title: "Advanced Color",
           instructor: "Educator",
@@ -377,6 +397,84 @@ test("createEvent unexpected error returns 500 generic without leaking raw messa
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, "Could not create event");
+  assert.equal(fs.existsSync(uploadedPath), false);
+  createdFiles.delete(uploadedPath);
+});
+
+test("createEvent cleans uploaded image on validation, authorization, and not-found early returns", async () => {
+  const validationRes = createResponse();
+  const validationPath = createUploadedFile("events/create-validation.webp");
+  const unrelatedPath = createUploadedFile("events/create-unrelated.webp");
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      file: { filename: "create-validation.webp" },
+      body: {
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "90",
+        location: "Conference Hall",
+      },
+    },
+    validationRes
+  );
+
+  assert.equal(validationRes.statusCode, 400);
+  assert.equal(fs.existsSync(validationPath), false);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(validationPath);
+
+  const authRes = createResponse();
+  const authPath = createUploadedFile("events/create-auth.webp");
+
+  await createEvent(
+    {
+      user: { _id: attendeeId, role: "client" },
+      file: { filename: "create-auth.webp" },
+      body: {
+        title: "Advanced Color",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "90",
+        location: "Conference Hall",
+      },
+    },
+    authRes
+  );
+
+  assert.equal(authRes.statusCode, 403);
+  assert.equal(fs.existsSync(authPath), false);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(authPath);
+
+  const notFoundRes = createResponse();
+  const notFoundPath = createUploadedFile("events/create-salon-not-found.webp");
+  Salon.findById = async () => null;
+
+  await createEvent(
+    {
+      user: { _id: organizerId, role: "barber" },
+      file: { filename: "create-salon-not-found.webp" },
+      body: {
+        title: "Advanced Color",
+        instructor: "Educator",
+        date: "2099-08-01",
+        time: "10:00",
+        duration: "90",
+        location: "Second Salon",
+        salonId: salonAId,
+      },
+    },
+    notFoundRes
+  );
+
+  assert.equal(notFoundRes.statusCode, 404);
+  assert.equal(fs.existsSync(notFoundPath), false);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(notFoundPath);
 });
 
 test("registerForEvent unexpected error returns 500 generic without leaking raw message", async () => {
@@ -2056,6 +2154,192 @@ test("updateEvent accepts valid numeric updates", async () => {
   assert.equal(event.duration, 120);
   assert.equal(event.price, 50);
   assert.equal(event.maxParticipants, 10);
+});
+
+test("updateEvent removes only the new uploaded image when persistence fails", async () => {
+  const res = createResponse();
+  const oldPath = createUploadedFile("events/update-existing.webp");
+  const newPath = createUploadedFile("events/update-new.webp");
+  const event = {
+    ...baseEvent,
+    imageUrl: "/uploads/events/update-existing.webp",
+    async save() {
+      throw new Error("save failed");
+    },
+  };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      file: { filename: "update-new.webp" },
+      body: { title: "Updated title" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(newPath), false);
+  createdFiles.delete(newPath);
+});
+
+test("updateEvent cleans uploaded image on validation, auth, and not-found early returns", async () => {
+  const oldPath = createUploadedFile("events/update-early-old.webp");
+  const unrelatedPath = createUploadedFile("events/update-early-unrelated.webp");
+  const event = {
+    ...baseEvent,
+    imageUrl: "/uploads/events/update-early-old.webp",
+    async save() {
+      return this;
+    },
+  };
+
+  Event.findById = async (id) => (String(id) === String(eventId) ? event : null);
+
+  const validationRes = createResponse();
+  const validationPath = createUploadedFile("events/update-validation.webp");
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      file: { filename: "update-validation.webp" },
+      body: { duration: "0" },
+    },
+    validationRes
+  );
+
+  assert.equal(validationRes.statusCode, 400);
+  assert.equal(fs.existsSync(validationPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(validationPath);
+
+  const authRes = createResponse();
+  const authPath = createUploadedFile("events/update-auth.webp");
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: otherUserId, role: "barber" },
+      file: { filename: "update-auth.webp" },
+      body: { title: "Updated title" },
+    },
+    authRes
+  );
+
+  assert.equal(authRes.statusCode, 403);
+  assert.equal(fs.existsSync(authPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(authPath);
+
+  const notFoundRes = createResponse();
+  const notFoundPath = createUploadedFile("events/update-not-found.webp");
+  Event.findById = async () => null;
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      file: { filename: "update-not-found.webp" },
+      body: { title: "Updated title" },
+    },
+    notFoundRes
+  );
+
+  assert.equal(notFoundRes.statusCode, 404);
+  assert.equal(fs.existsSync(notFoundPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(notFoundPath);
+});
+
+test("updateEvent deletes the old image only after persistence succeeds", async () => {
+  const res = createResponse();
+  const oldPath = createUploadedFile("events/replace-old.webp");
+  const newPath = createUploadedFile("events/replace-new.webp");
+  const event = {
+    ...baseEvent,
+    imageUrl: "/uploads/events/replace-old.webp",
+    async save() {
+      return this;
+    },
+  };
+
+  let callCount = 0;
+  Event.findById = (id) => {
+    callCount += 1;
+    if (callCount === 1) return event;
+    return createQuery({
+      _id: id,
+      ...event,
+      salonId: { _id: null, name: undefined },
+      organizerId: { _id: organizerId, name: "Organizer" },
+    });
+  };
+
+  await updateEvent(
+    {
+      params: { id: eventId },
+      user: { _id: organizerId, role: "barber" },
+      file: { filename: "replace-new.webp" },
+      body: { title: "Updated title" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(event.imageUrl, "/uploads/events/replace-new.webp");
+  assert.equal(fs.existsSync(oldPath), false);
+  assert.equal(fs.existsSync(newPath), true);
+  createdFiles.delete(oldPath);
+});
+
+test("updateEvent keeps the newly referenced image when post-commit work fails", async () => {
+  const res = createResponse();
+  const oldPath = createUploadedFile("events/post-commit-old.webp");
+  const newPath = createUploadedFile("events/post-commit-new.webp");
+  const event = {
+    ...baseEvent,
+    imageUrl: "/uploads/events/post-commit-old.webp",
+    async save() {
+      return this;
+    },
+  };
+
+  let callCount = 0;
+  Event.findById = (id) => {
+    callCount += 1;
+    if (callCount === 1 && String(id) === String(eventId)) {
+      return event;
+    }
+    return {
+      populate() {
+        throw new Error("populate failed");
+      },
+    };
+  };
+
+  await withSilencedConsoleError(async () => {
+    await updateEvent(
+      {
+        params: { id: eventId },
+        user: { _id: organizerId, role: "barber" },
+        file: { filename: "post-commit-new.webp" },
+        body: { title: "Updated title" },
+      },
+      res
+    );
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(fs.existsSync(newPath), true);
+  assert.equal(fs.existsSync(oldPath), false);
+  createdFiles.delete(oldPath);
 });
 
 test("updateEvent does not reject legacy past event when date/time is unchanged", async () => {

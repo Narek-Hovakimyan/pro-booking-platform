@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, test } from "node:test";
 
 import {
@@ -46,6 +48,8 @@ const originalMethods = {
 
 const barber = { _id: "barber-a", role: "barber" };
 const client = { _id: "client-a", role: "client" };
+const uploadsRoot = path.resolve(process.cwd(), "uploads");
+const createdFiles = new Set();
 
 afterEach(() => {
   BarberProfile.create = originalMethods.create;
@@ -64,6 +68,12 @@ afterEach(() => {
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
+  for (const filePath of createdFiles) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {}
+    createdFiles.delete(filePath);
+  }
 });
 
 const createResponse = () => ({
@@ -78,6 +88,14 @@ const createResponse = () => ({
     return this;
   },
 });
+
+const createUploadedFile = (relativePath, contents = relativePath) => {
+  const absolutePath = path.resolve(uploadsRoot, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, contents);
+  createdFiles.add(absolutePath);
+  return absolutePath;
+};
 
 const createProfileWithCert = (certOverrides = {}) => {
   const cert = {
@@ -257,6 +275,116 @@ test("barber can add certification with valid data", async () => {
   assert.equal(res.body.title, "Cutting Certificate");
   assert.equal(res.body.issuedBy, "Academy");
   assert.equal(res.body.description, "Trims");
+});
+
+test("addCertification cleans only the new uploaded file when persistence fails", async () => {
+  const res = createResponse();
+  const uploadedPath = createUploadedFile(
+    "certifications/new-certification.webp"
+  );
+  const unrelatedPath = createUploadedFile("certifications/unrelated.webp");
+
+  BarberProfile.findOne = async () => null;
+  BarberProfile.create = async () => {
+    throw new Error("write failed");
+  };
+
+  await addCertification(
+    {
+      user: barber,
+      file: { filename: "new-certification.webp" },
+      body: {
+        title: "Cutting",
+        issuedBy: "Academy",
+        issueDate: "2024-01-01",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(fs.existsSync(uploadedPath), false);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(uploadedPath);
+});
+
+test("addCertification cleans uploaded file on validation and authorization early returns", async () => {
+  const validationRes = createResponse();
+  const validationPath = createUploadedFile("certifications/add-validation.webp");
+  const unrelatedPath = createUploadedFile("certifications/add-validation-unrelated.webp");
+
+  await addCertification(
+    {
+      user: barber,
+      file: { filename: "add-validation.webp" },
+      body: { issuedBy: "Academy", issueDate: "2024-01-01" },
+    },
+    validationRes
+  );
+
+  assert.equal(validationRes.statusCode, 400);
+  assert.equal(fs.existsSync(validationPath), false);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(validationPath);
+
+  const authRes = createResponse();
+  const authPath = createUploadedFile("certifications/add-auth.webp");
+
+  await addCertification(
+    {
+      user: client,
+      file: { filename: "add-auth.webp" },
+      body: { title: "Cutting", issuedBy: "Academy", issueDate: "2024-01-01" },
+    },
+    authRes
+  );
+
+  assert.equal(authRes.statusCode, 403);
+  assert.equal(fs.existsSync(authPath), false);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(authPath);
+});
+
+test("addCertification preserves a committed upload when response serialization fails", async () => {
+  const uploadedPath = createUploadedFile("certifications/committed-add.webp");
+  const profile = createProfileWithCert();
+  profile.certifications.length = 0;
+  let jsonCalls = 0;
+  const res = {
+    statusCode: 200,
+    body: undefined,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      jsonCalls += 1;
+      if (jsonCalls === 1) throw new Error("serialization failed");
+      this.body = payload;
+      return this;
+    },
+  };
+
+  BarberProfile.findOne = async () => null;
+  BarberProfile.create = async ({ certifications }) => {
+    profile.certifications.push(...certifications);
+    return profile;
+  };
+
+  await addCertification(
+    {
+      user: barber,
+      file: { filename: "committed-add.webp" },
+      body: { title: "Cutting", issuedBy: "Academy", issueDate: "2024-01-01" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(jsonCalls, 2);
+  assert.equal(fs.existsSync(uploadedPath), true);
+  assert.equal(profile.certifications.length, 1);
+  assert.equal(profile.certifications[0].imageUrl, "/uploads/certifications/committed-add.webp");
 });
 
 test("addCertification rereads the trusted profile after the expected duplicate create", async () => {
@@ -803,9 +931,232 @@ test("update certification rejects issue date that would invalidate existing exp
   assert.equal(profile.saveCalled, false);
 });
 
+test("updateCertification preserves old file and removes only the new upload when save fails", async () => {
+  const res = createResponse();
+  const oldPath = createUploadedFile("certifications/existing-cert.webp");
+  const newPath = createUploadedFile("certifications/replacement-cert.webp");
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/existing-cert.webp",
+  });
+  profile.save = async () => {
+    throw new Error("save failed");
+  };
+
+  BarberProfile.findOne = async () => profile;
+
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+      file: { filename: "replacement-cert.webp" },
+      body: { title: "Updated" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(newPath), false);
+  createdFiles.delete(newPath);
+});
+
+test("updateCertification cleans uploaded file on validation, auth, and not-found early returns", async () => {
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/update-early-old.webp",
+  });
+  const oldPath = createUploadedFile("certifications/update-early-old.webp");
+  const unrelatedPath = createUploadedFile("certifications/update-early-unrelated.webp");
+
+  BarberProfile.findOne = async () => profile;
+
+  const validationRes = createResponse();
+  const validationPath = createUploadedFile("certifications/update-validation.webp");
+
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+      file: { filename: "update-validation.webp" },
+      body: { title: " " },
+    },
+    validationRes
+  );
+
+  assert.equal(validationRes.statusCode, 400);
+  assert.equal(fs.existsSync(validationPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(validationPath);
+
+  const authRes = createResponse();
+  const authPath = createUploadedFile("certifications/update-auth.webp");
+
+  await updateCertification(
+    {
+      user: client,
+      params: { certId: "cert-a" },
+      file: { filename: "update-auth.webp" },
+      body: { title: "Updated" },
+    },
+    authRes
+  );
+
+  assert.equal(authRes.statusCode, 403);
+  assert.equal(fs.existsSync(authPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(authPath);
+
+  const missingProfileRes = createResponse();
+  const missingProfilePath = createUploadedFile("certifications/update-missing-profile.webp");
+  BarberProfile.findOne = async () => null;
+
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+      file: { filename: "update-missing-profile.webp" },
+      body: { title: "Updated" },
+    },
+    missingProfileRes
+  );
+
+  assert.equal(missingProfileRes.statusCode, 404);
+  assert.equal(fs.existsSync(missingProfilePath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(missingProfilePath);
+
+  const missingCertRes = createResponse();
+  const missingCertPath = createUploadedFile("certifications/update-missing-cert.webp");
+  BarberProfile.findOne = async () => profile;
+
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "missing-cert" },
+      file: { filename: "update-missing-cert.webp" },
+      body: { title: "Updated" },
+    },
+    missingCertRes
+  );
+
+  assert.equal(missingCertRes.statusCode, 404);
+  assert.equal(fs.existsSync(missingCertPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(missingCertPath);
+});
+
+test("updateCertification deletes the old file only after a successful save", async () => {
+  const res = createResponse();
+  const oldPath = createUploadedFile("certifications/old-cert.webp");
+  const newPath = createUploadedFile("certifications/new-cert.webp");
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/old-cert.webp",
+  });
+
+  BarberProfile.findOne = async () => profile;
+
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+      file: { filename: "new-cert.webp" },
+      body: { title: "Updated" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(profile.saveCalled, true);
+  assert.equal(fs.existsSync(oldPath), false);
+  assert.equal(fs.existsSync(newPath), true);
+  createdFiles.delete(oldPath);
+});
+
+test("updateCertification preserves a committed replacement when response serialization fails", async () => {
+  const oldPath = createUploadedFile("certifications/post-save-old.webp");
+  const newPath = createUploadedFile("certifications/post-save-new.webp");
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/post-save-old.webp",
+  });
+  let jsonCalls = 0;
+  const res = {
+    statusCode: 200,
+    body: undefined,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      jsonCalls += 1;
+      if (jsonCalls === 1) throw new Error("serialization failed");
+      this.body = payload;
+      return this;
+    },
+  };
+
+  BarberProfile.findOne = async () => profile;
+
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+      file: { filename: "post-save-new.webp" },
+      body: { title: "Updated" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(jsonCalls, 2);
+  assert.equal(profile.certifications[0].imageUrl, "/uploads/certifications/post-save-new.webp");
+  assert.equal(fs.existsSync(newPath), true);
+  assert.equal(fs.existsSync(oldPath), false);
+});
+
+test("updateCertification keeps the committed replacement when old-file unlink fails", async () => {
+  const oldPath = createUploadedFile("certifications/unlink-old.webp");
+  const newPath = createUploadedFile("certifications/unlink-new.webp");
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/unlink-old.webp",
+  });
+  const originalUnlinkSync = fs.unlinkSync;
+  fs.unlinkSync = (filePath) => {
+    if (filePath === oldPath) throw new Error("unlink failed");
+    return originalUnlinkSync(filePath);
+  };
+
+  try {
+    BarberProfile.findOne = async () => profile;
+    const res = createResponse();
+
+    await updateCertification(
+      {
+        user: barber,
+        params: { certId: "cert-a" },
+        file: { filename: "unlink-new.webp" },
+        body: { title: "Updated" },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(profile.certifications[0].imageUrl, "/uploads/certifications/unlink-new.webp");
+    assert.equal(fs.existsSync(newPath), true);
+    assert.equal(fs.existsSync(oldPath), true);
+  } finally {
+    fs.unlinkSync = originalUnlinkSync;
+  }
+});
+
 test("barber can delete their own certification", async () => {
   const res = createResponse();
-  const profile = createProfileWithCert();
+  const uploadedPath = createUploadedFile("certifications/delete-cert.webp");
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/delete-cert.webp",
+  });
 
   BarberProfile.findOne = async () => profile;
 
@@ -820,6 +1171,32 @@ test("barber can delete their own certification", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(profile.certifications.length, 0);
   assert.equal(profile.saveCalled, true);
+  assert.equal(fs.existsSync(uploadedPath), false);
+  createdFiles.delete(uploadedPath);
+});
+
+test("deleteCertification preserves the existing file when persistence fails", async () => {
+  const res = createResponse();
+  const uploadedPath = createUploadedFile("certifications/failing-delete.webp");
+  const profile = createProfileWithCert({
+    imageUrl: "/uploads/certifications/failing-delete.webp",
+  });
+  profile.save = async () => {
+    throw new Error("save failed");
+  };
+
+  BarberProfile.findOne = async () => profile;
+
+  await deleteCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(fs.existsSync(uploadedPath), true);
 });
 
 test("public barber event certificates include issued safe certificate data only", async () => {

@@ -3,6 +3,7 @@ import EventCertificate from "../../models/EventCertificate.js";
 import EventRegistration from "../../models/EventRegistration.js";
 import EventReview from "../../models/EventReview.js";
 import Salon from "../../models/Salon.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
 import { createCertificateForRegistration } from "./certificateController.js";
 import { createNotification } from "../notifications/notificationController.js";
 import {
@@ -134,11 +135,18 @@ export const getEventById = async (req, res) => {
   }
 };
 
+const respondBeforeEventPersistence = (res, uploadedImagePath, status, message) => {
+  if (uploadedImagePath) deleteUploadedFile(uploadedImagePath);
+  return res.status(status).json({ message });
+};
+
 /**
  * POST /api/events
  * Auth: barber with salon owner/admin access or approved salon membership
  */
 export const createEvent = async (req, res) => {
+  const uploadedImagePath = req.file ? `/uploads/events/${req.file.filename}` : "";
+  let eventCreated = false;
   try {
     const {
       title,
@@ -167,45 +175,34 @@ export const createEvent = async (req, res) => {
       duration === null ||
       !location
     ) {
-      return res.status(400).json({
-        message: "Title, instructor, date, time, duration, and location are required",
-      });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 400, "Title, instructor, date, time, duration, and location are required");
     }
 
-    // Validate date/time
     const dateTimeResult = validateEventDateTime(date, time);
     if (!dateTimeResult.isValid) {
-      return res.status(400).json({ message: dateTimeResult.message });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 400, dateTimeResult.message);
     }
 
-    // Validate numeric fields
     const numResult = validateEventNumbers({ duration, price, maxParticipants });
     if (!numResult.isValid) {
-      return res.status(400).json({ message: numResult.message });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 400, numResult.message);
     }
 
     if (req.user?.role !== "barber") {
-      return res.status(403).json({
-        message: "Only barbers who manage a salon can create events",
-      });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 403, "Only barbers who manage a salon can create events");
     }
 
     if (salonId) {
-      // Verify user has access to this salon
       const salon = await Salon.findById(salonId);
       if (!salon) {
-        return res.status(404).json({ message: "Salon not found" });
+        return respondBeforeEventPersistence(res, uploadedImagePath, 404, "Salon not found");
       }
 
       if (!(await canUserCreateEventForSalon(req.user, salon))) {
-        return res.status(403).json({
-          message: "Only salon owners, admins, or approved salon barbers can create events",
-        });
+        return respondBeforeEventPersistence(res, uploadedImagePath, 403, "Only salon owners, admins, or approved salon barbers can create events");
       }
     } else if (!(await userHasAnyManageableSalon(req.user))) {
-      return res.status(403).json({
-        message: "Only salon owners, admins, or approved salon barbers can create events",
-      });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 403, "Only salon owners, admins, or approved salon barbers can create events");
     }
 
     const event = await Event.create({
@@ -226,6 +223,7 @@ export const createEvent = async (req, res) => {
       visibility,
       certificatesEnabled,
     });
+    eventCreated = true;
 
     const populated = await Event.findById(event._id)
       .populate("salonId", "name")
@@ -234,6 +232,7 @@ export const createEvent = async (req, res) => {
 
     return res.status(201).json(populated);
   } catch (error) {
+    if (uploadedImagePath && !eventCreated) deleteUploadedFile(uploadedImagePath);
     return sendControllerError(res, error, "Could not create event");
   }
 };
@@ -243,22 +242,23 @@ export const createEvent = async (req, res) => {
  * Auth: organizer or salon owner/admin only
  */
 export const updateEvent = async (req, res) => {
+  const uploadedImagePath = req.file ? `/uploads/events/${req.file.filename}` : "";
+  let eventPersisted = false;
   try {
     const event = await Event.findById(req.params.id);
     if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 404, "Event not found");
     }
 
     const { canManage } = await getEventAuthorization(event, req.user);
     if (!canManage) {
-      return res.status(403).json({
-        message: "Not authorized to update this event",
-      });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 403, "Not authorized to update this event");
     }
 
     const payload = parseEventPayload(req.body, req.file, {
       applyDefaults: false,
     });
+    const previousImageUrl = event.imageUrl || "";
     const allowedFields = [
       "title",
       "description",
@@ -277,24 +277,22 @@ export const updateEvent = async (req, res) => {
       "certificatesEnabled",
     ];
 
-    // Validate date/time if date or time changed
     if (payload.date !== undefined || payload.time !== undefined) {
       const effectiveDate = payload.date !== undefined ? payload.date : event.date;
       const effectiveTime = payload.time !== undefined ? payload.time : event.time;
       const dateTimeResult = validateEventDateTime(effectiveDate, effectiveTime);
       if (!dateTimeResult.isValid) {
-        return res.status(400).json({ message: dateTimeResult.message });
+        return respondBeforeEventPersistence(res, uploadedImagePath, 400, dateTimeResult.message);
       }
     }
 
-    // Validate numeric fields if provided
     const numResult = validateEventNumbers({
       duration: payload.duration,
       price: payload.price,
       maxParticipants: payload.maxParticipants,
     });
     if (!numResult.isValid) {
-      return res.status(400).json({ message: numResult.message });
+      return respondBeforeEventPersistence(res, uploadedImagePath, 400, numResult.message);
     }
 
     for (const field of allowedFields) {
@@ -304,6 +302,10 @@ export const updateEvent = async (req, res) => {
     }
 
     await event.save();
+    eventPersisted = true;
+    if (uploadedImagePath && previousImageUrl && previousImageUrl !== uploadedImagePath) {
+      deleteUploadedFile(previousImageUrl);
+    }
 
     const populated = await Event.findById(event._id)
       .populate("salonId", "name")
@@ -312,6 +314,7 @@ export const updateEvent = async (req, res) => {
 
     return res.json(populated);
   } catch (error) {
+    if (uploadedImagePath && !eventPersisted) deleteUploadedFile(uploadedImagePath);
     return sendControllerError(res, error, "Could not update event");
   }
 };

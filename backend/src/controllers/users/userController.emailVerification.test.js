@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { Writable } from "node:stream";
 import mongoose from "mongoose";
@@ -37,6 +39,7 @@ const originalUserMethods = {
   create: User.create,
 };
 const originalBarberProfileMethods = {
+  findOne: BarberProfile.findOne,
   findOneAndUpdate: BarberProfile.findOneAndUpdate,
 };
 const originalSalonMethods = {
@@ -54,6 +57,8 @@ const originalSubscriptionPlanMethods = {
 const originalJwtSecret = process.env.JWT_SECRET;
 const originalPlatformAdminEmails = process.env.PLATFORM_ADMIN_EMAILS;
 const originalPlatformAdminIds = process.env.PLATFORM_ADMIN_IDS;
+const uploadsDir = path.resolve(process.cwd(), "uploads", "avatars");
+const createdFiles = new Set();
 
 const userId = "64c000000000000000000001";
 const otherUserId = "64c000000000000000000002";
@@ -91,6 +96,7 @@ afterEach(() => {
   User.findByIdAndDelete = originalUserMethods.findByIdAndDelete;
   User.findOne = originalUserMethods.findOne;
   User.create = originalUserMethods.create;
+  BarberProfile.findOne = originalBarberProfileMethods.findOne;
   BarberProfile.findOneAndUpdate = originalBarberProfileMethods.findOneAndUpdate;
   Salon.find = originalSalonMethods.find;
   Salon.findById = originalSalonMethods.findById;
@@ -115,6 +121,12 @@ afterEach(() => {
   } else {
     process.env.PLATFORM_ADMIN_IDS = originalPlatformAdminIds;
   }
+  for (const filePath of createdFiles) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {}
+    createdFiles.delete(filePath);
+  }
 });
 
 const createResponse = () => ({
@@ -129,6 +141,14 @@ const createResponse = () => ({
     return this;
   },
 });
+
+const createUploadedAvatarFile = (filename, contents = filename) => {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const filePath = path.join(uploadsDir, filename);
+  fs.writeFileSync(filePath, contents);
+  createdFiles.add(filePath);
+  return filePath;
+};
 
 const createRequest = (overrides = {}) => ({
   user: { _id: userId, role: "client", ...overrides.user },
@@ -459,10 +479,17 @@ test("updateMyProfile – barber profile edit without media keeps existing image
 test("updateMyProfile – uploaded avatar updates user avatar and barber image", async () => {
   const res = createResponse();
   const req = createRequest({
-    user: { _id: userId, role: "barber" },
+    user: {
+      _id: userId,
+      role: "barber",
+      avatarUrl: "/uploads/avatars/existing-user.png",
+    },
     body: { name: "Updated Barber" },
   });
   req.file = { filename: "uploaded.png" };
+  const uploadedPath = createUploadedAvatarFile("uploaded.png");
+  const oldUserPath = createUploadedAvatarFile("existing-user.png");
+  const oldProfilePath = createUploadedAvatarFile("existing-profile.png");
   let userUpdatesSeen;
   let profileUpdatesSeen;
 
@@ -475,6 +502,9 @@ test("updateMyProfile – uploaded avatar updates user avatar and barber image",
       updates
     ));
   };
+  BarberProfile.findOne = async () => ({
+    imageUrl: "/uploads/avatars/existing-profile.png",
+  });
   BarberProfile.findOneAndUpdate = async (_query, updates) => {
     profileUpdatesSeen = updates;
     return {
@@ -494,6 +524,82 @@ test("updateMyProfile – uploaded avatar updates user avatar and barber image",
   assert.equal(profileUpdatesSeen.imageUrl, "/uploads/avatars/uploaded.png");
   assert.equal(res.body.avatarUrl, "/uploads/avatars/uploaded.png");
   assert.equal(res.body.imageUrl, "/uploads/avatars/uploaded.png");
+  assert.equal(fs.existsSync(uploadedPath), true);
+  assert.equal(fs.existsSync(oldUserPath), false);
+  assert.equal(fs.existsSync(oldProfilePath), false);
+  createdFiles.delete(oldUserPath);
+  createdFiles.delete(oldProfilePath);
+});
+
+test("updateMyProfile – pre-persistence failure removes only the new uploaded avatar", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    user: {
+      _id: userId,
+      role: "barber",
+      avatarUrl: "/uploads/avatars/original-user.png",
+    },
+    body: { name: "Updated Barber" },
+  });
+  req.file = { filename: "cleanup-on-failure.png" };
+  const uploadedPath = createUploadedAvatarFile("cleanup-on-failure.png");
+  const originalPath = createUploadedAvatarFile("original-user.png");
+  const unrelatedPath = createUploadedAvatarFile("unrelated-avatar.png");
+
+  Salon.find = async () => ({ select: async () => [] });
+  Salon.findById = async () => null;
+  User.findByIdAndUpdate = async () => {
+    throw new Error("write failed");
+  };
+  BarberProfile.findOne = async () => ({
+    imageUrl: "/uploads/avatars/original-user.png",
+  });
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(fs.existsSync(uploadedPath), false);
+  assert.equal(fs.existsSync(originalPath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
+  createdFiles.delete(uploadedPath);
+});
+
+test("updateMyProfile – partial persistence keeps the newly referenced upload", async () => {
+  const res = createResponse();
+  const req = createRequest({
+    user: {
+      _id: userId,
+      role: "barber",
+      avatarUrl: "/uploads/avatars/partial-old-user.png",
+    },
+    body: { name: "Updated Barber" },
+  });
+  req.file = { filename: "partial-new-user.png" };
+  const uploadedPath = createUploadedAvatarFile("partial-new-user.png");
+  const oldUserPath = createUploadedAvatarFile("partial-old-user.png");
+  const oldProfilePath = createUploadedAvatarFile("partial-old-profile.png");
+  let userUpdatesSeen;
+
+  Salon.find = async () => ({ select: async () => [] });
+  Salon.findById = async () => null;
+  User.findByIdAndUpdate = (_id, updates) => {
+    userUpdatesSeen = updates;
+    return updateAndSelect(applyUpdate(createBaseUser({ role: "barber" }), updates));
+  };
+  BarberProfile.findOne = async () => ({
+    imageUrl: "/uploads/avatars/partial-old-profile.png",
+  });
+  BarberProfile.findOneAndUpdate = async () => {
+    throw new Error("profile write failed");
+  };
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(userUpdatesSeen.avatarUrl, "/uploads/avatars/partial-new-user.png");
+  assert.equal(fs.existsSync(uploadedPath), true);
+  assert.equal(fs.existsSync(oldProfilePath), true);
+  assert.equal(fs.existsSync(oldUserPath), true);
 });
 
 test("updateMyProfile retries the expected barber profile duplicate once without upsert", async () => {

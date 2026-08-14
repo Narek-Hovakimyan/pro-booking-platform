@@ -1,5 +1,6 @@
 import BarberProfile from "../../models/BarberProfile.js";
 import User from "../../models/User.js";
+import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
 import { serializePrivateSelfBarberProfile } from "../../utils/privateSelfBarberProfileSerializer.js";
 import {
   BarberProfileConflictError,
@@ -17,6 +18,7 @@ export class SelfBarberProfileMutationError extends Error {
 
 const userProjection = "name phone city profession barberType specialty avatarUrl role";
 const profileProjection = "barberId bio city address instagram imageUrl galleryImages defaultSchedule";
+const avatarUploadPrefix = "/uploads/avatars/";
 
 const hasUpdates = (updates) => Object.keys(updates || {}).length > 0;
 
@@ -30,6 +32,11 @@ const readTrustedUser = (UserModel, userFilter) =>
 
 const readSelfProfile = (BarberProfileModel, trustedBarberId) =>
   selectQuery(BarberProfileModel.findOne({ barberId: trustedBarberId }), profileProjection);
+
+const deleteIfReplaced = (previousPath, nextPath) => {
+  if (!previousPath || previousPath === nextPath) return;
+  deleteUploadedFile(previousPath);
+};
 
 export const createSelfBarberProfileMutationService = (dependencies = {}) => {
   const deps = {
@@ -47,7 +54,23 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
     const userFilter = { _id: trustedBarberId, role: "barber" };
     const hasUserUpdates = hasUpdates(userUpdates);
     const hasProfileUpdates = hasUpdates(profileUpdates);
+    const uploadedAvatarPath =
+      typeof userUpdates.avatarUrl === "string" &&
+      userUpdates.avatarUrl.startsWith(avatarUploadPrefix)
+        ? userUpdates.avatarUrl
+        : "";
+    const previousUser = uploadedAvatarPath
+      ? await readTrustedUser(deps.UserModel, userFilter)
+      : null;
+    const previousProfile = uploadedAvatarPath
+      ? await readSelfProfile(deps.BarberProfileModel, trustedBarberId)
+      : null;
+    const previousUserAvatarUrl =
+      typeof previousUser?.avatarUrl === "string" ? previousUser.avatarUrl : "";
+    const previousProfileImageUrl =
+      typeof previousProfile?.imageUrl === "string" ? previousProfile.imageUrl : "";
     let user;
+    let avatarPersisted = false;
 
     try {
       if (hasUserUpdates) {
@@ -77,40 +100,59 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
       );
     }
 
-    let profile;
-    try {
-      if (hasProfileUpdates) {
-        profile = await retryBarberProfileUpsertOnDuplicate({
-          BarberProfileModel: deps.BarberProfileModel,
-          barberId: trustedBarberId,
-          update: {
-            $set: { ...profileUpdates },
-            $setOnInsert: { barberId: trustedBarberId },
-          },
-          options: { returnDocument: "after", runValidators: true, upsert: true },
-          projection: profileProjection,
-        });
+    avatarPersisted = Boolean(
+      uploadedAvatarPath && userUpdates.avatarUrl === uploadedAvatarPath
+    );
 
-        if (!profile) throw new BarberProfileConflictError();
-      } else {
-        profile = await readSelfProfile(deps.BarberProfileModel, trustedBarberId);
-      }
-    } catch (error) {
-      if (error instanceof BarberProfileConflictError) {
+    try {
+      let profile;
+      try {
+        if (hasProfileUpdates) {
+          profile = await retryBarberProfileUpsertOnDuplicate({
+            BarberProfileModel: deps.BarberProfileModel,
+            barberId: trustedBarberId,
+            update: {
+              $set: { ...profileUpdates },
+              $setOnInsert: { barberId: trustedBarberId },
+            },
+            options: { returnDocument: "after", runValidators: true, upsert: true },
+            projection: profileProjection,
+          });
+
+          if (!profile) throw new BarberProfileConflictError();
+        } else {
+          profile = await readSelfProfile(deps.BarberProfileModel, trustedBarberId);
+        }
+      } catch (error) {
+        if (error instanceof BarberProfileConflictError) {
+          throw new SelfBarberProfileMutationError(
+            "BARBER_PROFILE_CONFLICT",
+            "Could not save barber profile",
+            409
+          );
+        }
+
         throw new SelfBarberProfileMutationError(
-          "BARBER_PROFILE_CONFLICT",
-          "Could not save barber profile",
-          409
+          "BARBER_PROFILE_MUTATION_FAILED",
+          "Could not save barber profile"
         );
       }
 
-      throw new SelfBarberProfileMutationError(
-        "BARBER_PROFILE_MUTATION_FAILED",
-        "Could not save barber profile"
-      );
-    }
+      if (uploadedAvatarPath) {
+        deleteIfReplaced(previousUserAvatarUrl, uploadedAvatarPath);
+        deleteIfReplaced(previousProfileImageUrl, uploadedAvatarPath);
+      }
 
-    return deps.serialize({ user, profile });
+      return deps.serialize({ user, profile });
+    } catch (error) {
+      if (uploadedAvatarPath && !avatarPersisted) {
+        deleteUploadedFile(uploadedAvatarPath);
+      }
+      if (uploadedAvatarPath && avatarPersisted) {
+        error.preserveUploadedFile = true;
+      }
+      throw error;
+    }
   };
 };
 

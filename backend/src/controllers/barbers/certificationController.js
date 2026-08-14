@@ -16,6 +16,11 @@ import {
 
 // --- Certification CRUD ---
 
+const respondBeforeCertificationPersistence = (res, uploadedImageUrl, status, payload) => {
+  if (uploadedImageUrl) deleteUploadedFile(uploadedImageUrl);
+  return res.status(status).json(payload);
+};
+
 export const getCertifications = async (req, res) => {
   try {
     const profile = await BarberProfile.findOne({
@@ -51,35 +56,49 @@ export const getEventCertificates = async (req, res) => {
 };
 
 export const addCertification = async (req, res) => {
+  const uploadedImageUrl = getUploadedCertImagePath(req.file);
+  let certificationPersisted = false;
   try {
     if (req.user?.role !== "barber") {
-      return res.status(403).json({ message: "Only barbers can manage certifications" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 403, {
+        message: "Only barbers can manage certifications",
+      });
     }
 
     const { title, issuedBy, issueDate, expiryDate, description } = req.body;
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ message: "Title is required" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+        message: "Title is required",
+      });
     }
 
     if (!issuedBy || !issuedBy.trim()) {
-      return res.status(400).json({ message: "Issued by is required" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+        message: "Issued by is required",
+      });
     }
 
     if (!issueDate) {
-      return res.status(400).json({ message: "Issue date is required" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+        message: "Issue date is required",
+      });
     }
 
     const parsedIssueDate = parseCertificationDate(issueDate, "Issue date");
 
     if (parsedIssueDate.error) {
-      return res.status(400).json({ message: parsedIssueDate.error });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+        message: parsedIssueDate.error,
+      });
     }
 
     const issueDateObj = parsedIssueDate.value;
 
     if (isFutureDate(issueDateObj)) {
-      return res.status(400).json({ message: "Issue date cannot be in the future" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+        message: "Issue date cannot be in the future",
+      });
     }
 
     let expiryDateObj = null;
@@ -88,17 +107,19 @@ export const addCertification = async (req, res) => {
       const parsedExpiryDate = parseCertificationDate(expiryDate, "Expiry date");
 
       if (parsedExpiryDate.error) {
-        return res.status(400).json({ message: parsedExpiryDate.error });
+        return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+          message: parsedExpiryDate.error,
+        });
       }
 
       expiryDateObj = parsedExpiryDate.value;
 
       if (expiryDateObj <= issueDateObj) {
-        return res.status(400).json({ message: "Expiry date must be after issue date" });
+        return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+          message: "Expiry date must be after issue date",
+        });
       }
     }
-
-    const imageUrl = getUploadedCertImagePath(req.file);
 
     let profile = await BarberProfile.findOne({ barberId: req.user._id });
     const certification = {
@@ -106,7 +127,7 @@ export const addCertification = async (req, res) => {
       issuedBy: issuedBy.trim(),
       issueDate: issueDateObj,
       expiryDate: expiryDateObj,
-      imageUrl,
+      imageUrl: uploadedImageUrl,
       description: description?.trim() || "",
     };
 
@@ -116,6 +137,7 @@ export const addCertification = async (req, res) => {
           barberId: req.user._id,
           certifications: [certification],
         });
+        certificationPersisted = true;
 
         return res.status(201).json(
           newProfile.certifications[newProfile.certifications.length - 1]
@@ -133,11 +155,15 @@ export const addCertification = async (req, res) => {
     profile.certifications.push(certification);
 
     await profile.save();
+    certificationPersisted = true;
 
     return res.status(201).json(
       profile.certifications[profile.certifications.length - 1]
     );
   } catch (error) {
+    if (uploadedImageUrl && !certificationPersisted) {
+      deleteUploadedFile(uploadedImageUrl);
+    }
     if (error instanceof BarberProfileConflictError) {
       return res.status(409).json({
         code: "BARBER_PROFILE_CONFLICT",
@@ -150,9 +176,13 @@ export const addCertification = async (req, res) => {
 };
 
 export const updateCertification = async (req, res) => {
+  const uploadedImageUrl = getUploadedCertImagePath(req.file);
+  let certificationPersisted = false;
   try {
     if (req.user?.role !== "barber") {
-      return res.status(403).json({ message: "Only barbers can manage certifications" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 403, {
+        message: "Only barbers can manage certifications",
+      });
     }
 
     const { certId } = req.params;
@@ -161,7 +191,9 @@ export const updateCertification = async (req, res) => {
     const profile = await BarberProfile.findOne({ barberId: req.user._id });
 
     if (!profile) {
-      return res.status(404).json({ message: "Profile not found" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 404, {
+        message: "Profile not found",
+      });
     }
 
     normalizeCertifications(profile);
@@ -169,19 +201,25 @@ export const updateCertification = async (req, res) => {
     const cert = profile.certifications.id(certId);
 
     if (!cert) {
-      return res.status(404).json({ message: "Certification not found" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 404, {
+        message: "Certification not found",
+      });
     }
 
     if (title !== undefined) {
       if (!title.trim()) {
-        return res.status(400).json({ message: "Title cannot be empty" });
+        return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+          message: "Title cannot be empty",
+        });
       }
       cert.title = title.trim();
     }
 
     if (issuedBy !== undefined) {
       if (!issuedBy.trim()) {
-        return res.status(400).json({ message: "Issued by cannot be empty" });
+        return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+          message: "Issued by cannot be empty",
+        });
       }
       cert.issuedBy = issuedBy.trim();
     }
@@ -193,11 +231,15 @@ export const updateCertification = async (req, res) => {
       const parsedIssueDate = parseCertificationDate(issueDate, "Issue date");
 
       if (parsedIssueDate.error) {
-        return res.status(400).json({ message: parsedIssueDate.error });
+        return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+          message: parsedIssueDate.error,
+        });
       }
 
       if (isFutureDate(parsedIssueDate.value)) {
-        return res.status(400).json({ message: "Issue date cannot be in the future" });
+        return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+          message: "Issue date cannot be in the future",
+        });
       }
 
       nextIssueDate = parsedIssueDate.value;
@@ -208,7 +250,9 @@ export const updateCertification = async (req, res) => {
         const parsedExpiryDate = parseCertificationDate(expiryDate, "Expiry date");
 
         if (parsedExpiryDate.error) {
-          return res.status(400).json({ message: parsedExpiryDate.error });
+          return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+            message: parsedExpiryDate.error,
+          });
         }
 
         nextExpiryDate = parsedExpiryDate.value;
@@ -218,7 +262,9 @@ export const updateCertification = async (req, res) => {
     }
 
     if (nextExpiryDate && nextExpiryDate <= nextIssueDate) {
-      return res.status(400).json({ message: "Expiry date must be after issue date" });
+      return respondBeforeCertificationPersistence(res, uploadedImageUrl, 400, {
+        message: "Expiry date must be after issue date",
+      });
     }
 
     if (issueDate !== undefined) {
@@ -233,19 +279,24 @@ export const updateCertification = async (req, res) => {
       cert.description = description?.trim() || "";
     }
 
-    // Handle image upload - replace old image if new one uploaded
+    const previousImageUrl = cert.imageUrl || "";
+
     if (req.file) {
-      // Delete old image file if exists
-      if (cert.imageUrl) {
-        deleteUploadedFile(cert.imageUrl);
-      }
-      cert.imageUrl = getUploadedCertImagePath(req.file);
+      cert.imageUrl = uploadedImageUrl;
     }
 
     await profile.save();
+    certificationPersisted = true;
+
+    if (uploadedImageUrl && previousImageUrl && previousImageUrl !== uploadedImageUrl) {
+      deleteUploadedFile(previousImageUrl);
+    }
 
     return res.json(cert);
   } catch (error) {
+    if (uploadedImageUrl && !certificationPersisted) {
+      deleteUploadedFile(uploadedImageUrl);
+    }
     return res.status(400).json({
       message: error.message || "Could not update certification",
     });
@@ -274,13 +325,14 @@ export const deleteCertification = async (req, res) => {
       return res.status(404).json({ message: "Certification not found" });
     }
 
-    // Delete associated image file
-    if (cert.imageUrl) {
-      deleteUploadedFile(cert.imageUrl);
-    }
+    const deletedImageUrl = cert.imageUrl || "";
 
     profile.certifications.pull(certId);
     await profile.save();
+
+    if (deletedImageUrl) {
+      deleteUploadedFile(deletedImageUrl);
+    }
 
     return res.json({ message: "Certification deleted" });
   } catch (error) {

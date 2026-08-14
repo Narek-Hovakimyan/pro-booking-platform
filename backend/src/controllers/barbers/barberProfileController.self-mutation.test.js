@@ -225,6 +225,34 @@ test("uploaded avatar overrides body media and is cleaned after validation or se
   assert.equal(cleanupFailureRes.body.code, "BARBER_PROFILE_FIELDS_INVALID");
 });
 
+test("uploaded avatar remains when mutation fails after committing the new reference", async () => {
+  const committedFile = createUploadedAvatar("controller-committed-avatar.webp");
+  const controller = createBarberProfileSelfMutationController({
+    mutateSelfBarberProfile: async () => {
+      const error = new Error("partial persistence");
+      error.preserveUploadedFile = true;
+      throw error;
+    },
+  });
+  const res = createResponse();
+
+  await controller(
+    {
+      user: { _id: "trusted" },
+      params: { barberId: "trusted" },
+      file: committedFile,
+      body: { name: "Narek" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(
+    fs.existsSync(path.join(uploadsDir, committedFile.filename)),
+    true
+  );
+});
+
 test("nested accessor payload maps to bounded 400 without service call and cleans upload", async () => {
   let getterCalls = 0;
   let serviceCalled = false;

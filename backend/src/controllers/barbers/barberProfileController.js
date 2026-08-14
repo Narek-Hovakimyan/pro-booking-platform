@@ -433,6 +433,8 @@ const cleanupUploadedAvatar = (file) => {
   }
 };
 
+const shouldCleanupUploadedAvatar = (error) => !error?.preserveUploadedFile;
+
 export const createBarberProfileSelfMutationController = (dependencies = {}) => {
   const mutateProfile = dependencies.mutateSelfBarberProfile || mutateSelfBarberProfile;
   const validatePayload =
@@ -459,7 +461,9 @@ export const createBarberProfileSelfMutationController = (dependencies = {}) => 
 
       return res.json(response);
     } catch (error) {
-      cleanupUploadedAvatar(req.file);
+      if (shouldCleanupUploadedAvatar(error)) {
+        cleanupUploadedAvatar(req.file);
+      }
 
       if (
         error instanceof BarberProfileMutationPayloadError ||
