@@ -5,6 +5,7 @@ import { renderWithProviders } from "@/test/renderWithProviders";
 import DashboardAnalytics from "./DashboardAnalytics";
 import api from "@/shared/api/axios";
 import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
+import { getArmeniaMonthKey } from "@/shared/utils/armeniaDateTime";
 
 vi.mock("@/shared/api/axios", () => ({
   default: {
@@ -105,12 +106,12 @@ function setupApi({
         : Promise.resolve({ data: statusData });
     }
 
-    if (url === `/bookings/barber/${BARBER_ID}/income?month=${new Date().toISOString().slice(0, 7)}`) {
+    if (url === `/bookings/barber/${BARBER_ID}/income?month=${getArmeniaMonthKey()}`) {
       return incomeRejects
         ? Promise.reject(new Error("income failed"))
         : Promise.resolve({
             data: {
-              month: new Date().toISOString().slice(0, 7),
+              month: getArmeniaMonthKey(),
               completedIncome: 0,
               completedCount: 0,
               pendingIncome: 0,
@@ -158,6 +159,7 @@ async function waitForDashboard() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -283,6 +285,8 @@ describe("DashboardAnalytics", () => {
   });
 
   it("formats summary income values in AMD and passes complete booking prices", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-02T09:00:00.000Z"));
     setupApi({
       manageableData: [],
       statusData: { salons: [] },
@@ -313,6 +317,8 @@ describe("DashboardAnalytics", () => {
   });
 
   it("keeps zero prices and omits invalid or missing booking prices", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-02T09:00:00.000Z"));
     setupApi({
       manageableData: [],
       statusData: { salons: [] },
@@ -381,5 +387,33 @@ describe("DashboardAnalytics", () => {
       />
     );
     expect(await screen.findByText("Next booking price: omitted")).toBeInTheDocument();
+  });
+
+  it("uses Armenia day and month keys around the UTC month boundary", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-01-31T20:30:00.000Z"));
+    setupApi({
+      manageableData: [],
+      statusData: { salons: [] },
+      onboardingData: { state: { workplace: "independent" } },
+    });
+
+    renderDashboard({
+      bookings: [
+        {
+          _id: "armenia-midnight-booking",
+          status: "accepted",
+          bookingDate: "2026-02-01",
+          time: "00:45",
+          price: 5000,
+        },
+      ],
+    });
+    await waitForDashboard();
+
+    expect(api.get).toHaveBeenCalledWith(
+      `/bookings/barber/${BARBER_ID}/income?month=2026-02`
+    );
+    expect(screen.getByText("Next booking price: 5,000 AMD")).toBeInTheDocument();
   });
 });

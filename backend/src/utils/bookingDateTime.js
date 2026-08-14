@@ -124,6 +124,40 @@ export const getArmeniaDateKey = (date) => {
   return `${year}-${month}-${day}`;
 };
 
+/**
+ * Get the UTC instants that bound an Armenia/Yerevan calendar day.
+ * Armenia uses a fixed +04:00 offset, so these bounds are stable across hosts.
+ */
+export const getArmeniaDayBounds = (dateKey) => {
+  if (!isDateKey(dateKey)) return null;
+
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const startMs =
+    Date.UTC(year, month - 1, day) - ARMENIA_UTC_OFFSET_MINUTES * 60 * 1000;
+
+  return {
+    start: new Date(startMs),
+    end: new Date(startMs + 24 * 60 * 60 * 1000),
+  };
+};
+
+/**
+ * Get the UTC instants that bound the Armenia/Yerevan calendar month containing date.
+ */
+export const getArmeniaMonthBounds = (date) => {
+  const dateKey = getArmeniaDateKey(date);
+  const [year, month] = dateKey.split("-").map(Number);
+  const startMs =
+    Date.UTC(year, month - 1, 1) - ARMENIA_UTC_OFFSET_MINUTES * 60 * 1000;
+  const endMs =
+    Date.UTC(year, month, 1) - ARMENIA_UTC_OFFSET_MINUTES * 60 * 1000;
+
+  return {
+    start: new Date(startMs),
+    end: new Date(endMs),
+  };
+};
+
 export const MAX_BOOKING_HORIZON_DAYS = 180;
 
 export const isBeyondBookingHorizon = (bookingDate) => {
@@ -133,10 +167,10 @@ export const isBeyondBookingHorizon = (bookingDate) => {
   const [year, month, day] = todayKey.split("-").map(Number);
 
   // Use Date.UTC for reliable arithmetic (not affected by mock-sensitive multi-arg constructor).
-  // Add MAX days to today's Armenia date in UTC, then format as date key.
+  // Add MAX days to today's Armenia date in UTC, then format it through the
+  // Armenia-safe conversion rather than the host-local Date methods.
   const maxUtcMs = Date.UTC(year, month - 1, day + MAX_BOOKING_HORIZON_DAYS);
-  const maxDate = new Date(maxUtcMs);
-  const maxKey = formatDateKey(maxDate);
+  const maxKey = getArmeniaDateKey(new Date(maxUtcMs));
 
   return bookingDate > maxKey;
 };

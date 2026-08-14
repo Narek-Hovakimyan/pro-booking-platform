@@ -3,7 +3,9 @@ import { afterEach, test } from "node:test";
 
 import {
   ARMENIA_UTC_OFFSET_HOURS,
+  getArmeniaDayBounds,
   getArmeniaDateKey,
+  getArmeniaMonthBounds,
   getCurrentMonthKey,
   isBeyondBookingHorizon,
   MAX_BOOKING_HORIZON_DAYS,
@@ -32,6 +34,20 @@ test("getCurrentMonthKey uses Armenia/Yerevan business month near UTC month boun
   assert.equal(getCurrentMonthKey(), "2026-02");
 });
 
+test("Armenia day and month bounds convert calendar boundaries to UTC instants", () => {
+  const dayBounds = getArmeniaDayBounds("2026-02-01");
+  const monthBounds = getArmeniaMonthBounds(new RealDate("2026-01-31T20:30:00.000Z"));
+
+  assert.deepEqual(dayBounds, {
+    start: new RealDate("2026-01-31T20:00:00.000Z"),
+    end: new RealDate("2026-02-01T20:00:00.000Z"),
+  });
+  assert.deepEqual(monthBounds, {
+    start: new RealDate("2026-01-31T20:00:00.000Z"),
+    end: new RealDate("2026-02-28T20:00:00.000Z"),
+  });
+});
+
 test("isBeyondBookingHorizon allows dates within 180 days (Armenia date)", () => {
   const fixedNow = new RealDate("2026-01-31T20:30:00.000Z"); // Armenia = 2026-02-01
 
@@ -50,6 +66,40 @@ test("isBeyondBookingHorizon allows dates within 180 days (Armenia date)", () =>
   assert.equal(isBeyondBookingHorizon("2026-07-31"), false);
   // 2026-02-01 + 181 days = 2026-08-01 → rejected
   assert.equal(isBeyondBookingHorizon("2026-08-01"), true);
+});
+
+test("isBeyondBookingHorizon is stable across process timezones", () => {
+  const previousTimeZone = process.env.TZ;
+  const fixedNow = new RealDate("2026-01-31T20:30:00.000Z");
+
+  global.Date = class extends RealDate {
+    constructor(value) {
+      super(value ?? fixedNow);
+    }
+    static now() {
+      return fixedNow.getTime();
+    }
+  };
+
+  try {
+    for (const timezone of ["UTC", "Asia/Yerevan", "America/Los_Angeles"]) {
+      process.env.TZ = timezone;
+      assert.deepEqual(
+        [
+          isBeyondBookingHorizon("2026-07-30"),
+          isBeyondBookingHorizon("2026-07-31"),
+          isBeyondBookingHorizon("2026-08-01"),
+        ],
+        [false, false, true]
+      );
+    }
+  } finally {
+    if (previousTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTimeZone;
+    }
+  }
 });
 
 test("isBeyondBookingHorizon rejects far future date for any reasonable fixed now", () => {

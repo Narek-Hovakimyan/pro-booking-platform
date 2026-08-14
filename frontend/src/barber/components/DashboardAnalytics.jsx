@@ -20,7 +20,13 @@ import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { formatCurrency } from "@/platform/utils/billingFormatters";
-import { formatDateKey } from "@/shared/utils/dates";
+import {
+  formatArmeniaDate,
+  getArmeniaDateKey,
+  getArmeniaMonthKey,
+  getArmeniaTimeKey,
+  getArmeniaWeekBounds,
+} from "@/shared/utils/armeniaDateTime";
 import AnalyticsActivityLists from "@/barber/components/analytics/AnalyticsActivityLists";
 import AnalyticsHeader from "@/barber/components/analytics/AnalyticsHeader";
 import AnalyticsNextBooking from "@/barber/components/analytics/AnalyticsNextBooking";
@@ -32,7 +38,7 @@ import { StatCardSkeleton } from "@/barber/components/analytics/AnalyticsStatCar
 // Helpers
 // ---------------------------------------------------------------------------
 
-const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
+const getCurrentMonth = () => getArmeniaMonthKey();
 
 const getSalonList = (data) => {
   if (Array.isArray(data)) return data;
@@ -55,19 +61,6 @@ const hasApprovedSalonAccess = (statusData, currentUser) => {
 const getSpecialistWorkplace = (statusData) => {
   const workplace = statusData?.state?.workplace;
   return ["independent", "salon", "both"].includes(workplace) ? workplace : null;
-};
-
-const getWeekBounds = () => {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-  return { monday, sunday };
 };
 
 function getBookingId(booking) {
@@ -170,8 +163,8 @@ export default function DashboardAnalytics({ bookings = [] }) {
     (!shouldCheckManageableSalons ||
       (hasLoadedManageableSalonCount && !manageableSalonLoading && !hasMultipleManageableSalons));
 
-  const todayKey = formatDateKey(new Date());
-  const { monday, sunday } = getWeekBounds();
+  const todayKey = getArmeniaDateKey();
+  const weekBounds = getArmeniaWeekBounds();
 
   // ---- Derived (unchanged) ----
 
@@ -187,11 +180,14 @@ export default function DashboardAnalytics({ bookings = [] }) {
       if (hasMultipleManageableSalons) return [];
       return bookings.filter((b) => {
         if (!b.bookingDate) return false;
-        const d = new Date(b.bookingDate + "T00:00:00");
-        return d >= monday && d <= sunday;
+        return (
+          weekBounds &&
+          b.bookingDate >= weekBounds.startKey &&
+          b.bookingDate <= weekBounds.endKey
+        );
       });
     },
-    [bookings, hasMultipleManageableSalons, monday, sunday],
+    [bookings, hasMultipleManageableSalons, weekBounds],
   );
   const thisMonthCompleted = useMemo(
     () => {
@@ -261,8 +257,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
   // ---- NEW: derived for dashboard sections ----
 
   const nextBooking = useMemo(() => {
-    const now = new Date();
-    const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const currentTime = getArmeniaTimeKey();
     const upcoming = todayBookings
       .filter(
         (b) =>
@@ -452,8 +447,7 @@ export default function DashboardAnalytics({ bookings = [] }) {
 
   // ---- Today's date display ----
 
-  const todayDate = new Date();
-  const todayDateLabel = todayDate.toLocaleDateString("en-US", {
+  const todayDateLabel = formatArmeniaDate(new Date(), {
     weekday: "long",
     month: "long",
     day: "numeric",

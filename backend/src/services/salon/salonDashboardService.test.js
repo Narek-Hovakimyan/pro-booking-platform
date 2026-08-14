@@ -199,7 +199,7 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
   const result = await getSalonDashboard(
     salonId,
     ownerId,
-    new Date("2026-06-05T09:00:00.000Z")
+    new Date("2026-05-31T20:30:00.000Z")
   );
 
   assert.deepEqual(result.staffSummary, {
@@ -229,6 +229,18 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
   }
 
   assert.deepEqual(reviewQueries, [{ barberId: { $in: [staffBarberId] } }]);
+
+  const createdThisMonth = bookingFindQueries.find((query) => query.createdAt);
+  const revenueThisMonth = bookingFindQueries.find((query) => query.updatedAt);
+
+  assert.deepEqual(createdThisMonth.createdAt, {
+    $gte: new Date("2026-05-31T20:00:00.000Z"),
+    $lt: new Date("2026-06-30T20:00:00.000Z"),
+  });
+  assert.deepEqual(revenueThisMonth.updatedAt, {
+    $gte: new Date("2026-05-31T20:00:00.000Z"),
+    $lt: new Date("2026-06-30T20:00:00.000Z"),
+  });
 });
 
 test("relationship confirmation controls dashboard private movement", async () => {

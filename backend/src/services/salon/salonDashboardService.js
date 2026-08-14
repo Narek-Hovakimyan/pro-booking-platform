@@ -11,6 +11,10 @@ import {
   getRelationshipType,
   isWorkingSpecialist,
 } from "./salonRelationshipService.js";
+import {
+  getArmeniaDateKey,
+  getArmeniaMonthBounds,
+} from "../../utils/bookingDateTime.js";
 
 export class DashboardError extends Error {
   constructor(statusCode, message) {
@@ -199,14 +203,8 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
     };
   }
 
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(now);
-  todayEnd.setHours(23, 59, 59, 999);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
-  const todayKey = todayStart.toISOString().split("T")[0]; // "YYYY-MM-DD"
+  const todayKey = getArmeniaDateKey(now);
+  const monthBounds = getArmeniaMonthBounds(now);
 
   const [todayBookings, upcomingBookings, pendingBookings, monthBookings] =
     await Promise.all([
@@ -226,7 +224,7 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
       }),
       Booking.find({
         barberId: { $in: staffIds },
-        createdAt: { $gte: monthStart, $lte: monthEnd },
+        createdAt: { $gte: monthBounds.start, $lt: monthBounds.end },
       }).lean(),
     ]);
 
@@ -276,13 +274,8 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
     return { todayRevenue: 0, monthRevenue: 0 };
   }
 
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(now);
-  todayEnd.setHours(23, 59, 59, 999);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const todayKey = todayStart.toISOString().split("T")[0];
+  const todayKey = getArmeniaDateKey(now);
+  const monthBounds = getArmeniaMonthBounds(now);
 
   const [todayCompleted, monthCompleted] = await Promise.all([
     Booking.find({
@@ -293,7 +286,7 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
     Booking.find({
       barberId: { $in: staffIds },
       status: "completed",
-      updatedAt: { $gte: monthStart, $lte: monthEnd },
+      updatedAt: { $gte: monthBounds.start, $lt: monthBounds.end },
     }).lean(),
   ]);
 

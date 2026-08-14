@@ -1,3 +1,8 @@
+import {
+  formatArmeniaCalendarDate,
+  parseArmeniaDateTime,
+} from "@/shared/utils/armeniaDateTime";
+
 export const EVENT_TYPE_OPTIONS = [
   { value: "training", label: "Training" },
   { value: "masterclass", label: "Masterclass" },
@@ -13,13 +18,13 @@ export const EVENT_TYPE_LABELS = Object.fromEntries(
 
 export const formatEventDate = (dateStr) => {
   if (!dateStr) return "Date not set";
-  const date = new Date(dateStr + "T00:00:00");
-  if (Number.isNaN(date.getTime())) return "Date not set";
-  return date.toLocaleDateString("en-US", {
+  const formatted = formatArmeniaCalendarDate(dateStr, {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
+
+  return formatted || "Date not set";
 };
 
 export const formatEventPrice = (price) => {
@@ -72,9 +77,7 @@ export const getRegistrationStatusLabel = (status) => {
 };
 export const getEventDateTime = (event) => {
   if (!event?.date || !event?.time) return null;
-  const dateTime = new Date(`${event.date}T${event.time}:00`);
-
-  return Number.isNaN(dateTime.getTime()) ? null : dateTime;
+  return parseArmeniaDateTime(event.date, event.time);
 };
 export const isEventEnded = (event) => {
   const startsAt = getEventDateTime(event);
@@ -95,4 +98,3 @@ export const canReviewEvent = (event) => {
   );
 };
 export const getCertificate = (registration) => registration?.certificate || null;
-

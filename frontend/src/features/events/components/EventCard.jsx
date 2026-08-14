@@ -2,6 +2,7 @@ import { Calendar, Clock, MapPin, Users } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { getArmeniaDateKey } from "@/shared/utils/armeniaDateTime";
 import {
   formatEventDate as formatDate,
   formatEventDuration as formatDuration,
@@ -42,7 +43,7 @@ export default function EventCard({
   const isFull = maxParticipants > 0 && registrationCount >= maxParticipants;
   const isPast =
     Boolean(getEventDate(event)) &&
-    getEventDate(event) < new Date().toISOString().slice(0, 10);
+    getEventDate(event) < getArmeniaDateKey();
 
   return (
     <Card
@@ -210,4 +211,3 @@ export default function EventCard({
     </Card>
   );
 }
-
