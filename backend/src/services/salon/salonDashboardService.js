@@ -14,6 +14,7 @@ import {
 import {
   getArmeniaDateKey,
   getArmeniaMonthBounds,
+  isDateKey,
 } from "../../utils/bookingDateTime.js";
 
 export class DashboardError extends Error {
@@ -46,9 +47,33 @@ const getBookingRevenueAmount = (booking) => {
   return Number.isFinite(price) ? price : 0;
 };
 
-/**
- * Get approved salon member IDs, grouped by relationship type.
- */
+const getAppointmentMonthKey = (booking) => {
+  const appointmentKey = [booking?.bookingDate, booking?.dayKey].find(isDateKey);
+  return appointmentKey?.slice(0, 7) ||
+    (booking?.completedAt
+      ? getArmeniaDateKey(new Date(booking.completedAt)).slice(0, 7)
+      : "");
+};
+
+const getMonthBookings = async (staffIds, now) => {
+  const monthBounds = getArmeniaMonthBounds(now);
+  const monthKey = getArmeniaDateKey(monthBounds.start).slice(0, 7);
+  const nextMonthKey = getArmeniaDateKey(monthBounds.end).slice(0, 7);
+  const candidates = await Booking.find({
+    barberId: { $in: staffIds },
+    $or: [
+      { bookingDate: { $gte: `${monthKey}-01`, $lt: `${nextMonthKey}-01` } },
+      { dayKey: { $gte: `${monthKey}-01`, $lt: `${nextMonthKey}-01` } },
+      { completedAt: { $gte: monthBounds.start, $lt: monthBounds.end } },
+    ],
+  }).lean();
+
+  return candidates.filter(
+    (booking) => getAppointmentMonthKey(booking) === monthKey
+  );
+};
+
+/** Get approved salon member IDs, grouped by relationship type. */
 const getSalonMembers = async (salonId) => {
   const users = await User.find({
     role: "barber",
@@ -89,9 +114,7 @@ const getSalonMembers = async (salonId) => {
   return { staffIds, chairRenterIds };
 };
 
-/**
- * Fetch salon subscription summary.
- */
+/** Fetch salon subscription summary. */
 const getSubscriptionSummary = async (salonId, now = new Date()) => {
   const subscription = await Subscription.findOne({
     ownerType: "salon",
@@ -142,9 +165,7 @@ const getSubscriptionSummary = async (salonId, now = new Date()) => {
   };
 };
 
-/**
- * Get staff summary including chair renter counts.
- */
+/** Get staff summary including chair renter counts. */
 const getStaffSummary = async (salonId, staffIds, chairRenterIds) => {
   const pendingRequests = await SalonJoinRequest.countDocuments({
     salonId,
@@ -186,9 +207,7 @@ const getStaffSummary = async (salonId, staffIds, chairRenterIds) => {
   };
 };
 
-/**
- * Get booking summary (staff-only).
- */
+/** Get booking summary (staff-only). */
 const getBookingSummary = async (staffIds, now = new Date()) => {
   if (staffIds.length === 0) {
     return {
@@ -204,7 +223,6 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
   }
 
   const todayKey = getArmeniaDateKey(now);
-  const monthBounds = getArmeniaMonthBounds(now);
 
   const [todayBookings, upcomingBookings, pendingBookings, monthBookings] =
     await Promise.all([
@@ -222,10 +240,7 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
         barberId: { $in: staffIds },
         status: "pending",
       }),
-      Booking.find({
-        barberId: { $in: staffIds },
-        createdAt: { $gte: monthBounds.start, $lt: monthBounds.end },
-      }).lean(),
+      getMonthBookings(staffIds, now),
     ]);
 
   let completedThisMonth = 0;
@@ -266,16 +281,13 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
   };
 };
 
-/**
- * Get revenue summary (staff-only, completed bookings).
- */
+/** Get revenue summary (staff-only, completed bookings). */
 const getRevenueSummary = async (staffIds, now = new Date()) => {
   if (staffIds.length === 0) {
     return { todayRevenue: 0, monthRevenue: 0 };
   }
 
   const todayKey = getArmeniaDateKey(now);
-  const monthBounds = getArmeniaMonthBounds(now);
 
   const [todayCompleted, monthCompleted] = await Promise.all([
     Booking.find({
@@ -283,11 +295,9 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
       status: "completed",
       $or: [{ bookingDate: todayKey }, { dayKey: todayKey }],
     }).lean(),
-    Booking.find({
-      barberId: { $in: staffIds },
-      status: "completed",
-      updatedAt: { $gte: monthBounds.start, $lt: monthBounds.end },
-    }).lean(),
+    getMonthBookings(staffIds, now).then((bookings) =>
+      bookings.filter((booking) => booking.status === "completed")
+    ),
   ]);
 
   const todayRevenue = todayCompleted.reduce(
@@ -302,9 +312,7 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
   return { todayRevenue, monthRevenue };
 };
 
-/**
- * Get review summary (staff-only).
- */
+/** Get review summary (staff-only). */
 const getReviewSummary = async (staffIds) => {
   if (staffIds.length === 0) {
     return { averageRating: 0, totalReviews: 0 };

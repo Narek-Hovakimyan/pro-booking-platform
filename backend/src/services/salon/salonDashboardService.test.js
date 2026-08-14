@@ -66,6 +66,46 @@ const createLeanQuery = (items) => ({
   },
 });
 
+const configureDashboardMocks = (bookings) => {
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins: [],
+    name: "Owner Salon",
+  });
+  User.findById = () => ({
+    select: async () => ({ _id: ownerId }),
+  });
+  User.find = () => ({
+    select: async () => [
+      {
+        _id: staffBarberId,
+        salons: [
+          {
+            salon: { toString: () => salonId },
+            status: "approved",
+            relationshipType: "staff",
+          },
+        ],
+      },
+    ],
+  });
+  Subscription.findOne = () => ({ lean: async () => null });
+  Subscription.find = () => ({ lean: async () => [] });
+  SubscriptionPlan.findOne = async () => ({ pricePerSeat: 100 });
+  SubscriptionSeat.countDocuments = async () => 0;
+  SubscriptionSeat.find = () => ({ lean: async () => [] });
+  SalonJoinRequest.countDocuments = async () => 0;
+  Booking.countDocuments = async () => 0;
+  Booking.find = (query) => {
+    const isMonthQuery = query.$or?.some(
+      (condition) => condition.bookingDate?.$gte
+    );
+    return createLeanQuery(isMonthQuery ? bookings : []);
+  };
+  Review.find = () => createLeanQuery([]);
+};
+
 test("getSalonDashboard excludes chair renters from owner booking and revenue metrics", async () => {
   const bookingCountQueries = [];
   const bookingFindQueries = [];
@@ -171,22 +211,13 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
       ]);
     }
 
-    if (query.status === "completed" && query.updatedAt) {
-      return createLeanQuery([
-        {
-          _id: "completed-staff",
-          barberId: staffBarberId,
-          status: "completed",
-          price: 120,
-        },
-      ]);
-    }
-
     return createLeanQuery([
       {
         _id: "month-staff",
         barberId: staffBarberId,
         status: "completed",
+        bookingDate: "2026-06-05",
+        price: 120,
       },
     ]);
   };
@@ -230,17 +261,108 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
 
   assert.deepEqual(reviewQueries, [{ barberId: { $in: [staffBarberId] } }]);
 
-  const createdThisMonth = bookingFindQueries.find((query) => query.createdAt);
-  const revenueThisMonth = bookingFindQueries.find((query) => query.updatedAt);
+  const monthQueries = bookingFindQueries.filter((query) =>
+    query.$or?.some((condition) => condition.bookingDate?.$gte)
+  );
+  assert.equal(monthQueries.length, 2);
+  for (const query of monthQueries) {
+    assert.deepEqual(query.bookingDate, undefined);
+    assert.deepEqual(query.updatedAt, undefined);
+    assert.deepEqual(query.$or[0].bookingDate, {
+      $gte: "2026-06-01",
+      $lt: "2026-07-01",
+    });
+  }
+});
 
-  assert.deepEqual(createdThisMonth.createdAt, {
-    $gte: new Date("2026-05-31T20:00:00.000Z"),
-    $lt: new Date("2026-06-30T20:00:00.000Z"),
-  });
-  assert.deepEqual(revenueThisMonth.updatedAt, {
-    $gte: new Date("2026-05-31T20:00:00.000Z"),
-    $lt: new Date("2026-06-30T20:00:00.000Z"),
-  });
+test("dashboard monthly metrics use Armenia appointment months and completedAt fallback", async () => {
+  const bookings = [
+    {
+      _id: "august-appointment",
+      barberId: staffBarberId,
+      status: "completed",
+      createdAt: new Date("2026-07-31T12:00:00.000Z"),
+      updatedAt: new Date("2026-09-03T12:00:00.000Z"),
+      bookingDate: "2026-08-15",
+      dayKey: "2026-08-15",
+      price: 100,
+      finalPrice: 70,
+      promotionId: "promotion-1",
+    },
+    {
+      _id: "september-appointment",
+      barberId: staffBarberId,
+      status: "completed",
+      createdAt: new Date("2026-08-01T12:00:00.000Z"),
+      bookingDate: "2026-09-01",
+      dayKey: "2026-09-01",
+      price: 90,
+    },
+    {
+      _id: "august-cancelled",
+      barberId: staffBarberId,
+      status: "cancelled",
+      createdAt: new Date("2026-08-20T12:00:00.000Z"),
+      bookingDate: "2026-08-20",
+      dayKey: "2026-08-20",
+      price: 80,
+    },
+    {
+      _id: "august-rejected",
+      barberId: staffBarberId,
+      status: "rejected",
+      createdAt: new Date("2026-08-21T12:00:00.000Z"),
+      bookingDate: "2026-08-21",
+      dayKey: "2026-08-21",
+      price: 60,
+    },
+    {
+      _id: "completed-fallback",
+      barberId: staffBarberId,
+      status: "completed",
+      bookingDate: "",
+      dayKey: "",
+      completedAt: new Date("2026-08-31T19:59:59.000Z"),
+      price: 40,
+    },
+    {
+      _id: "outside-armenia-month",
+      barberId: staffBarberId,
+      status: "completed",
+      bookingDate: "",
+      dayKey: "",
+      completedAt: new Date("2026-08-31T20:00:00.000Z"),
+      price: 500,
+    },
+  ];
+
+  configureDashboardMocks(bookings);
+
+  const august = await getSalonDashboard(
+    salonId,
+    ownerId,
+    new Date("2026-08-01T00:30:00.000Z")
+  );
+  assert.equal(august.bookingSummary.completedThisMonth, 2);
+  assert.equal(august.bookingSummary.cancelledThisMonth, 1);
+  assert.equal(august.bookingSummary.rejectedThisMonth, 1);
+  assert.equal(august.revenueSummary.monthRevenue, 110);
+  assert.deepEqual(Object.keys(august.revenueSummary).sort(), [
+    "monthRevenue",
+    "todayRevenue",
+  ]);
+
+  const september = await getSalonDashboard(
+    salonId,
+    ownerId,
+    new Date("2026-09-01T00:30:00.000Z")
+  );
+  assert.equal(september.bookingSummary.completedThisMonth, 2);
+  assert.equal(september.revenueSummary.monthRevenue, 590);
+  assert.deepEqual(Object.keys(september.revenueSummary).sort(), [
+    "monthRevenue",
+    "todayRevenue",
+  ]);
 });
 
 test("relationship confirmation controls dashboard private movement", async () => {
