@@ -339,6 +339,7 @@ export const extendManualSubscription = async ({
   requester = null,
   now = new Date(),
   session = null,
+  plan: authoritativePlan = null,
 }) => {
   if (!["barber", "salon"].includes(ownerType)) {
     const error = new Error("ownerType must be 'barber' or 'salon'");
@@ -412,7 +413,12 @@ export const extendManualSubscription = async ({
     throw error;
   }
 
-  const plan = await getOrCreateDefaultSubscriptionPlanWithSession(session);
+  const plan = authoritativePlan || await getOrCreateDefaultSubscriptionPlanWithSession(session);
+  if (!plan?._id || !plan.pricePerSeat || !plan.currency) {
+    const error = new Error("Subscription plan could not be validated");
+    error.statusCode = 409;
+    throw error;
+  }
   const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
 
   let periodStart;

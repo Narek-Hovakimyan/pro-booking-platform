@@ -2353,9 +2353,12 @@ test("confirmSalonPayment rejects missing note, booking deposits, disabled provi
   mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
     saveableDoc({ ...subscriptionPaymentDoc, status: "paid", provider: "manual" })
   );
+  mockMethod(Subscription, "findById", async () =>
+    saveableDoc({ ...subscriptionDoc, status: "trialing" })
+  );
   await assert.rejects(
     () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
-    { statusCode: 400 }
+    { statusCode: 409 }
   );
 
   let savedMismatchedAttempt = false;
@@ -2374,9 +2377,47 @@ test("confirmSalonPayment rejects missing note, booking deposits, disabled provi
   );
   await assert.rejects(
     () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
-    { statusCode: 400, message: "Payment attempt subscription does not match the salon owner" }
+    { statusCode: 400, message: "Payment attempt subscription does not match its owner" }
   );
   assert.equal(savedMismatchedAttempt, false);
+});
+
+test("confirmSalonPayment fails closed for invalid subscription amount, currency, or linkage", async () => {
+  stubTransactionSession();
+  const plan = { _id: oid("64b000000000000000050099"), pricePerSeat: 100, currency: "AMD" };
+  const linkedSubscription = saveableDoc({ ...subscriptionDoc, planId: plan._id });
+  const baseAttempt = {
+    ...subscriptionPaymentDoc,
+    status: "pending",
+    paidAt: null,
+    confirmedAt: null,
+    provider: "manual",
+  };
+
+  mockMethod(Subscription, "findById", async () => linkedSubscription);
+  mockMethod(SubscriptionPlan, "findById", async () => plan);
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
+    saveableDoc({ ...baseAttempt, amount: 299 })
+  );
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 400, message: "Payment attempt amount does not match the subscription plan" }
+  );
+
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () =>
+    saveableDoc({ ...baseAttempt, currency: "USD" })
+  );
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 400, message: "Payment attempt currency does not match the subscription plan" }
+  );
+
+  mockMethod(SubscriptionPaymentAttempt, "findById", async () => saveableDoc(baseAttempt));
+  mockMethod(Subscription, "findById", async () => null);
+  await assert.rejects(
+    () => confirmSalonPayment(paymentId.toString(), { actor: platformActor, note: "Confirm" }),
+    { statusCode: 404, message: "Subscription not found for payment attempt" }
+  );
 });
 
 test("confirmSalonPayment manually confirms subscription payment with audit and sanitized response", async () => {
@@ -2393,6 +2434,19 @@ test("confirmSalonPayment manually confirms subscription payment with audit and 
   });
 
   mockMethod(SubscriptionPaymentAttempt, "findById", async () => attempt);
+  const defaultPlan = { _id: oid("64b000000000000000050098"), pricePerSeat: 100, currency: "AMD" };
+  const plan = { _id: oid("64b000000000000000050099"), pricePerSeat: 100, currency: "AMD" };
+  const subscription = saveableDoc({
+    ...subscriptionDoc,
+    planId: plan._id,
+    currentPeriodStart: new Date(),
+    currentPeriodEnd: new Date(),
+  });
+  mockMethod(Subscription, "findOne", async () => subscription);
+  mockMethod(SubscriptionPlan, "findById", async () => plan);
+  mockMethod(SubscriptionPlan, "findOne", async () => defaultPlan);
+  mockMethod(PaymentRecord, "create", async (payload) => [payload[0]]);
+  mockMethod(PaymentRecord, "findOneAndUpdate", async () => ({}));
   mockMethod(PlatformAuditLog, "create", async (payload) => {
     auditPayload = Array.isArray(payload) ? payload[0] : payload;
     return payload;
@@ -2405,6 +2459,7 @@ test("confirmSalonPayment manually confirms subscription payment with audit and 
   });
 
   assert.equal(attempt.status, "paid");
+  assert.equal(String(subscription.planId), String(plan._id));
   assert.ok(attempt.paidAt);
   assert.ok(attempt.confirmedAt);
   assert.equal(auditPayload.action, "salon_subscription.payment_confirm");

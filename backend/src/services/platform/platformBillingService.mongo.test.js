@@ -74,6 +74,7 @@ const createFixture = async ({ providerPaymentId, attemptStatus = "pending" }) =
   const ownerId = new mongoose.Types.ObjectId();
   const salonId = new mongoose.Types.ObjectId();
   const subscriptionId = new mongoose.Types.ObjectId();
+  const planId = new mongoose.Types.ObjectId();
 
   await User.create({
     _id: ownerId,
@@ -92,6 +93,16 @@ const createFixture = async ({ providerPaymentId, attemptStatus = "pending" }) =
     phone: "+37410000000",
     ownerId,
   });
+  await SubscriptionPlan.create({
+    _id: planId,
+    name: "Fixture Monthly",
+    code: `fixture_${providerPaymentId}`,
+    pricePerSeat: 5000,
+    currency: "AMD",
+    interval: "month",
+    features: [],
+    isActive: true,
+  });
 
   await Subscription.create({
     _id: subscriptionId,
@@ -99,7 +110,7 @@ const createFixture = async ({ providerPaymentId, attemptStatus = "pending" }) =
     ownerId: salonId,
     ownerRefModel: "Salon",
     payerId: ownerId,
-    planId: new mongoose.Types.ObjectId(),
+    planId,
     status: "trialing",
     seatCount: 2,
     pricePerSeat: 5000,
@@ -364,12 +375,7 @@ test(
       }),
     ]);
 
-    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
-    assert.match(
-      results.find((result) => result.status === "rejected").reason.message,
-      /cannot be confirmed/i
-    );
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
     assert.equal(
       await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
       1

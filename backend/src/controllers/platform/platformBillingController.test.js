@@ -8,6 +8,7 @@ import Subscription from "../../models/Subscription.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import PaymentRecord from "../../models/PaymentRecord.js";
 import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 import {
   activateSubscription,
@@ -41,6 +42,8 @@ const originalMethods = {
   paymentAttemptFindOne: SubscriptionPaymentAttempt.findOne,
   paymentAttemptCountDocuments: SubscriptionPaymentAttempt.countDocuments,
   platformAuditCreate: PlatformAuditLog.create,
+  paymentRecordCreate: PaymentRecord.create,
+  paymentRecordFindOneAndUpdate: PaymentRecord.findOneAndUpdate,
 };
 
 afterEach(() => {
@@ -69,6 +72,8 @@ afterEach(() => {
   SubscriptionPaymentAttempt.findOne = originalMethods.paymentAttemptFindOne;
   SubscriptionPaymentAttempt.countDocuments = originalMethods.paymentAttemptCountDocuments;
   PlatformAuditLog.create = originalMethods.platformAuditCreate;
+  PaymentRecord.create = originalMethods.paymentRecordCreate;
+  PaymentRecord.findOneAndUpdate = originalMethods.paymentRecordFindOneAndUpdate;
 });
 
 const oid = (suffix) => new mongoose.Types.ObjectId(`64b0000000000000000${suffix}`);
@@ -403,6 +408,11 @@ test("confirmPayment preserves authenticated actor, note, and request IP", async
     purpose: "subscription",
     status: "pending",
     provider: "manual",
+    payerId: ownerId,
+    amount: 5000,
+    currency: "AMD",
+    seatCount: 1,
+    months: 1,
     paidAt: null,
     confirmedAt: null,
     subscriptionId: null,
@@ -420,6 +430,25 @@ test("confirmPayment preserves authenticated actor, note, and request IP", async
     async endSession() {},
   });
   SubscriptionPaymentAttempt.findById = async () => paymentAttempt;
+  let canonicalSubscription = null;
+  const plan = { _id: oid("41002"), pricePerSeat: 5000, currency: "AMD" };
+  Subscription.findOne = async () => canonicalSubscription;
+  Subscription.create = async (payload) => {
+    const values = Array.isArray(payload) ? payload[0] : payload;
+    canonicalSubscription = saveable({ ...values, _id: oid("41003"), planId: plan._id });
+    return Array.isArray(payload) ? [canonicalSubscription] : canonicalSubscription;
+  };
+  SubscriptionPlan.findOne = async () => plan;
+  let paymentRecord = null;
+  PaymentRecord.create = async (payload) => {
+    const values = Array.isArray(payload) ? payload[0] : payload;
+    paymentRecord = { ...values };
+    return Array.isArray(payload) ? [paymentRecord] : paymentRecord;
+  };
+  PaymentRecord.findOneAndUpdate = async (_filter, update) => {
+    Object.assign(paymentRecord, update.$set);
+    return paymentRecord;
+  };
   PlatformAuditLog.create = async (payload) => {
     auditPayload = payload[0];
     return payload;

@@ -4,11 +4,9 @@ import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
-import { extendManualSubscription } from "../subscription/subscriptionManualMutations.js";
+import { finalizeSubscriptionPaymentAttempt } from "../payment/paymentAttemptService.js";
 import { getIdString } from "./platformBillingCalculations.js";
-import {
-  serializePaymentAttempt,
-} from "./platformBillingSerializers.js";
+import { serializePaymentAttempt } from "./platformBillingSerializers.js";
 import {
   getAllIndividualBillingSummaries,
   getIndividualPayments,
@@ -342,10 +340,10 @@ export const confirmSalonPayment = async (paymentAttemptId, { note, actor, reque
       throw error;
     }
 
-    const confirmableStatuses = ["pending", "requires_action"];
+    const confirmableStatuses = ["pending", "requires_action", "paid"];
     if (!confirmableStatuses.includes(attempt.status)) {
       const error = new Error(
-        `Payment attempt status "${attempt.status}" cannot be confirmed. Only pending or requires_action allowed.`
+        `Payment attempt status "${attempt.status}" cannot be confirmed.`
       );
       error.statusCode = 400;
       throw error;
@@ -365,45 +363,22 @@ export const confirmSalonPayment = async (paymentAttemptId, { note, actor, reque
       confirmedAt: attempt.confirmedAt,
     };
     const now = new Date();
+    const hadSubscriptionLink = Boolean(attempt.subscriptionId);
 
-    if (attempt.subscriptionId) {
-      const linkedSubscription = await Subscription.findById(
-        attempt.subscriptionId,
-        null,
-        options
-      );
-      if (
-        !linkedSubscription ||
-        linkedSubscription.ownerType !== "salon" ||
-        getIdString(linkedSubscription.ownerId) !== getIdString(attempt.ownerId)
-      ) {
-        const error = new Error("Payment attempt subscription does not match the salon owner");
-        error.statusCode = 400;
-        throw error;
-      }
+    const finalized = await finalizeSubscriptionPaymentAttempt({
+      attempt,
+      now,
+      session,
+      confirmedAt: now,
+    });
 
-      const subscription = await extendManualSubscription({
-        ownerType: attempt.ownerType,
-        ownerId: attempt.ownerId,
-        payerId: attempt.payerId,
-        seatCount: attempt.seatCount,
-        months: attempt.months,
-        now,
-        session,
-      });
-
-      attempt.status = "paid";
-      attempt.paidAt = now;
-      attempt.confirmedAt = now;
-      attempt.subscriptionId = subscription._id;
-      await attempt.save(options);
-
+    if (!finalized.idempotent) {
       await createPlatformAuditLog(
         {
           actorId: actor._id,
           action: "salon_subscription.payment_confirm",
           salonId: attempt.ownerId,
-          subscriptionId: subscription._id,
+          subscriptionId: finalized.subscription._id,
           paymentAttemptId: attempt._id,
           oldValue,
           newValue: {
@@ -417,29 +392,11 @@ export const confirmSalonPayment = async (paymentAttemptId, { note, actor, reque
         },
         session
       );
-
-      return { type: "billing_detail", salonId: getIdString(attempt.ownerId) };
     }
 
-    attempt.status = "paid";
-    attempt.paidAt = now;
-    attempt.confirmedAt = now;
-    await attempt.save(options);
-
-    await createPlatformAuditLog(
-      {
-        actorId: actor._id,
-        action: "salon_subscription.payment_confirm",
-        salonId: attempt.ownerId,
-        paymentAttemptId: attempt._id,
-        oldValue,
-        newValue: { status: "paid", paidAt: now, confirmedAt: now },
-        note: trimmedNote,
-        requestIp,
-      },
-      session
-    );
-
+    if (hadSubscriptionLink) {
+      return { type: "billing_detail", salonId: getIdString(attempt.ownerId) };
+    }
     return {
       type: "payment_attempt_only",
       payload: {
@@ -450,9 +407,7 @@ export const confirmSalonPayment = async (paymentAttemptId, { note, actor, reque
     };
   });
 
-  if (result.type === "billing_detail") {
-    return getSalonBillingDetail(result.salonId);
-  }
-
-  return result.payload;
+  return result.type === "billing_detail"
+    ? getSalonBillingDetail(result.salonId)
+    : result.payload;
 };

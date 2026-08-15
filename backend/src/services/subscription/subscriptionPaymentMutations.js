@@ -17,7 +17,7 @@ import {
 import { serializeUserPaymentAttempt } from "../payment/subscriptionPaymentSerializers.js";
 import { serializeSubscriptionStatus } from "./subscriptionSerializers.js";
 import { buildPaymentAttemptExpiry } from "./subscriptionHelpers.js";
-import { extendManualSubscription } from "./subscriptionManualMutations.js";
+import { finalizeSubscriptionPaymentAttempt } from "../payment/paymentAttemptService.js";
 import {
   getAuthorizedPaymentAttemptInSession,
   getOrCreateDefaultSubscriptionPlanWithSession,
@@ -210,53 +210,22 @@ export const confirmSubscriptionPaymentAttempt = async ({
       throw error;
     }
 
-    if (lockedAttempt.status === "paid") {
-      return {
-        paymentAttempt: serializeUserPaymentAttempt(lockedAttempt),
-        subscription: lockedAttempt.subscriptionId
-          ? serializeSubscriptionStatus(
-              await Subscription.findById(lockedAttempt.subscriptionId, null, options),
-              null,
-              now
-            )
-          : null,
-        idempotent: true,
-      };
-    }
-
-    if (!["pending", "requires_action"].includes(lockedAttempt.status)) {
-      const error = new Error("Only pending payment attempts can be confirmed");
-      error.statusCode = 400;
-      throw error;
-    }
-
     const refreshedAttempt = await SubscriptionPaymentAttempt.findById(
       lockedAttempt._id,
       null,
       options
     );
-
-    if (refreshedAttempt.status === "paid") {
-      return {
-        paymentAttempt: serializeUserPaymentAttempt(refreshedAttempt),
-        subscription: refreshedAttempt.subscriptionId
-          ? serializeSubscriptionStatus(
-              await Subscription.findById(refreshedAttempt.subscriptionId, null, options),
-              null,
-              now
-            )
-          : null,
-        idempotent: true,
-      };
-    }
-
-    if (!["pending", "requires_action"].includes(refreshedAttempt.status)) {
+    if (refreshedAttempt.status !== "paid" && !["pending", "requires_action"].includes(refreshedAttempt.status)) {
       const error = new Error("Only pending payment attempts can be confirmed");
       error.statusCode = 400;
       throw error;
     }
 
-    if (refreshedAttempt.expiresAt && new Date(refreshedAttempt.expiresAt) <= now) {
+    if (
+      refreshedAttempt.status !== "paid" &&
+      refreshedAttempt.expiresAt &&
+      new Date(refreshedAttempt.expiresAt) <= now
+    ) {
       refreshedAttempt.status = "expired";
       await refreshedAttempt.save(options);
 
@@ -265,29 +234,17 @@ export const confirmSubscriptionPaymentAttempt = async ({
       throw error;
     }
 
-    const subscription = await extendManualSubscription({
-      ownerType: refreshedAttempt.ownerType,
-      ownerId: refreshedAttempt.ownerId,
-      payerId: refreshedAttempt.payerId,
-      seatCount: refreshedAttempt.seatCount,
-      months: refreshedAttempt.months,
+    const finalized = await finalizeSubscriptionPaymentAttempt({
+      attempt: refreshedAttempt,
       now,
       session,
+      confirmedAt: now,
     });
 
-    applyPaymentAttemptTransition(refreshedAttempt, "paid", now);
-    refreshedAttempt.subscriptionId = subscription._id;
-    refreshedAttempt.providerPaymentId =
-      refreshedAttempt.providerPaymentId ||
-      `${refreshedAttempt.provider}:${refreshedAttempt._id}`;
-    refreshedAttempt.providerIntentId =
-      refreshedAttempt.providerIntentId || refreshedAttempt.providerPaymentId;
-    await refreshedAttempt.save(options);
-
     return {
-      paymentAttempt: serializeUserPaymentAttempt(refreshedAttempt),
-      subscription: serializeSubscriptionStatus(subscription, null, now),
-      idempotent: false,
+      paymentAttempt: serializeUserPaymentAttempt(finalized.attempt),
+      subscription: serializeSubscriptionStatus(finalized.subscription, null, now),
+      idempotent: finalized.idempotent,
     };
   });
 };

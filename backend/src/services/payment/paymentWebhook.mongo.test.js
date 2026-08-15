@@ -29,6 +29,7 @@ const originals = {
   bookingFindById: Booking.findById,
   bookingSave: Booking.prototype.save,
   paymentRecordCreate: PaymentRecord.create,
+  paymentRecordFindOneAndUpdate: PaymentRecord.findOneAndUpdate,
   subscriptionCreate: Subscription.create,
   subscriptionFindOne: Subscription.findOne,
   subscriptionFindOneAndUpdate: Subscription.findOneAndUpdate,
@@ -90,6 +91,7 @@ const restorePatchedMethods = () => {
   Booking.findById = originals.bookingFindById;
   Booking.prototype.save = originals.bookingSave;
   PaymentRecord.create = originals.paymentRecordCreate;
+  PaymentRecord.findOneAndUpdate = originals.paymentRecordFindOneAndUpdate;
   Subscription.create = originals.subscriptionCreate;
   Subscription.findOne = originals.subscriptionFindOne;
   Subscription.findOneAndUpdate = originals.subscriptionFindOneAndUpdate;
@@ -578,6 +580,7 @@ test(
       planRead: new Set(),
       planWrite: new Set(),
       paymentCreate: new Set(),
+      paymentWrite: new Set(),
       attemptRead: new Set(),
       attemptClaim: new Set(),
       attemptSave: new Set(),
@@ -624,6 +627,10 @@ test(
     PaymentRecord.create = function patchedPaymentCreate(docs, options) {
       capture.paymentCreate.add(Boolean(options?.session));
       return originals.paymentRecordCreate.call(this, docs, options);
+    };
+    PaymentRecord.findOneAndUpdate = function patchedPaymentUpdate(filter, update, options) {
+      capture.paymentWrite.add(Boolean(options?.session));
+      return originals.paymentRecordFindOneAndUpdate.call(this, filter, update, options);
     };
     SubscriptionPaymentAttempt.findOne = function patchedAttemptFindOne(
       filter,
@@ -672,6 +679,7 @@ test(
     assert.deepEqual([...capture.planRead], [true]);
     assert.deepEqual([...capture.planWrite], [true]);
     assert.deepEqual([...capture.paymentCreate], [true]);
+    assert.deepEqual([...capture.paymentWrite], [true]);
     assert.deepEqual([...capture.attemptRead], [true]);
     assert.deepEqual([...capture.attemptClaim], [true]);
     assert.deepEqual([...capture.attemptSave], [true]);
@@ -895,7 +903,9 @@ test(
     const providerPaymentId = `mock_confirm_rollback_${Date.now()}`;
     const { attempt, ownerId } = await createSubscriptionAttempt({
       providerPaymentId,
-      amount: 10000,
+      // One seat for one month is billed at the default plan's 5,000 AMD.
+      // Keep this valid so the injected save failure exercises rollback.
+      amount: 5000,
     });
 
     let failOnce = true;

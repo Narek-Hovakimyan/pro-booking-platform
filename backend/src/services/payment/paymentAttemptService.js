@@ -1,8 +1,14 @@
 import Booking from "../../models/Booking.js";
+import PaymentRecord from "../../models/PaymentRecord.js";
 import Subscription from "../../models/Subscription.js";
+import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
-import { runInRequiredTransaction } from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
-import { extendManualSubscription, serializeSubscriptionStatus } from "../subscriptionService.js";
+import {
+  getOrCreateDefaultSubscriptionPlanWithSession,
+  runInRequiredTransaction,
+} from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
+import { extendManualSubscription } from "../subscription/subscriptionManualMutations.js";
+import { serializeSubscriptionStatus } from "../subscription/subscriptionSerializers.js";
 import { applyPaymentAttemptTransition } from "./paymentAttemptState.js";
 import {
   getConfiguredPaymentProviderName,
@@ -186,6 +192,145 @@ const findAttemptById = (attemptId, session = null) =>
     session ? { session } : undefined
   );
 
+const finalizationError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const paymentRecordReference = (attempt) =>
+  attempt.providerPaymentId || attempt.providerIntentId || `${attempt.provider}:${attempt._id}`;
+
+const resolveSubscriptionForAttempt = async (attempt, options) => {
+  const subscription = attempt.subscriptionId
+    ? await Subscription.findById(attempt.subscriptionId, null, options)
+    : await Subscription.findOne(
+      { ownerType: attempt.ownerType, ownerId: attempt.ownerId },
+      null,
+      options
+    );
+
+  if (!subscription && attempt.subscriptionId) {
+    throw finalizationError("Subscription not found for payment attempt", 404);
+  }
+  if (subscription && (
+    subscription.ownerType !== attempt.ownerType ||
+    getIdString(subscription.ownerId) !== getIdString(attempt.ownerId)
+  )) {
+    throw finalizationError("Payment attempt subscription does not match its owner");
+  }
+  return subscription;
+};
+
+const verifyPaidSubscriptionFinalization = async ({ attempt, subscription, options }) => {
+  if (attempt.subscriptionId && getIdString(attempt.subscriptionId) !== getIdString(subscription._id)) {
+    throw finalizationError("Paid payment attempt has an invalid subscription linkage", 409);
+  }
+  if (subscription.status !== "active") {
+    throw finalizationError("Paid payment attempt is missing its subscription effect", 409);
+  }
+
+  const payment = await PaymentRecord.findOne(
+    {
+      subscriptionId: subscription._id,
+      ownerType: attempt.ownerType,
+      ownerId: attempt.ownerId,
+      providerPaymentId: paymentRecordReference(attempt),
+      status: "paid",
+    },
+    null,
+    options
+  );
+  if (!payment) {
+    throw finalizationError("Paid payment attempt is missing its accounting record", 409);
+  }
+};
+
+export const finalizeSubscriptionPaymentAttempt = async ({
+  attempt,
+  now = new Date(),
+  session,
+  confirmedAt = null,
+}) => {
+  if (!session) {
+    throw finalizationError("Payment confirmation requires an active database transaction", 503);
+  }
+  if (!attempt || (attempt.purpose || "subscription") !== "subscription") {
+    throw finalizationError("Only subscription payment attempts can be finalized");
+  }
+  if (!["barber", "salon"].includes(attempt.ownerType) || !attempt.ownerId || !attempt.payerId) {
+    throw finalizationError("Payment attempt owner context is invalid");
+  }
+
+  const options = { session };
+  const subscription = await resolveSubscriptionForAttempt(attempt, options);
+  if (attempt.status === "paid") {
+    if (!subscription) {
+      throw finalizationError("Paid payment attempt is missing its subscription effect", 409);
+    }
+    await verifyPaidSubscriptionFinalization({ attempt, subscription, options });
+    return { attempt, subscription, idempotent: true };
+  }
+  if (!["pending", "requires_action"].includes(attempt.status)) {
+    throw finalizationError("Only pending payment attempts can be finalized");
+  }
+
+  const plan = subscription
+    ? await SubscriptionPlan.findById(subscription.planId, null, options)
+    : await getOrCreateDefaultSubscriptionPlanWithSession(session);
+  if (!plan) {
+    throw finalizationError("Subscription plan not found for payment attempt", 409);
+  }
+  const expectedAmount = plan.pricePerSeat * attempt.seatCount * attempt.months;
+  if (attempt.amount !== expectedAmount) {
+    throw finalizationError("Payment attempt amount does not match the subscription plan");
+  }
+  if (attempt.currency !== plan.currency) {
+    throw finalizationError("Payment attempt currency does not match the subscription plan");
+  }
+
+  const finalizedSubscription = await extendManualSubscription({
+    ownerType: attempt.ownerType,
+    ownerId: attempt.ownerId,
+    payerId: attempt.payerId,
+    seatCount: attempt.seatCount,
+    months: attempt.months,
+    now,
+    session,
+    plan,
+  });
+  const providerPaymentId = paymentRecordReference(attempt);
+  const payment = await PaymentRecord.findOneAndUpdate(
+    {
+      subscriptionId: finalizedSubscription._id,
+      ownerType: attempt.ownerType,
+      ownerId: attempt.ownerId,
+      amount: attempt.amount,
+      currency: attempt.currency,
+      periodStart: finalizedSubscription.currentPeriodStart,
+      periodEnd: finalizedSubscription.currentPeriodEnd,
+      paidAt: now,
+      providerPaymentId: null,
+      status: "paid",
+    },
+    { $set: { providerPaymentId } },
+    { returnDocument: "after", session }
+  );
+  if (!payment) {
+    throw finalizationError("Subscription accounting record could not be finalized", 409);
+  }
+
+  attempt.subscriptionId = finalizedSubscription._id;
+  attempt.providerPaymentId = attempt.providerPaymentId || providerPaymentId;
+  attempt.providerIntentId = attempt.providerIntentId || attempt.providerPaymentId;
+  attempt.status = "paid";
+  attempt.paidAt = now;
+  if (confirmedAt) attempt.confirmedAt = confirmedAt;
+  await attempt.save(options);
+
+  return { attempt, subscription: finalizedSubscription, idempotent: false };
+};
+
 export const processPaymentWebhook = async ({
   rawBody,
   headers,
@@ -220,6 +365,19 @@ export const processPaymentWebhook = async ({
     }
 
     if (isTerminalIdempotentStatus(claimed.status, nextStatus)) {
+      if (nextStatus === "paid" && (claimed.purpose || "subscription") === "subscription") {
+        const finalized = await finalizeSubscriptionPaymentAttempt({
+          attempt: claimed,
+          now,
+          session,
+        });
+        return {
+          idempotent: true,
+          paymentAttempt: serializePaymentAttempt(finalized.attempt),
+          subscription: finalized.subscription,
+          attempt: finalized.attempt,
+        };
+      }
       return {
         idempotent: true,
         paymentAttempt: serializePaymentAttempt(claimed),
@@ -227,30 +385,27 @@ export const processPaymentWebhook = async ({
       };
     }
 
-    const transition = applyPaymentAttemptTransition(claimed, nextStatus, now);
+    let transition = { idempotent: false };
     let subscription = null;
     let booking = null;
 
     if (
-      !transition.idempotent &&
       nextStatus === "paid" &&
       (claimed.purpose || "subscription") === "subscription"
     ) {
-      subscription = await extendManualSubscription({
-        ownerType: claimed.ownerType,
-        ownerId: claimed.ownerId,
-        payerId: claimed.payerId,
-        seatCount: claimed.seatCount,
-        months: claimed.months,
+      const finalized = await finalizeSubscriptionPaymentAttempt({
+        attempt: claimed,
         now,
         session,
       });
-      claimed.subscriptionId = subscription._id;
+      subscription = finalized.subscription;
+      transition = { idempotent: finalized.idempotent };
+    } else {
+      transition = applyPaymentAttemptTransition(claimed, nextStatus, now);
     }
 
     if (
-      !transition.idempotent &&
-      claimed.purpose === "booking_deposit" &&
+      !transition.idempotent && claimed.purpose === "booking_deposit" &&
       ["paid", "failed", "refunded"].includes(nextStatus)
     ) {
       booking = await Booking.findById(claimed.bookingId, null, options);
@@ -262,7 +417,7 @@ export const processPaymentWebhook = async ({
       }
     }
 
-    if (!transition.idempotent) {
+    if (!transition.idempotent && !(nextStatus === "paid" && (claimed.purpose || "subscription") === "subscription")) {
       await claimed.save(options);
     }
     return {

@@ -56,6 +56,8 @@ const originalSeatCreate = SubscriptionSeat.create;
 const originalSeatFindById = SubscriptionSeat.findById;
 const originalPaymentCreate = PaymentRecord.create;
 const originalPaymentFind = PaymentRecord.find;
+const originalPaymentFindOne = PaymentRecord.findOne;
+const originalPaymentFindOneAndUpdate = PaymentRecord.findOneAndUpdate;
 const originalAttemptCreate = SubscriptionPaymentAttempt.create;
 const originalAttemptFind = SubscriptionPaymentAttempt.find;
 const originalAttemptFindById = SubscriptionPaymentAttempt.findById;
@@ -105,6 +107,8 @@ afterEach(() => {
   SubscriptionSeat.findById = originalSeatFindById;
   PaymentRecord.create = originalPaymentCreate;
   PaymentRecord.find = originalPaymentFind;
+  PaymentRecord.findOne = originalPaymentFindOne;
+  PaymentRecord.findOneAndUpdate = originalPaymentFindOneAndUpdate;
   SubscriptionPaymentAttempt.create = originalAttemptCreate;
   SubscriptionPaymentAttempt.find = originalAttemptFind;
   SubscriptionPaymentAttempt.findById = originalAttemptFindById;
@@ -373,6 +377,21 @@ const stubManualConfirmationDependencies = ({
     paymentRecords.push(normalizedPayload);
     return Array.isArray(payload) ? [normalizedPayload] : normalizedPayload;
   };
+  PaymentRecord.findOneAndUpdate = async (filter, update) => {
+    const payment = paymentRecords.find((record) =>
+      record.providerPaymentId == null &&
+      record.amount === filter.amount &&
+      record.currency === filter.currency
+    );
+    if (!payment) return null;
+    Object.assign(payment, update.$set);
+    return payment;
+  };
+  PaymentRecord.findOne = async (filter) => paymentRecords.find((record) =>
+    record.subscriptionId === filter.subscriptionId &&
+    record.providerPaymentId === filter.providerPaymentId &&
+    record.status === filter.status
+  ) || null;
 
   return {
     getPaymentRecords: () => paymentRecords,
@@ -2788,7 +2807,7 @@ test("dev-confirm is idempotent and does not double-extend subscription", async 
   assert.equal(first.idempotent, false);
   assert.equal(second.idempotent, true);
   assert.equal(stubs.getSubscriptionCreateCount(), 1);
-  assert.equal(stubs.getSubscriptionFindCount(), 1);
+  assert.equal(stubs.getSubscriptionFindCount(), 2);
   assert.equal(stubs.getPaymentRecords().length, 1);
   assert.equal(attemptSaveCount, 1);
 });
