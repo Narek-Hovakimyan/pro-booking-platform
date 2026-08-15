@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import mongoose from "mongoose";
 
 import Salon from "../../models/Salon.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import Schedule from "../../models/Schedule.js";
 import Service from "../../models/Service.js";
+import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
+import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 import {
   calculateVoucherDiscountPreview,
   validateVoucherCreateInput,
@@ -28,8 +32,12 @@ const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
 const originalVoucherCreate = Voucher.create;
 const originalVoucherAggregate = Voucher.aggregate;
 const originalSalonFindById = Salon.findById;
+const originalSalonExists = Salon.exists;
+const originalBarberProfileFindOne = BarberProfile.findOne;
+const originalScheduleFindOne = Schedule.findOne;
 const originalServiceFindOne = Service.findOne;
 const originalServiceFindById = Service.findById;
+const originalUserFindById = User.findById;
 
 const barberA = { _id: new mongoose.Types.ObjectId(), role: "barber" };
 const barberB = { _id: new mongoose.Types.ObjectId(), role: "barber" };
@@ -61,8 +69,19 @@ afterEach(() => {
   Voucher.create = originalVoucherCreate;
   Voucher.aggregate = originalVoucherAggregate;
   Salon.findById = originalSalonFindById;
+  Salon.exists = originalSalonExists;
+  BarberProfile.findOne = originalBarberProfileFindOne;
+  Schedule.findOne = originalScheduleFindOne;
   Service.findOne = originalServiceFindOne;
   Service.findById = originalServiceFindById;
+  User.findById = originalUserFindById;
+});
+
+beforeEach(() => {
+  Service.findOne = () => chainableSelect(serviceDoc);
+  User.findById = () => chainableSelect({ _id: barberA._id, role: "barber", salons: [] });
+  BarberProfile.findOne = () => chainableSelect({ barberId: barberA._id, address: "1 Main St" });
+  Schedule.findOne = () => chainableSelect(createCanonicalPersonalSchedule());
 });
 
 /* ── Helpers ────────────────────────────────────────────── */
@@ -118,6 +137,7 @@ const chainableSelect = (result) => {
   return {
     select: () => ({ lean: leanFn }),
     lean: leanFn,
+    then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
   };
 };
 
@@ -314,6 +334,37 @@ test("duplicate manual code returns clean 400", async () => {
 
   assert.equal(res.statusCode, 400);
   assert.ok(res.body.message.includes("already exists"));
+});
+
+test("manual code uniqueness is scoped to the logical voucher owner", async () => {
+  const req = {
+    user: barberA,
+    body: {
+      ownerType: "barber",
+      ownerId: barberA._id,
+      title: "Scoped code",
+      type: "amount",
+      amount: 1000,
+      code: "SHARED123",
+    },
+  };
+  const res = createResponse();
+  let lookup;
+
+  Voucher.findOne = (filter) => {
+    lookup = filter;
+    return chainableSelect(null);
+  };
+  Voucher.create = async (payload) => payload;
+
+  await createVoucher(req, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(lookup, {
+    ownerType: "barber",
+    ownerId: barberA._id,
+    code: "SHARED123",
+  });
 });
 
 test("duplicate voucher create race returns 400 without noisy sensitive logging", async () => {
@@ -704,12 +755,12 @@ test("validate rejects expired voucher", async () => {
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Voucher.find = async () => [voucherDoc];
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("expired"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate rejects inactive voucher", async () => {
@@ -717,16 +768,16 @@ test("validate rejects inactive voucher", async () => {
 
   const req = {
     user: client,
-    body: { code: "TESTCODE1", barberId: barberA._id },
+    body: { code: "TESTCODE1", barberId: barberA._id, serviceId },
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Voucher.find = async () => [voucherDoc];
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("active"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate rejects overused voucher", async () => {
@@ -734,16 +785,16 @@ test("validate rejects overused voucher", async () => {
 
   const req = {
     user: client,
-    body: { code: "TESTCODE1", barberId: barberA._id },
+    body: { code: "TESTCODE1", barberId: barberA._id, serviceId },
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Voucher.find = async () => [voucherDoc];
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("fully redeemed"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate rejects voucher for wrong barber", async () => {
@@ -751,16 +802,16 @@ test("validate rejects voucher for wrong barber", async () => {
 
   const req = {
     user: client,
-    body: { code: "TESTCODE1", barberId: barberA._id },
+    body: { code: "TESTCODE1", barberId: barberA._id, serviceId },
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Voucher.find = async () => [];
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("does not apply to this barber"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate rejects voucher for wrong salon", async () => {
@@ -776,16 +827,18 @@ test("validate rejects voucher for wrong salon", async () => {
       code: "TESTCODE1",
       barberId: barberA._id,
       salonId: otherSalonId,
+      serviceId,
     },
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Salon.exists = async () => null;
+  Voucher.find = async () => [voucherDoc];
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("does not apply to this salon"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate rejects voucher for wrong service", async () => {
@@ -804,12 +857,12 @@ test("validate rejects voucher for wrong service", async () => {
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Voucher.find = async () => [voucherDoc];
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("does not apply to this service"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate rejects inactive requested service", async () => {
@@ -825,13 +878,13 @@ test("validate rejects inactive requested service", async () => {
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  Voucher.find = async () => [voucherDoc];
   Service.findOne = () => chainableSelect(null);
 
   await validateVoucherCode(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("inactive"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("validate returns safe payload and caps discountPreview against discounted service price", async () => {
@@ -847,7 +900,11 @@ test("validate returns safe payload and caps discountPreview against discounted 
   };
   const res = createResponse();
 
-  Voucher.findOne = () => chainableSelect(voucherDoc);
+  let voucherLookup;
+  Voucher.find = (filter) => {
+    voucherLookup = filter;
+    return Promise.resolve([voucherDoc]);
+  };
   Service.findOne = () => chainableSelect({
     price: 12000,
     discountType: "fixed",
@@ -868,6 +925,53 @@ test("validate returns safe payload and caps discountPreview against discounted 
   assert.equal(res.body.discountPreview, 5000);
   // Confirm no sensitive fields leaked
   assert.equal(res.body.voucher.redemptionBookingIds, undefined);
+  assert.deepEqual(voucherLookup, {
+    code: "TESTCODE1",
+    $or: [{ ownerType: "barber", ownerId: String(barberA._id) }],
+  });
+});
+
+test("generic validation fails closed for an applicable barber and salon code collision", async () => {
+  const salonVoucher = makeVoucherDoc({
+    _id: new mongoose.Types.ObjectId(),
+    ownerType: "salon",
+    ownerId: salonId,
+    code: "SHARED",
+  });
+  const barberVoucher = makeVoucherDoc({
+    _id: new mongoose.Types.ObjectId(),
+    code: "SHARED",
+  });
+  const req = {
+    user: client,
+    body: { code: "SHARED", barberId: barberA._id, salonId, serviceId },
+  };
+  const res = createResponse();
+  let lookup;
+
+  User.findById = () => chainableSelect({
+    _id: barberA._id,
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", worksAsSpecialist: true }],
+  });
+  Salon.exists = async () => ({ _id: salonId });
+  Schedule.findOne = () => chainableSelect({});
+  Voucher.find = (filter) => {
+    lookup = filter;
+    return Promise.resolve([barberVoucher, salonVoucher]);
+  };
+
+  await validateVoucherCode(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "Invalid voucher code" });
+  assert.equal(res.body.voucher, undefined);
+  assert.equal(barberVoucher.currentUses, 0);
+  assert.equal(salonVoucher.currentUses, 0);
+  assert.deepEqual(lookup.$or, [
+    { ownerType: "barber", ownerId: String(barberA._id) },
+    { ownerType: "salon", ownerId: String(salonId) },
+  ]);
 });
 
 test("validateVoucherCode failure logs structured err without sensitive body values", async () => {
@@ -887,7 +991,7 @@ test("validateVoucherCode failure logs structured err without sensitive body val
   };
   const res = createResponse();
 
-  Voucher.findOne = () => {
+  Voucher.find = () => {
     throw err;
   };
 

@@ -2,9 +2,43 @@ import Voucher from "../../models/Voucher.js";
 import { calculateServiceDiscountedPrice } from "../../controllers/services/serviceController.js";
 import { calculateLoyaltyDiscountForBooking } from "../barberClientService.js";
 import { getLogger } from "../../config/logger.js";
+import { validateVoucherApplicability } from "../voucherValidation.js";
 
 const sameId = (left, right) =>
   String(left || "") === String(right || "");
+
+const getVoucherOwnerScopes = ({ barberId, salonId }) => {
+  const scopes = [{ ownerType: "barber", ownerId: barberId }];
+  if (salonId) scopes.push({ ownerType: "salon", ownerId: salonId });
+  return scopes;
+};
+
+const invalidVoucherCode = () =>
+  Object.assign(new Error("Invalid voucher code"), { statusCode: 400 });
+
+export const resolveVoucherForBooking = async ({
+  voucherCode: rawCode,
+  barberId,
+  salonId,
+  serviceId,
+  session,
+}) => {
+  const code = String(rawCode || "").toUpperCase().trim();
+  if (!code) return null;
+
+  const vouchers = await Voucher.find(
+    { code, $or: getVoucherOwnerScopes({ barberId, salonId }) },
+    null,
+    session ? { session } : undefined
+  );
+  const applicable = vouchers.filter(
+    (voucher) =>
+      !validateVoucherApplicability({ voucher, barberId, salonId, serviceId }).error
+  );
+
+  if (applicable.length !== 1) throw invalidVoucherCode();
+  return applicable[0];
+};
 
 const SAFE_ID_PATTERN = /^[a-f\d]{24}$/i;
 const VOUCHER_LOG_EVENT = "booking.voucher_secondary_write_failed";
@@ -70,67 +104,14 @@ export const validateVoucherForBooking = async ({
   servicePrice,
   session,
 }) => {
-  const code = String(rawCode || "").toUpperCase().trim();
-  if (!code) return null;
-
-  const voucher = await Voucher.findOne(
-    { code },
-    null,
-    session ? { session } : undefined
-  );
-  if (!voucher) {
-    throw Object.assign(new Error("Invalid voucher code"), { statusCode: 400 });
-  }
-  if (!voucher.active) {
-    throw Object.assign(new Error("This voucher is no longer active"), { statusCode: 400 });
-  }
-  if (voucher.expiresAt && new Date() > new Date(voucher.expiresAt)) {
-    throw Object.assign(new Error("This voucher has expired"), { statusCode: 400 });
-  }
-  if (voucher.currentUses >= voucher.maxUses) {
-    throw Object.assign(new Error("This voucher has been fully redeemed"), { statusCode: 400 });
-  }
-
-  if (voucher.ownerType === "barber") {
-    if (!sameId(voucher.ownerId, barberId)) {
-      throw Object.assign(new Error("This voucher does not apply to this barber"), { statusCode: 400 });
-    }
-  }
-  if (voucher.ownerType === "salon") {
-    if (!salonId || !sameId(voucher.ownerId, salonId)) {
-      throw Object.assign(new Error("This voucher does not apply to this salon"), { statusCode: 400 });
-    }
-  }
-
-  if (voucher.serviceId) {
-    if (!sameId(voucher.serviceId, serviceId)) {
-      throw Object.assign(new Error("This voucher does not apply to this service"), { statusCode: 400 });
-    }
-  }
-  if (voucher.applicableServiceIds && voucher.applicableServiceIds.length > 0) {
-    const matchesService = voucher.applicableServiceIds.some(
-      (sid) => sameId(sid, serviceId)
-    );
-    if (!matchesService) {
-      throw Object.assign(new Error("This promotion does not apply to this service"), { statusCode: 400 });
-    }
-  }
-
-  if (voucher.applicableBarberIds && voucher.applicableBarberIds.length > 0) {
-    const matchesBarber = voucher.applicableBarberIds.some(
-      (bid) => sameId(bid, barberId)
-    );
-    if (!matchesBarber) {
-      throw Object.assign(new Error("This promotion does not apply to this barber"), { statusCode: 400 });
-    }
-  }
-
-  if (voucher.startDate) {
-    const now = new Date();
-    if (now < new Date(voucher.startDate)) {
-      throw Object.assign(new Error("This promotion is not yet active"), { statusCode: 400 });
-    }
-  }
+  const voucher = await resolveVoucherForBooking({
+    voucherCode: rawCode,
+    barberId,
+    salonId,
+    serviceId,
+    session,
+  });
+  if (!voucher) return null;
 
   const voucherDiscount = calculateVoucherDiscount({ voucher, servicePrice });
   const finalPrice = Math.max(0, servicePrice - voucherDiscount);

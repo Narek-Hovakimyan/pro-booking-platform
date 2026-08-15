@@ -57,6 +57,7 @@ const originalCompensateBookingReferenceMediaFailure =
 const originalSupportsTransactions =
   __bookingCreateServiceTestHooks.supportsTransactions;
 const originalStartSession = __bookingCreateServiceTestHooks.startSession;
+const originalVoucherFind = Voucher.find;
 const originalVoucherFindOne = Voucher.findOne;
 const originalVoucherFindOneAndUpdate = Voucher.findOneAndUpdate;
 const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
@@ -117,6 +118,7 @@ afterEach(() => {
     originalSupportsTransactions;
   __bookingCreateServiceTestHooks.startSession = originalStartSession;
   __bookingSideEffectsTestHooks.resetGetIO();
+  Voucher.find = originalVoucherFind;
   Voucher.findOne = originalVoucherFindOne;
   Voucher.findOneAndUpdate = originalVoucherFindOneAndUpdate;
   Voucher.findByIdAndUpdate = originalVoucherFindByIdAndUpdate;
@@ -2404,9 +2406,14 @@ test("voucher claim and redemption roll back before a retried booking transactio
     pendingHoldWrites += operations.length;
     return { ok: 1 };
   };
-  Voucher.findOne = async (_query, _projection, options) => {
+  Voucher.find = async (query, _projection, options) => {
+    assert.equal(query.code, "RETRY10");
+    assert.deepEqual(query.$or, [
+      { ownerType: "barber", ownerId: barberId },
+      { ownerType: "salon", ownerId: salonId },
+    ]);
     assert.ok(options?.session);
-    return voucher;
+    return [voucher];
   };
   Voucher.findOneAndUpdate = async (_filter, update, options) => {
     assert.ok(options?.session);

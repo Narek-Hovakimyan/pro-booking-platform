@@ -1,15 +1,16 @@
 import mongoose from "mongoose";
 import Service from "../../models/Service.js";
 import Voucher from "../../models/Voucher.js";
+import { resolveVoucherForBooking } from "../../services/booking/bookingPricingService.js";
 import {
   assertVoucherOwnerAccess,
   calculateVoucherDiscountPreview,
   generateVoucherCode,
   getActiveVoucherService,
   isValidObjectId,
+  resolveVoucherValidationContext,
   validateManagedVoucherServiceReference,
   validateManualVoucherCode,
-  validateVoucherApplicability,
   validateVoucherCreateInput,
 } from "../../services/voucherValidation.js";
 
@@ -67,7 +68,7 @@ export const createVoucher = async (req, res) => {
       }
       const normalized = manualCodeValidation.value;
       // Check uniqueness
-      const existing = await Voucher.findOne({ code: normalized }).select("_id").lean();
+      const existing = await Voucher.findOne({ ownerType, ownerId, code: normalized }).select("_id").lean();
       if (existing) {
         return res.status(400).json({ message: "A voucher with this code already exists" });
       }
@@ -78,7 +79,7 @@ export const createVoucher = async (req, res) => {
       const maxAttempts = 10;
       while (attempts < maxAttempts) {
         const candidate = generateVoucherCode();
-        const existing = await Voucher.findOne({ code: candidate }).select("_id").lean();
+        const existing = await Voucher.findOne({ ownerType, ownerId, code: candidate }).select("_id").lean();
         if (!existing) {
           voucherCode = candidate;
           break;
@@ -366,24 +367,27 @@ export const validateVoucherCode = async (req, res) => {
       return res.status(400).json({ message: "Voucher code is required" });
     }
 
-    const normalizedCode = String(code).toUpperCase().trim();
-    const voucher = await Voucher.findOne({ code: normalizedCode }).lean();
-    if (!voucher) {
-      return res.status(400).json({ message: "Invalid voucher code" });
-    }
+    const context = await resolveVoucherValidationContext({ barberId, salonId, serviceId });
+    if (!context) return res.status(400).json({ message: "Invalid voucher code" });
 
-    const applicability = validateVoucherApplicability({
-      voucher,
-      barberId,
-      salonId,
-      serviceId,
-    });
-    if (applicability.error) {
-      return res.status(applicability.code).json({ message: applicability.error });
+    let voucher;
+    try {
+      voucher = await resolveVoucherForBooking({
+        voucherCode: code,
+        barberId: context.barberId,
+        salonId: context.salonId,
+        serviceId: context.serviceId,
+      });
+    } catch (error) {
+      if (error?.statusCode === 400) {
+        return res.status(400).json({ message: "Invalid voucher code" });
+      }
+      throw error;
     }
+    if (!voucher) return res.status(400).json({ message: "Invalid voucher code" });
 
     const activeService = await getActiveVoucherService({
-      serviceId,
+      serviceId: context.serviceId,
       ServiceModel: Service,
     });
     if (activeService.error) {

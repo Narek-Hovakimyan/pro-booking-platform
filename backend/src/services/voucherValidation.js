@@ -3,11 +3,30 @@ import mongoose from "mongoose";
 
 import Salon from "../models/Salon.js";
 import Service from "../models/Service.js";
+import {
+  normalizeScopedBookingReadinessIds,
+  resolveScopedBookingReadiness,
+} from "./booking/bookingReadinessService.js";
 import { canManageSalonRequest } from "../utils/salonPermissions.js";
 import { calculateServiceDiscountedPrice } from "./serviceValidation.js";
 
 export const isValidObjectId = (value) =>
   Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
+
+export const resolveVoucherValidationContext = async ({ barberId, salonId, serviceId }) => {
+  const normalizedIds = normalizeScopedBookingReadinessIds({ barberId, salonId, serviceId });
+  if (normalizedIds.body) return null;
+
+  const bookingReadiness = await resolveScopedBookingReadiness(normalizedIds);
+  if (bookingReadiness.body) return null;
+
+  const ownerScopes = [{ ownerType: "barber", ownerId: normalizedIds.barberId }];
+  if (bookingReadiness.salonId) {
+    ownerScopes.push({ ownerType: "salon", ownerId: bookingReadiness.salonId });
+  }
+
+  return { ...normalizedIds, salonId: bookingReadiness.salonId, ownerScopes };
+};
 
 const sameId = (left, right) =>
   String(left || "") === String(right || "");

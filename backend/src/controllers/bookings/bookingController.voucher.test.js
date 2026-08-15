@@ -11,6 +11,7 @@ import Service from "../../models/Service.js";
 import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
 import { getLogger } from "../../config/logger.js";
+import { resolveVoucherForBooking } from "../../services/booking/bookingPricingService.js";
 
 import {
   barberId,
@@ -100,8 +101,12 @@ test("createBooking with valid voucherCode applies discount to booking.price and
     return null;
   };
 
-  // Mock findOne for initial lookup (always returns from our mock)
-  Voucher.findOne = async () => claimed;
+  // Mock scoped lookup for initial resolution.
+  let voucherLookup;
+  Voucher.find = async (filter) => {
+    voucherLookup = filter;
+    return [claimed];
+  };
 
   // Mock findByIdAndUpdate for recordRedemption
   Voucher.findByIdAndUpdate = async () => ({ ...voucher, currentUses: 1, redemptionBookingIds: ["booking-new"] });
@@ -136,6 +141,36 @@ test("createBooking with valid voucherCode applies discount to booking.price and
   assert.equal(createdBookings[0].finalPrice, 90); // audit trail
   assert.equal(createdBookings[0].price, 90); // booking.price is the discounted price
   assert.equal(createdBookings[0].price, 100 - 10); // service.price(100) - voucherDiscount(10)
+  assert.deepEqual(voucherLookup, {
+    code: "WELCOME10",
+    $or: [
+      { ownerType: "barber", ownerId: barberId },
+      { ownerType: "salon", ownerId: salonId },
+    ],
+  });
+});
+
+test("scoped resolution isolates salons and fails closed for an applicable owner collision", async () => {
+  const salonAVoucher = {
+    _id: "salon-a-voucher", ownerType: "salon", ownerId: salonId, code: "SHARED",
+    active: true, currentUses: 0, maxUses: 2, applicableServiceIds: [], applicableBarberIds: [],
+  };
+  const salonBId = "64b0000000000000000000cc";
+  const salonBVoucher = { ...salonAVoucher, _id: "salon-b-voucher", ownerId: salonBId };
+  Voucher.find = async (filter) => filter.$or.some((scope) => String(scope.ownerId) === salonBId)
+    ? [salonBVoucher]
+    : [salonAVoucher];
+
+  assert.equal((await resolveVoucherForBooking({ voucherCode: "SHARED", barberId, salonId, serviceId }))._id, salonAVoucher._id);
+  assert.equal((await resolveVoucherForBooking({ voucherCode: "SHARED", barberId, salonId: salonBId, serviceId }))._id, salonBVoucher._id);
+
+  Voucher.find = async () => [{ ...salonAVoucher }, {
+    ...salonAVoucher, _id: "barber-voucher", ownerType: "barber", ownerId: barberId,
+  }];
+  await assert.rejects(
+    resolveVoucherForBooking({ voucherCode: "SHARED", barberId, salonId, serviceId }),
+    { message: "Invalid voucher code", statusCode: 400 }
+  );
 });
 
 test("createBooking with voucher calculates deposit from discounted final price", async () => {
@@ -168,7 +203,7 @@ test("createBooking with voucher calculates deposit from discounted final price"
     redemptionBookingIds: [],
   };
 
-  Voucher.findOne = async () => voucher;
+  Voucher.find = async () => [voucher];
   Voucher.findOneAndUpdate = async () => voucher;
   Voucher.findByIdAndUpdate = async () => ({
     ...voucher,
@@ -226,7 +261,7 @@ test("createBooking with promotionCode stores promotion fields", async () => {
     redemptionBookingIds: [],
   };
 
-  Voucher.findOne = async () => voucher;
+  Voucher.find = async () => [voucher];
   Voucher.findOneAndUpdate = async () => voucher;
   Voucher.findByIdAndUpdate = async () => voucher;
 
@@ -260,7 +295,7 @@ test("createBooking with promotionCode stores promotion fields", async () => {
 test("createBooking with invalid voucherCode returns 400", async () => {
   mockSuccessfulCreateDependencies([], barberWithSalon);
 
-  Voucher.findOne = async () => null;
+  Voucher.find = async () => [];
   Voucher.findOneAndUpdate = async () => null;
 
   const res = createResponse();
@@ -304,7 +339,7 @@ test("createBooking with fully used voucher returns 400", async () => {
     redemptionBookingIds: ["booking-old"],
   };
 
-  Voucher.findOne = async () => overusedVoucher;
+  Voucher.find = async () => [overusedVoucher];
   // Atomic claim should fail because currentUses >= maxUses
   Voucher.findOneAndUpdate = async (filter) => {
     if (filter.currentUses && filter.currentUses.$lt && filter.currentUses.$lt > overusedVoucher.currentUses) {
@@ -333,7 +368,7 @@ test("createBooking with fully used voucher returns 400", async () => {
   );
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("fully redeemed") || res.body.message.includes("no longer available"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("createBooking with expired voucher returns 400", async () => {
@@ -354,7 +389,7 @@ test("createBooking with expired voucher returns 400", async () => {
     redemptionBookingIds: [],
   };
 
-  Voucher.findOne = async () => expiredVoucher;
+  Voucher.find = async () => [expiredVoucher];
 
   const res = createResponse();
 
@@ -376,7 +411,7 @@ test("createBooking with expired voucher returns 400", async () => {
   );
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("expired"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("createBooking with voucher for wrong barber returns 400", async () => {
@@ -397,7 +432,7 @@ test("createBooking with voucher for wrong barber returns 400", async () => {
     redemptionBookingIds: [],
   };
 
-  Voucher.findOne = async () => wrongBarberVoucher;
+  Voucher.find = async () => [wrongBarberVoucher];
 
   const res = createResponse();
 
@@ -419,7 +454,7 @@ test("createBooking with voucher for wrong barber returns 400", async () => {
   );
 
   assert.equal(res.statusCode, 400);
-  assert.ok(res.body.message.includes("does not apply to this barber"));
+  assert.equal(res.body.message, "Invalid voucher code");
 });
 
 test("cancelling a voucher-discounted booking restores voucher use", async () => {
@@ -526,7 +561,7 @@ test("createBooking with voucher amount exceeding service price caps at price=0 
     if (filter._id === voucher._id && filter.active) return claimed;
     return null;
   };
-  Voucher.findOne = async () => claimed;
+  Voucher.find = async () => [claimed];
   Voucher.findByIdAndUpdate = async () => ({ ...voucher, currentUses: 1, redemptionBookingIds: ["booking-new"] });
 
   const res = createResponse();
@@ -578,7 +613,7 @@ test("failed booking creation does not issue an out-of-transaction voucher rollb
     if (filter._id === voucher._id && filter.active) return claimed;
     return null;
   };
-  Voucher.findOne = async () => claimed;
+  Voucher.find = async () => [claimed];
 
   let secondaryVoucherWrites = 0;
   Voucher.findByIdAndUpdate = async () => {
