@@ -105,6 +105,11 @@ function renderPageWithNotifications(preloadedState = {}) {
   );
 }
 
+const useUpcomingEventsClock = () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-08-06T08:00:00.000Z"));
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -115,6 +120,7 @@ afterEach(() => {
 
 describe("EventsPage", () => {
   it("keeps organizer registration disabled, preserves approved cancellation rules, and hides expired register actions", async () => {
+    useUpcomingEventsClock();
     resolveApiResponses({
       events: [
         {
@@ -308,7 +314,8 @@ describe("EventsPage", () => {
   });
 
   it("routes failed card registrations to the page-level notification layer and keeps modal state clear", async () => {
-    const user = userEvent.setup();
+    useUpcomingEventsClock();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const error = new Error("Registration closed");
     const registrationFailure = vi.fn(async () => {
       throw error;
@@ -427,7 +434,8 @@ describe("EventsPage", () => {
   });
 
   it("keeps successful registrations on the existing success path", async () => {
-    const user = userEvent.setup();
+    useUpcomingEventsClock();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     let registrations = [];
 
     mockedApi.get.mockImplementation(async (url) => {
@@ -493,7 +501,8 @@ describe("EventsPage", () => {
   });
 
   it("suppresses late registration updates after unmount", async () => {
-    const user = userEvent.setup();
+    useUpcomingEventsClock();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const pending = deferred();
 
