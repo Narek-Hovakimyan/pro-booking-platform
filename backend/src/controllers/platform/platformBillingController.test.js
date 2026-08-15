@@ -26,6 +26,7 @@ const originalMethods = {
   userFind: User.find,
   userFindById: User.findById,
   subscriptionFindOne: Subscription.findOne,
+  subscriptionFindOneAndUpdate: Subscription.findOneAndUpdate,
   subscriptionFindById: Subscription.findById,
   subscriptionCreate: Subscription.create,
   subscriptionDeleteOne: Subscription.deleteOne,
@@ -34,6 +35,7 @@ const originalMethods = {
   subscriptionSeatFind: SubscriptionSeat.find,
   subscriptionSeatFindOne: SubscriptionSeat.findOne,
   subscriptionSeatCreate: SubscriptionSeat.create,
+  subscriptionSeatCountDocuments: SubscriptionSeat.countDocuments,
   subscriptionSeatDeleteOne: SubscriptionSeat.deleteOne,
   paymentAttemptFindById: SubscriptionPaymentAttempt.findById,
   paymentAttemptFindOne: SubscriptionPaymentAttempt.findOne,
@@ -52,6 +54,7 @@ afterEach(() => {
   User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
   Subscription.findOne = originalMethods.subscriptionFindOne;
+  Subscription.findOneAndUpdate = originalMethods.subscriptionFindOneAndUpdate;
   Subscription.findById = originalMethods.subscriptionFindById;
   Subscription.create = originalMethods.subscriptionCreate;
   Subscription.deleteOne = originalMethods.subscriptionDeleteOne;
@@ -60,6 +63,7 @@ afterEach(() => {
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   SubscriptionSeat.create = originalMethods.subscriptionSeatCreate;
+  SubscriptionSeat.countDocuments = originalMethods.subscriptionSeatCountDocuments;
   SubscriptionSeat.deleteOne = originalMethods.subscriptionSeatDeleteOne;
   SubscriptionPaymentAttempt.findById = originalMethods.paymentAttemptFindById;
   SubscriptionPaymentAttempt.findOne = originalMethods.paymentAttemptFindOne;
@@ -132,6 +136,7 @@ const installCommonReadMocks = (subscription) => {
   User.find = () => query([]);
   Subscription.findOne = () => query(subscription);
   SubscriptionSeat.find = () => query([]);
+  SubscriptionSeat.countDocuments = async () => 0;
   SubscriptionPaymentAttempt.findOne = () => query(null);
 };
 
@@ -142,6 +147,7 @@ test("updateSeatCount preserves authenticated actor, note, body values, and requ
     ownerId: salonId,
     status: "active",
     seatCount: 3,
+    activeSeatCount: 0,
   });
   let auditPayload;
   installCommonReadMocks(subscription);
@@ -173,6 +179,7 @@ test("updateSeatCount preserves authenticated actor, note, body values, and requ
 test("activateSubscription preserves authenticated actor, body values, note, and request IP", async () => {
   const subscription = saveable({
     _id: oid("21001"),
+    __v: 0,
     ownerType: "salon",
     ownerId: salonId,
     status: "cancelled",
@@ -189,7 +196,16 @@ test("activateSubscription preserves authenticated actor, body values, note, and
     provider: "manual",
   });
   let auditPayload;
+  let persistedSubscription;
   installCommonReadMocks(subscription);
+  Subscription.findOneAndUpdate = async (_filter, update) => {
+    persistedSubscription = saveable({
+      ...subscription,
+      ...update.$set,
+      __v: subscription.__v + 1,
+    });
+    return persistedSubscription;
+  };
   SubscriptionPlan.findOne = async () => ({
     _id: oid("21003"),
     pricePerSeat: 5000,
@@ -212,11 +228,11 @@ test("activateSubscription preserves authenticated actor, body values, note, and
     assert.fail
   );
 
-  assert.equal(subscription.status, "active");
-  assert.equal(subscription.seatCount, 4);
-  assert.equal(subscription.pricePerSeat, 5000);
-  assert.equal(subscription.totalPrice, 20000);
-  assert.equal(subscription.provider, "manual");
+  assert.equal(persistedSubscription.status, "active");
+  assert.equal(persistedSubscription.seatCount, 4);
+  assert.equal(persistedSubscription.pricePerSeat, 5000);
+  assert.equal(persistedSubscription.totalPrice, 20000);
+  assert.equal(persistedSubscription.provider, "manual");
   assert.equal(auditPayload.actorId, actor._id);
   assert.equal(auditPayload.note, "manual renewal approved");
   assert.equal(auditPayload.requestIp, requestIp);

@@ -79,8 +79,13 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
     status: "active",
     revokedAt: null,
     subscriptionId: {
+      _id: new mongoose.Types.ObjectId(),
       ownerId: salonId,
       status: "active",
+      activeSeatCount: 1,
+      async save() {
+        return this;
+      },
     },
     async save() {
       return this;
@@ -105,6 +110,7 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(activeSeat.status, "revoked");
   assert.ok(activeSeat.revokedAt instanceof Date);
+  assert.equal(activeSeat.subscriptionId.activeSeatCount, 0);
   assert.equal(barber.salons.length, 0);
   assert.equal(barber.salonStatus, "none");
 });

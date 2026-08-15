@@ -752,6 +752,11 @@ test("missing independent schedule returns safe not-found without fabricated def
 });
 
 test("exact eligible salon schedule succeeds and preserves overrides and non-working days", async () => {
+  mock.timers.enable({
+    apis: ["Date"],
+    now: new Date("2026-08-01T08:00:00.000Z"),
+  });
+  try {
   const res = createResponse();
   const schedule = createScheduleDoc({
     salonId: salonAId,
@@ -786,6 +791,9 @@ test("exact eligible salon schedule succeeds and preserves overrides and non-wor
   assert.deepEqual(res.body.scheduleOverrides, schedule.scheduleOverrides);
   assert.deepEqual(res.body.nonWorkingDays, schedule.nonWorkingDays);
   assert.equal(res.body.password, undefined);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("pending rejected non-specialist and cross-salon memberships cannot read salon schedules", async () => {

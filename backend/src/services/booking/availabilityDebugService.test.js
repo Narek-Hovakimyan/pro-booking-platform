@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, test } from "node:test";
+import { after, afterEach, before, describe, mock, test } from "node:test";
 
 import {
   authorizeDebugAccess,
@@ -216,6 +216,17 @@ describe("authorizeDebugAccess", () => {
 });
 
 describe("debugAvailability", () => {
+  before(() => {
+    mock.timers.enable({
+      apis: ["Date"],
+      now: new Date("2026-08-01T08:00:00.000Z"),
+    });
+  });
+
+  after(() => {
+    mock.timers.reset();
+  });
+
   test("returns available: false with explanation for non-working day", async () => {
     Schedule.findOne = async () => ({
       nonWorkingDays: [bookingDate],
