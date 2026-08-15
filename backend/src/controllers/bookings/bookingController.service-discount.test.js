@@ -36,6 +36,17 @@ const originalVoucherMethods = {
   findOneAndUpdate: Voucher.findOneAndUpdate,
 };
 
+const mockScopedVoucherLookup = (voucher) => {
+  Voucher.find = async (filter) => {
+    assert.equal(filter.code, voucher.code);
+    assert.deepEqual(filter.$or, [
+      { ownerType: "barber", ownerId: barberId },
+      { ownerType: "salon", ownerId: salonId },
+    ]);
+    return [voucher];
+  };
+};
+
 const createRequestLogger = () => {
   const calls = [];
   return {
@@ -441,6 +452,7 @@ test("createBooking with discounted service + voucher caps voucherDiscount at di
   };
 
   let claimed = { ...voucher };
+  mockScopedVoucherLookup(claimed);
   Voucher.findOneAndUpdate = async (filter) => {
     if (filter._id === voucher._id && filter.active) return claimed;
     return null;
@@ -504,6 +516,7 @@ test("createBooking with discounted service + high-value voucher caps at 0", asy
   };
 
   let claimed = { ...voucher };
+  mockScopedVoucherLookup(claimed);
   Voucher.findOneAndUpdate = async (filter) => {
     if (filter._id === voucher._id && filter.active) return claimed;
     return null;
@@ -567,6 +580,7 @@ test("contract: voucher quote preview matches create pricing and create claims v
   };
   let claimCalls = 0;
   let claimUpdate = null;
+  mockScopedVoucherLookup(voucher);
   Voucher.findOne = async () => voucher;
   Voucher.findOneAndUpdate = async (_filter, update) => {
     claimCalls += 1;
@@ -768,6 +782,7 @@ test("createBooking does not stack loyalty discount with voucher", async () => {
     expiresAt: null,
     redemptionBookingIds: [],
   };
+  mockScopedVoucherLookup(voucher);
   Voucher.findOne = async () => voucher;
   Voucher.findOneAndUpdate = async () => voucher;
   Voucher.findByIdAndUpdate = async () => voucher;
