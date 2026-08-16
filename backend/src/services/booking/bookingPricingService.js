@@ -1,6 +1,10 @@
 import Voucher from "../../models/Voucher.js";
 import { calculateServiceDiscountedPrice } from "../../controllers/services/serviceController.js";
 import { calculateLoyaltyDiscountForBooking } from "../barberClientService.js";
+import {
+  getLoyaltyMilestone,
+  __loyaltyRewardRedemptionTestHooks,
+} from "./loyaltyRewardRedemptionService.js";
 import { getLogger } from "../../config/logger.js";
 import { validateVoucherApplicability } from "../voucherValidation.js";
 
@@ -195,6 +199,7 @@ export const buildBookingPricing = async ({
   salonId,
   voucherCode,
   claimVoucher = false,
+  claimLoyaltyReward: shouldClaimLoyaltyReward = false,
   bookingId,
   session,
 }) => {
@@ -230,6 +235,20 @@ export const buildBookingPricing = async ({
     serviceDiscountedPrice,
     hasVoucher: Boolean(voucherClaim),
   });
+  let loyaltyRewardClaim = null;
+  if (
+    shouldClaimLoyaltyReward &&
+    !voucherClaim &&
+    loyaltyDiscount.applied
+  ) {
+    loyaltyRewardClaim = await __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward({
+      barberId,
+      clientId,
+      milestone: getLoyaltyMilestone(loyaltyDiscount),
+      bookingId,
+      session,
+    });
+  }
   const finalPrice = voucherClaim
     ? voucherClaim.finalPrice
     : loyaltyDiscount.finalPrice;
@@ -241,6 +260,7 @@ export const buildBookingPricing = async ({
     voucherClaim,
     voucherDiscountAmount: voucherClaim?.voucherDiscount || 0,
     loyaltyDiscount,
+    loyaltyRewardClaim,
     finalPrice,
   };
 };

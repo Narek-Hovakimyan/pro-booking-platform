@@ -366,6 +366,7 @@ export const createBookingService = async ({
             salonId: bookingReadiness.salonId,
             voucherCode: rawVoucherCode,
             claimVoucher: Boolean(rawVoucherCode),
+            claimLoyaltyReward: true,
             bookingId,
             session,
           });

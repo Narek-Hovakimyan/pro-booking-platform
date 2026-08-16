@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import fs from "fs";
 import path from "path";
 
@@ -18,6 +18,7 @@ import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
 import { handleReferenceImageUploadError } from "../../middleware/uploadMiddleware.js";
 import { __bookingCreateServiceTestHooks } from "../../services/booking/bookingCreateService.js";
+import { __loyaltyRewardRedemptionTestHooks } from "../../services/booking/loyaltyRewardRedemptionService.js";
 import { __bookingSideEffectsTestHooks } from "../../services/booking/bookingSideEffectsService.js";
 import { MEDIA_STORE_ERROR_CODES, MediaStoreError } from "../../services/media/mediaStore.js";
 import { explicitAllDaysOffMarker } from "../../utils/scheduleUtils.js";
@@ -61,6 +62,18 @@ const originalVoucherFind = Voucher.find;
 const originalVoucherFindOne = Voucher.findOne;
 const originalVoucherFindOneAndUpdate = Voucher.findOneAndUpdate;
 const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
+const originalLoyaltyClaim =
+  __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward;
+const mockLoyaltyClaim = async ({
+  bookingId,
+  barberId,
+  clientId,
+  milestone,
+} = {}) => ({ bookingId, barberId, clientId, milestone, status: "claimed" });
+
+beforeEach(() => {
+  __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward = mockLoyaltyClaim;
+});
 
 const oldAutoClosedWeeklySchedule = {
   sun: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
@@ -122,6 +135,7 @@ afterEach(() => {
   Voucher.findOne = originalVoucherFindOne;
   Voucher.findOneAndUpdate = originalVoucherFindOneAndUpdate;
   Voucher.findByIdAndUpdate = originalVoucherFindByIdAndUpdate;
+  __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward = originalLoyaltyClaim;
   if (originalPaymentProvider === undefined) {
     delete process.env.PAYMENT_PROVIDER;
   } else {

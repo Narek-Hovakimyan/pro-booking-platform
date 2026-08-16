@@ -36,6 +36,10 @@ import {
   recordVoucherRedemption,
   restoreVoucherOnCancel,
 } from "../../services/booking/bookingPricingService.js";
+import {
+  consumeLoyaltyRewardForBooking,
+  restoreLoyaltyRewardForBooking,
+} from "../../services/booking/loyaltyRewardRedemptionService.js";
 import { buildBookingStatusUpdate } from "../../services/booking/bookingStatusService.js";
 import {
   getDayKeyFromDate,
@@ -76,6 +80,8 @@ export const __bookingTestHooks = {
   rollbackVoucherClaim,
   recordVoucherRedemption,
   restoreVoucherOnCancel,
+  consumeLoyaltyRewardForBooking,
+  restoreLoyaltyRewardForBooking,
 };
 
 export const createBooking = async (req, res) => {
@@ -428,6 +434,30 @@ export const updateBooking = async (req, res) => {
           getDayKeyFromDate(bookingToUpdate.bookingDate) || bookingToUpdate.dayKey;
       }
       await bookingToUpdate.save(session ? { session } : undefined);
+
+      const hasLoyaltyReward =
+        bookingToUpdate.loyaltyDiscountApplied === true;
+
+      if (
+        hasLoyaltyReward &&
+        (safeUpdates.status === "rejected" || safeUpdates.status === "cancelled")
+      ) {
+        await restoreLoyaltyRewardForBooking({
+          barberId: bookingToUpdate.barberId,
+          clientId: bookingToUpdate.clientId,
+          bookingId: bookingToUpdate._id,
+          session,
+        });
+      }
+
+      if (hasLoyaltyReward && safeUpdates.status === "completed") {
+        await consumeLoyaltyRewardForBooking({
+          barberId: bookingToUpdate.barberId,
+          clientId: bookingToUpdate.clientId,
+          bookingId: bookingToUpdate._id,
+          session,
+        });
+      }
 
       if (safeUpdates.status && isTerminalBookingStatus(safeUpdates.status)) {
         await releaseBookingSlotHolds({

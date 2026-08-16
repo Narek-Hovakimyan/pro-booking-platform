@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import { createBooking, quoteBookingPrice } from "./bookingController.js";
@@ -14,6 +14,7 @@ import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
 import { normalizeScopedBookingReadinessIds } from "../../services/booking/bookingReadinessService.js";
+import { __loyaltyRewardRedemptionTestHooks } from "../../services/booking/loyaltyRewardRedemptionService.js";
 
 import {
   barber,
@@ -35,6 +36,18 @@ const originalVoucherMethods = {
   findOne: Voucher.findOne,
   findOneAndUpdate: Voucher.findOneAndUpdate,
 };
+const originalLoyaltyClaim =
+  __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward;
+const mockLoyaltyClaim = async ({
+  bookingId,
+  barberId,
+  clientId,
+  milestone,
+} = {}) => ({ bookingId, barberId, clientId, milestone, status: "claimed" });
+
+beforeEach(() => {
+  __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward = mockLoyaltyClaim;
+});
 
 const mockScopedVoucherLookup = (voucher) => {
   Voucher.find = async (filter) => {
@@ -76,6 +89,7 @@ afterEach(() => {
   Voucher.findByIdAndUpdate = originalVoucherMethods.findByIdAndUpdate;
   Voucher.findOne = originalVoucherMethods.findOne;
   Voucher.findOneAndUpdate = originalVoucherMethods.findOneAndUpdate;
+  __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward = originalLoyaltyClaim;
 });
 
 test("booking readiness rejects request-derived IDs before model queries with create/quote parity", async () => {
