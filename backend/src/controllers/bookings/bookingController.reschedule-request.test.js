@@ -29,6 +29,7 @@ import {
   mockBookingSlotHoldModel,
   originalMethods,
   otherClient,
+  salonId,
 } from "./bookingController.testUtils.js";
 
 const requestedBookingDate = getFutureBookingDateForDay("wed", 14);
@@ -70,6 +71,13 @@ const createRequestBody = (overrides = {}) => ({
   time: requestedTime,
   note: "Please move this",
   ...overrides,
+});
+
+const createWednesdaySchedule = (from, to) => ({
+  weeklySchedule: {
+    wed: { working: true, from, to, breakFrom: "", breakTo: "" },
+  },
+  nonWorkingDays: [],
 });
 
 const createRequestLogger = () => {
@@ -222,6 +230,78 @@ test("reschedule request does not mutate original booking date/time", async () =
     bookingDate
   );
   assert.equal(res.body.rescheduleRequest.originalTime, "10:00");
+});
+
+test("independent reschedule uses only the personal schedule", async () => {
+  const booking = createMutableBooking({ salonId: null });
+  const res = createResponse();
+  const scheduleQueries = [];
+
+  Booking.findById = async () => booking;
+  mockBookingSlotHoldModel();
+  User.findById = () => ({ select: async () => barberWithSalon });
+  Schedule.findOne = async (query) => {
+    scheduleQueries.push(query);
+    return query.salonId === null
+      ? createWednesdaySchedule("09:00", "17:00")
+      : createWednesdaySchedule("10:00", "12:00");
+  };
+  Booking.find = mockBookingFind([]);
+  Notification.create = async (payload) => payload;
+
+  await createRescheduleRequest(
+    { user: client, params: { id: booking._id }, body: createRequestBody() },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(scheduleQueries, [{ barberId, salonId: null }]);
+});
+
+test("independent reschedule rejects a slot outside personal hours", async () => {
+  const booking = createMutableBooking({ salonId: null });
+  const res = createResponse();
+
+  Booking.findById = async () => booking;
+  mockBookingSlotHoldModel();
+  User.findById = () => ({ select: async () => barberWithSalon });
+  Schedule.findOne = async (query) =>
+    query.salonId === null
+      ? createWednesdaySchedule("10:00", "12:00")
+      : createWednesdaySchedule("09:00", "17:00");
+  Booking.find = mockBookingFind([]);
+
+  await createRescheduleRequest(
+    { user: client, params: { id: booking._id }, body: createRequestBody() },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Not enough time for selected service");
+});
+
+test("salon reschedule continues to use its selected salon schedule", async () => {
+  const booking = createMutableBooking({ salonId });
+  const res = createResponse();
+  const scheduleQueries = [];
+
+  Booking.findById = async () => booking;
+  mockBookingSlotHoldModel();
+  User.findById = () => ({ select: async () => barberWithSalon });
+  Schedule.findOne = async (query) => {
+    scheduleQueries.push(query);
+    return createWednesdaySchedule("09:00", "17:00");
+  };
+  Booking.find = mockBookingFind([]);
+  Notification.create = async (payload) => payload;
+
+  await createRescheduleRequest(
+    { user: client, params: { id: booking._id }, body: createRequestBody() },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(scheduleQueries, [{ barberId, salonId }]);
 });
 
 test("reschedule request validates requested slot against accepted and confirmed bookings", async () => {
