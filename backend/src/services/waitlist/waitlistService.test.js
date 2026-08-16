@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import WaitlistEntry from "../../models/WaitlistEntry.js";
 import Booking from "../../models/Booking.js";
@@ -12,6 +12,7 @@ import {
   clientId,
   createMockEntry,
   futureDate,
+  installWaitlistTestClock,
   mockFindOneAndUpdateForEntries,
   mockValidWaitlistRelationships,
   mockWaitlistApprovalFlow,
@@ -21,6 +22,7 @@ import {
   otherSalonId,
   pastDate,
   resetWaitlistServiceModelMocks,
+  resetWaitlistTestClock,
   salonId,
   serviceId,
   waitlistEntryId,
@@ -38,7 +40,12 @@ import {
   __waitlistNotificationTestHooks,
 } from "./waitlistNotificationService.js";
 
+beforeEach(() => {
+  installWaitlistTestClock();
+});
+
 afterEach(() => {
+  resetWaitlistTestClock();
   resetWaitlistServiceModelMocks();
   __waitlistNotificationTestHooks.resetLogger();
 });

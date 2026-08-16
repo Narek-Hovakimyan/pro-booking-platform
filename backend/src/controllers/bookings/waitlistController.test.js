@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import { acceptOfferEntry, approveEntry, cancelEntry, createEntry } from "./waitlistController.js";
 import Booking from "../../models/Booking.js";
@@ -16,7 +16,9 @@ import {
 } from "../../services/booking/bookingSlotHoldService.js";
 import {
   createMockEntry,
+  installWaitlistTestClock,
   resetWaitlistServiceModelMocks,
+  resetWaitlistTestClock,
 } from "../../services/waitlist/waitlistService.testUtils.js";
 
 const clientId = "64b000000000000000000001";
@@ -35,7 +37,12 @@ const originalMethods = {
   waitlistFindOneAndUpdate: WaitlistEntry.findOneAndUpdate,
 };
 
+beforeEach(() => {
+  installWaitlistTestClock();
+});
+
 afterEach(() => {
+  resetWaitlistTestClock();
   resetWaitlistServiceModelMocks();
   Booking.create = originalMethods.bookingCreate;
   Salon.findById = originalMethods.salonFindById;

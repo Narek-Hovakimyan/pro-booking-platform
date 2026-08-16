@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
@@ -15,8 +15,10 @@ import {
   clientId,
   createMockEntry,
   futureDate,
+  installWaitlistTestClock,
   otherClientId,
   resetWaitlistServiceModelMocks,
+  resetWaitlistTestClock,
   serviceId,
 } from "./waitlistService.testUtils.js";
 import {
@@ -55,7 +57,12 @@ const originalSlotHoldMethods = {
 const rollbackLogger = getLogger();
 const originalRollbackLoggerWarn = rollbackLogger.warn;
 
+beforeEach(() => {
+  installWaitlistTestClock();
+});
+
 afterEach(() => {
+  resetWaitlistTestClock();
   resetWaitlistServiceModelMocks();
   BookingSlotHold.deleteMany = originalSlotHoldMethods.deleteMany;
   __bookingSlotHoldServiceTestHooks.indexesReady = originalSlotHoldMethods.indexesReady;

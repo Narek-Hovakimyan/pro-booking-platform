@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import WaitlistEntry from "../../models/WaitlistEntry.js";
 import Notification from "../../models/Notification.js";
@@ -10,11 +10,13 @@ import {
   clientId,
   createMockEntry,
   futureDate,
+  installWaitlistTestClock,
   mockFindOneAndUpdateForEntries,
   otherSalonId,
   otherServiceId,
   pastDate,
   resetWaitlistServiceModelMocks,
+  resetWaitlistTestClock,
   salonId,
   serviceId,
 } from "./waitlistService.testUtils.js";
@@ -23,7 +25,12 @@ import {
   notifyMatchingWaitlistEntries,
 } from "./waitlistService.js";
 
+beforeEach(() => {
+  installWaitlistTestClock();
+});
+
 afterEach(() => {
+  resetWaitlistTestClock();
   resetWaitlistServiceModelMocks();
 });
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mock } from "node:test";
 
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
@@ -21,10 +22,22 @@ export const salonId = "64b000000000000000000020";
 export const otherSalonId = "64b000000000000000000021";
 export const serviceId = "64b000000000000000000030";
 export const otherServiceId = "64b000000000000000000031";
+const WAITLIST_CLOCK_START = "2026-08-01T08:00:00.000Z";
 export const futureDate = "2026-08-15";
 export const beyondHorizonDate = "2099-06-15";
 export const pastDate = "2020-01-01";
 export const waitlistEntryId = "64b000000000000000000040";
+
+export const installWaitlistTestClock = () => {
+  mock.timers.enable({
+    apis: ["Date"],
+    now: new Date(WAITLIST_CLOCK_START),
+  });
+};
+
+export const resetWaitlistTestClock = () => {
+  mock.timers.reset();
+};
 
 const originalMethods = {
   waitlistFind: WaitlistEntry.find,
