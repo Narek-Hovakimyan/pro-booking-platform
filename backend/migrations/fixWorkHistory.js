@@ -1,122 +1,148 @@
-import User from "../src/models/User.js";
-import Salon from "../src/models/Salon.js";
+import { disconnectDB } from "../src/config/db.js";
 import connectDB from "../src/config/db.js";
+import Salon from "../src/models/Salon.js";
+import User from "../src/models/User.js";
 
-/**
- * Fix work history for barbers with multiple salons.
- *
- * The bug was: when a barber joined a second salon, closeCurrentWorkHistory(barber, null, ...)
- * was called, which closed ALL current work history entries (including the first salon's).
- *
- * This migration:
- * 1. Finds barbers who have approved salons but their workHistory says "not current"
- * 2. Re-opens those entries (isCurrent = true, endDate = null)
- * 3. Creates missing workHistory entries for approved salons that have none
- * 4. Closes workHistory entries for salons the barber no longer belongs to
- */
-export default async function fixWorkHistory() {
-  console.log("Running work history fix...");
+const createCounters = () => ({
+  inspected: 0, migrated: 0, skippedAlreadyMigrated: 0, conflicts: 0, malformed: 0, failed: 0,
+});
+const idOf = (value) => (value == null ? "" : String(value));
+const migrationError = (message, counters, kind = "conflict") => {
+  const error = new Error(message);
+  error.code = `WORK_HISTORY_${kind.toUpperCase()}`;
+  error.migrationCounters = counters;
+  return error;
+};
 
-  try {
-    const barbers = await User.find({ role: "barber" });
+const approvedSalonsFor = (barber, counters) => {
+  const approved = (barber.salons || []).filter((entry) => entry?.status === "approved");
+  const ids = approved.map((entry) => idOf(entry.salon));
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    counters.malformed += 1;
+    throw migrationError(`Barber ${barber._id} has malformed approved salon membership`, counters, "malformed");
+  }
+  return approved;
+};
 
-    let fixedCount = 0;
-
-    for (const barber of barbers) {
-      const approvedSalons = (barber.salons || []).filter(
-        (s) => s.status === "approved"
-      );
-
-      // Build set of approved salon IDs for quick lookup
-      const approvedSalonIds = new Set(
-        approvedSalons.map((s) => s.salon?.toString()).filter(Boolean)
-      );
-
-      if (approvedSalons.length === 0 && (!barber.workHistory || barber.workHistory.length === 0)) continue;
-
-      let changed = false;
-
-      // Step 1: Fix/create entries for approved salons
-      for (const salonEntry of approvedSalons) {
-        const salonId = salonEntry.salon?.toString();
-        if (!salonId) continue;
-
-        // Try matching by salon ObjectId (as string) or by salonName
-        const historyEntry = barber.workHistory.find(
-          (h) => {
-            // Match by ObjectId
-            if (h.salon && h.salon.toString() === salonId) return true;
-            // Match by salonName if no ObjectId
-            if (!h.salon && h.salonName) {
-              return salonEntry.salonName === h.salonName;
-            }
-            return false;
-          }
-        );
-
-        if (historyEntry) {
-          // Entry exists - if it's not current, fix it
-          if (!historyEntry.isCurrent) {
-            historyEntry.isCurrent = true;
-            historyEntry.endDate = null;
-            changed = true;
-          }
-          // Ensure salon ObjectId is set
-          if (!historyEntry.salon) {
-            historyEntry.salon = salonId;
-            changed = true;
-          }
-        } else {
-          // No workHistory entry at all for an approved salon - create one
-          const salon = await Salon.findById(salonId).select("name");
-          barber.workHistory.push({
-            salon: salonId,
-            salonName: salon?.name || "Salon",
-            startDate: salonEntry.joinedAt || new Date(),
-            endDate: null,
-            isCurrent: true,
-          });
-          changed = true;
-        }
+const classifyHistory = ({ barber, approvedSalons, salonsById, counters }) => {
+  const history = Array.isArray(barber.workHistory) ? barber.workHistory : [];
+  const bySalon = new Map();
+  for (const entry of history) {
+    const salonId = idOf(entry?.salon);
+    if (!salonId || !salonsById.has(salonId)) {
+      counters.malformed += 1;
+      throw migrationError(`Barber ${barber._id} has unresolved work history`, counters, "malformed");
+    }
+    if (bySalon.has(salonId)) {
+      counters.conflicts += 1;
+      throw migrationError(`Barber ${barber._id} has duplicate work history for salon ${salonId}`, counters);
+    }
+    bySalon.set(salonId, entry);
+  }
+  const approvedIds = new Set(approvedSalons.map((entry) => idOf(entry.salon)));
+  const next = history.map((entry) => ({ ...(entry.toObject?.() || entry) }));
+  let changed = false;
+  for (const membership of approvedSalons) {
+    const salonId = idOf(membership.salon);
+    const existing = bySalon.get(salonId);
+    if (existing) {
+      if (!existing.isCurrent || existing.endDate) {
+        const target = next.find((entry) => idOf(entry.salon) === salonId);
+        target.isCurrent = true;
+        target.endDate = null;
+        changed = true;
       }
-
-      // Step 2: Close workHistory entries for salons the barber no longer belongs to
-      for (const history of (barber.workHistory || [])) {
-        const historySalonId = history.salon?.toString();
-        if (!historySalonId) continue;
-
-        if (history.isCurrent && !approvedSalonIds.has(historySalonId)) {
-          history.isCurrent = false;
-          if (!history.endDate) {
-            history.endDate = new Date();
-          }
-          changed = true;
-        }
+      continue;
+    }
+    const startDate = membership.joinedAt || barber.createdAt;
+    if (!startDate) {
+      counters.malformed += 1;
+      throw migrationError(`Barber ${barber._id} has no deterministic work-history start date`, counters, "malformed");
+    }
+    next.push({ salon: membership.salon, salonName: salonsById.get(salonId).name || "Salon", startDate, endDate: null, isCurrent: true });
+    changed = true;
+  }
+  for (const entry of next) {
+    if (entry.isCurrent && !approvedIds.has(idOf(entry.salon))) {
+      entry.isCurrent = false;
+      if (!entry.endDate) entry.endDate = barber.updatedAt || barber.createdAt;
+      if (!entry.endDate) {
+        counters.malformed += 1;
+        throw migrationError(`Barber ${barber._id} has no deterministic work-history end date`, counters, "malformed");
       }
+      changed = true;
+    }
+  }
+  return { changed, next };
+};
 
-      if (changed) {
+export default async function fixWorkHistory({ UserModel = User, SalonModel = Salon, dryRun = false } = {}) {
+  const counters = createCounters();
+  const barbers = await UserModel.find({ role: "barber" });
+  for (const barber of barbers) {
+    counters.inspected += 1;
+    try {
+      const approvedSalons = approvedSalonsFor(barber, counters);
+      const ids = [...new Set([
+        ...approvedSalons.map((entry) => idOf(entry.salon)),
+        ...(Array.isArray(barber.workHistory) ? barber.workHistory.map((entry) => idOf(entry?.salon)) : []),
+      ])];
+      if (ids.some((id) => !id)) {
+        counters.malformed += 1;
+        throw migrationError(`Barber ${barber._id} has unresolved work history`, counters, "malformed");
+      }
+      const salons = ids.length ? await SalonModel.find({ _id: { $in: ids } }).select("name") : [];
+      const salonsById = new Map(salons.map((salon) => [idOf(salon._id), salon]));
+      if (salonsById.size !== ids.length) {
+        counters.malformed += 1;
+        throw migrationError(`Barber ${barber._id} has missing salon references`, counters, "malformed");
+      }
+      const { changed, next } = classifyHistory({ barber, approvedSalons, salonsById, counters });
+      if (!changed) {
+        counters.skippedAlreadyMigrated += 1;
+        continue;
+      }
+      if (!dryRun) {
+        barber.workHistory = next;
         await barber.save();
-        fixedCount++;
+      }
+      counters.migrated += 1;
+    } catch (error) {
+      counters.failed += 1;
+      if (!error.migrationCounters) error.migrationCounters = counters;
+      throw error;
+    }
+  }
+  return counters;
+}
+
+export const runFixWorkHistoryMigration = async ({
+  connect = () => connectDB({ terminateOnFailure: false }), disconnect = disconnectDB, execute = fixWorkHistory,
+  setExitCode = (code) => { process.exitCode = code; }, logError = console.error,
+} = {}) => {
+  let failure;
+  let result;
+  try {
+    await connect();
+    result = await execute();
+  } catch (error) {
+    failure = error;
+    setExitCode(1);
+    logError("Work history migration failed:", error);
+  } finally {
+    try {
+      await disconnect();
+    } catch (disconnectError) {
+      if (!failure) {
+        failure = disconnectError;
+        setExitCode(1);
+        logError("Work history migration disconnect failed:", disconnectError);
       }
     }
-
-    console.log(`Work history fix complete. Fixed ${fixedCount} barbers.`);
-  } catch (error) {
-    console.error("Work history fix error:", error.message);
   }
-}
+  if (failure) throw failure;
+  return result;
+};
 
-// Direct execution guard: run via `node migrations/fixWorkHistory.js`
-const isDirectRun =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("fixWorkHistory.js");
-
-if (isDirectRun) {
-  connectDB()
-    .then(() => fixWorkHistory())
-    .then(() => process.exit(0))
-    .catch((error) => {
-      console.error(error);
-      process.exit(1);
-    });
-}
+const isDirectRun = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("fixWorkHistory.js");
+if (isDirectRun) void runFixWorkHistoryMigration().catch(() => {});

@@ -208,6 +208,23 @@ test("every DB startup failure logs only fixed metadata and exits once", async (
   }
 });
 
+test("non-terminating connection mode rejects without calling process.exit", async () => {
+  const lines = prepareFailureLogger();
+  const originalError = makeHostileDriverError();
+  const exitCalls = [];
+  process.env.MONGO_URI = hostileValues[0];
+  mongoose.connect = async () => { throw originalError; };
+  process.exit = (code) => { exitCalls.push(code); };
+
+  await assert.rejects(
+    () => connectDB({ terminateOnFailure: false }),
+    (error) => error.code === "connection_failed" && error.cause === originalError
+  );
+
+  assert.equal(lines.length, 1);
+  assert.deepEqual(exitCalls, []);
+});
+
 test("Sentry helper failures do not add logs or prevent the required exit", async () => {
   for (const behavior of [
     { captureException() { throw new Error("capture private-secret"); } },

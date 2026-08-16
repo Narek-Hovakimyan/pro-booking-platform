@@ -22,10 +22,21 @@ const logConnectionFailure = (reason) => {
   );
 };
 
-const exitForConnectionFailure = async (reason) => {
+const connectionFailure = (reason, cause) => {
+  const error = new Error(reason);
+  error.code = reason;
+  if (cause) error.cause = cause;
+  return error;
+};
+
+const handleConnectionFailure = async (reason, { terminateOnFailure, cause } = {}) => {
   logConnectionFailure(reason);
   await captureSentryStartupFailure("database");
-  process.exit(1);
+  if (terminateOnFailure) {
+    process.exit(1);
+    return;
+  }
+  throw connectionFailure(reason, cause);
 };
 
 const createTimeoutError = () => {
@@ -69,16 +80,16 @@ export const disconnectDB = async () => {
   await mongoose.disconnect();
 };
 
-const connectDB = async () => {
+const connectDB = async ({ terminateOnFailure = true } = {}) => {
   const mongoUri = process.env.MONGO_URI;
 
   if (!mongoUri || mongoUri === "your_mongodb_connection_string") {
-    await exitForConnectionFailure("configuration_missing");
+    await handleConnectionFailure("configuration_missing", { terminateOnFailure });
     return;
   }
 
   if (!mongoUri.startsWith("mongodb://") && !mongoUri.startsWith("mongodb+srv://")) {
-    await exitForConnectionFailure("configuration_invalid");
+    await handleConnectionFailure("configuration_invalid", { terminateOnFailure });
     return;
   }
 
@@ -88,8 +99,8 @@ const connectDB = async () => {
       { event: "database.connected" },
       "MongoDB connected"
     );
-  } catch {
-    await exitForConnectionFailure("connection_failed");
+  } catch (error) {
+    await handleConnectionFailure("connection_failed", { terminateOnFailure, cause: error });
   }
 };
 
