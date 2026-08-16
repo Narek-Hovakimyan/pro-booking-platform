@@ -52,6 +52,7 @@ import { redisClientService } from "./services/redisClientService.js";
 import { serverLifecycleService } from "./services/serverLifecycleService.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
+import { startMediaReconciliationScheduler } from "./services/media/mediaReconciliationScheduler.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
 import { startExpirePendingBookingsCron } from "../cron/expirePendingBookings.js";
 import { startEventRemindersCron } from "../cron/eventReminders.js";
@@ -274,6 +275,7 @@ const startServer = async () => {
   startBookingReminderScheduler();
   startWaitlistExpirationScheduler();
   startSubscriptionExpirationScheduler();
+  startMediaReconciliationScheduler({ logger });
 };
 
 void startServer().catch(() => {

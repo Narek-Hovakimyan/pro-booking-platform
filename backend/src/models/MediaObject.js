@@ -163,6 +163,49 @@ const mediaObjectSchema = new mongoose.Schema(
       trim: true,
       maxlength: 512,
     },
+    reconciliationLeaseToken: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 200,
+    },
+    reconciliationLeaseExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    reconciliationFencingToken: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: (value) => Number.isSafeInteger(value) && value >= 0,
+        message: "reconciliationFencingToken must be a non-negative safe integer",
+      },
+    },
+    reconciliationRetryCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: (value) => Number.isSafeInteger(value) && value >= 0,
+        message: "reconciliationRetryCount must be a non-negative safe integer",
+      },
+    },
+    nextReconciliationAt: {
+      type: Date,
+      default: null,
+    },
+    lastReconciliationError: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 512,
+    },
+    reconciliationManual: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -173,6 +216,7 @@ mediaObjectSchema.index(
 );
 mediaObjectSchema.index({ status: 1, createdAt: 1 });
 mediaObjectSchema.index({ deletePendingAt: 1 });
+mediaObjectSchema.index({ status: 1, nextReconciliationAt: 1, reconciliationLeaseExpiresAt: 1 });
 mediaObjectSchema.index({ ownerModel: 1, ownerId: 1, mediaClass: 1, legacyUrl: 1 });
 
 mediaObjectSchema.pre("validate", function setLifecycleTimestamps() {

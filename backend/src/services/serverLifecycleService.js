@@ -6,6 +6,7 @@ import {
 import { stopBookingReminderScheduler } from "./booking/bookingReminderScheduler.js";
 import { stopSubscriptionExpirationScheduler } from "./subscriptionExpirationScheduler.js";
 import { stopWaitlistExpirationScheduler } from "./waitlist/waitlistExpirationScheduler.js";
+import { stopMediaReconciliationScheduler } from "./media/mediaReconciliationScheduler.js";
 import { redisClientService } from "./redisClientService.js";
 
 const DEFAULT_PING_TIMEOUT_MS = 1000;
@@ -70,6 +71,7 @@ export const createServerLifecycleService = ({
   stopBookingReminderSchedulerFn = stopBookingReminderScheduler,
   stopWaitlistExpirationSchedulerFn = stopWaitlistExpirationScheduler,
   stopSubscriptionExpirationSchedulerFn = stopSubscriptionExpirationScheduler,
+  stopMediaReconciliationSchedulerFn = stopMediaReconciliationScheduler,
   stopCronTaskFn = stopCronTask,
   closeHttpServerFn = stopHttpServer,
   closeSocketServerFn = closeSocketServer,
@@ -168,6 +170,7 @@ export const createServerLifecycleService = ({
           stopBookingReminderSchedulerFn,
           stopWaitlistExpirationSchedulerFn,
           stopSubscriptionExpirationSchedulerFn,
+          stopMediaReconciliationSchedulerFn,
         ]) {
           try {
             await stopFn();
