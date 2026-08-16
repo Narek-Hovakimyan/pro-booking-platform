@@ -20,7 +20,12 @@ import { setBookings } from "@/store/slices/bookingsSlice";
 import { setSchedule } from "@/store/slices/scheduleSlice";
 import { setServices } from "@/store/slices/servicesSlice";
 import { setBarbers } from "@/store/slices/usersSlice";
-import { formatDateLabel, getDayKeyFromDate, getNext7Days, parseDateKey } from "@/shared/utils/dates";
+import {
+  formatArmeniaDateLabel,
+  getArmeniaDayKey,
+  getNext7ArmeniaDays,
+  isDateKey,
+} from "@/shared/utils/dates";
 import { getSalonSlotAvailabilitySummary } from "@/shared/utils/slots";
 import { timeToMinutes } from "@/shared/utils/time";
 
@@ -192,7 +197,7 @@ export default function BookingPage({
   const [isScheduleBlocked, setIsScheduleBlocked] = useState(false);
   const [error, setError] = useState("");
   const [selectedDate, setSelectedDate] = useState(() =>
-    initialRebookContext?.serviceId ? "" : getNext7Days()[0].value
+    initialRebookContext?.serviceId ? "" : getNext7ArmeniaDays()[0].value
   );
   const [activeBarberId, setActiveBarberId] = useState(null);
   const [selectedSalonId, setSelectedSalonId] = useState(initialSelectedSalonId);
@@ -251,14 +256,12 @@ export default function BookingPage({
     barber?.defaultSchedule ||
     defaultPersonalSchedule;
   const nonWorkingDays = barberScheduleEntry.nonWorkingDays || EMPTY_NON_WORKING_DAYS;
-  const dateOptions = useMemo(() => getNext7Days(), []);
-  const selectedDateObject = parseDateKey(selectedDate);
-  const customSelectedDateOption = selectedDateObject
+  const dateOptions = useMemo(() => getNext7ArmeniaDays(), []);
+  const customSelectedDateOption = isDateKey(selectedDate)
     ? {
-        date: selectedDateObject,
         value: selectedDate,
-        dayKey: getDayKeyFromDate(selectedDateObject),
-        label: formatDateLabel(selectedDateObject),
+        dayKey: getArmeniaDayKey(selectedDate),
+        label: formatArmeniaDateLabel(selectedDate),
       }
     : null;
   const selectedDateOption =

@@ -4,7 +4,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import EmptyState from "@/shared/components/common/EmptyState";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
-import { formatDateKey } from "@/shared/utils/dates";
+import { getArmeniaTodayKey } from "@/shared/utils/dates";
 import { getMediaUrl } from "@/shared/utils/media";
 
 import SalonBookingSummary from "./SalonBookingSummary";
@@ -340,7 +340,7 @@ export default function SalonBookingSteps({
               Or pick a custom date
               <input
                 className="rounded-2xl border p-3 font-normal"
-                min={formatDateKey(new Date())}
+                min={getArmeniaTodayKey()}
                 type="date"
                 value={selectedDate}
                 onChange={(event) => selectDate(event.target.value)}

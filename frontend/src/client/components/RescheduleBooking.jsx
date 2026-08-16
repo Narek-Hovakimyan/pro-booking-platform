@@ -17,11 +17,12 @@ import {
   getBookingSalonId,
 } from "@/client/utils/bookingStatusUtils";
 import {
-  formatDateKey,
-  formatDateLabel,
-  getDayKeyFromDate,
+  formatArmeniaDateLabel,
+  getArmeniaDayKey,
+  getArmeniaTodayKey,
   getNext7Days,
-  parseDateKey,
+  isBeforeArmeniaToday,
+  isDateKey,
 } from "@/shared/utils/dates";
 import { getSlotAvailabilitySummary } from "@/shared/utils/slots";
 import { timeToMinutes } from "@/shared/utils/time";
@@ -82,7 +83,7 @@ export default function RescheduleBooking({ booking, onClose }) {
   const lifecycleRef = useRef({ initialized: false, mounted: false, trigger: null });
   const latestOnCloseRef = useRef(onClose);
   const isSavingRef = useRef(false);
-  const dateOptions = useMemo(() => getNext7Days(), []);
+  const dateOptions = useMemo(() => getNext7Days({ armenia: true }), []);
   const [selectedDate, setSelectedDate] = useState(
     booking.bookingDate || dateOptions[0].value
   );
@@ -108,12 +109,11 @@ export default function RescheduleBooking({ booking, onClose }) {
     barber?.defaultSchedule ||
     defaultPersonalSchedule;
   const nonWorkingDays = rescheduleSchedule.nonWorkingDays || [];
-  const selectedDateObject = parseDateKey(selectedDate);
-  const selectedDayKey = selectedDateObject
-    ? getDayKeyFromDate(selectedDateObject)
+  const selectedDayKey = isDateKey(selectedDate)
+    ? getArmeniaDayKey(selectedDate)
     : booking.dayKey;
-  const selectedDateLabel = selectedDateObject
-    ? formatDateLabel(selectedDateObject)
+  const selectedDateLabel = isDateKey(selectedDate)
+    ? formatArmeniaDateLabel(selectedDate)
     : selectedDate;
   const selectedOverride = barberScheduleOverrides[selectedDate];
   const weeklyDaySchedule = barberWeeklySchedule[selectedDayKey];
@@ -157,7 +157,7 @@ export default function RescheduleBooking({ booking, onClose }) {
       : slotSummary.blockedByBooking
         ? "This time is already booked"
         : "No available slots";
-  const todayKey = formatDateKey(new Date());
+  const todayKey = getArmeniaTodayKey();
 
   useEffect(() => {
     latestOnCloseRef.current = onClose;
@@ -251,7 +251,7 @@ export default function RescheduleBooking({ booking, onClose }) {
   }, [barber?.defaultSchedule, booking.barberId, dispatch, originalSalonId]);
 
   const selectDate = (dateKey) => {
-    if (!parseDateKey(dateKey) || dateKey < todayKey) return;
+    if (!isDateKey(dateKey) || isBeforeArmeniaToday(dateKey)) return;
 
     setSelectedDate(dateKey);
     setTime("");

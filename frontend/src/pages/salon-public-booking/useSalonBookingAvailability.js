@@ -6,7 +6,13 @@ import initialSchedule, {
   defaultPersonalSchedule,
   getDayScheduleFromDefaultSchedule,
 } from "@/shared/data/schedule";
-import { formatDateKey, formatDateLabel, getDayKeyFromDate, getNext7Days, parseDateKey } from "@/shared/utils/dates";
+import {
+  formatArmeniaDateLabel,
+  getArmeniaDayKey,
+  getNext7ArmeniaDays,
+  isBeforeArmeniaToday,
+  isDateKey,
+} from "@/shared/utils/dates";
 import { getSalonSlotAvailabilitySummary } from "@/shared/utils/slots";
 import { timeToMinutes } from "@/shared/utils/time";
 
@@ -48,8 +54,7 @@ export function useSalonBookingAvailability({
   const [barberBookings, setBarberBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
 
-  const dateOptions = useMemo(() => getNext7Days(), []);
-  const todayKey = formatDateKey(new Date());
+  const dateOptions = useMemo(() => getNext7ArmeniaDays(), []);
   const selectedBarberId = selectedBarber?.id || selectedBarber?._id;
 
   const selectedBarberServices = useMemo(() => {
@@ -145,13 +150,11 @@ export function useSalonBookingAvailability({
     barberScheduleEntry?.defaultSchedule || defaultPersonalSchedule;
   const barberScheduleOverrides = barberScheduleEntry?.scheduleOverrides || {};
 
-  const selectedDateObject = parseDateKey(selectedDate);
-  const selectedDateOption = selectedDateObject
+  const selectedDateOption = isDateKey(selectedDate)
     ? {
-        date: selectedDateObject,
         value: selectedDate,
-        dayKey: getDayKeyFromDate(selectedDateObject),
-        label: formatDateLabel(selectedDateObject),
+        dayKey: getArmeniaDayKey(selectedDate),
+        label: formatArmeniaDateLabel(selectedDate),
       }
     : null;
   const selectedDateLabel = selectedDateOption?.label || selectedDate || "";
@@ -245,8 +248,7 @@ export function useSalonBookingAvailability({
               : "No available slots";
 
   const selectDate = (dateKey) => {
-    const date = parseDateKey(dateKey);
-    if (!date || dateKey < todayKey) return;
+    if (!isDateKey(dateKey) || isBeforeArmeniaToday(dateKey)) return;
 
     setSelectedDate(dateKey);
     setSelectedTime("");

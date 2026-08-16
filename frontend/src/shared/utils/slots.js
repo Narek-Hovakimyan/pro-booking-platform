@@ -1,5 +1,6 @@
 import { timeToMinutes, minutesToTime } from "./time";
-import { isToday } from "./dates";
+import { getArmeniaDayKey, getArmeniaTodayKey } from "./dates";
+import { getArmeniaMinutesOfDay, isArmeniaDateKey } from "./armeniaDateTime";
 
 const dayIndexes = {
   sun: 0,
@@ -11,28 +12,29 @@ const dayIndexes = {
   sat: 6,
 };
 
-export function isPastSlot(dayKey, time) {
-  const now = new Date();
+export function isPastSlot(dayKey, time, now = new Date()) {
   const selectedDayIndex = dayIndexes[dayKey];
+  const currentDayIndex = dayIndexes[getArmeniaDayKey(getArmeniaTodayKey(now))];
 
-  if (selectedDayIndex === undefined) return false;
-  if (selectedDayIndex < now.getDay()) return true;
-  if (selectedDayIndex > now.getDay()) return false;
+  if (selectedDayIndex === undefined || currentDayIndex === undefined) return false;
+  if (selectedDayIndex < currentDayIndex) return true;
+  if (selectedDayIndex > currentDayIndex) return false;
 
   const slotMinutes = timeToMinutes(time);
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const nowMinutes = getArmeniaMinutesOfDay(now);
 
-  return slotMinutes !== null && slotMinutes <= nowMinutes;
+  return slotMinutes !== null && nowMinutes !== null && slotMinutes <= nowMinutes;
 }
 
-export function isPastSlotForDate(dateValue, time) {
-  if (!isToday(dateValue)) return false;
-
+export function isPastSlotForDate(dateValue, time, now = new Date()) {
+  if (!isArmeniaDateKey(dateValue)) return false;
   const slotMinutes = timeToMinutes(time);
-  const now = new Date();
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  if (slotMinutes === null) return false;
+  if (dateValue !== getArmeniaTodayKey(now)) return false;
 
-  return slotMinutes !== null && slotMinutes <= nowMinutes;
+  const nowMinutes = getArmeniaMinutesOfDay(now);
+
+  return nowMinutes !== null && slotMinutes <= nowMinutes;
 }
 
 const blockingBookingStatuses = new Set(["pending", "accepted", "confirmed"]);
@@ -113,6 +115,7 @@ function getCanonicalSlotAvailabilitySummary(
   const schedule = normalizeSchedule(daySchedule);
   const bookings = Array.isArray(existingBookings) ? existingBookings : [];
   const selectedDate = options.selectedDate;
+  const now = options.now;
 
   if (!Number.isFinite(serviceDuration) || serviceDuration <= 0) {
     return { availableSlots: [], blockedByTime: false, blockedByBooking: false };
@@ -139,8 +142,8 @@ function getCanonicalSlotAvailabilitySummary(
     const slotEnd = t + serviceDuration;
     const time = minutesToTime(t);
     const pastSlot = selectedDate
-      ? isPastSlotForDate(selectedDate, time)
-      : isPastSlot(selectedDayKey, time);
+      ? isPastSlotForDate(selectedDate, time, now)
+      : isPastSlot(selectedDayKey, time, now);
     const notEnoughContinuousTime =
       slotEnd > end || crossesBreakRange(t, slotEnd, breakStart, breakEnd);
     const alreadyBooked = bookings.some((booking) => {

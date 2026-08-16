@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 
-import { formatDateKey, getDayKeyFromDate, parseDateKey } from "@/shared/utils/dates";
+import {
+  getArmeniaDayKey,
+  getArmeniaTodayKey,
+  isBeforeArmeniaToday,
+  isDateKey,
+} from "@/shared/utils/dates";
 import { getServicePriceInfo } from "@/shared/data/serviceCategories";
 import { useBooking } from "@/shared/hooks/useBooking";
 import { useClientBookingState } from "@/client/hooks/useClientBookingState";
@@ -44,13 +49,12 @@ export default function ClientBooking({
   const selectedBarberId = barber?._id || barber?.id || "";
   const selectedServiceEntityId =
     selectedService?._id || selectedService?.id || selectedServiceId || "";
-  const todayKey = formatDateKey(new Date());
+  const todayKey = getArmeniaTodayKey();
   const safeServices = services || [];
   const activeServices = safeServices.filter((service) => service?.active);
   const hasActiveServices = activeServices.length > 0;
-  const parsedSelectedDate = selectedDate ? parseDateKey(selectedDate) : null;
   const selectedDateDayKey =
-    selectedDayKey || (parsedSelectedDate ? getDayKeyFromDate(parsedSelectedDate) : "");
+    selectedDayKey || (isDateKey(selectedDate) ? getArmeniaDayKey(selectedDate) : "");
   const selectedServicePriceInfo = getServicePriceInfo(selectedService);
 
   const bookingState = useClientBookingState({
@@ -137,20 +141,18 @@ export default function ClientBooking({
   };
 
   const handleSelectDate = (day) => {
-    const date = parseDateKey(day.value);
-    if (!date || day.value < todayKey) return;
+    if (!isDateKey(day.value) || isBeforeArmeniaToday(day.value)) return;
     setSelectedDate(day.value);
-    setSelectedDayKey(day.dayKey || getDayKeyFromDate(date));
+    setSelectedDayKey(day.dayKey || getArmeniaDayKey(day.value));
     setSelectedTime("");
     confirmation.clearBookingQuote();
     bookingState.setError("");
   };
 
   const handleSelectCustomDate = (value) => {
-    const date = parseDateKey(value);
-    if (!date || value < todayKey) return;
+    if (!isDateKey(value) || isBeforeArmeniaToday(value)) return;
     setSelectedDate(value);
-    setSelectedDayKey(getDayKeyFromDate(date));
+    setSelectedDayKey(getArmeniaDayKey(value));
     setSelectedTime("");
     confirmation.clearBookingQuote();
     bookingState.setError("");

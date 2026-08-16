@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes } from "react-router-dom";
@@ -403,7 +403,10 @@ async function completeFlow(props) {
   };
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
 
 describe("ClientBooking salon context payloads", () => {
   it("omits salonId for independent booking without an explicit salon context", async () => {
@@ -514,6 +517,30 @@ describe("ClientBooking salon context payloads", () => {
 });
 
 describe("ClientBooking split boundaries", () => {
+  it("uses Armenia today for the date minimum and custom-date selection", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-31T20:15:00.000Z"));
+    setupStrictMocks();
+    const props = buildProps({
+      step: 3,
+      selectedDate: "2026-02-01",
+      selectedDayKey: "sun",
+      dateOptions: [{ value: "2026-02-01", label: "Sun, Feb 1", dayKey: "sun" }],
+    });
+
+    renderBooking(<ClientBooking {...props} />);
+
+    const dateInput = screen.getByLabelText("Or pick a custom date");
+    expect(dateInput).toHaveAttribute("min", "2026-02-01");
+
+    fireEvent.change(dateInput, { target: { value: "2026-01-31" } });
+    expect(props.setSelectedDate).not.toHaveBeenCalled();
+
+    fireEvent.change(dateInput, { target: { value: "2026-02-02" } });
+    expect(props.setSelectedDate).toHaveBeenCalledWith("2026-02-02");
+    expect(props.setSelectedDayKey).toHaveBeenCalledWith("mon");
+  });
+
   it("keeps confirmation unavailable while service data is loading", async () => {
     const user = userEvent.setup();
     const props = buildProps({ isServiceDataLoading: true, step: 4 });
