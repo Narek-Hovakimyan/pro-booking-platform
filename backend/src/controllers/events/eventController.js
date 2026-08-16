@@ -216,6 +216,7 @@ export const createEvent = async (req, res) => {
       duration: Number(duration),
       price,
       maxParticipants,
+      approvedRegistrationCount: 0,
       location,
       salonId: salonId || null,
       organizerId: req.user._id,
@@ -245,7 +246,7 @@ export const updateEvent = async (req, res) => {
   const uploadedImagePath = req.file ? `/uploads/events/${req.file.filename}` : "";
   let eventPersisted = false;
   try {
-    const event = await Event.findById(req.params.id);
+    let event = await Event.findById(req.params.id);
     if (!event) {
       return respondBeforeEventPersistence(res, uploadedImagePath, 404, "Event not found");
     }
@@ -295,13 +296,53 @@ export const updateEvent = async (req, res) => {
       return respondBeforeEventPersistence(res, uploadedImagePath, 400, numResult.message);
     }
 
-    for (const field of allowedFields) {
-      if (payload[field] !== undefined) {
-        event[field] = payload[field];
-      }
-    }
+    const nextFields = Object.fromEntries(
+      allowedFields
+        .filter((field) => payload[field] !== undefined)
+        .map((field) => [field, payload[field]])
+    );
+    const nextMaxParticipants = payload.maxParticipants;
 
-    await event.save();
+    if (nextMaxParticipants !== undefined && Number(nextMaxParticipants) > 0) {
+      const currentCount = event.approvedRegistrationCount;
+      if (!Number.isFinite(currentCount) || currentCount < 0) {
+        const capacityError = new Error(
+          "Event registration capacity is temporarily unavailable"
+        );
+        capacityError.statusCode = 503;
+        throw capacityError;
+      }
+      if (currentCount > Number(nextMaxParticipants)) {
+        const capacityError = new Error(
+          "maxParticipants cannot be below approved registration count"
+        );
+        capacityError.statusCode = 400;
+        throw capacityError;
+      }
+
+      const guardedEvent = await Event.findOneAndUpdate(
+        {
+          _id: event._id,
+          approvedRegistrationCount: { $gte: 0 },
+          $expr: {
+            $lte: ["$approvedRegistrationCount", Number(nextMaxParticipants)],
+          },
+        },
+        { $set: nextFields },
+        { returnDocument: "after" }
+      );
+      if (!guardedEvent) {
+        const capacityError = new Error(
+          "maxParticipants cannot be below approved registration count"
+        );
+        capacityError.statusCode = 400;
+        throw capacityError;
+      }
+      event = guardedEvent;
+    } else {
+      Object.assign(event, nextFields);
+      await event.save();
+    }
     eventPersisted = true;
     if (uploadedImagePath && previousImageUrl && previousImageUrl !== uploadedImagePath) {
       deleteUploadedFile(previousImageUrl);

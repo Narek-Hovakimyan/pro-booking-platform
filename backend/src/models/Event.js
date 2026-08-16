@@ -22,6 +22,8 @@ const eventSchema = new mongoose.Schema({
   duration: { type: Number, required: true },
   price: { type: Number, default: 0 },
   maxParticipants: { type: Number, default: 20 },
+  // Nullable so legacy events without a reconciled capacity counter remain readable.
+  approvedRegistrationCount: { type: Number, default: null },
   location: { type: String, required: true },
   salonId: {
     type: mongoose.Schema.Types.ObjectId,

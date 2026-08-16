@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Event from "../../models/Event.js";
 import EventCertificate from "../../models/EventCertificate.js";
 import EventRegistration from "../../models/EventRegistration.js";
@@ -27,6 +28,29 @@ import {
   mapRegistrationResponse,
 } from "../../utils/eventUtils.js";
 import { sendControllerError } from "../../utils/controllerError.js";
+
+const createRegistrationControllerError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const runEventRegistrationTransaction = async (operation) => {
+  const session = await mongoose.startSession();
+  if (!session || typeof session.withTransaction !== "function") {
+    await session?.endSession?.();
+    throw createRegistrationControllerError(
+      "Event registration capacity is temporarily unavailable",
+      503
+    );
+  }
+
+  try {
+    return await session.withTransaction(() => operation(session));
+  } finally {
+    await session.endSession?.();
+  }
+};
 
 /**
  * POST /api/events/:id/register
@@ -343,23 +367,81 @@ export const waitlistRegistration = async (req, res) => {
       return res.status(precondition.code).json({ message: precondition.error });
     }
 
-    registration.status = WAITLISTED_REGISTRATION_STATUS;
-    registration.attendanceStatus = "pending";
-    registration.attended = false;
-    registration.checkedInAt = null;
-    registration.reminderSentAt = null;
-    await registration.save();
+    const wasApproved = registration.status === APPROVED_REGISTRATION_STATUS;
+    const maxParticipants = Number(event.maxParticipants || 0);
+    let persistedRegistration = registration;
+
+    if (wasApproved && maxParticipants > 0) {
+      if (
+        !Number.isFinite(event.approvedRegistrationCount) ||
+        event.approvedRegistrationCount < 1
+      ) {
+        throw createRegistrationControllerError(
+          "Event registration capacity is temporarily unavailable",
+          503
+        );
+      }
+
+      persistedRegistration = await runEventRegistrationTransaction(async (session) => {
+        const released = await Event.findOneAndUpdate(
+          {
+            _id: event._id,
+            maxParticipants: { $gt: 0 },
+            approvedRegistrationCount: { $gt: 0 },
+          },
+          { $inc: { approvedRegistrationCount: -1 } },
+          { returnDocument: "after", session }
+        );
+        if (!released) {
+          throw createRegistrationControllerError(
+            "Event registration capacity is temporarily unavailable",
+            503
+          );
+        }
+
+        const updated = await EventRegistration.findOneAndUpdate(
+          {
+            _id: registration._id,
+            eventId: event._id,
+            status: APPROVED_REGISTRATION_STATUS,
+          },
+          {
+            $set: {
+              status: WAITLISTED_REGISTRATION_STATUS,
+              attendanceStatus: "pending",
+              attended: false,
+              checkedInAt: null,
+              reminderSentAt: null,
+            },
+          },
+          { returnDocument: "after", session }
+        );
+        if (!updated) {
+          throw createRegistrationControllerError(
+            "Registration is no longer approved"
+          );
+        }
+        return updated;
+      });
+    } else {
+      registration.status = WAITLISTED_REGISTRATION_STATUS;
+      registration.attendanceStatus = "pending";
+      registration.attended = false;
+      registration.checkedInAt = null;
+      registration.reminderSentAt = null;
+      await registration.save();
+    }
 
     await createNotification({
       userId: getRegistrationUserId(registration),
       type: "event_registration_waitlisted",
       message: `Your registration for ${event.title} was moved to the waiting list`,
-      data: getEventNotificationData(event, registration),
+      data: getEventNotificationData(event, persistedRegistration),
     });
 
     return res.json({
       message: "Registration moved to waiting list",
-      registration: mapRegistrationResponse(registration),
+      registration: mapRegistrationResponse(persistedRegistration),
       registrationCount: await countApprovedRegistrations(event._id),
     });
   } catch (error) {
@@ -417,57 +499,93 @@ export const approveRegistration = async (req, res) => {
       return res.status(precondition.code).json({ message: precondition.error });
     }
 
-    const originalStatus = registration.status;
-    const originalApprovalState = {
-      status: originalStatus,
-      rejectionReason: registration.rejectionReason || "",
-      attendanceStatus: registration.attendanceStatus || "pending",
-      attended: Boolean(registration.attended),
-      checkedInAt: registration.checkedInAt || null,
-      reminderSentAt: registration.reminderSentAt || null,
-    };
+    let updated;
+    let committedEvent = event;
 
-    // Atomic approval: only update if still pending or waitlisted
-    const updated = await EventRegistration.findOneAndUpdate(
-      {
-        _id: registration._id,
-        eventId: event._id,
-        status: {
-          $in: [PENDING_REGISTRATION_STATUS, WAITLISTED_REGISTRATION_STATUS],
-        },
-      },
-      {
-        $set: {
-          status: APPROVED_REGISTRATION_STATUS,
-          rejectionReason: "",
-          attendanceStatus: "pending",
-          attended: false,
-          checkedInAt: null,
-          reminderSentAt: null,
-        },
-      },
-      { new: true, returnDocument: "after" }
-    );
-
-    if (!updated) {
-      return res.status(400).json({
-        message: "Registration is no longer pending or waitlisted",
-      });
-    }
-
-    // Post-approval recount guard (minimizes race window)
     if (maxParticipants > 0) {
-      const newCount = await countApprovedRegistrations(event._id);
-      if (newCount > maxParticipants) {
-        await EventRegistration.findOneAndUpdate(
+      if (
+        !Number.isFinite(event.approvedRegistrationCount) ||
+        event.approvedRegistrationCount < 0
+      ) {
+        throw createRegistrationControllerError(
+          "Event registration capacity is temporarily unavailable",
+          503
+        );
+      }
+
+      const transactionResult = await runEventRegistrationTransaction(async (session) => {
+        const claimedEvent = await Event.findOneAndUpdate(
+          {
+            _id: event._id,
+            maxParticipants: { $gt: 0 },
+            approvedRegistrationCount: { $gte: 0 },
+            $expr: {
+              $lt: ["$approvedRegistrationCount", "$maxParticipants"],
+            },
+          },
+          { $inc: { approvedRegistrationCount: 1 } },
+          { returnDocument: "after", session }
+        );
+        if (!claimedEvent) {
+          throw createRegistrationControllerError("Event is full");
+        }
+
+        const transitioned = await EventRegistration.findOneAndUpdate(
           {
             _id: registration._id,
             eventId: event._id,
-            status: APPROVED_REGISTRATION_STATUS,
+            status: {
+              $in: [PENDING_REGISTRATION_STATUS, WAITLISTED_REGISTRATION_STATUS],
+            },
           },
-          { $set: originalApprovalState }
+          {
+            $set: {
+              status: APPROVED_REGISTRATION_STATUS,
+              rejectionReason: "",
+              attendanceStatus: "pending",
+              attended: false,
+              checkedInAt: null,
+              reminderSentAt: null,
+            },
+          },
+          { new: true, session }
         );
-        return res.status(400).json({ message: "Event is full" });
+        if (!transitioned) {
+          throw createRegistrationControllerError(
+            "Registration is no longer pending or waitlisted"
+          );
+        }
+
+        return { event: claimedEvent, registration: transitioned };
+      });
+      committedEvent = transactionResult.event;
+      updated = transactionResult.registration;
+    } else {
+      updated = await EventRegistration.findOneAndUpdate(
+        {
+          _id: registration._id,
+          eventId: event._id,
+          status: {
+            $in: [PENDING_REGISTRATION_STATUS, WAITLISTED_REGISTRATION_STATUS],
+          },
+        },
+        {
+          $set: {
+            status: APPROVED_REGISTRATION_STATUS,
+            rejectionReason: "",
+            attendanceStatus: "pending",
+            attended: false,
+            checkedInAt: null,
+            reminderSentAt: null,
+          },
+        },
+        { new: true, returnDocument: "after" }
+      );
+
+      if (!updated) {
+        return res.status(400).json({
+          message: "Registration is no longer pending or waitlisted",
+        });
       }
     }
 
@@ -475,10 +593,13 @@ export const approveRegistration = async (req, res) => {
       userId: getRegistrationUserId(registration),
       type: "event_registration_approved",
       message: `Your registration for ${event.title} was approved`,
-      data: getEventNotificationData(event, registration),
+      data: getEventNotificationData(committedEvent, registration),
     });
 
-    const finalCount = await countApprovedRegistrations(event._id);
+    const finalCount =
+      maxParticipants > 0 && Number.isFinite(committedEvent.approvedRegistrationCount)
+        ? committedEvent.approvedRegistrationCount
+        : await countApprovedRegistrations(event._id);
 
     return res.json({
       message: "Registration approved",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import {
   approveRegistration,
@@ -12,12 +13,14 @@ import Salon from "../../models/Salon.js";
 
 const originalMethods = {
   eventFindById: Event.findById,
+  eventFindOneAndUpdate: Event.findOneAndUpdate,
   registrationCountDocuments: EventRegistration.countDocuments,
   registrationCreate: EventRegistration.create,
   registrationFindOne: EventRegistration.findOne,
   registrationFindOneAndUpdate: EventRegistration.findOneAndUpdate,
   notificationCreate: Notification.create,
   salonFindById: Salon.findById,
+  startSession: mongoose.startSession,
 };
 
 const organizerId = "64b000000000000000000001";
@@ -27,12 +30,23 @@ const eventId = "64b000000000000000000004";
 
 afterEach(() => {
   Event.findById = originalMethods.eventFindById;
+  Event.findOneAndUpdate = originalMethods.eventFindOneAndUpdate;
   EventRegistration.countDocuments = originalMethods.registrationCountDocuments;
   EventRegistration.create = originalMethods.registrationCreate;
   EventRegistration.findOne = originalMethods.registrationFindOne;
   EventRegistration.findOneAndUpdate = originalMethods.registrationFindOneAndUpdate;
   Notification.create = originalMethods.notificationCreate;
   Salon.findById = originalMethods.salonFindById;
+  mongoose.startSession = originalMethods.startSession;
+});
+
+beforeEach(() => {
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      return callback(this);
+    },
+    async endSession() {},
+  });
 });
 
 const createResponse = () => ({
@@ -55,6 +69,7 @@ const createEvent = (overrides = {}) => ({
   salonId: null,
   status: "upcoming",
   maxParticipants: 2,
+  approvedRegistrationCount: 0,
   ...overrides,
 });
 
@@ -91,6 +106,22 @@ const setupApproveMocks = ({
 } = {}) => {
   Event.findById = async (id) =>
     event && String(id) === String(event._id) ? event : null;
+  Event.findOneAndUpdate = async (query, update) => {
+    if (!event || String(query._id) !== String(event._id)) return null;
+    const max = Number(event.maxParticipants || 0);
+    if (
+      query.maxParticipants &&
+      !(max > 0) ||
+      query.approvedRegistrationCount &&
+      (event.approvedRegistrationCount == null || event.approvedRegistrationCount < 0) ||
+      query.$expr && !(event.approvedRegistrationCount < max)
+    ) return null;
+    if (update.$inc) {
+      event.approvedRegistrationCount += update.$inc.approvedRegistrationCount || 0;
+    }
+    if (update.$set) Object.assign(event, update.$set);
+    return event;
+  };
   Salon.findById = async () => null;
   EventRegistration.findOne = async (query) =>
     registrations.find((registration) => matchesQuery(registration, query)) || null;
@@ -109,6 +140,26 @@ const setupApproveMocks = ({
     notifications.push(payload);
     return payload;
   };
+
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      const eventCount = event?.approvedRegistrationCount;
+      const registrationState = registrations.map((item) => ({
+        item,
+        values: { ...item },
+      }));
+      try {
+        return await callback(this);
+      } catch (error) {
+        if (event) event.approvedRegistrationCount = eventCount;
+        for (const state of registrationState) {
+          Object.assign(state.item, state.values);
+        }
+        throw error;
+      }
+    },
+    async endSession() {},
+  });
 
   return { event, registrations, notifications };
 };
@@ -413,10 +464,19 @@ test("approveRegistration preserves successful query, mutation, and notification
   const registration = createRegistration();
   const res = createResponse();
   const operations = [];
+  const event = createEvent();
 
   Event.findById = async () => {
     operations.push("find-event");
-    return createEvent();
+    return event;
+  };
+  Event.findOneAndUpdate = async (query, update) => {
+    operations.push("claim-capacity");
+    assert.deepEqual(query.$expr, {
+      $lt: ["$approvedRegistrationCount", "$maxParticipants"],
+    });
+    event.approvedRegistrationCount += update.$inc.approvedRegistrationCount;
+    return event;
   };
   Salon.findById = async () => null;
   EventRegistration.findOne = async () => {
@@ -452,10 +512,9 @@ test("approveRegistration preserves successful query, mutation, and notification
     "find-event",
     "find-registration",
     "count-approved",
+    "claim-capacity",
     "approve-registration",
-    "count-approved",
     "notify",
-    "count-approved",
   ]);
 });
 
@@ -537,7 +596,7 @@ test("approveRegistration preserves organizer-or-salon-manager authorization", a
   assert.equal(registration.status, "pending");
 });
 
-test("approveRegistration rolls back and does not notify when post-update recount exceeds capacity", async () => {
+test("approveRegistration rolls back capacity and does not notify when registration mutation fails", async () => {
   const registration = createRegistration({
     status: "waitlisted",
     rejectionReason: "old reason",
@@ -548,16 +607,15 @@ test("approveRegistration rolls back and does not notify when post-update recoun
   });
   const notifications = [];
   const res = createResponse();
-  let countCalls = 0;
+  const event = createEvent({ maxParticipants: 1 });
 
   setupApproveMocks({
-    event: createEvent({ maxParticipants: 1 }),
+    event,
     registrations: [registration],
     notifications,
   });
-  EventRegistration.countDocuments = async () => {
-    countCalls += 1;
-    return countCalls === 1 ? 0 : 2;
+  EventRegistration.findOneAndUpdate = async () => {
+    throw new Error("forced registration mutation failure");
   };
 
   await approveRegistration(
@@ -568,8 +626,8 @@ test("approveRegistration rolls back and does not notify when post-update recoun
     res
   );
 
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.message, "Event is full");
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not approve registration");
   assert.equal(registration.status, "waitlisted");
   assert.equal(registration.rejectionReason, "old reason");
   assert.equal(registration.attendanceStatus, "no_show");

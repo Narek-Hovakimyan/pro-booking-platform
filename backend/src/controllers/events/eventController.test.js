@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, test } from "node:test";
+import mongoose from "mongoose";
 
 import {
   cancelEvent,
@@ -36,6 +37,7 @@ const originalMethods = {
   eventCreate: Event.create,
   eventFind: Event.find,
   eventFindById: Event.findById,
+  eventFindOneAndUpdate: Event.findOneAndUpdate,
   certificateFind: EventCertificate.find,
   certificateAggregate: EventCertificate.aggregate,
   eventReviewAggregate: EventReview.aggregate,
@@ -53,6 +55,7 @@ const originalMethods = {
   joinRequestFind: SalonJoinRequest.find,
   joinRequestFindOne: SalonJoinRequest.findOne,
   userFindById: User.findById,
+  startSession: mongoose.startSession,
 };
 
 const organizerId = "64b000000000000000000001";
@@ -68,6 +71,7 @@ afterEach(() => {
   Event.create = originalMethods.eventCreate;
   Event.find = originalMethods.eventFind;
   Event.findById = originalMethods.eventFindById;
+  Event.findOneAndUpdate = originalMethods.eventFindOneAndUpdate;
   EventCertificate.find = originalMethods.certificateFind;
   EventCertificate.aggregate = originalMethods.certificateAggregate;
   EventReview.aggregate = originalMethods.eventReviewAggregate;
@@ -85,6 +89,7 @@ afterEach(() => {
   SalonJoinRequest.find = originalMethods.joinRequestFind;
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
   User.findById = originalMethods.userFindById;
+  mongoose.startSession = originalMethods.startSession;
   for (const filePath of createdFiles) {
     try {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -163,6 +168,7 @@ const baseEvent = {
   duration: 90,
   price: 0,
   maxParticipants: 2,
+  approvedRegistrationCount: 0,
   location: "Yerevan",
   status: "upcoming",
   organizerId,
@@ -196,6 +202,32 @@ const createControllerMocks = ({
   Event.findById = (id) =>
     createQuery(String(id) === String(event._id) ? { ...event } : null);
   Event.find = () => createQuery([{ ...event }]);
+  Event.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(event._id)) return null;
+    if (
+      query.approvedRegistrationCount &&
+      (event.approvedRegistrationCount == null || event.approvedRegistrationCount < 0)
+    ) {
+      return null;
+    }
+    if (
+      query.$expr?.$lt &&
+      !(event.approvedRegistrationCount < Number(event.maxParticipants || 0))
+    ) {
+      return null;
+    }
+    if (
+      query.$expr?.$lte &&
+      !(event.approvedRegistrationCount <= query.$expr.$lte[1])
+    ) {
+      return null;
+    }
+    if (update.$inc) {
+      event.approvedRegistrationCount += update.$inc.approvedRegistrationCount || 0;
+    }
+    if (update.$set) Object.assign(event, update.$set);
+    return { ...event };
+  };
   EventReview.aggregate = async () => [];
   EventRegistration.findOne = async (query) =>
     registrations.find((registration) => matchesQuery(registration, query)) || null;
@@ -244,6 +276,12 @@ const createControllerMocks = ({
   };
   Notification.create = async (payload) => payload;
   Salon.findById = async () => null;
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      return callback(this);
+    },
+    async endSession() {},
+  });
 
   return { event, registrations };
 };
@@ -2132,6 +2170,11 @@ test("updateEvent accepts valid numeric updates", async () => {
       salonId: { _id: null, name: undefined },
       organizerId: { _id: organizerId, name: "Organizer" },
     });
+  };
+  Event.findOneAndUpdate = async (query, update) => {
+    if (String(query._id) !== String(event._id)) return null;
+    Object.assign(event, update.$set || {});
+    return event;
   };
 
   EventRegistration.aggregate = async () => [];
