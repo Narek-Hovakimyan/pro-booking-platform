@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import AvatarUploadButton from "@/shared/components/AvatarUploadButton";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -47,6 +49,8 @@ export default function ProfileFormCard({
   editable = true,
   variant = "full",
 }) {
+  const [isAvatarUploading, setIsAvatarUploading] = useState(false);
+  const isMutationLocked = isProfileSaving || isAvatarUploading;
   const isBasicsVariant = variant === "basics";
   const headerDescription = editable
     ? isBasicsVariant
@@ -111,7 +115,7 @@ export default function ProfileFormCard({
               Name
               <input
                 className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 placeholder="Name"
                 value={profile.name}
                 onChange={(event) => onUpdateField("name", event.target.value)}
@@ -122,7 +126,7 @@ export default function ProfileFormCard({
               Phone
               <input
                 className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 placeholder="Phone"
                 value={profile.phone}
                 onChange={(event) => onUpdateField("phone", event.target.value)}
@@ -135,7 +139,7 @@ export default function ProfileFormCard({
               Profession / Մասնագիտություն
               <select
                 className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 value={profile.profession || "barber"}
                 onChange={(event) => {
                   onUpdateField("profession", event.target.value);
@@ -160,7 +164,7 @@ export default function ProfileFormCard({
                 Barber type / Վարսահարդարի տեսակ
                 <select
                   className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                  disabled={isProfileSaving}
+                  disabled={isMutationLocked}
                   value={profile.barberType || "unisex"}
                   onChange={(event) => onUpdateField("barberType", event.target.value)}
                 >
@@ -177,7 +181,7 @@ export default function ProfileFormCard({
               Bio
               <textarea
                 className="min-h-28 w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 placeholder="Short introduction for clients"
                 value={profile.bio}
                 onChange={(event) => onUpdateField("bio", event.target.value)}
@@ -190,7 +194,7 @@ export default function ProfileFormCard({
               City
               <input
                 className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 placeholder="City"
                 value={profile.city}
                 onChange={(event) => onUpdateField("city", event.target.value)}
@@ -201,7 +205,7 @@ export default function ProfileFormCard({
               Address
               <input
                 className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 placeholder={isBasicsVariant ? "Private address" : "Address"}
                 value={profile.address}
                 onChange={(event) => onUpdateField("address", event.target.value)}
@@ -215,7 +219,7 @@ export default function ProfileFormCard({
                 Instagram
                 <input
                   className="w-full rounded-2xl border p-3 font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
-                  disabled={isProfileSaving}
+                  disabled={isMutationLocked}
                   placeholder="Instagram"
                   value={profile.instagram}
                   onChange={(event) => onUpdateField("instagram", event.target.value)}
@@ -246,9 +250,10 @@ export default function ProfileFormCard({
                 Upload the image clients see on your public profile.
               </p>
               <AvatarUploadButton
-                disabled={isProfileSaving}
+                disabled={isMutationLocked}
                 label={profile.imageUrl ? "Change photo" : "Upload photo"}
                 uploadUrl={`/barbers/profile/${currentUser.id}`}
+                onUploadStateChange={setIsAvatarUploading}
                 onUploaded={onAvatarUploaded}
               />
             </div>
@@ -269,7 +274,7 @@ export default function ProfileFormCard({
           <div className="flex gap-3">
             <Button
               className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600 sm:w-auto"
-              disabled={isProfileSaving}
+              disabled={isMutationLocked}
               type="submit"
             >
               {isProfileSaving ? "Saving..." : "Save profile"}

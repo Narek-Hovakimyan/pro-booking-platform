@@ -12,6 +12,7 @@ export default function AvatarUploadButton({
   disabled = false,
   label = "Change image",
   onUploaded,
+  onUploadStateChange,
 }) {
   const inputRef = useRef(null);
   const [error, setError] = useState("");
@@ -43,6 +44,7 @@ export default function AvatarUploadButton({
     formData.append("avatar", file);
 
     setIsUploading(true);
+    onUploadStateChange?.(true);
     setError("");
 
     try {
@@ -55,6 +57,7 @@ export default function AvatarUploadButton({
       );
     } finally {
       setIsUploading(false);
+      onUploadStateChange?.(false);
     }
   };
 
