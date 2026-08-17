@@ -123,7 +123,13 @@ export default function MessagesPage() {
       const { data } = await api.get(`/messages/${contactId}`);
       if (!isCurrentConversationRequest(requestSnapshot)) return [];
       const normalizedMessages = (data || []).map(normalizeMessage);
-      const nextMessages = showLoading ? normalizedMessages : mergeMessages(messagesCacheByConversationKey.get(cacheKey) || [], normalizedMessages);
+      // A response can be older than a socket event received while it was in
+      // flight. Keep the latest cache entry as the tie-breaker for duplicate
+      // IDs while still incorporating every message returned by the server.
+      const nextMessages = mergeMessages(
+        normalizedMessages,
+        messagesCacheByConversationKey.get(cacheKey) || []
+      );
 
       messagesCacheByConversationKey.set(cacheKey, nextMessages);
       setMessages(nextMessages);
@@ -249,23 +255,30 @@ export default function MessagesPage() {
         ? message.receiverId
         : message.senderId;
     const activeUser = selectedUserRef.current;
+    const activeUserId = activeUser?.id || conversationRequestRef.current.contactId;
 
     if (
       activeUser &&
-      String(activeUser.id) === String(otherUserId) &&
+      String(activeUserId) === String(otherUserId) &&
       String(message.senderId) !== String(currentUserId)
     ) {
       message.isRead = true;
       markConversationRead(otherUserId, [message]);
     }
 
+    const isForActiveConversation = activeUserId && (
+      String(message.senderId) === String(activeUserId)
+      || String(message.receiverId) === String(activeUserId)
+    );
+    if (isForActiveConversation && currentUserId) {
+      const cacheKey = getConversationKey(currentUserId, activeUserId);
+      const cachedMessages = messagesCacheByConversationKey.get(cacheKey) || [];
+      messagesCacheByConversationKey.set(cacheKey, mergeMessages(cachedMessages, [message]));
+    }
+
     // Update messages for the selected conversation
     setMessages((currentMessages) => {
-      if (!activeUser) return currentMessages;
-
-      const isForActiveConversation =
-        String(message.senderId) === String(activeUser.id) ||
-        String(message.receiverId) === String(activeUser.id);
+      if (!activeUserId) return currentMessages;
 
       if (!isForActiveConversation) return currentMessages;
 
@@ -278,7 +291,7 @@ export default function MessagesPage() {
       }
 
       const merged = mergeMessages(currentMessages, [message]);
-      const cacheKey = getConversationKey(currentUserId, activeUser.id);
+      const cacheKey = getConversationKey(currentUserId, activeUserId);
       messagesCacheByConversationKey.set(cacheKey, merged);
       return merged;
     });
@@ -296,7 +309,7 @@ export default function MessagesPage() {
         ? existingMessages
         : [...existingMessages, message];
       const isActiveConversation =
-        activeUser && String(activeUser.id) === String(otherUserId);
+        activeUserId && String(activeUserId) === String(otherUserId);
       const isIncoming = String(message.senderId) !== String(currentUserId);
 
       const updatedContact = {

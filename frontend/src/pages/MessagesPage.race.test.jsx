@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes } from "react-router-dom";
 
@@ -7,6 +7,7 @@ import { restoreAuthSession } from "@/store/slices/authSlice";
 import { contactsCacheByUserId, messagesCacheByConversationKey } from "@/features/messages/utils/messageHelpers";
 import MessagesPage from "./MessagesPage";
 import api from "@/shared/api/axios";
+import { getSocket } from "@/shared/lib/socket";
 
 vi.mock("@/shared/api/axios", () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
@@ -57,6 +58,18 @@ function deferred() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function createSocket() {
+  const listeners = new Map();
+  return {
+    connected: true,
+    on: vi.fn((event, listener) => listeners.set(event, listener)),
+    off: vi.fn((event) => listeners.delete(event)),
+    emit(event, payload) {
+      listeners.get(event)?.(payload);
+    },
+  };
 }
 
 function buildMessage({
@@ -120,6 +133,54 @@ afterEach(() => {
 });
 
 describe("MessagesPage request guards", () => {
+  it("merges a socket message into the initial load without duplicates or reordering", async () => {
+    const conversation = deferred();
+    const socket = createSocket();
+    vi.mocked(getSocket).mockReturnValue(socket);
+
+    api.get.mockImplementation((url) => {
+      if (url === "/messages") {
+        return Promise.resolve({
+          data: [buildMessage({ id: "c-a", senderId: "friend-a", receiverId: "account-a", text: "Preview" })],
+        });
+      }
+      if (url === "/messages/friend-a") return conversation.promise;
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    api.put.mockResolvedValue({ data: { modifiedCount: 1 } });
+
+    renderMessagesPage({ route: "/messages/friend-a" });
+    const socketMessage = buildMessage({
+      id: "m-2",
+      senderId: "friend-a",
+      receiverId: "account-a",
+      text: "Socket newer",
+      createdAt: "2026-07-29T11:00:00.000Z",
+    });
+
+    await waitFor(() => expect(screen.getByTestId("selected-user")).toHaveTextContent("friend-a"));
+    expect(socket.on).toHaveBeenCalledWith("newMessage", expect.any(Function));
+    socket.emit("newMessage", socketMessage);
+    expect([...messagesCacheByConversationKey.keys()]).toContain("account-a:friend-a");
+    expect(messagesCacheByConversationKey.get("account-a:friend-a")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: "Socket newer" })])
+    );
+    await waitFor(() => expect(screen.getByText("Socket newer")).toBeVisible());
+
+    await act(async () => {
+      conversation.resolve({
+        data: [
+          buildMessage({ id: "m-1", senderId: "friend-a", receiverId: "account-a", text: "Older server" }),
+          socketMessage,
+        ],
+      });
+    });
+
+    await flush();
+    expect(screen.getByTestId("message-texts").textContent).toBe("Older serverSocket newer");
+    expect(screen.getAllByText("Socket newer")).toHaveLength(1);
+  });
+
   it("keeps conversation B visible when conversation A resolves late", async () => {
     const aMessages = deferred();
     const bMessages = deferred();
