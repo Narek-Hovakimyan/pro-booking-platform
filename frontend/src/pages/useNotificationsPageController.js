@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
 import api from "@/shared/api/axios";
+import { getSocket } from "@/shared/lib/socket";
 import { useBookingNotificationActions } from "@/shared/hooks/useBookingNotificationActions";
 import { useEventRegistrationNotificationActions } from "@/shared/hooks/useEventRegistrationNotificationActions";
 import { useJobApplicationNotificationActions } from "@/shared/hooks/useJobApplicationNotificationActions";
@@ -148,19 +149,42 @@ export function useNotificationsPageController({ currentUser, currentUserId }) {
 
     let isMounted = true;
     let intervalId = null;
+    let refreshInFlight = null;
+    let refreshQueued = false;
     const accountSnapshot = captureAccount();
 
-    async function safeLoad(options) {
-      if (!isMounted || !isCurrentAccount(accountSnapshot)) return;
-      await loadNotifications({ ...options, accountSnapshot });
+    function safeLoad(options = {}) {
+      if (!isMounted || !isCurrentAccount(accountSnapshot)) return Promise.resolve();
+
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return refreshInFlight;
+      }
+
+      refreshInFlight = loadNotifications({ ...options, accountSnapshot }).finally(() => {
+        refreshInFlight = null;
+        if (refreshQueued && isMounted && isCurrentAccount(accountSnapshot)) {
+          refreshQueued = false;
+          safeLoad();
+        } else {
+          refreshQueued = false;
+        }
+      });
+
+      return refreshInFlight;
     }
 
     safeLoad({ showLoading: true });
     intervalId = setInterval(() => safeLoad(), 15000);
+    const socket = getSocket();
+    const handleNotification = () => safeLoad();
+
+    socket?.on("notification", handleNotification);
 
     return () => {
       isMounted = false;
       clearInterval(intervalId);
+      socket?.off("notification", handleNotification);
     };
   }, [captureAccount, currentUserId, isCurrentAccount, loadNotifications]);
 

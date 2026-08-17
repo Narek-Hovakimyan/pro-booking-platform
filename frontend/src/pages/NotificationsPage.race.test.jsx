@@ -8,6 +8,12 @@ import { restoreAuthSession } from "@/store/slices/authSlice";
 import api from "@/shared/api/axios";
 import NotificationsPage from "./NotificationsPage";
 
+const getSocketMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/shared/lib/socket", () => ({
+  getSocket: getSocketMock,
+}));
+
 let latestNotificationsListProps = null;
 
 vi.mock("@/shared/api/axios", () => ({
@@ -148,6 +154,19 @@ function notification(id, message, overrides = {}) {
   };
 }
 
+function createFakeSocket() {
+  const listeners = new Map();
+  return {
+    on: vi.fn((event, listener) => listeners.set(event, listener)),
+    off: vi.fn((event, listener) => {
+      if (listeners.get(event) === listener) listeners.delete(event);
+    }),
+    emit(event, payload) {
+      listeners.get(event)?.(payload);
+    },
+  };
+}
+
 function renderNotificationsPage(currentUser = { id: "account-a", role: "client" }) {
   return renderWithProviders(
     <Routes>
@@ -199,6 +218,8 @@ async function flush() {
 beforeEach(() => {
   NotificationsPage.__clearNotificationsCacheForTests?.();
   latestNotificationsListProps = null;
+  getSocketMock.mockReset();
+  getSocketMock.mockReturnValue(null);
   api.delete.mockReset();
   api.get.mockReset();
   api.patch.mockReset();
@@ -211,6 +232,89 @@ afterEach(() => {
 });
 
 describe("NotificationsPage account isolation", () => {
+  it("refreshes immediately for an incoming notification socket event", async () => {
+    const socket = createFakeSocket();
+    getSocketMock.mockReturnValue(socket);
+    api.get
+      .mockResolvedValueOnce({ data: [notification("n-1", "Existing notification")] })
+      .mockResolvedValueOnce({
+        data: [
+          notification("n-2", "Incoming notification"),
+          notification("n-1", "Existing notification"),
+        ],
+      });
+
+    renderNotificationsPage();
+    expect(await screen.findByText("Existing notification")).toBeVisible();
+    api.get.mockClear();
+
+    socket.emit("notification", notification("n-2", "Incoming notification"));
+
+    expect(await screen.findByText("Incoming notification")).toBeVisible();
+    expect(api.get).toHaveBeenCalledTimes(1);
+    expect(socket.on).toHaveBeenCalledTimes(1);
+    expect(socket.on).toHaveBeenCalledWith("notification", expect.any(Function));
+  });
+
+  it("coalesces socket and polling refreshes while preserving same-ID dedupe", async () => {
+    vi.useFakeTimers();
+    const socket = createFakeSocket();
+    const pollLoad = deferred();
+    const queuedLoad = deferred();
+    getSocketMock.mockReturnValue(socket);
+    api.get
+      .mockResolvedValueOnce({ data: [notification("n-1", "Existing notification")] })
+      .mockReturnValueOnce(pollLoad.promise)
+      .mockReturnValueOnce(queuedLoad.promise);
+
+    renderNotificationsPage();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+    });
+    expect(api.get).toHaveBeenCalledTimes(2);
+
+    socket.emit("notification", notification("n-1", "Updated notification"));
+    socket.emit("notification", notification("n-1", "Updated notification"));
+
+    await act(async () => {
+      pollLoad.resolve({ data: [notification("n-1", "Updated notification")] });
+      await Promise.resolve();
+    });
+    expect(api.get).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      queuedLoad.resolve({ data: [notification("n-1", "Updated notification")] });
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("Updated notification")).toHaveLength(1);
+    expect(screen.queryByText("Existing notification")).not.toBeInTheDocument();
+  });
+
+  it("cleans the notification listener and does not accumulate it on rerender", async () => {
+    const socket = createFakeSocket();
+    getSocketMock.mockReturnValue(socket);
+    api.get.mockResolvedValue({ data: [notification("n-1", "Existing notification")] });
+
+    const view = renderNotificationsPage();
+    expect(await screen.findByText("Existing notification")).toBeVisible();
+    view.rerender(
+      <Routes>
+        <Route path="/notifications" element={<NotificationsPage />} />
+      </Routes>,
+    );
+    expect(socket.on).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    expect(socket.off).toHaveBeenCalledTimes(1);
+    socket.emit("notification", notification("n-2", "After unmount"));
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
   it("completes the initial load under StrictMode and preserves cache behavior", async () => {
     api.get.mockResolvedValueOnce({
       data: [notification("strict-1", "Strict notification")],
