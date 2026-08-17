@@ -259,6 +259,7 @@ export default function SalonPublicBookingPage() {
         setPromoCode={submission.setPromoCode}
         promoStatus={submission.promoStatus}
         validatedPromo={submission.validatedPromo}
+        publicPromotions={submission.publicPromotions}
         validatingPromo={submission.validatingPromo}
         onApplyPromo={submission.handleApplyPromo}
         onRemovePromo={submission.handleRemovePromo}

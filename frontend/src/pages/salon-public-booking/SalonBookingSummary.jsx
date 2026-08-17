@@ -22,6 +22,7 @@ export default function SalonBookingSummary({
   promoCode,
   setPromoCode,
   promoStatus,
+  publicPromotions = [],
   validatingPromo,
   onApplyPromo,
   onRemovePromo,
@@ -169,6 +170,26 @@ export default function SalonBookingSummary({
             <p className={`mt-2 text-sm ${promoStatus.type === "success" ? "text-emerald-600" : "text-red-600"}`}>
               {promoStatus.message}
             </p>
+          )}
+          {!validatedPromo && !promoCode.trim() && publicPromotions.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-2 text-xs font-medium text-neutral-500">
+                Available promo codes
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {publicPromotions.map((promotion) => (
+                  <button
+                    key={promotion.code}
+                    type="button"
+                    disabled={validatingPromo}
+                    onClick={() => onApplyPromo(promotion.code)}
+                    className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+                  >
+                    {promotion.code}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 

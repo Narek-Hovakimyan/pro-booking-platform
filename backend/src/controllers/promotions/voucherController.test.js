@@ -1258,6 +1258,72 @@ test("getPublicVouchers excludes future vouchers while retaining started and und
   ]);
 });
 
+test("getPublicVouchers scopes public salon discovery to the booking context", async () => {
+  const req = {
+    params: { ownerType: "salon", ownerId: salonId },
+    query: { salonId: String(salonId), barberId: String(barberA._id), serviceId: String(serviceId) },
+  };
+  const res = createResponse();
+  let pipeline;
+  User.findById = () => chainableSelect({
+    _id: barberA._id,
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", worksAsSpecialist: true }],
+  });
+  Salon.exists = async () => ({ _id: salonId });
+  Schedule.findOne = () => chainableSelect({});
+  Voucher.aggregate = async (receivedPipeline) => {
+    pipeline = receivedPipeline;
+    return [];
+  };
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(pipeline[0].$match.visibility, "public");
+  assert.equal(pipeline[0].$match.active, true);
+  assert.deepEqual(pipeline.slice(3, 6).map((stage) => stage.$match.$or), [
+    [{ serviceId: null }, { serviceId: new mongoose.Types.ObjectId(serviceId) }],
+    [
+      { applicableServiceIds: { $exists: false } },
+      { applicableServiceIds: { $size: 0 } },
+      { applicableServiceIds: new mongoose.Types.ObjectId(serviceId) },
+    ],
+    [
+      { applicableBarberIds: { $exists: false } },
+      { applicableBarberIds: { $size: 0 } },
+      { applicableBarberIds: new mongoose.Types.ObjectId(barberA._id) },
+    ],
+  ]);
+});
+
+test("getPublicVouchers does not discover another salon's vouchers", async () => {
+  const otherSalonId = new mongoose.Types.ObjectId();
+  const req = {
+    params: { ownerType: "salon", ownerId: otherSalonId },
+    query: { salonId: String(salonId), barberId: String(barberA._id), serviceId: String(serviceId) },
+  };
+  const res = createResponse();
+  let aggregateCalled = false;
+  User.findById = () => chainableSelect({
+    _id: barberA._id,
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", worksAsSpecialist: true }],
+  });
+  Salon.exists = async () => ({ _id: salonId });
+  Schedule.findOne = () => chainableSelect({});
+  Voucher.aggregate = async () => {
+    aggregateCalled = true;
+    return [];
+  };
+
+  await getPublicVouchers(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
+  assert.equal(aggregateCalled, false);
+});
+
 test("getPublicVouchers returns empty array for private vouchers", async () => {
   const req = {
     params: { ownerType: "barber", ownerId: barberA._id },

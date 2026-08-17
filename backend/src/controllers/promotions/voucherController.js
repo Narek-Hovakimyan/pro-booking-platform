@@ -437,6 +437,7 @@ export const validateVoucherCode = async (req, res) => {
 export const getPublicVouchers = async (req, res) => {
   try {
     const { ownerType, ownerId } = req.params;
+    const { salonId, barberId, serviceId } = req.query || {};
     if (!["barber", "salon"].includes(ownerType)) {
       return res.status(400).json({ message: "ownerType must be 'barber' or 'salon'" });
     }
@@ -447,6 +448,49 @@ export const getPublicVouchers = async (req, res) => {
 
     const now = new Date();
     const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
+    const hasBookingScope = Boolean(salonId || barberId || serviceId);
+    let scopeStages = [];
+
+    if (hasBookingScope) {
+      if (!barberId || !serviceId) return res.json([]);
+
+      const context = await resolveVoucherValidationContext({
+        salonId,
+        barberId,
+        serviceId,
+      });
+      if (
+        !context ||
+        (ownerType === "barber" && String(context.barberId) !== String(ownerId)) ||
+        (ownerType === "salon" && String(context.salonId || "") !== String(ownerId))
+      ) {
+        return res.json([]);
+      }
+
+      const serviceObjectId = new mongoose.Types.ObjectId(context.serviceId);
+      const barberObjectId = new mongoose.Types.ObjectId(context.barberId);
+      scopeStages = [
+        { $match: { $or: [{ serviceId: null }, { serviceId: serviceObjectId }] } },
+        {
+          $match: {
+            $or: [
+              { applicableServiceIds: { $exists: false } },
+              { applicableServiceIds: { $size: 0 } },
+              { applicableServiceIds: serviceObjectId },
+            ],
+          },
+        },
+        {
+          $match: {
+            $or: [
+              { applicableBarberIds: { $exists: false } },
+              { applicableBarberIds: { $size: 0 } },
+              { applicableBarberIds: barberObjectId },
+            ],
+          },
+        },
+      ];
+    }
 
     const safeVouchers = await Voucher.aggregate([
       {
@@ -467,6 +511,7 @@ export const getPublicVouchers = async (req, res) => {
         },
       },
       { $match: { $or: [{ startDate: null }, { startDate: { $lte: now } }] } },
+      ...scopeStages,
       {
         $project: {
           code: 1,

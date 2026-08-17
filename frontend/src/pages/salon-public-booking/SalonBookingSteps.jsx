@@ -40,6 +40,7 @@ export default function SalonBookingSteps({
   setPromoCode,
   promoStatus,
   validatedPromo,
+  publicPromotions,
   validatingPromo,
   onApplyPromo,
   onRemovePromo,
@@ -420,6 +421,7 @@ export default function SalonBookingSteps({
           promoCode={promoCode}
           setPromoCode={setPromoCode}
           promoStatus={promoStatus}
+          publicPromotions={publicPromotions}
           validatingPromo={validatingPromo}
           onApplyPromo={onApplyPromo}
           onRemovePromo={onRemovePromo}

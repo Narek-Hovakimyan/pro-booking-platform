@@ -183,7 +183,9 @@ function setupStrictMocks({ quoteResponses = [quoteResponse], createdBookings = 
   useBooking.mockReturnValue({ createBooking: createBookingMock });
 
   api.get.mockImplementation((url) => {
-    if (url === `/vouchers/public/barber/${BARBER_ID}`) return Promise.resolve({ data: [] });
+    if (url.startsWith(`/vouchers/public/barber/${BARBER_ID}?`)) {
+      return Promise.resolve({ data: [] });
+    }
     throw new Error(`Unexpected api.get call: ${url}`);
   });
 
@@ -664,6 +666,22 @@ describe("ClientBooking split boundaries", () => {
 });
 
 describe("ClientBooking booking flow", () => {
+  it("discovers barber vouchers with the selected booking context", async () => {
+    setupStrictMocks();
+
+    renderBooking(
+      <ClientBooking {...buildProps({ selectedSalonId: EXPLICIT_SALON_ID })} />
+    );
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    const requestUrl = api.get.mock.calls[0][0];
+    const url = new URL(requestUrl, "https://hairbook.test");
+    expect(url.pathname).toBe(`/vouchers/public/barber/${BARBER_ID}`);
+    expect(url.searchParams.get("barberId")).toBe(BARBER_ID);
+    expect(url.searchParams.get("serviceId")).toBe(SERVICE_ID);
+    expect(url.searchParams.get("salonId")).toBe(EXPLICIT_SALON_ID);
+  });
+
   it("submits real FormData with consultation JSON, consent JSON, and reference files", async () => {
     const user = userEvent.setup();
     const { useBooking: useActualBooking } = await vi.importActual("@/shared/hooks/useBooking");

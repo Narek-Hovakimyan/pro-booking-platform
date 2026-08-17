@@ -13,24 +13,43 @@ export function useClientBookingVoucher({
   setQuoteError,
 }) {
   const [publicVouchers, setPublicVouchers] = useState([]);
+  const [publicVoucherContextKey, setPublicVoucherContextKey] = useState("");
   const [voucherPreview, setVoucherPreview] = useState(null);
   const [discountPreview, setDiscountPreview] = useState(0);
   const [voucherError, setVoucherError] = useState("");
   const [voucherLoading, setVoucherLoading] = useState(false);
   const previousServiceIdRef = useRef(selectedServiceEntityId);
+  const discoveryRequestIdRef = useRef(0);
+  const voucherContextKey = [selectedBarberId, selectedSalonId, selectedServiceEntityId]
+    .map((value) => String(value || ""))
+    .join(":");
 
   useEffect(() => {
-    if (!selectedBarberId) return;
+    const requestId = ++discoveryRequestIdRef.current;
+    if (!selectedBarberId || !selectedServiceEntityId) {
+      return undefined;
+    }
+
+    const params = new URLSearchParams({
+      barberId: String(selectedBarberId),
+      serviceId: String(selectedServiceEntityId),
+    });
+    if (selectedSalonId) params.set("salonId", String(selectedSalonId));
 
     api
-      .get(`/vouchers/public/barber/${selectedBarberId}`)
+      .get(`/vouchers/public/barber/${selectedBarberId}?${params}`)
       .then(({ data }) => {
+        if (requestId !== discoveryRequestIdRef.current) return;
         setPublicVouchers(Array.isArray(data) ? data : []);
+        setPublicVoucherContextKey(voucherContextKey);
       })
       .catch(() => {
+        if (requestId !== discoveryRequestIdRef.current) return;
         setPublicVouchers([]);
+        setPublicVoucherContextKey(voucherContextKey);
       });
-  }, [selectedBarberId]);
+    return undefined;
+  }, [selectedBarberId, selectedSalonId, selectedServiceEntityId, voucherContextKey]);
 
   const removeVoucher = useCallback(() => {
     setVoucherCode("");
@@ -112,7 +131,7 @@ export function useClientBookingVoucher({
   return {
     applyVoucher,
     discountPreview,
-    publicVouchers,
+    publicVouchers: publicVoucherContextKey === voucherContextKey ? publicVouchers : [],
     removeVoucher,
     setDiscountPreview,
     setPublicVouchers,
