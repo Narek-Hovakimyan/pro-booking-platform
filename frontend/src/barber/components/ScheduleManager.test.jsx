@@ -2,13 +2,14 @@ import { StrictMode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatDateKey } from "@/shared/utils/dates";
+import { getArmeniaTodayKey } from "@/shared/utils/dates";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import ScheduleWeeklyHours from "@/barber/components/schedule/ScheduleWeeklyHours";
 import ScheduleManager from "./ScheduleManager";
 import {
   filterCurrentNonWorkingDays,
   filterCurrentScheduleOverrides,
+  getScheduleManagerViewState,
   getSelectedDateScheduleSavePlan,
 } from "@/barber/utils/scheduleManagerHelpers";
 
@@ -174,6 +175,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -497,16 +499,15 @@ describe("ScheduleManager", () => {
     );
   });
 
-  it("filters stale date boundaries from overrides and non-working days", () => {
-    const today = new Date();
-    const todayKey = formatDateKey(today);
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
+  it("uses Armenia date boundaries when filtering overrides and days off", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T20:30:00.000Z"));
 
-    const pastKey = formatDateKey(yesterday);
-    const futureKey = formatDateKey(tomorrow);
+    const todayKey = getArmeniaTodayKey();
+    const pastKey = "2026-08-03";
+    const futureKey = "2026-08-05";
+
+    expect(todayKey).toBe("2026-08-04");
 
     expect(
       filterCurrentScheduleOverrides(
@@ -520,6 +521,66 @@ describe("ScheduleManager", () => {
     expect(
       filterCurrentNonWorkingDays([pastKey, futureKey, futureKey], todayKey)
     ).toEqual([futureKey]);
+  });
+
+  it("renders Armenia today and the next seven Armenia dates across midnight", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T20:30:00.000Z"));
+
+    const viewState = getScheduleManagerViewState({
+      schedule: baseSchedule({
+        scheduleOverrides: {
+          "2026-08-03": { isWorking: false },
+          "2026-08-04": { isWorking: true, startTime: "10:00", endTime: "16:00" },
+        },
+      }),
+      activePerSalonSchedule: null,
+      selectedDate: "2026-08-04",
+      draftOverride: { dateKey: "", isWorking: true, startTime: "", endTime: "" },
+      validationState: { dateKey: "", message: "" },
+      breakToggleState: { dateKey: "", enabled: false },
+      activeSalonId: "salon-a",
+      isLoading: false,
+      isLoadingSalons: false,
+      isPerSalonLoading: false,
+      perSalonError: "",
+      error: "",
+    });
+
+    expect(viewState.todayKey).toBe("2026-08-04");
+    expect(viewState.dateOptions.map((option) => option.value)).toEqual([
+      "2026-08-04",
+      "2026-08-05",
+      "2026-08-06",
+      "2026-08-07",
+      "2026-08-08",
+      "2026-08-09",
+      "2026-08-10",
+    ]);
+    expect(viewState.selectedDateKey).toBe("2026-08-04");
+    expect(viewState.dateStatusMap["2026-08-04"].isPast).toBe(false);
+    expect(viewState.scheduleOverrides).not.toHaveProperty("2026-08-03");
+  });
+
+  it("allows an Armenia-today edit and rejects the prior Armenia date", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-03T20:30:00.000Z"));
+    mockSingleSalonScheduleLoad();
+
+    renderPage();
+
+    const dateInput = await screen.findByLabelText("Select a custom date");
+    expect(dateInput).toHaveAttribute("min", "2026-08-04");
+    expect(dateInput).toHaveValue("2026-08-04");
+
+    fireEvent.change(dateInput, { target: { value: "2026-08-05" } });
+    expect(dateInput).toHaveValue("2026-08-05");
+
+    fireEvent.change(dateInput, { target: { value: "2026-08-03" } });
+    expect(dateInput).toHaveValue("2026-08-05");
+
+    fireEvent.change(dateInput, { target: { value: "2026-08-04" } });
+    expect(dateInput).toHaveValue("2026-08-04");
   });
 
   it("keeps weekly schedule defaults intact when explicit working is false or missing", () => {

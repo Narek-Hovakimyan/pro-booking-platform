@@ -4,7 +4,7 @@ import { useDispatch, useSelector } from "react-redux";
 import api from "@/shared/api/axios";
 import { getMyBarberOnboarding } from "@/shared/api/barberOnboarding";
 import { getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
-import { formatDateKey, getNext7Days, parseDateKey } from "@/shared/utils/dates";
+import { getArmeniaTodayKey, getNext7ArmeniaDays, isBeforeArmeniaToday, parseDateKey } from "@/shared/utils/dates";
 import { formatTimeInput } from "@/shared/utils/time";
 import { setServices } from "@/store/slices/servicesSlice";
 import {
@@ -39,7 +39,7 @@ export default function useScheduleManager({
 
   const currentUserId = currentUser?.id || currentUser?._id;
   const [salonEntries, setSalonEntries] = useState([]), [isLoadingSalons, setIsLoadingSalons] = useState(true), [isLoadingServices, setIsLoadingServices] = useState(false), [servicesError, setServicesError] = useState(""), [selectedSalonId, setSelectedSalonId] = useState(null), [perSalonSchedule, setPerSalonSchedule] = useState(null), [loadedScheduleSalonId, setLoadedScheduleSalonId] = useState(null), [isPerSalonLoading, setIsPerSalonLoading] = useState(false), [perSalonError, setPerSalonError] = useState(""), [saveSuccess, setSaveSuccess] = useState(""), [isDrawerOpen, setIsDrawerOpen] = useState(false), [onboardingStep, setOnboardingStep] = useState(null), [isOnboardingStepLoading, setIsOnboardingStepLoading] = useState(false), [validationState, setValidationState] = useState({ dateKey: "", message: "" }), [breakToggleState, setBreakToggleState] = useState({ dateKey: "", enabled: false });
-  const initialDateOptions = getNext7Days(), initialSelectedDateKey = initialDateOptions[0].value, initialTodayKey = formatDateKey(new Date());
+  const initialDateOptions = getNext7ArmeniaDays(), initialSelectedDateKey = initialDateOptions[0].value, initialTodayKey = getArmeniaTodayKey();
   const [selectedDate, setSelectedDate] = useState(initialSelectedDateKey);
   const [draftOverride, setDraftOverride] = useState(() => getDefaultDateOverrideDraft(initialSelectedDateKey, getNormalizedDateOverride({ selectedDateKey: initialSelectedDateKey, scheduleOverrides: filterCurrentScheduleOverrides(schedule.scheduleOverrides || {}, initialTodayKey), nonWorkingDays: filterCurrentNonWorkingDays(schedule.nonWorkingDays || [], initialTodayKey), defaultDaySchedule: getDayScheduleFromDefaultSchedule(normalizeDefaultScheduleDraft(schedule.defaultSchedule)) })));
   const isMountedRef = useRef(true), servicesFetchAttemptedRef = useRef(""), onboardingRequestRef = useRef(0), salonLoadRequestRef = useRef(0), scheduleLoadRequestRef = useRef(0), saveRequestRef = useRef(0), activeSalonIdRef = useRef(null);
@@ -189,11 +189,11 @@ export default function useScheduleManager({
   }, [effectiveSchedule, normalizedOverride, selectedDateKey]);
   const selectDate = useCallback(
     (dateKey) => {
-      if (!parseDateKey(dateKey) || dateKey < todayKey) return;
+      if (!parseDateKey(dateKey) || isBeforeArmeniaToday(dateKey)) return;
       setSelectedDate(dateKey);
       setValidationState({ dateKey, message: "" });
     },
-    [todayKey]
+    []
   );
 
   const updateDraft = useCallback(

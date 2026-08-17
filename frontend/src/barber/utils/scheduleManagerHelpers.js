@@ -1,6 +1,10 @@
 import { defaultPersonalSchedule } from "@/shared/data/schedule";
 import { cn } from "@/shared/lib/utils";
-import { formatDateKey, getNext7Days, parseDateKey } from "@/shared/utils/dates";
+import {
+  getArmeniaTodayKey,
+  getNext7ArmeniaDays,
+  parseDateKey,
+} from "@/shared/utils/dates";
 import { getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
 import { timeToMinutes } from "@/shared/utils/time";
 import { normalizeDefaultScheduleDraft } from "@/barber/utils/scheduleHelpers";
@@ -279,8 +283,11 @@ export const getScheduleManagerViewState = ({
   const defaultDaySchedule = getDayScheduleFromDefaultSchedule(
     currentDefaultSchedule
   );
-  const dateOptions = getNext7Days();
-  const todayKey = formatDateKey(new Date());
+  const dateOptions = getNext7ArmeniaDays().map((option) => ({
+    ...option,
+    date: parseDateKey(option.value),
+  }));
+  const todayKey = getArmeniaTodayKey();
   const scheduleOverrides = filterCurrentScheduleOverrides(
     effectiveSchedule.scheduleOverrides || {},
     todayKey
@@ -290,9 +297,7 @@ export const getScheduleManagerViewState = ({
     todayKey
   );
   const selectedDateObject = parseDateKey(selectedDate) || dateOptions[0].date;
-  const selectedDateKey = selectedDateObject
-    ? formatDateKey(selectedDateObject)
-    : dateOptions[0].value;
+  const selectedDateKey = selectedDateObject ? selectedDate : dateOptions[0].value;
   const normalizedOverride = getNormalizedDateOverride({
     selectedDateKey,
     scheduleOverrides,

@@ -6,6 +6,7 @@ import ClientReliabilitySummary from "@/barber/components/bookings/ClientReliabi
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
 import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
+import { parseArmeniaDateTime } from "@/shared/utils/armeniaDateTime";
 
 function getBookingCardTone(status) {
   switch (status) {
@@ -26,13 +27,15 @@ function getBookingCardTone(status) {
   }
 }
 
-function isBookingPast(booking) {
+function isBookingPast(booking, now = new Date()) {
   if (!booking?.bookingDate) return false;
-  const now = new Date();
-  const bookingEnd = new Date(`${booking.bookingDate}T${booking.time || "00:00"}:00`);
+  const bookingEnd = parseArmeniaDateTime(
+    booking.bookingDate,
+    booking.time || "00:00"
+  );
   const duration = Number(booking?.duration || 0);
 
-  if (Number.isNaN(bookingEnd.getTime())) return false;
+  if (!bookingEnd) return false;
 
   bookingEnd.setMinutes(
     bookingEnd.getMinutes() + (Number.isFinite(duration) && duration > 0 ? duration : 0)

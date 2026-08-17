@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import CalendarBookingCard from "./CalendarBookingCard";
 
@@ -11,6 +11,10 @@ vi.mock("@/shared/components/StatusBadge", () => ({
 vi.mock("@/barber/components/bookings/ClientReliabilitySummary", () => ({
   default: ({ clientId }) => <div>Reliability: {clientId}</div>,
 }));
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function renderCard(overrides = {}) {
   const props = {
@@ -114,6 +118,64 @@ describe("CalendarBookingCard", () => {
     expect(props.onComplete).toHaveBeenCalledTimes(1);
     expect(props.onNoShow).toHaveBeenCalledTimes(1);
     expect(props.onLateCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no-show actions for an Armenia-past booking across a browser-local day boundary", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T20:30:00.000Z"));
+
+    renderCard({
+      booking: {
+        _id: "booking-past",
+        status: "accepted",
+        bookingDate: "2026-08-04",
+        time: "00:15",
+        duration: 10,
+        client: { id: "client-past" },
+      },
+      status: "accepted",
+    });
+
+    expect(screen.getByRole("button", { name: "Mark no-show" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Late cancellation" })).toBeInTheDocument();
+  });
+
+  it("keeps no-show actions limited to eligible accepted bookings", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T20:30:00.000Z"));
+    const futureBooking = {
+      _id: "booking-future",
+      status: "accepted",
+      bookingDate: "2026-08-04",
+      time: "00:45",
+      duration: 10,
+      client: { id: "client-future" },
+    };
+
+    renderCard({ booking: futureBooking, status: "accepted" });
+
+    expect(screen.queryByRole("button", { name: "Mark no-show" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Late cancellation" })).not.toBeInTheDocument();
+  });
+
+  it("keeps no-show actions unavailable for a past non-accepted booking", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T20:30:00.000Z"));
+
+    renderCard({
+      booking: {
+        _id: "booking-pending",
+        status: "pending",
+        bookingDate: "2026-08-04",
+        time: "00:15",
+        duration: 10,
+        client: { id: "client-pending" },
+      },
+      status: "pending",
+    });
+
+    expect(screen.queryByRole("button", { name: "Mark no-show" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Late cancellation" })).not.toBeInTheDocument();
   });
 });
 
