@@ -1,5 +1,6 @@
 import { timeToMinutes } from "@/shared/utils/time";
 import { getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
+import { getArmeniaDayKey } from "@/shared/utils/dates";
 
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export const TIMELINE_INTERVAL_MINUTES = 10;
@@ -151,7 +152,8 @@ export function getEffectiveDaySchedule(scheduleEntry, selectedDateKey, defaultS
   const nonWorkingDays = scheduleEntry?.nonWorkingDays || [];
   const selectedOverride = scheduleOverrides[selectedDateKey];
   const baseDefaultSchedule = defaultSchedule || FALLBACK_DEFAULT_SCHEDULE;
-
+  const weeklyDaySchedule =
+    scheduleEntry?.weeklySchedule?.[getArmeniaDayKey(selectedDateKey)];
   const selectedDaySchedule = selectedOverride
     ? {
         working: Boolean(selectedOverride.isWorking),
@@ -160,7 +162,19 @@ export function getEffectiveDaySchedule(scheduleEntry, selectedDateKey, defaultS
         breakFrom: selectedOverride.breakStart || "",
         breakTo: selectedOverride.breakEnd || "",
       }
-    : getDayScheduleFromDefaultSchedule(baseDefaultSchedule);
+    : weeklyDaySchedule?.working === false
+      ? {
+          working: false,
+          from: weeklyDaySchedule.from || "",
+          to: weeklyDaySchedule.to || "",
+          breakFrom: weeklyDaySchedule.breakFrom || "",
+          breakTo: weeklyDaySchedule.breakTo || "",
+        }
+      : weeklyDaySchedule?.working === true &&
+          timeToMinutes(weeklyDaySchedule.from) !== null &&
+          timeToMinutes(weeklyDaySchedule.to) !== null
+        ? weeklyDaySchedule
+        : getDayScheduleFromDefaultSchedule(baseDefaultSchedule);
 
   return {
     selectedDaySchedule,

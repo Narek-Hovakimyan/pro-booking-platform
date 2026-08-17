@@ -224,13 +224,13 @@ function DayColumn({
         {isNonWorking && (
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="rounded-full bg-neutral-200 px-3 py-1 text-[10px] font-medium text-neutral-500">
-              Closed
+              Closed — existing bookings remain
             </span>
           </div>
         )}
 
         {/* Booking blocks */}
-        {!isNonWorking && overlapGroups.length > 0 && (
+        {overlapGroups.length > 0 && (
           <div className="absolute inset-0">
             {overlapGroups.map((group, groupIdx) => {
               const subCount = overlapGroups.length;

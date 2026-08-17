@@ -481,8 +481,8 @@ export default function DayTimelineView({
     );
   }
 
-  // ─── Non-working day (no schedule) ───
-  if (isNonWorkingDay) {
+  // ─── Non-working day without existing bookings ───
+  if (isNonWorkingDay && bookings.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-12 text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-neutral-200">
@@ -496,6 +496,11 @@ export default function DayTimelineView({
 
   return (
     <div className="space-y-4">
+      {isNonWorkingDay && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          This day is closed for new availability. Existing bookings remain actionable.
+        </div>
+      )}
       {/* ─── Timeline grid (overflow-visible so popover is not clipped) ─── */}
       <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
