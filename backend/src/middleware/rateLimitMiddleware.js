@@ -28,7 +28,7 @@ export const isRateLimitEnabled = () => {
     return false;
   }
 
-  return getBooleanEnv("RATE_LIMIT_ENABLED", true);
+  return getBooleanEnv("RATE_LIMIT_ENABLED", isProduction() || Boolean(process.env.REDIS_URL?.trim()));
 };
 
 const isNodeTestProcess = () =>

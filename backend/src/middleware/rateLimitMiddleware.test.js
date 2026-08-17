@@ -13,10 +13,26 @@ import {
   __resetRateLimitDependencies,
   __setRateLimitDependencies,
   emailVerificationLimiter,
+  isRateLimitEnabled,
   rateLimitCode,
   rateLimitMessage,
   rateLimitStoreUnavailableCode,
 } from "./rateLimitMiddleware.js";
+
+const originalNodeEnv = process.env.NODE_ENV;
+const originalRateLimitEnabled = process.env.RATE_LIMIT_ENABLED;
+const originalRedisUrl = process.env.REDIS_URL;
+
+const restoreEnvironment = () => {
+  for (const [name, value] of Object.entries({
+    NODE_ENV: originalNodeEnv,
+    RATE_LIMIT_ENABLED: originalRateLimitEnabled,
+    REDIS_URL: originalRedisUrl,
+  })) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+};
 
 const createRedisCommandHarness = () => {
   const counters = new Map();
@@ -59,6 +75,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetRateLimitDependencies();
+  restoreEnvironment();
 });
 
 const createRequest = ({
@@ -163,6 +180,113 @@ test("Redis store failures fail closed instead of allowing a request", async () 
   assert.ok(result.nextError instanceof Error);
   assert.equal(result.nextError.code, rateLimitStoreUnavailableCode);
   assert.equal(result.res.statusCode, 200);
+});
+
+test("development and test default rate limiting off when Redis is unconfigured", async () => {
+  delete process.env.REDIS_URL;
+  delete process.env.RATE_LIMIT_ENABLED;
+  __setRateLimitDependencies({
+    getRedisClient: () => {
+      throw new Error("redis unavailable");
+    },
+  });
+
+  for (const environment of ["development", "test"]) {
+    process.env.NODE_ENV = environment;
+    const limiter = createJsonRateLimiter({
+      namespace: `${environment}-without-redis`,
+      windowMs: 60 * 1000,
+      limit: 1,
+    });
+    const result = await runLimiter(limiter, createRequest());
+
+    assert.equal(isRateLimitEnabled(), false);
+    assert.equal(result.nextCalled, true);
+    assert.equal(result.nextError, undefined);
+  }
+});
+
+test("an explicit rate-limit enablement fails closed when Redis is unavailable", async () => {
+  process.env.NODE_ENV = "development";
+  delete process.env.REDIS_URL;
+  process.env.RATE_LIMIT_ENABLED = "true";
+  __setRateLimitDependencies({
+    getRedisClient: () => {
+      throw new Error("redis unavailable");
+    },
+  });
+
+  const limiter = createJsonRateLimiter({
+    namespace: "explicit-enabled-without-redis",
+    windowMs: 60 * 1000,
+    limit: 1,
+  });
+  const result = await runLimiter(limiter, createRequest());
+
+  assert.equal(isRateLimitEnabled(), true);
+  assert.equal(result.nextCalled, false);
+  assert.equal(result.nextError?.code, rateLimitStoreUnavailableCode);
+});
+
+test("an explicit rate-limit disablement bypasses an unavailable Redis store", async () => {
+  process.env.NODE_ENV = "development";
+  delete process.env.REDIS_URL;
+  process.env.RATE_LIMIT_ENABLED = "false";
+  __setRateLimitDependencies({
+    getRedisClient: () => {
+      throw new Error("redis unavailable");
+    },
+  });
+
+  const limiter = createJsonRateLimiter({
+    namespace: "explicit-disabled-without-redis",
+    windowMs: 60 * 1000,
+    limit: 1,
+  });
+  const result = await runLimiter(limiter, createRequest());
+
+  assert.equal(isRateLimitEnabled(), false);
+  assert.equal(result.nextCalled, true);
+  assert.equal(result.nextError, undefined);
+});
+
+test("production keeps rate limiting enabled when Redis is unconfigured", async () => {
+  process.env.NODE_ENV = "production";
+  delete process.env.REDIS_URL;
+  delete process.env.RATE_LIMIT_ENABLED;
+  __setRateLimitDependencies({
+    getRedisClient: () => {
+      throw new Error("redis unavailable");
+    },
+  });
+
+  const limiter = createJsonRateLimiter({
+    namespace: "production-without-redis",
+    windowMs: 60 * 1000,
+    limit: 1,
+  });
+  const result = await runLimiter(limiter, createRequest());
+
+  assert.equal(isRateLimitEnabled(), true);
+  assert.equal(result.nextCalled, false);
+  assert.equal(result.nextError?.code, rateLimitStoreUnavailableCode);
+});
+
+test("a configured Redis environment keeps the existing default rate limiter behavior", async () => {
+  process.env.NODE_ENV = "development";
+  process.env.REDIS_URL = "redis://configured.example.test:6379/0";
+  delete process.env.RATE_LIMIT_ENABLED;
+
+  const limiter = createJsonRateLimiter({
+    namespace: "configured-redis",
+    windowMs: 60 * 1000,
+    limit: 1,
+  });
+  const result = await runLimiter(limiter, createRequest());
+
+  assert.equal(isRateLimitEnabled(), true);
+  assert.equal(result.nextCalled, true);
+  assert.equal(result.nextError, undefined);
 });
 
 test("hostile Redis errors are replaced by fixed safe error metadata before generic logging", async () => {
