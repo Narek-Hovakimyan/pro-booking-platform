@@ -1,7 +1,7 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProviders } from "@/test/renderWithProviders";
 import api from "@/shared/api/axios";
@@ -111,8 +111,14 @@ function SubmissionHarness({
         <div data-testid="success">{String(state.bookingSuccess)}</div>
         <div data-testid="payment">{state.bookingPayment ? "set" : "unset"}</div>
         <div data-testid="promo">{state.promoCode}</div>
+        <div data-testid="public-promotions">
+          {state.publicPromotions.map((promotion) => promotion.code).join(",")}
+        </div>
       <button onClick={() => state.setPromoCode("SAVE10")} type="button">
         seed-promo
+      </button>
+      <button onClick={() => state.handleApplyPromo()} type="button">
+        apply-promo
       </button>
       <button disabled={state.isSaving} onClick={state.submitBooking} type="button">
         submit
@@ -131,7 +137,103 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+beforeEach(() => {
+  api.get.mockResolvedValue({ data: [] });
+  useBooking.mockReturnValue({ createBooking: vi.fn() });
+});
+
 describe("SalonPublicBookingPage split hooks", () => {
+  it("keeps only current applicable salon-promotion discovery after a selection change", async () => {
+    const staleDiscovery = deferred();
+    api.get.mockImplementation((url) => {
+      if (url.includes("barberId=barber-a")) return staleDiscovery.promise;
+      if (url.includes("barberId=barber-b")) return Promise.resolve({ data: [{ code: "BONLY" }] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    const { rerender } = renderWithProviders(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-a", name: "Ava" }}
+        selectedService={{ id: "service-a", name: "Cut", price: 12000, duration: 30 }}
+      />
+    );
+
+    rerender(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-b", name: "Bea" }}
+        selectedService={{ id: "service-b", name: "Color", price: 14000, duration: 45 }}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByTestId("public-promotions")).toHaveTextContent("BONLY"));
+    await act(async () => {
+      staleDiscovery.resolve({ data: [{ code: "STALE" }] });
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("public-promotions")).toHaveTextContent("BONLY");
+    expect(screen.getByTestId("public-promotions")).not.toHaveTextContent("STALE");
+  });
+
+  it("shows discovered promotions only after an explicit client action", async () => {
+    const onApplyPromo = vi.fn();
+    renderWithProviders(
+      <SalonBookingSummary
+        salon={{ name: "North Studio" }}
+        selectedBarber={{ name: "Ava", depositSettings: { enabled: false } }}
+        selectedService={{ name: "Cut", duration: 30, price: 12000 }}
+        selectedDateLabel="Mon, Aug 10"
+        validSelectedTime="10:00"
+        currentUser={null}
+        promoCode=""
+        setPromoCode={vi.fn()}
+        promoStatus={{ type: "", message: "" }}
+        publicPromotions={[{ code: "SALON20" }]}
+        validatingPromo={false}
+        onApplyPromo={onApplyPromo}
+        onRemovePromo={vi.fn()}
+        client={{ name: "", phone: "", note: "" }}
+        setClient={vi.fn()}
+        submitError=""
+        canConfirmBooking={false}
+        confirmDisabledReason=""
+        isSaving={false}
+        onBack={vi.fn()}
+        onConfirm={vi.fn()}
+        authRedirect="%2Fsalons%2Fsalon-1%2Fbook"
+        selectedServicePriceInfo={{ hasDiscount: false, originalPrice: 12000, discountedPrice: 12000 }}
+        publicPromoDiscount={0}
+        publicTotalDiscount={0}
+        publicFinalPrice={12000}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "SALON20" }));
+    expect(onApplyPromo).toHaveBeenCalledWith("SALON20");
+  });
+
+  it("preserves manual salon promo-code validation", async () => {
+    api.post.mockResolvedValue({
+      data: { valid: true, promotion: { code: "SAVE10", title: "Save Ten" }, discountAmount: 10 },
+    });
+    renderWithProviders(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-1", name: "Ava" }}
+        selectedService={{ id: "svc-1", name: "Cut", price: 12000, duration: 30 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "seed-promo" }));
+    fireEvent.click(screen.getByRole("button", { name: "apply-promo" }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/salons/salon-1/promotions/validate",
+      { code: "SAVE10", serviceId: "svc-1", barberId: "barber-1" }
+    ));
+  });
+
   it("drops stale public booking data after a salon switch and final unmount", async () => {
     const stale = deferred();
     const fresh = deferred();
