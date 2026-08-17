@@ -485,10 +485,13 @@ export default function BarbersPage() {
         const reviewStats =
           reviewStatsByBarberId[String(barberId)] ||
           getReviewStats(reviews, barberId);
-        const minMatches =
-          !priceRange.min || prices.some((price) => price >= minPrice);
-        const maxMatches =
-          !priceRange.max || prices.some((price) => price <= maxPrice);
+        const priceMatches =
+          (!priceRange.min && !priceRange.max) ||
+          prices.some(
+            (price) =>
+              (!priceRange.min || price >= minPrice) &&
+              (!priceRange.max || price <= maxPrice)
+          );
         const discountMatches =
           !discountFilter || barberServices.some(hasActiveServiceDiscount);
         const ratingMatches =
@@ -505,8 +508,7 @@ export default function BarbersPage() {
           cityMatches &&
           serviceMatches &&
           categoryMatches &&
-          minMatches &&
-          maxMatches &&
+          priceMatches &&
           discountMatches &&
           ratingMatches &&
           professionMatches &&
