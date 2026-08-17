@@ -437,7 +437,6 @@ export const validateVoucherCode = async (req, res) => {
 export const getPublicVouchers = async (req, res) => {
   try {
     const { ownerType, ownerId } = req.params;
-
     if (!["barber", "salon"].includes(ownerType)) {
       return res.status(400).json({ message: "ownerType must be 'barber' or 'salon'" });
     }
@@ -467,6 +466,7 @@ export const getPublicVouchers = async (req, res) => {
           ],
         },
       },
+      { $match: { $or: [{ startDate: null }, { startDate: { $lte: now } }] } },
       {
         $project: {
           code: 1,

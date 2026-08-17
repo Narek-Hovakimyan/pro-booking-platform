@@ -1217,6 +1217,47 @@ test("getPublicVouchers returns public active voucher list", async () => {
   assert.equal(res.body[0]._id, undefined);
 });
 
+test("getPublicVouchers excludes future vouchers while retaining started and undated vouchers", async () => {
+  let pipeline;
+  Voucher.aggregate = async (receivedPipeline) => {
+    pipeline = receivedPipeline;
+    return [];
+  };
+
+  await getPublicVouchers(
+    { params: { ownerType: "barber", ownerId: barberA._id } },
+    createResponse()
+  );
+
+  const startDateMatch = pipeline.find(
+    (stage) => stage.$match?.$or?.some((condition) => condition.startDate)
+  );
+  const conditions = startDateMatch.$match.$or;
+  const now = conditions.find((condition) => condition.startDate?.$lte).startDate.$lte;
+
+  assert.deepEqual(conditions, [
+    { startDate: null },
+    { startDate: { $lte: now } },
+  ]);
+  const matchesStartDate = (startDate) =>
+    conditions.some((condition) =>
+      condition.startDate === null
+        ? startDate == null
+        : startDate <= condition.startDate.$lte
+    );
+  assert.equal(matchesStartDate(new Date(now.getTime() + 1)), false);
+  assert.equal(matchesStartDate(new Date(now.getTime() - 1)), true);
+  assert.equal(matchesStartDate(null), true);
+
+  const baseMatch = pipeline[0].$match;
+  assert.equal(baseMatch.visibility, "public");
+  assert.equal(baseMatch.active, true);
+  assert.deepEqual(pipeline[1].$match.$or, [
+    { expiresAt: null },
+    { expiresAt: { $gt: now } },
+  ]);
+});
+
 test("getPublicVouchers returns empty array for private vouchers", async () => {
   const req = {
     params: { ownerType: "barber", ownerId: barberA._id },
