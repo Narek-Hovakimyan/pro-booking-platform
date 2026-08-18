@@ -1,4 +1,7 @@
+import { useEffect, useRef, useState } from "react";
+
 import SalonPromotionsManager from "@/barber/components/SalonPromotionsManager";
+import { getSalonSubscription } from "@/shared/api/subscriptions";
 
 export default function PromotionSettingsView({
   effectivePromotionSalonId,
@@ -8,6 +11,49 @@ export default function PromotionSettingsView({
   selectedPromotionSalon,
   onSelectedPromotionSalonChange,
 }) {
+  const selectedSalonId =
+    selectedPromotionSalon?.id || selectedPromotionSalon?._id || "";
+  const requestIdRef = useRef(0);
+  const [entitlement, setEntitlement] = useState({
+    salonId: "",
+    status: "loading",
+  });
+
+  useEffect(() => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    if (!selectedSalonId) {
+      return undefined;
+    }
+
+    let isActive = true;
+
+    getSalonSubscription(selectedSalonId)
+      .then((response) => {
+        if (!isActive || requestId !== requestIdRef.current) return;
+
+        setEntitlement({
+          salonId: selectedSalonId,
+          status: response?.subscription?.isActive === true ? "active" : "denied",
+        });
+      })
+      .catch(() => {
+        if (!isActive || requestId !== requestIdRef.current) return;
+        setEntitlement({ salonId: selectedSalonId, status: "denied" });
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedSalonId]);
+
+  const isCheckingEntitlement =
+    Boolean(selectedSalonId) &&
+    (entitlement.salonId !== selectedSalonId || entitlement.status === "loading");
+  const hasActiveEntitlement =
+    entitlement.salonId === selectedSalonId && entitlement.status === "active";
+
   return (
     <>
       <h2 className="text-xl font-bold sm:text-2xl">Salon Promotions</h2>
@@ -51,11 +97,20 @@ export default function PromotionSettingsView({
             </div>
           )}
 
-          {selectedPromotionSalon && (
+          {isCheckingEntitlement && (
+            <p className="text-neutral-500">Checking salon subscription...</p>
+          )}
+
+          {selectedPromotionSalon && !isCheckingEntitlement && !hasActiveEntitlement && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              An active salon subscription is required to manage promotions for
+              this salon.
+            </p>
+          )}
+
+          {selectedPromotionSalon && hasActiveEntitlement && (
             <SalonPromotionsManager
-              salonId={
-                selectedPromotionSalon.id || selectedPromotionSalon._id
-              }
+              salonId={selectedSalonId}
               salonName={selectedPromotionSalon.name || "Salon"}
             />
           )}
