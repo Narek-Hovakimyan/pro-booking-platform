@@ -154,6 +154,16 @@ const baseVoucher = (overrides = {}) => ({
   ...overrides,
 });
 
+const mutableVoucher = (overrides = {}) => {
+  const promotion = baseVoucher(overrides);
+  let saveCalls = 0;
+  promotion.save = async () => {
+    saveCalls += 1;
+    return promotion;
+  };
+  return { promotion, getSaveCalls: () => saveCalls };
+};
+
 afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Service.findOne = originalMethods.serviceFindOne;
@@ -437,6 +447,158 @@ test("duplicate promotion create race returns 400 without logging sensitive code
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "A promotion with this code already exists");
   assert.equal(log.calls.length, 0);
+});
+
+test("update validates the effective discount type and retained amount before mutation", async () => {
+  installSalon();
+  const { promotion, getSaveCalls } = mutableVoucher({ amount: 200 });
+  Voucher.findOne = async () => promotion;
+
+  const res = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId, promotionId: "64d000000000000000000099" },
+      body: { discountType: "percentage" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /cannot exceed 100/);
+  assert.equal(promotion.discountType, "fixed");
+  assert.equal(promotion.amount, 200);
+  assert.equal(getSaveCalls(), 0);
+});
+
+test("valid discount type switch succeeds and percentage values above 100 are rejected", async () => {
+  installSalon();
+  const valid = mutableVoucher({ amount: 200 });
+  Voucher.findOne = async () => valid.promotion;
+
+  const validRes = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId, promotionId: "64d000000000000000000099" },
+      body: { discountType: "percentage", discountValue: 20 },
+    },
+    validRes
+  );
+
+  assert.equal(validRes.statusCode, 200);
+  assert.equal(valid.promotion.discountType, "percentage");
+  assert.equal(valid.promotion.amount, 20);
+  assert.equal(valid.getSaveCalls(), 1);
+
+  const invalid = mutableVoucher();
+  Voucher.findOne = async () => invalid.promotion;
+  const invalidRes = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId, promotionId: "64d000000000000000000099" },
+      body: { discountType: "percentage", discountValue: 101 },
+    },
+    invalidRes
+  );
+
+  assert.equal(invalidRes.statusCode, 400);
+  assert.match(invalidRes.body.message, /cannot exceed 100/);
+  assert.equal(invalid.promotion.discountType, "fixed");
+  assert.equal(invalid.promotion.amount, 10);
+  assert.equal(invalid.getSaveCalls(), 0);
+});
+
+test("create rejects malformed and reversed promotion dates without mutation", async () => {
+  installSalon();
+  let createCalls = 0;
+  Voucher.create = async () => {
+    createCalls += 1;
+  };
+
+  for (const body of [
+    basePromotionBody({ startDate: "not-a-date" }),
+    basePromotionBody({ endDate: "not-a-date" }),
+    basePromotionBody({ startDate: "2030-05-02T00:00:00.000Z", endDate: "2030-05-01T00:00:00.000Z" }),
+  ]) {
+    const res = createResponse();
+    await createSalonPromotion(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId },
+        body,
+      },
+      res
+    );
+    assert.equal(res.statusCode, 400);
+  }
+
+  assert.equal(createCalls, 0);
+});
+
+test("update rejects reversed effective dates without mutating the promotion", async () => {
+  installSalon();
+  const { promotion, getSaveCalls } = mutableVoucher({
+    startDate: new Date("2030-05-01T00:00:00.000Z"),
+    expiresAt: new Date("2030-05-05T00:00:00.000Z"),
+  });
+  Voucher.findOne = async () => promotion;
+
+  const res = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId, promotionId: "64d000000000000000000099" },
+      body: { startDate: "2030-05-06T00:00:00.000Z" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /on or before/);
+  assert.equal(promotion.startDate.toISOString(), "2030-05-01T00:00:00.000Z");
+  assert.equal(promotion.expiresAt.toISOString(), "2030-05-05T00:00:00.000Z");
+  assert.equal(getSaveCalls(), 0);
+});
+
+test("ordered and open-ended promotion dates remain valid", async () => {
+  installSalon();
+  Voucher.findOne = () => query(null);
+  Voucher.create = async (payload) => payload;
+
+  const createRes = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody({ startDate: "2030-05-01T00:00:00.000Z" }),
+    },
+    createRes
+  );
+
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(createRes.body.startDate.toISOString(), "2030-05-01T00:00:00.000Z");
+  assert.equal(createRes.body.expiresAt, null);
+
+  const { promotion, getSaveCalls } = mutableVoucher({
+    startDate: new Date("2030-05-01T00:00:00.000Z"),
+    expiresAt: null,
+  });
+  Voucher.findOne = async () => promotion;
+  const updateRes = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId, promotionId: "64d000000000000000000099" },
+      body: { endDate: "2030-05-02T00:00:00.000Z" },
+    },
+    updateRes
+  );
+
+  assert.equal(updateRes.statusCode, 200);
+  assert.equal(promotion.expiresAt.toISOString(), "2030-05-02T00:00:00.000Z");
+  assert.equal(getSaveCalls(), 1);
 });
 
 test("promotion fetch failure logs structured err and preserves response", async () => {

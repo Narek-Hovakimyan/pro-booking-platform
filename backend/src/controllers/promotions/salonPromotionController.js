@@ -51,6 +51,45 @@ const assertSalonPromotionSubscription = async (salonId) => {
   };
 };
 
+const validatePromotionDiscount = (discountType, discountValue) => {
+  if (!["fixed", "percentage"].includes(discountType)) {
+    return { error: "discountType must be 'fixed' or 'percentage'" };
+  }
+
+  const amount = Number(discountValue);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "discountValue must be greater than 0" };
+  }
+  if (discountType === "percentage" && amount > 100) {
+    return { error: "Percentage discount cannot exceed 100" };
+  }
+
+  return { amount };
+};
+
+const parsePromotionDate = (value, field) => {
+  if (value === undefined || value === null || value === "") return { date: null };
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { error: `${field} must be a valid date` };
+
+  return { date };
+};
+
+const validatePromotionDates = (startDate, endDate) => {
+  const parsedStartDate = parsePromotionDate(startDate, "startDate");
+  if (parsedStartDate.error) return parsedStartDate;
+
+  const parsedEndDate = parsePromotionDate(endDate, "endDate");
+  if (parsedEndDate.error) return parsedEndDate;
+
+  if (parsedStartDate.date && parsedEndDate.date && parsedStartDate.date > parsedEndDate.date) {
+    return { error: "startDate must be on or before endDate" };
+  }
+
+  return { startDate: parsedStartDate.date, endDate: parsedEndDate.date };
+};
+
 /* ── Handlers ────────────────────────────────────────────────── */
 
 /**
@@ -121,14 +160,13 @@ export const createSalonPromotion = async (req, res) => {
     if (!title || !title.trim()) {
       return res.status(400).json({ message: "title is required" });
     }
-    if (!discountType || !["fixed", "percentage"].includes(discountType)) {
-      return res.status(400).json({ message: "discountType must be 'fixed' or 'percentage'" });
+    const discountValidation = validatePromotionDiscount(discountType, discountValue);
+    if (discountValidation.error) {
+      return res.status(400).json({ message: discountValidation.error });
     }
-    if (discountValue === undefined || discountValue === null || Number(discountValue) <= 0) {
-      return res.status(400).json({ message: "discountValue must be greater than 0" });
-    }
-    if (discountType === "percentage" && (Number(discountValue) > 100)) {
-      return res.status(400).json({ message: "Percentage discount cannot exceed 100" });
+    const dateValidation = validatePromotionDates(startDate, endDate);
+    if (dateValidation.error) {
+      return res.status(400).json({ message: dateValidation.error });
     }
 
     // Generate or validate code
@@ -198,12 +236,12 @@ export const createSalonPromotion = async (req, res) => {
       description: description?.trim() || "",
       discountType,
       type: "amount", // internal type kept as "amount" for compat
-      amount: Number(discountValue),
+      amount: discountValidation.amount,
       serviceId: serviceId || null,
       applicableServiceIds: applicableServiceIds && Array.isArray(applicableServiceIds) ? applicableServiceIds : [],
       applicableBarberIds: validBarberIds,
-      startDate: startDate ? new Date(startDate) : null,
-      expiresAt: endDate ? new Date(endDate) : null,
+      startDate: dateValidation.startDate,
+      expiresAt: dateValidation.endDate,
       maxUses: maxUses !== undefined && maxUses !== null ? Number(maxUses) : Number.MAX_SAFE_INTEGER,
       active: active !== undefined ? Boolean(active) : true,
       visibility: "public",
@@ -258,6 +296,20 @@ export const updateSalonPromotion = async (req, res) => {
 
     const { title, description, discountType, discountValue, applicableServiceIds, applicableBarberIds, startDate, endDate, maxUses, active } = req.body;
 
+    const effectiveDiscountType = discountType === undefined ? promotion.discountType : discountType;
+    const effectiveDiscountValue = discountValue === undefined ? promotion.amount : discountValue;
+    const discountValidation = validatePromotionDiscount(effectiveDiscountType, effectiveDiscountValue);
+    if (discountValidation.error) {
+      return res.status(400).json({ message: discountValidation.error });
+    }
+    const dateValidation = validatePromotionDates(
+      startDate === undefined ? promotion.startDate : startDate,
+      endDate === undefined ? promotion.expiresAt : endDate
+    );
+    if (dateValidation.error) {
+      return res.status(400).json({ message: dateValidation.error });
+    }
+
     if (title !== undefined) {
       if (!title.trim()) return res.status(400).json({ message: "title cannot be empty" });
       promotion.title = title.trim();
@@ -265,21 +317,9 @@ export const updateSalonPromotion = async (req, res) => {
     if (description !== undefined) {
       promotion.description = String(description).trim();
     }
-    if (discountType !== undefined) {
-      if (!["fixed", "percentage"].includes(discountType)) {
-        return res.status(400).json({ message: "discountType must be 'fixed' or 'percentage'" });
-      }
-      promotion.discountType = discountType;
-    }
+    if (discountType !== undefined) promotion.discountType = discountType;
     if (discountValue !== undefined) {
-      const val = Number(discountValue);
-      if (!Number.isFinite(val) || val <= 0) {
-        return res.status(400).json({ message: "discountValue must be greater than 0" });
-      }
-      if (promotion.discountType === "percentage" && val > 100) {
-        return res.status(400).json({ message: "Percentage discount cannot exceed 100" });
-      }
-      promotion.amount = val;
+      promotion.amount = discountValidation.amount;
     }
     if (active !== undefined) {
       promotion.active = Boolean(active);
@@ -309,10 +349,10 @@ export const updateSalonPromotion = async (req, res) => {
       promotion.applicableBarberIds = validBarberIds;
     }
     if (startDate !== undefined) {
-      promotion.startDate = startDate ? new Date(startDate) : null;
+      promotion.startDate = dateValidation.startDate;
     }
     if (endDate !== undefined) {
-      promotion.expiresAt = endDate ? new Date(endDate) : null;
+      promotion.expiresAt = dateValidation.endDate;
     }
 
     await promotion.save();
