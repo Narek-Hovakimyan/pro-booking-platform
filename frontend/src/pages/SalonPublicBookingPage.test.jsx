@@ -111,6 +111,8 @@ function SubmissionHarness({
         <div data-testid="success">{String(state.bookingSuccess)}</div>
         <div data-testid="payment">{state.bookingPayment ? "set" : "unset"}</div>
         <div data-testid="promo">{state.promoCode}</div>
+        <div data-testid="validated-promo">{state.validatedPromo?.promotion?.code || ""}</div>
+        <div data-testid="promo-discount">{state.validatedPromo?.discountAmount || 0}</div>
         <div data-testid="public-promotions">
           {state.publicPromotions.map((promotion) => promotion.code).join(",")}
         </div>
@@ -232,6 +234,76 @@ describe("SalonPublicBookingPage split hooks", () => {
       "/salons/salon-1/promotions/validate",
       { code: "SAVE10", serviceId: "svc-1", barberId: "barber-1" }
     ));
+    await waitFor(() => expect(screen.getByTestId("validated-promo")).toHaveTextContent("SAVE10"));
+  });
+
+  it("ignores promo validation that resolves after the selected barber changes", async () => {
+    const pending = deferred();
+    api.post.mockReturnValue(pending.promise);
+    const { rerender } = renderWithProviders(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-a", name: "Ava" }}
+        selectedService={{ id: "svc-1", name: "Cut", price: 12000, duration: 30 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "seed-promo" }));
+    fireEvent.click(screen.getByRole("button", { name: "apply-promo" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    rerender(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-b", name: "Bea" }}
+        selectedService={{ id: "svc-1", name: "Cut", price: 12000, duration: 30 }}
+      />
+    );
+
+    await act(async () => {
+      pending.resolve({
+        data: { valid: true, promotion: { code: "SAVE10", title: "Save Ten" }, discountAmount: 10 },
+      });
+    });
+
+    expect(screen.getByTestId("promo")).toHaveTextContent("");
+    expect(screen.getByTestId("validated-promo")).toHaveTextContent("");
+    expect(screen.getByTestId("promo-discount")).toHaveTextContent("0");
+  });
+
+  it("ignores promo validation that resolves after the selected service changes", async () => {
+    const pending = deferred();
+    const createBookingMock = vi.fn().mockResolvedValue({});
+    useBooking.mockReturnValue({ createBooking: createBookingMock });
+    api.post.mockReturnValue(pending.promise);
+    const { rerender } = renderWithProviders(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-1", name: "Ava" }}
+        selectedService={{ id: "svc-a", name: "Cut", price: 12000, duration: 30 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "seed-promo" }));
+    fireEvent.click(screen.getByRole("button", { name: "apply-promo" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    rerender(
+      <SubmissionHarness
+        currentUser={{ id: "client-1", role: "client" }}
+        selectedBarber={{ id: "barber-1", name: "Ava" }}
+        selectedService={{ id: "svc-b", name: "Color", price: 14000, duration: 45 }}
+      />
+    );
+
+    await act(async () => {
+      pending.resolve({
+        data: { valid: true, promotion: { code: "SAVE10", title: "Save Ten" }, discountAmount: 10 },
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+
+    await waitFor(() => expect(createBookingMock).toHaveBeenCalledTimes(1));
+    expect(createBookingMock.mock.calls[0][0]).not.toHaveProperty("promotionCode");
+    expect(screen.getByTestId("validated-promo")).toHaveTextContent("");
   });
 
   it("drops stale public booking data after a salon switch and final unmount", async () => {

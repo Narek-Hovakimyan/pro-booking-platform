@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useBooking } from "@/shared/hooks/useBooking";
 import api from "@/shared/api/axios";
@@ -26,11 +26,34 @@ export function useSalonBookingSubmission({
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [bookingPayment, setBookingPayment] = useState(null);
   const discoveryRequestIdRef = useRef(0);
+  const validationRequestIdRef = useRef(0);
   const selectedBarberId = selectedBarber?.id || selectedBarber?._id;
   const selectedServiceId = selectedService?.id || selectedService?._id;
   const promotionContextKey = [salonId, selectedBarberId, selectedServiceId]
     .map((value) => String(value || ""))
     .join(":");
+  const currentPromotionContextKeyRef = useRef(promotionContextKey);
+  const previousPromotionContextKeyRef = useRef(promotionContextKey);
+
+  useLayoutEffect(() => {
+    currentPromotionContextKeyRef.current = promotionContextKey;
+  }, [promotionContextKey]);
+
+  const resetPromoState = useCallback(() => {
+    validationRequestIdRef.current += 1;
+    setPromoCode("");
+    setValidatedPromo(null);
+    setPromoStatus({ type: "", message: "" });
+    setValidatingPromo(false);
+  }, []);
+
+  useEffect(() => {
+    if (previousPromotionContextKeyRef.current !== promotionContextKey) {
+      resetPromoState();
+    }
+
+    previousPromotionContextKeyRef.current = promotionContextKey;
+  }, [promotionContextKey, resetPromoState]);
 
   useEffect(() => {
     const requestId = ++discoveryRequestIdRef.current;
@@ -60,12 +83,6 @@ export function useSalonBookingSubmission({
     return undefined;
   }, [promotionContextKey, salonId, selectedBarberId, selectedServiceId]);
 
-  const resetPromoState = () => {
-    setPromoCode("");
-    setValidatedPromo(null);
-    setPromoStatus({ type: "", message: "" });
-  };
-
   const resetBookingFlow = () => {
     setBookingSuccess(false);
     setBookingPayment(null);
@@ -76,6 +93,8 @@ export function useSalonBookingSubmission({
     const code = String(submittedCode || "").trim().toUpperCase();
     if (!code) return;
 
+    const requestId = ++validationRequestIdRef.current;
+    const validationContextKey = promotionContextKey;
     setPromoCode(code);
     setValidatingPromo(true);
     setPromoStatus({ type: "", message: "" });
@@ -87,6 +106,13 @@ export function useSalonBookingSubmission({
         barberId: selectedBarber?.id || selectedBarber?._id,
       });
 
+      if (
+        requestId !== validationRequestIdRef.current ||
+        validationContextKey !== currentPromotionContextKeyRef.current
+      ) {
+        return;
+      }
+
       if (res.data.valid) {
         setValidatedPromo(res.data);
         setPromoStatus({
@@ -95,13 +121,25 @@ export function useSalonBookingSubmission({
         });
       }
     } catch (err) {
+      if (
+        requestId !== validationRequestIdRef.current ||
+        validationContextKey !== currentPromotionContextKeyRef.current
+      ) {
+        return;
+      }
+
       setValidatedPromo(null);
       setPromoStatus({
         type: "error",
         message: err.response?.data?.message || "Invalid promo code",
       });
     } finally {
-      setValidatingPromo(false);
+      if (
+        requestId === validationRequestIdRef.current &&
+        validationContextKey === currentPromotionContextKeyRef.current
+      ) {
+        setValidatingPromo(false);
+      }
     }
   };
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import api from "@/shared/api/axios";
 import { withClientBookingSalonContext } from "@/client/utils/clientBookingPayload";
@@ -18,11 +18,17 @@ export function useClientBookingVoucher({
   const [discountPreview, setDiscountPreview] = useState(0);
   const [voucherError, setVoucherError] = useState("");
   const [voucherLoading, setVoucherLoading] = useState(false);
-  const previousServiceIdRef = useRef(selectedServiceEntityId);
   const discoveryRequestIdRef = useRef(0);
+  const validationRequestIdRef = useRef(0);
   const voucherContextKey = [selectedBarberId, selectedSalonId, selectedServiceEntityId]
     .map((value) => String(value || ""))
     .join(":");
+  const currentVoucherContextKeyRef = useRef(voucherContextKey);
+  const previousVoucherContextKeyRef = useRef(voucherContextKey);
+
+  useLayoutEffect(() => {
+    currentVoucherContextKeyRef.current = voucherContextKey;
+  }, [voucherContextKey]);
 
   useEffect(() => {
     const requestId = ++discoveryRequestIdRef.current;
@@ -51,17 +57,25 @@ export function useClientBookingVoucher({
     return undefined;
   }, [selectedBarberId, selectedSalonId, selectedServiceEntityId, voucherContextKey]);
 
-  const removeVoucher = useCallback(() => {
+  const clearVoucherState = useCallback(() => {
+    validationRequestIdRef.current += 1;
     setVoucherCode("");
     setVoucherPreview(null);
     setDiscountPreview(0);
+    setVoucherLoading(false);
     clearBookingQuote();
     setQuoteError("");
     setVoucherError("");
   }, [clearBookingQuote, setQuoteError, setVoucherCode]);
 
+  const removeVoucher = useCallback(() => {
+    clearVoucherState();
+  }, [clearVoucherState]);
+
   const applyVoucher = useCallback(
     async (code) => {
+      const requestId = ++validationRequestIdRef.current;
+      const validationContextKey = voucherContextKey;
       setVoucherLoading(true);
       setVoucherError("");
 
@@ -78,6 +92,13 @@ export function useClientBookingVoucher({
           )
         );
 
+        if (
+          requestId !== validationRequestIdRef.current ||
+          validationContextKey !== currentVoucherContextKeyRef.current
+        ) {
+          return;
+        }
+
         if (data.valid) {
           clearBookingQuote();
           setVoucherCode(code);
@@ -86,6 +107,13 @@ export function useClientBookingVoucher({
           setVoucherError("");
         }
       } catch (err) {
+        if (
+          requestId !== validationRequestIdRef.current ||
+          validationContextKey !== currentVoucherContextKeyRef.current
+        ) {
+          return;
+        }
+
         setVoucherPreview(null);
         setDiscountPreview(0);
         setVoucherCode("");
@@ -93,7 +121,12 @@ export function useClientBookingVoucher({
           err.response?.data?.message || "Invalid or expired voucher code"
         );
       } finally {
-        setVoucherLoading(false);
+        if (
+          requestId === validationRequestIdRef.current &&
+          validationContextKey === currentVoucherContextKeyRef.current
+        ) {
+          setVoucherLoading(false);
+        }
       }
     },
     [
@@ -102,6 +135,7 @@ export function useClientBookingVoucher({
       selectedSalonId,
       selectedServiceEntityId,
       setVoucherCode,
+      voucherContextKey,
     ]
   );
 
@@ -112,21 +146,15 @@ export function useClientBookingVoucher({
   }, [removeVoucher, voucherCode]);
 
   useEffect(() => {
-    const resetId = window.setTimeout(() => {
-      if (
-        previousServiceIdRef.current &&
-        previousServiceIdRef.current !== selectedServiceEntityId
-      ) {
-        removeVoucher();
-      }
-
+    if (previousVoucherContextKeyRef.current !== voucherContextKey) {
+      clearVoucherState();
+    } else {
       clearBookingQuote();
       setQuoteError("");
-      previousServiceIdRef.current = selectedServiceEntityId;
-    }, 0);
+    }
 
-    return () => window.clearTimeout(resetId);
-  }, [clearBookingQuote, removeVoucher, selectedServiceEntityId, setQuoteError]);
+    previousVoucherContextKeyRef.current = voucherContextKey;
+  }, [clearBookingQuote, clearVoucherState, setQuoteError, voucherContextKey]);
 
   return {
     applyVoucher,
