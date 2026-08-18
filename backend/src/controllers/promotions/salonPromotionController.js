@@ -5,6 +5,7 @@ import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import {
   getMemberRelationshipType,
 } from "../../services/salon/salonRelationshipService.js";
+import { salonHasActiveSubscription } from "../../services/subscriptionService.js";
 
 const isValidObjectId = (value) =>
   Boolean(value) && mongoose.Types.ObjectId.isValid(String(value));
@@ -38,6 +39,16 @@ const assertManageSalon = async (userId, salonId) => {
     return { error: "Only salon owner or admin can manage promotions", code: 403 };
   }
   return null;
+};
+
+const assertSalonPromotionSubscription = async (salonId) => {
+  if (await salonHasActiveSubscription(salonId)) return null;
+
+  return {
+    code: 403,
+    error: "An active salon subscription is required to manage promotions",
+    errorCode: "SALON_SUBSCRIPTION_REQUIRED",
+  };
 };
 
 /* ── Handlers ────────────────────────────────────────────────── */
@@ -81,6 +92,13 @@ export const createSalonPromotion = async (req, res) => {
     const accessErr = await assertManageSalon(req.user._id, salonId);
     if (accessErr) {
       return res.status(accessErr.code).json({ message: accessErr.error });
+    }
+    const subscriptionErr = await assertSalonPromotionSubscription(salonId);
+    if (subscriptionErr) {
+      return res.status(subscriptionErr.code).json({
+        code: subscriptionErr.errorCode,
+        message: subscriptionErr.error,
+      });
     }
 
     const {
@@ -215,6 +233,13 @@ export const updateSalonPromotion = async (req, res) => {
     const accessErr = await assertManageSalon(req.user._id, salonId);
     if (accessErr) {
       return res.status(accessErr.code).json({ message: accessErr.error });
+    }
+    const subscriptionErr = await assertSalonPromotionSubscription(salonId);
+    if (subscriptionErr) {
+      return res.status(subscriptionErr.code).json({
+        code: subscriptionErr.errorCode,
+        message: subscriptionErr.error,
+      });
     }
 
     if (!isValidObjectId(promotionId)) {

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
 import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
 import {
@@ -15,6 +16,7 @@ import {
 const originalMethods = {
   salonFindById: Salon.findById,
   serviceFindOne: Service.findOne,
+  subscriptionFindOne: Subscription.findOne,
   userFindById: User.findById,
   voucherCreate: Voucher.create,
   voucherFindOne: Voucher.findOne,
@@ -155,9 +157,20 @@ const baseVoucher = (overrides = {}) => ({
 afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Service.findOne = originalMethods.serviceFindOne;
+  Subscription.findOne = originalMethods.subscriptionFindOne;
   User.findById = originalMethods.userFindById;
   Voucher.create = originalMethods.voucherCreate;
   Voucher.findOne = originalMethods.voucherFindOne;
+});
+
+beforeEach(() => {
+  Subscription.findOne = () =>
+    query({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() + 60_000),
+    });
 });
 
 test("owner can create promotion", async () => {
@@ -200,6 +213,154 @@ test("admin can create promotion", async () => {
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.code, "ADMIN10");
+});
+
+test("unpaid authorized owner cannot create a salon promotion", async () => {
+  installSalon();
+  Subscription.findOne = () => query(null);
+  let createCalled = false;
+  Voucher.create = async () => {
+    createCalled = true;
+  };
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "SALON_SUBSCRIPTION_REQUIRED",
+    message: "An active salon subscription is required to manage promotions",
+  });
+  assert.equal(createCalled, false);
+});
+
+test("unpaid authorized admin cannot update a salon promotion", async () => {
+  installSalon({ admins: [adminId] });
+  Subscription.findOne = () => query(null);
+  let promotionLookupCalled = false;
+  Voucher.findOne = async () => {
+    promotionLookupCalled = true;
+  };
+
+  const res = createResponse();
+  await updateSalonPromotion(
+    {
+      user: { _id: adminId, role: "barber" },
+      params: { salonId, promotionId: "64d000000000000000000099" },
+      body: { title: "Renamed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, "SALON_SUBSCRIPTION_REQUIRED");
+  assert.equal(promotionLookupCalled, false);
+});
+
+test("promotion mutations require an active subscription for the route salon", async () => {
+  installSalon();
+  let subscriptionFilter;
+  Subscription.findOne = (filter) => {
+    subscriptionFilter = filter;
+    return query({
+      ownerType: "salon",
+      ownerId: salonId,
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() + 60_000),
+    });
+  };
+  Voucher.findOne = () => query(null);
+  Voucher.create = async (payload) => payload;
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(subscriptionFilter.ownerType, "salon");
+  assert.equal(String(subscriptionFilter.ownerId), salonId);
+});
+
+test("a subscription for another salon cannot grant promotion access", async () => {
+  installSalon();
+  const otherSalonId = "64d000000000000000000088";
+  Subscription.findOne = (filter) => {
+    if (String(filter.ownerId) === otherSalonId) {
+      return query({ ownerType: "salon", ownerId: otherSalonId, status: "active" });
+    }
+    return query(null);
+  };
+  Voucher.create = async () => {
+    throw new Error("must not create");
+  };
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, "SALON_SUBSCRIPTION_REQUIRED");
+});
+
+test("unauthorized promotion requests are denied before subscription lookup", async () => {
+  installSalon();
+  let subscriptionLookupCalled = false;
+  Subscription.findOne = () => {
+    subscriptionLookupCalled = true;
+    return query({ status: "active" });
+  };
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: outsiderId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(subscriptionLookupCalled, false);
+});
+
+test("promotion subscription lookup failures fail closed", async () => {
+  installSalon();
+  Subscription.findOne = () => {
+    throw new Error("subscription lookup failed");
+  };
+
+  const res = createResponse();
+  await createSalonPromotion(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId },
+      body: basePromotionBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not create promotion" });
 });
 
 test("normal member cannot create promotion", async () => {
