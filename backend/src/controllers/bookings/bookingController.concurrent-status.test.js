@@ -15,13 +15,13 @@ import {
   originalMethods,
 } from "./bookingController.testUtils.js";
 
-const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
+const originalVoucherFindOneAndUpdate = Voucher.findOneAndUpdate;
 
 afterEach(() => {
   Booking.findById = originalMethods.bookingFindById;
   Notification.create = originalMethods.notificationCreate;
   User.findById = originalMethods.userFindById;
-  Voucher.findByIdAndUpdate = originalVoucherFindByIdAndUpdate;
+  Voucher.findOneAndUpdate = originalVoucherFindOneAndUpdate;
   __bookingSideEffectsTestHooks.resetGetIO();
 });
 
@@ -59,7 +59,10 @@ test("concurrent cancel and reject claim one terminal state and restore a vouche
     configureConcurrentStatusDependencies(booking);
   let voucherRestoreCalls = 0;
   let voucherCurrentUses = 1;
-  Voucher.findByIdAndUpdate = async (_id, update) => {
+  Voucher.findOneAndUpdate = async (filter, update) => {
+    assert.equal(filter._id, "voucher-1");
+    assert.equal(filter.redemptionBookingIds, booking._id);
+    assert.deepEqual(filter.currentUses, { $gt: 0 });
     voucherRestoreCalls += 1;
     voucherCurrentUses += update.$inc.currentUses;
     return { currentUses: voucherCurrentUses };

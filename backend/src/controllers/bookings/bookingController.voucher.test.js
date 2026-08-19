@@ -467,13 +467,15 @@ test("cancelling a voucher-discounted booking restores voucher use", async () =>
     select: async () => ({ name: "Barber" }),
   });
 
-  // Mock Voucher.findByIdAndUpdate to capture the restoration call
+  // Mock the conditional transactional restoration call.
   let restoredVoucherId = null;
   let restoredFields = null;
-  Voucher.findByIdAndUpdate = async (id, update) => {
-    restoredVoucherId = id;
+  let restoredFilter = null;
+  Voucher.findOneAndUpdate = async (filter, update) => {
+    restoredVoucherId = filter._id;
+    restoredFilter = filter;
     restoredFields = update;
-    return null;
+    return { currentUses: 0 };
   };
 
   const booking = createMutableBooking({
@@ -497,6 +499,8 @@ test("cancelling a voucher-discounted booking restores voucher use", async () =>
 
   assert.equal(res.statusCode, 200);
   assert.equal(restoredVoucherId, "voucher-1");
+  assert.equal(restoredFilter.redemptionBookingIds, booking._id);
+  assert.deepEqual(restoredFilter.currentUses, { $gt: 0 });
   assert.ok(restoredFields.$inc);
   assert.equal(restoredFields.$inc.currentUses, -1);
   assert.ok(restoredFields.$pull);
@@ -651,17 +655,18 @@ test("failed booking creation does not issue an out-of-transaction voucher rollb
   assert.equal(secondaryVoucherWrites, 0);
 });
 
-test("voucher restore secondary-write failure is logged safely without changing cancel behavior", async () => {
+test("voucher restore failure aborts the cancellation transaction", async () => {
   Notification.create = async (payload) => payload;
   User.findById = () => ({
     select: async () => ({ name: "Barber" }),
   });
 
-  const loggerCalls = installVoucherLoggerSpy({ throws: true });
   let mutationAttempts = 0;
-  Voucher.findByIdAndUpdate = async (id, update) => {
+  Voucher.findOneAndUpdate = async (filter, update) => {
     mutationAttempts += 1;
-    assert.equal(id, validVoucherId);
+    assert.equal(filter._id, validVoucherId);
+    assert.equal(filter.redemptionBookingIds, validBookingId);
+    assert.deepEqual(filter.currentUses, { $gt: 0 });
     assert.deepEqual(update, {
       $inc: { currentUses: -1 },
       $pull: { redemptionBookingIds: validBookingId },
@@ -690,27 +695,22 @@ test("voucher restore secondary-write failure is logged safely without changing 
     res
   );
 
-  assert.equal(res.statusCode, 200);
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not update booking");
   assert.equal(mutationAttempts, 1);
-  assert.equal(loggerCalls.length, 1);
-  assert.deepEqual(loggerCalls[0][0], {
-    err: { name: "Error" },
-    event: "booking.voucher_secondary_write_failed",
-    operation: "restore_on_cancel",
-    voucherId: validVoucherId,
-    bookingId: validBookingId,
-  });
 });
 
 test("repeated cancel/reject on voucher booking does not double-restore voucher use", async () => {
   let restoreCallCount = 0;
   let lastRestoreBookingId = null;
-  Voucher.findByIdAndUpdate = async (id, update) => {
+  Voucher.findOneAndUpdate = async (filter, update) => {
     if (update && update.$inc && update.$inc.currentUses === -1) {
       restoreCallCount++;
-      lastRestoreBookingId = id;
+      lastRestoreBookingId = filter._id;
+      assert.equal(filter.redemptionBookingIds, booking._id);
+      assert.deepEqual(filter.currentUses, { $gt: 0 });
     }
-    return null;
+    return { currentUses: 0 };
   };
 
   const notifications = [];
@@ -750,4 +750,70 @@ test("repeated cancel/reject on voucher booking does not double-restore voucher 
   // restore should NOT be called a second time
   assert.equal(restoreCallCount, 1);
   assert.equal(lastRestoreBookingId, "voucher-repeat");
+});
+
+test("rejecting a voucher-discounted booking restores its exact redemption", async () => {
+  Notification.create = async (payload) => payload;
+  User.findById = () => ({ select: async () => ({ name: "Barber" }) });
+  const booking = createMutableBooking({
+    status: "pending",
+    voucherId: "voucher-reject",
+    voucherDiscount: 10,
+  });
+  Booking.findById = async () => booking;
+
+  let restoreFilter = null;
+  Voucher.findOneAndUpdate = async (filter, update) => {
+    restoreFilter = filter;
+    assert.deepEqual(update, {
+      $inc: { currentUses: -1 },
+      $pull: { redemptionBookingIds: booking._id },
+    });
+    return { currentUses: 0 };
+  };
+
+  const res = createResponse();
+  await updateBooking(
+    {
+      user: barberWithSalon,
+      params: { id: booking._id },
+      body: { status: "rejected", rejectionReason: "Unavailable" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(restoreFilter._id, "voucher-reject");
+  assert.equal(restoreFilter.redemptionBookingIds, booking._id);
+});
+
+test("missing voucher redemption link fails closed without a second restore", async () => {
+  Notification.create = async (payload) => payload;
+  User.findById = () => ({ select: async () => ({ name: "Barber" }) });
+  const booking = createMutableBooking({
+    status: "accepted",
+    voucherId: "voucher-missing-link",
+    voucherDiscount: 10,
+  });
+  Booking.findById = async () => booking;
+  let restoreAttempts = 0;
+  Voucher.findOneAndUpdate = async (filter) => {
+    restoreAttempts += 1;
+    assert.equal(filter.redemptionBookingIds, booking._id);
+    return null;
+  };
+
+  const res = createResponse();
+  await updateBooking(
+    {
+      user: client,
+      params: { id: booking._id },
+      body: { status: "cancelled", cancelReason: "Plans changed" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not update booking");
+  assert.equal(restoreAttempts, 1);
 });

@@ -435,6 +435,13 @@ export const updateBooking = async (req, res) => {
       }
       await bookingToUpdate.save(session ? { session } : undefined);
 
+      if (
+        bookingToUpdate.voucherId &&
+        (safeUpdates.status === "rejected" || safeUpdates.status === "cancelled")
+      ) {
+        await restoreVoucherOnCancel(bookingToUpdate, { session });
+      }
+
       const hasLoyaltyReward =
         bookingToUpdate.loyaltyDiscountApplied === true;
 
@@ -511,7 +518,6 @@ export const updateBooking = async (req, res) => {
 
       if (safeUpdates.status === "rejected" || safeUpdates.status === "cancelled") {
         notifyWaitlistForReleasedBookingSlot(updatedBooking);
-        restoreVoucherOnCancel(updatedBooking, previousStatus);
       }
 
       // ── Review request automation ──

@@ -295,20 +295,29 @@ export const recordVoucherRedemption = async (voucherId, bookingId) => {
 };
 
 /**
- * Restore voucher use when a booking with voucherDiscount is cancelled/rejected.
+ * Restore a claimed voucher use as part of the booking status transaction.
  */
-export const restoreVoucherOnCancel = async (booking, previousStatus) => {
-  if (!booking.voucherId || !booking.voucherDiscount) return;
-  const terminalStatuses = new Set(["cancelled", "rejected"]);
-  if (terminalStatuses.has(previousStatus)) return;
+export const restoreVoucherOnCancel = async (booking, { session } = {}) => {
+  if (!booking?.voucherId) return null;
 
-  await runVoucherSecondaryWrite({
-    operation: "restore_on_cancel",
-    voucherId: booking.voucherId,
-    bookingId: booking._id,
-    update: {
+  const restored = await Voucher.findOneAndUpdate(
+    {
+      _id: booking.voucherId,
+      currentUses: { $gt: 0 },
+      redemptionBookingIds: booking._id,
+    },
+    {
       $inc: { currentUses: -1 },
       $pull: { redemptionBookingIds: booking._id },
     },
-  });
+    { new: true, ...(session ? { session } : {}) }
+  );
+
+  if (!restored) {
+    throw Object.assign(new Error("Voucher redemption could not be restored"), {
+      code: "VOUCHER_REDEMPTION_RESTORE_FAILED",
+    });
+  }
+
+  return restored;
 };

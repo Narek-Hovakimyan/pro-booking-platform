@@ -13,7 +13,11 @@ import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
-import { createBooking, quoteBookingPrice } from "./bookingController.js";
+import {
+  createBooking,
+  quoteBookingPrice,
+  updateBooking,
+} from "./bookingController.js";
 
 const enabled = process.env.RUN_REAL_MONGO_TRANSACTION_TESTS === "true";
 const response = () => ({ statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
@@ -61,6 +65,14 @@ test("real Mongo scoped voucher quote/create parity, ambiguity, and contention",
   const body = (code, time) => ({ barberId, clientId, salonId: salonAId, serviceId: service._id, bookingDate: day, dayKey: "tue", time, clientName: "Client", voucherCode: code });
   const invokeQuote = async (code) => { const res = response(); await quoteBookingPrice({ user: { _id: clientId, role: "client" }, body: body(code, "10:00") }, res); return res; };
   const invokeCreate = async (code, time) => { const res = response(); await createBooking({ user: { _id: clientId, role: "client" }, body: body(code, time) }, res); return res; };
+  const invokeStatus = async (bookingId, status, user) => {
+    const res = response();
+    const body = status === "rejected"
+      ? { status, rejectionReason: "Unavailable" }
+      : { status, cancelReason: "Plans changed" };
+    await updateBooking({ user, params: { id: bookingId }, body }, res);
+    return res;
+  };
 
   const [a, b] = await Voucher.create([{ ownerType: "salon", ownerId: salonAId, code: "SAME", title: "A", type: "amount", amount: 10, maxUses: 2 }, { ownerType: "salon", ownerId: salonBId, code: "SAME", title: "B", type: "amount", amount: 40, maxUses: 2 }]);
   const quote = await invokeQuote("SAME");
@@ -89,4 +101,54 @@ test("real Mongo scoped voucher quote/create parity, ambiguity, and contention",
   const bookings = await Booking.find({ voucherId: limited._id });
   assert.equal(bookings.length, 1);
   assert.equal((await Voucher.findById(limited._id)).redemptionBookingIds.length, 1);
+
+  const cancelled = await invokeStatus(bookings[0]._id, "cancelled", {
+    _id: clientId,
+    role: "client",
+  });
+  assert.equal(cancelled.statusCode, 200);
+  assert.equal((await Booking.findById(bookings[0]._id)).status, "cancelled");
+  assert.equal((await Voucher.findById(limited._id)).currentUses, 0);
+  assert.equal((await Voucher.findById(limited._id)).redemptionBookingIds.length, 0);
+
+  const cancelReplay = await invokeStatus(bookings[0]._id, "cancelled", {
+    _id: clientId,
+    role: "client",
+  });
+  assert.equal(cancelReplay.statusCode, 400);
+  assert.equal((await Voucher.findById(limited._id)).currentUses, 0);
+
+  const rejectVoucher = await Voucher.create({ ownerType: "salon", ownerId: salonAId, code: "REJECT", title: "Reject", type: "amount", amount: 10, maxUses: 1 });
+  assert.equal((await invokeCreate("REJECT", "14:00")).statusCode, 201);
+  const rejectBooking = await Booking.findOne({ voucherId: rejectVoucher._id });
+  const rejected = await invokeStatus(rejectBooking._id, "rejected", {
+    _id: barberId,
+    role: "barber",
+  });
+  assert.equal(rejected.statusCode, 200);
+  assert.equal((await Voucher.findById(rejectVoucher._id)).currentUses, 0);
+  assert.equal((await Voucher.findById(rejectVoucher._id)).redemptionBookingIds.length, 0);
+
+  const failingVoucher = await Voucher.create({ ownerType: "salon", ownerId: salonAId, code: "FAILRESTORE", title: "Failure", type: "amount", amount: 10, maxUses: 1 });
+  assert.equal((await invokeCreate("FAILRESTORE", "15:00")).statusCode, 201);
+  const failingBooking = await Booking.findOne({ voucherId: failingVoucher._id });
+  const originalFindOneAndUpdate = Voucher.findOneAndUpdate;
+  Voucher.findOneAndUpdate = async (filter, ...args) => {
+    if (String(filter?._id) === String(failingVoucher._id) && filter.redemptionBookingIds) {
+      throw new Error("restore failed");
+    }
+    return originalFindOneAndUpdate.call(Voucher, filter, ...args);
+  };
+  try {
+    const failedCancel = await invokeStatus(failingBooking._id, "cancelled", {
+      _id: clientId,
+      role: "client",
+    });
+    assert.equal(failedCancel.statusCode, 500);
+  } finally {
+    Voucher.findOneAndUpdate = originalFindOneAndUpdate;
+  }
+  assert.equal((await Booking.findById(failingBooking._id)).status, "pending");
+  assert.equal((await Voucher.findById(failingVoucher._id)).currentUses, 1);
+  assert.equal((await Voucher.findById(failingVoucher._id)).redemptionBookingIds.length, 1);
 });
