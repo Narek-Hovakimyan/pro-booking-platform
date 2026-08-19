@@ -8,6 +8,9 @@ import {
 } from "./reviewController.js";
 import Booking from "../../models/Booking.js";
 import Review from "../../models/Review.js";
+import {
+  __reviewCreationServiceTestHooks,
+} from "../../services/reviews/reviewCreationService.js";
 
 const originalMethods = {
   bookingFindById: Booking.findById,
@@ -23,12 +26,24 @@ const otherBarberId = "64b000000000000000000007";
 const bookingId = "64b000000000000000000005";
 const reviewId = "64b000000000000000000006";
 
+const installTransactionStub = () => {
+  __reviewCreationServiceTestHooks.setStartSession(async () => ({
+    async withTransaction(task) {
+      return task();
+    },
+    async endSession() {},
+  }));
+};
+
+installTransactionStub();
+
 afterEach(() => {
   Booking.findById = originalMethods.bookingFindById;
   Review.create = originalMethods.reviewCreate;
   Review.findOne = originalMethods.reviewFindOne;
   Review.findById = originalMethods.reviewFindById;
   Review.find = originalMethods.reviewFind;
+  installTransactionStub();
 });
 
 const createResponse = () => ({
@@ -66,7 +81,8 @@ const mockReviewDependencies = ({ bookingStatus = "completed" } = {}) => {
     },
   });
   Review.findOne = async () => null;
-  Review.create = async (payload) => ({
+  Review.create = async ([payload]) => [
+    {
     _id: reviewId,
     ...payload,
     reply: { message: "", repliedBy: null, updatedAt: null },
@@ -79,7 +95,8 @@ const mockReviewDependencies = ({ bookingStatus = "completed" } = {}) => {
         },
       };
     },
-  });
+    },
+  ];
 };
 
 const createMockReview = (overrides = {}) => {

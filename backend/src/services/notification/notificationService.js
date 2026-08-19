@@ -52,8 +52,14 @@ const persistNotification = async (payload, internalHash, session) => {
     : payload;
 
   try {
+    const createdNotification = session
+      ? await Notification.create([notificationPayload], { session })
+      : await Notification.create(notificationPayload);
+
     return {
-      notification: await Notification.create(notificationPayload, session ? { session } : undefined),
+      notification: Array.isArray(createdNotification)
+        ? createdNotification[0]
+        : createdNotification,
       created: true,
     };
   } catch (error) {

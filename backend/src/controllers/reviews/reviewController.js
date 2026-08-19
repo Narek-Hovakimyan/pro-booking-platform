@@ -1,5 +1,7 @@
-import Booking from "../../models/Booking.js";
 import Review from "../../models/Review.js";
+import {
+  createBarberReview,
+} from "../../services/reviews/reviewCreationService.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import { isValidObjectIdString } from "../../utils/requestValidation.js";
 
@@ -79,49 +81,13 @@ export const createReview = async (req, res) => {
       });
     }
 
-    const booking = await Booking.findById(bookingId);
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    if (booking.status !== "completed") {
-      return res.status(400).json({
-        message: "Review is allowed only for completed bookings",
-      });
-    }
-
-    if (String(booking.barberId) !== String(barberId)) {
-      return res.status(400).json({
-        message: "Review barber must match the completed booking",
-      });
-    }
-
-    if (String(booking.clientId) !== String(req.user._id)) {
-      return res.status(403).json({
-        message: "You can review only your own booking",
-      });
-    }
-
-    const existingReview = await Review.findOne({ bookingId });
-
-    if (existingReview) {
-      return res.status(400).json({
-        message: "This booking has already been reviewed",
-      });
-    }
-
-    const review = await Review.create({
+    const review = await createBarberReview({
       barberId,
       bookingId,
       rating,
       comment: reviewComment,
-      isVerified: true,
       clientId: req.user._id,
     });
-
-    booking.reviewed = true;
-    await booking.save();
 
     const populatedReview = await review.populate("clientId", "name");
 

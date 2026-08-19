@@ -458,9 +458,9 @@ test("notifyMatchingWaitlistEntries forwards session and afterCommit through all
     };
   };
   Notification.create = async (payload, options) => {
-    calls.notificationPayload = payload;
+    calls.notificationPayload = payload[0];
     calls.notificationOptions = options;
-    return payload;
+    return [payload[0]];
   };
 
   const count = await notifyMatchingWaitlistEntries({

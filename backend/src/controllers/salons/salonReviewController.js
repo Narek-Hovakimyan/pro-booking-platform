@@ -1,7 +1,8 @@
-import Booking from "../../models/Booking.js";
 import Salon from "../../models/Salon.js";
 import SalonReview from "../../models/SalonReview.js";
-import { createNotification } from "../notifications/notificationController.js";
+import {
+  createSalonReview as createSalonReviewTransaction,
+} from "../../services/reviews/reviewCreationService.js";
 import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
@@ -190,70 +191,13 @@ export const createSalonReview = async (req, res) => {
       });
     }
 
-    const [salon, booking] = await Promise.all([
-      Salon.findById(salonId),
-      Booking.findById(bookingId),
-    ]);
-
-    if (!salon) {
-      return res.status(404).json({ message: "Salon not found" });
-    }
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    if (booking.status !== "completed") {
-      return res.status(400).json({
-        message: "You can only review completed bookings",
-      });
-    }
-
-    if (String(booking.clientId) !== String(req.user._id)) {
-      return res.status(403).json({
-        message: "You can only review your own bookings",
-      });
-    }
-
-    const bookingSalonId = booking?.salonId ? String(booking.salonId) : "";
-
-    if (!bookingSalonId) {
-      return res.status(400).json({
-        message: "This booking is not connected to a salon",
-      });
-    }
-
-    if (bookingSalonId !== String(salonId)) {
-      return res.status(400).json({
-        message: "Salon review must match the booking salon",
-      });
-    }
-
-    const existingReview = await SalonReview.findOne({
-      bookingId,
-      salonId,
-      clientId: req.user._id,
-    });
-
-    if (existingReview) {
-      return res.status(400).json({
-        message: "You have already reviewed this salon for this booking",
-      });
-    }
-
-    const review = await SalonReview.create({
+    const review = await createSalonReviewTransaction({
       salonId,
       bookingId,
       rating,
       comment,
-      isVerified: true,
       clientId: req.user._id,
-    });
-
-    await createNotification({
-      userId: salon.ownerId,
-      type: "salon_review_created",
-      message: `${req.user.name} left a review for ${salon.name}`,
+      clientName: req.user.name,
     });
 
     const populatedReview = await review.populate("clientId", "name avatarUrl");

@@ -10,6 +10,9 @@ import Booking from "../../models/Booking.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
 import SalonReview from "../../models/SalonReview.js";
+import {
+  __reviewCreationServiceTestHooks,
+} from "../../services/reviews/reviewCreationService.js";
 
 const originalMethods = {
   bookingFindById: Booking.findById,
@@ -31,6 +34,17 @@ const adminId = "64b000000000000000000009";
 const employeeId = "64b00000000000000000000a";
 const unrelatedUserId = "64b00000000000000000000b";
 
+const installTransactionStub = () => {
+  __reviewCreationServiceTestHooks.setStartSession(async () => ({
+    async withTransaction(task) {
+      return task();
+    },
+    async endSession() {},
+  }));
+};
+
+installTransactionStub();
+
 afterEach(() => {
   Booking.findById = originalMethods.bookingFindById;
   Notification.create = originalMethods.notificationCreate;
@@ -39,6 +53,7 @@ afterEach(() => {
   SalonReview.findOne = originalMethods.salonReviewFindOne;
   SalonReview.findById = originalMethods.salonReviewFindById;
   SalonReview.find = originalMethods.salonReviewFind;
+  installTransactionStub();
 });
 
 const createResponse = () => ({
@@ -80,7 +95,8 @@ const mockCreateSalonReviewDependencies = ({
     status: bookingStatus,
   });
   SalonReview.findOne = async () => null;
-  SalonReview.create = async (payload) => ({
+  SalonReview.create = async ([payload]) => [
+    {
     _id: reviewId,
     ...payload,
     reply: { message: "", repliedBy: null, updatedAt: null },
@@ -94,7 +110,8 @@ const mockCreateSalonReviewDependencies = ({
         },
       };
     },
-  });
+    },
+  ];
   Notification.create = async (payload) => payload;
 };
 

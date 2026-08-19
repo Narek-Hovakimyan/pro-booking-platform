@@ -83,8 +83,9 @@ test("past pending booking becomes expired and sends notifications", async () =>
     return null;
   };
   Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
+    const notification = Array.isArray(payload) ? payload[0] : payload;
+    notifications.push(notification);
+    return Array.isArray(payload) ? [notification] : notification;
   };
   BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   WaitlistEntry.find = async () => [];
@@ -205,8 +206,9 @@ test("duplicate expiration does not send duplicate notifications", async () => {
     return null;
   };
   Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
+    const notification = Array.isArray(payload) ? payload[0] : payload;
+    notifications.push(notification);
+    return Array.isArray(payload) ? [notification] : notification;
   };
   BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   WaitlistEntry.find = async () => [];
@@ -241,8 +243,9 @@ test("booking with no clientId still sends barber notification only", async () =
     return null;
   };
   Notification.create = async (payload) => {
-    notifications.push(payload);
-    return payload;
+    const notification = Array.isArray(payload) ? payload[0] : payload;
+    notifications.push(notification);
+    return Array.isArray(payload) ? [notification] : notification;
   };
   BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
   WaitlistEntry.find = async () => [];
@@ -307,8 +310,9 @@ test("booking expiration re-reads in transaction, uses session, and preserves de
     return { deletedCount: 30 };
   };
   Notification.create = async (payload, options) => {
-    notificationOptions.push({ payload, options });
-    return payload;
+    const notification = Array.isArray(payload) ? payload[0] : payload;
+    notificationOptions.push({ payload: notification, options });
+    return Array.isArray(payload) ? [notification] : notification;
   };
 
   await expirePendingBookings({
