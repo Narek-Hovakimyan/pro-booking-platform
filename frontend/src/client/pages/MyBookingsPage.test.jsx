@@ -102,13 +102,29 @@ vi.mock("@/client/components/LoyaltyBanner", () => ({
 }));
 
 vi.mock("@/client/components/BookingCard", () => ({
-  default: ({ booking, bookingId, isActive, isBookAgainEligible, onBookAgain, price, serviceName }) => (
+  default: ({
+    booking,
+    bookingId,
+    isActive,
+    isBookAgainEligible,
+    isSalonReviewed,
+    canReviewSalon,
+    onBookAgain,
+    onReviewSalon,
+    price,
+    serviceName,
+  }) => (
     <article data-testid={`booking-card-${isActive ? "active" : "history"}-${bookingId || "missing"}`}>
       <span>{serviceName}</span>
       {price ? <span>{price}</span> : null}
       {isBookAgainEligible ? (
         <button type="button" onClick={() => onBookAgain(booking)}>
           Book again
+        </button>
+      ) : null}
+      {canReviewSalon ? (
+        <button type="button" onClick={() => onReviewSalon?.(booking)}>
+          {isSalonReviewed ? "Salon reviewed ✓" : "Review salon"}
         </button>
       ) : null}
     </article>
@@ -140,6 +156,7 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
     vi.useRealTimers();
     routerMocks.navigate.mockClear();
     dispatchMock.mockClear();
+    state.auth.currentUser = { id: "client-1" };
     state.bookings = [];
     state.reviews = [];
     state.users = [];
@@ -358,5 +375,86 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
         })
       );
     });
+  });
+
+  it("loads salon reviews even when the barber directory request fails", async () => {
+    state.bookings = [
+      {
+        id: "reviewed-salon-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        salonId: "salon-1",
+        bookingDate: "2026-07-01",
+        time: "10:00",
+        status: "completed",
+        service: { name: "Salon haircut" },
+      },
+    ];
+    vi.mocked(api.get).mockImplementation((url) => {
+      if (url === "/users/barbers") {
+        return Promise.reject(new Error("directory unavailable"));
+      }
+      if (url === "/salon-reviews/salon/salon-1") {
+        return Promise.resolve({
+          data: {
+            reviews: [
+              { bookingId: "reviewed-salon-booking", salonId: "salon-1" },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByText("Salon reviewed ✓")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Review salon")).not.toBeInTheDocument();
+  });
+
+  it("clears stale salon review state when a later salon review load fails", async () => {
+    const booking = {
+      id: "reviewed-salon-booking",
+      clientId: "client-1",
+      barberId: "barber-1",
+      salonId: "salon-1",
+      bookingDate: "2026-07-01",
+      time: "10:00",
+      status: "completed",
+      service: { name: "Salon haircut" },
+    };
+    state.bookings = [booking];
+    let salonRequestCount = 0;
+    vi.mocked(api.get).mockImplementation((url) => {
+      if (url === "/salon-reviews/salon/salon-1") {
+        salonRequestCount += 1;
+        return salonRequestCount === 1
+          ? Promise.resolve({
+              data: {
+                reviews: [
+                  { bookingId: booking.id, salonId: booking.salonId },
+                ],
+              },
+            })
+          : Promise.reject(new Error("review service unavailable"));
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    const { rerender } = renderPage();
+    expect(await screen.findByText("Salon reviewed ✓")).toBeInTheDocument();
+
+    state.auth.currentUser = { id: "client-2" };
+    state.bookings = [{ ...booking, clientId: "client-2" }];
+    rerender(
+      <MemoryRouter initialEntries={["/my-bookings"]}>
+        <MyBookingsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Review salon")).toBeInTheDocument();
+    expect(screen.queryByText("Salon reviewed ✓")).not.toBeInTheDocument();
   });
 });

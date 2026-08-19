@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 
@@ -81,6 +81,7 @@ export default function MyBookingsPage() {
   const [cancelError, setCancelError] = useState("");
   const [delayError, setDelayError] = useState("");
   const [reviewError, setReviewError] = useState("");
+  const salonReviewsLoadRef = useRef(0);
   const { currentUser } = useSelector((state) => state.auth);
   const bookings = useSelector((state) => state.bookings);
   const reviews = useSelector((state) => state.reviews);
@@ -171,8 +172,14 @@ export default function MyBookingsPage() {
     if (!currentUser?.id) return;
 
     let isMounted = true;
+    const loadId = ++salonReviewsLoadRef.current;
+
+    const isCurrentLoad = () =>
+      isMounted && salonReviewsLoadRef.current === loadId;
 
     async function loadBookings({ showLoading = false, silent = false } = {}) {
+      setSalonReviews([]);
+
       if (showLoading) {
         setIsLoading(true);
       }
@@ -201,29 +208,32 @@ export default function MyBookingsPage() {
           });
         }
 
-        try {
-          const { data: barbersData } = await api.get("/users/barbers");
+        const salonIds = Array.from(
+          new Set(data.map(getBookingSalonId).filter(Boolean))
+        );
+        const [barbersResult, salonReviewsResult] = await Promise.allSettled([
+          api.get("/users/barbers"),
+          Promise.all(
+            salonIds.map((salonId) =>
+              api.get(`/salon-reviews/salon/${salonId}`)
+            )
+          ),
+        ]);
 
-          if (isMounted) {
-            dispatch(setBarbers(barbersData));
+        if (isCurrentLoad()) {
+          if (barbersResult.status === "fulfilled") {
+            dispatch(setBarbers(barbersResult.value.data));
           }
 
-          const salonIds = Array.from(
-            new Set(data.map(getBookingSalonId).filter(Boolean))
-          );
-          const salonReviewResponses = await Promise.all(
-            salonIds.map((salonId) => api.get(`/salon-reviews/salon/${salonId}`))
-          );
-
-          if (isMounted) {
+          if (salonReviewsResult.status === "fulfilled") {
             setSalonReviews(
-              salonReviewResponses.flatMap((response) =>
+              salonReviewsResult.value.flatMap((response) =>
                 response.data?.reviews || response.data || []
               )
             );
+          } else {
+            setSalonReviews([]);
           }
-        } catch {
-          // Barber names have safe fallbacks if the directory cannot be loaded.
         }
       } catch (requestError) {
         if (isMounted && !silent) {
