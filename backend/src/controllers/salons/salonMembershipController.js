@@ -4,6 +4,7 @@ import Salon from "../../models/Salon.js";
 import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import User from "../../models/User.js";
 import {
+  isSalonAdmin,
   isSalonOwner,
   sameId,
 } from "../../utils/salonPermissions.js";
@@ -27,6 +28,22 @@ import {
   decideSalonJoinRequestLifecycle,
   requestSalonJoinLifecycle,
 } from "../../services/salon/salonJoinRequestLifecycleService.js";
+
+const sessionQuery = (query, session) =>
+  query?.session ? query.session(session) : query;
+
+const runTransaction = async (callback) => {
+  const session = await mongoose.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await callback(session);
+    });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+};
 
 const isValidSalonId = (salonId) =>
   typeof salonId === "string" &&
@@ -177,51 +194,68 @@ export const leaveSalon = async (req, res) => {
       return res.status(400).json({ message: "salonId is required" });
     }
 
-    const barber = await User.findById(req.user._id);
+    const result = await runTransaction(async (session) => {
+      const [barber, salon] = await Promise.all([
+        sessionQuery(User.findById(req.user._id), session),
+        sessionQuery(Salon.findById(salonId), session),
+      ]);
 
-    if (!barber) {
-      return res.status(404).json({ message: "Barber not found" });
-    }
+      if (!barber) {
+        const error = new Error("Barber not found");
+        error.statusCode = 404;
+        throw error;
+      }
 
-    // Check if barber is in this salon via new array or legacy
-    const isInSalon = (barber.salons || []).some(
-      (s) => s.salon?.toString() === salonId.toString() && s.status === "approved"
-    ) || (barber.salonStatus === "approved" && sameId(barber.salon, salonId));
+      if (isSalonOwner(salon, barber._id)) {
+        const error = new Error(
+          "Salon owner cannot leave without transferring ownership or deleting salon"
+        );
+        error.statusCode = 400;
+        throw error;
+      }
 
-    if (!isInSalon) {
+      const isInSalon = (barber.salons || []).some(
+        (s) => s.salon?.toString() === salonId.toString() && s.status === "approved"
+      ) || (barber.salonStatus === "approved" && sameId(barber.salon, salonId));
+      const wasAdmin = isSalonAdmin(salon, barber._id);
+
+      if (!isInSalon && !wasAdmin) {
+        return { barber, salon, membershipRemoved: false };
+      }
+
+      if (Array.isArray(barber.salons)) {
+        barber.salons = barber.salons.filter(
+          (s) => s.salon?.toString() !== salonId.toString()
+        );
+      }
+
+      closeCurrentWorkHistory(barber, salonId);
+
+      const remainingApproved = (barber.salons || []).filter((s) => s.status === "approved");
+      if (remainingApproved.length > 0 && !remainingApproved.some((s) => s.isPrimary)) {
+        remainingApproved[0].isPrimary = true;
+      }
+
+      syncLegacySalonFields(barber);
+      if (wasAdmin) {
+        salon.admins = (salon.admins || []).filter(
+          (adminId) => !sameId(adminId, barber._id)
+        );
+      }
+      await barber.save({ session });
+      if (wasAdmin) await salon.save({ session });
+
+      return { barber, salon, membershipRemoved: isInSalon };
+    });
+
+    const { barber, salon, membershipRemoved } = result;
+    if (!membershipRemoved) {
       return res.json({
         message: "You are not currently part of this salon",
         user: serializeUser(barber),
       });
     }
 
-    const salon = await Salon.findById(salonId);
-
-    if (isSalonOwner(salon, barber._id)) {
-      return res.status(400).json({
-        message:
-          "Salon owner cannot leave without transferring ownership or deleting salon",
-      });
-    }
-
-    // Remove salon from salons array
-    if (Array.isArray(barber.salons)) {
-      barber.salons = barber.salons.filter(
-        (s) => s.salon?.toString() !== salonId.toString()
-      );
-    }
-
-    closeCurrentWorkHistory(barber, salonId);
-
-    // If leaving primary salon and has other approved, set first remaining as primary
-    const remainingApproved = (barber.salons || []).filter((s) => s.status === "approved");
-    if (remainingApproved.length > 0 && !remainingApproved.some((s) => s.isPrimary)) {
-      remainingApproved[0].isPrimary = true;
-    }
-
-    // Update legacy fields
-    syncLegacySalonFields(barber);
-    await barber.save();
     await revokeSalonSeatsForRemovedMember({
       salonId,
       barberId: barber._id,
@@ -241,7 +275,7 @@ export const leaveSalon = async (req, res) => {
       user: serializeUser(barber),
     });
   } catch (error) {
-    return res.status(400).json({
+    return res.status(error.statusCode || 400).json({
       message: error.message || "Could not leave salon",
     });
   }

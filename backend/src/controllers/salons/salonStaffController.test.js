@@ -16,6 +16,7 @@ import User from "../../models/User.js";
 import { __notificationServiceTestHooks } from "../../services/notification/notificationService.js";
 
 const originalNotificationCreate = Notification.create;
+const originalStartSession = mongoose.startSession;
 const originalSalonFindById = Salon.findById;
 const originalSeatFind = SubscriptionSeat.find;
 const originalUserFindById = User.findById;
@@ -43,6 +44,7 @@ const createResponse = () => ({
 });
 
 afterEach(() => {
+  mongoose.startSession = originalStartSession;
   Notification.create = originalNotificationCreate;
   Salon.findById = originalSalonFindById;
   SubscriptionSeat.find = originalSeatFind;
@@ -51,6 +53,12 @@ afterEach(() => {
 });
 
 test("removeBarberFromSalon revokes active subscription seat", async () => {
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+    },
+    async endSession() {},
+  });
   const ownerId = new mongoose.Types.ObjectId();
   const salonId = new mongoose.Types.ObjectId();
   const barberId = new mongoose.Types.ObjectId();
@@ -59,6 +67,9 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
     name: "Seat Salon",
     ownerId,
     admins: [],
+    async save() {
+      return this;
+    },
   };
   const barber = {
     _id: barberId,
@@ -113,6 +124,65 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
   assert.equal(activeSeat.subscriptionId.activeSeatCount, 0);
   assert.equal(barber.salons.length, 0);
   assert.equal(barber.salonStatus, "none");
+});
+
+test("owner removal revokes promoted admin authority without affecting another salon", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const adminId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const otherSalonId = new mongoose.Types.ObjectId();
+  const salon = {
+    _id: salonId,
+    name: "Primary Salon",
+    ownerId,
+    admins: [adminId],
+    async save() {
+      return this;
+    },
+  };
+  const otherSalon = {
+    _id: otherSalonId,
+    ownerId: new mongoose.Types.ObjectId(),
+    admins: [adminId],
+  };
+  const barber = {
+    _id: adminId,
+    name: "Admin Barber",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+    salon: salonId,
+    salonStatus: "approved",
+    workHistory: [],
+    async save() {
+      return this;
+    },
+  };
+
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+    },
+    async endSession() {},
+  });
+  Salon.findById = async (id) =>
+    String(id) === String(salonId) ? salon : otherSalon;
+  User.findById = async () => barber;
+  SubscriptionSeat.find = () => chainableQuery([]);
+  Notification.create = async (payload) => payload;
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  const res = createResponse();
+  await removeBarberFromSalon(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(adminId) },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(salon.admins, []);
+  assert.deepEqual(otherSalon.admins, [adminId]);
 });
 
 test("owner request sets pending relationshipType", async () => {

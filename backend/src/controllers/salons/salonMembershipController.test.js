@@ -3,12 +3,16 @@ import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import Notification from "../../models/Notification.js";
+import Salon from "../../models/Salon.js";
 import SalonJoinRequest from "../../models/SalonJoinRequest.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import { __notificationServiceTestHooks } from "../../services/notification/notificationService.js";
 import {
   cancelJoinRequestBySalon,
   decideJoinRequest,
+  getOwnerJoinRequests,
+  leaveSalon,
 } from "./salonMembershipController.js";
 
 const originalMethods = {
@@ -18,6 +22,10 @@ const originalMethods = {
   joinRequestFindOne: SalonJoinRequest.findOne,
   joinRequestFindOneAndUpdate: SalonJoinRequest.findOneAndUpdate,
   userFindById: User.findById,
+  salonFindById: Salon.findById,
+  salonFind: Salon.find,
+  joinRequestFind: SalonJoinRequest.find,
+  seatFind: SubscriptionSeat.find,
 };
 
 const ownerId = "64b000000000000000000020";
@@ -33,6 +41,10 @@ afterEach(() => {
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
   SalonJoinRequest.findOneAndUpdate = originalMethods.joinRequestFindOneAndUpdate;
   User.findById = originalMethods.userFindById;
+  Salon.findById = originalMethods.salonFindById;
+  Salon.find = originalMethods.salonFind;
+  SalonJoinRequest.find = originalMethods.joinRequestFind;
+  SubscriptionSeat.find = originalMethods.seatFind;
   __notificationServiceTestHooks.resetGetIO();
 });
 
@@ -221,6 +233,23 @@ test("admin self-rejection is blocked", async () => {
   assert.equal(res.body.message, "You cannot manage your own join request");
 });
 
+test("former admin cannot approve or reject requests", async () => {
+  mockFindRequest(createRequestDoc({ admins: [] }));
+
+  for (const status of ["accepted", "rejected"]) {
+    const res = createResponse();
+    await decideJoinRequest(
+      {
+        user: { _id: adminId, role: "barber" },
+        params: { requestId },
+        body: { status },
+      },
+      res
+    );
+    assert.equal(res.statusCode, 403);
+  }
+});
+
 test("transaction errors are bounded and do not send notifications", async () => {
   const request = createRequestDoc();
   const savedBarber = {
@@ -357,4 +386,87 @@ test("cancel by salon returns no request identifier", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { salonStatus: "none" });
+});
+
+test("admin leaving removes salon authority and is idempotent", async () => {
+  const salon = {
+    _id: salonId,
+    ownerId,
+    admins: [adminId],
+    name: "Owner Salon",
+    async save() {
+      return this;
+    },
+  };
+  const barber = {
+    _id: adminId,
+    name: "Former Admin",
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+    salon: salonId,
+    salonStatus: "approved",
+    workHistory: [],
+    async save() {
+      return this;
+    },
+  };
+
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+    },
+    async endSession() {},
+  });
+  Salon.findById = async () => salon;
+  User.findById = async () => barber;
+  SubscriptionSeat.find = () => ({
+    populate() {
+      return this;
+    },
+    then(resolve, reject) {
+      return Promise.resolve([]).then(resolve, reject);
+    },
+  });
+  Notification.create = async (payload) => payload;
+  __notificationServiceTestHooks.setGetIO(() => null);
+
+  const first = createResponse();
+  const second = createResponse();
+  await Promise.all([
+    leaveSalon(
+      { user: { _id: adminId, role: "barber" }, body: { salonId } },
+      first
+    ),
+    leaveSalon(
+      { user: { _id: adminId, role: "barber" }, body: { salonId } },
+      second
+    ),
+  ]);
+  assert.equal(first.statusCode, 200);
+  assert.equal(second.statusCode, 200);
+  assert.deepEqual(salon.admins, []);
+});
+
+test("former admin cannot list requests or applicant contact data", async () => {
+  Salon.find = async () => [];
+  SalonJoinRequest.find = () => ({
+    populate() {
+      return this;
+    },
+    sort() {
+      return this;
+    },
+    then(resolve, reject) {
+      return Promise.resolve([]).then(resolve, reject);
+    },
+  });
+  const res = createResponse();
+
+  await getOwnerJoinRequests(
+    { user: { _id: adminId, role: "barber" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, []);
 });
