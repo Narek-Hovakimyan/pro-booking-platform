@@ -16,6 +16,7 @@ import {
   refreshAuthSession,
 } from "../controllers/auth/authSessionController.js";
 import { googleAuth, loginUser, registerUser } from "../controllers/auth/authController.js";
+import { confirmRecentAuthentication } from "../controllers/auth/recentAuthenticationController.js";
 import authRoutes from "./auth/authRoutes.js";
 
 const createRequest = () => ({
@@ -60,6 +61,28 @@ const runLimiter = async (limiter, req, res) => {
   return nextCalled;
 };
 
+const runRecentAuthenticationRouteWithoutCredentials = () =>
+  new Promise((resolve, reject) => {
+    const req = {
+      ...createRequest(),
+      originalUrl: "/api/auth/recent-authentication",
+      url: "/recent-authentication",
+    };
+    const res = {
+      statusCode: 200,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body) {
+        resolve({ body, statusCode: this.statusCode });
+        return this;
+      },
+    };
+
+    authRoutes.handle(req, res, reject);
+  });
+
 test("auth routes apply rate limiters before controllers", () => {
   const routes = Object.fromEntries(
     authRoutes.stack.map((layer) => [
@@ -80,6 +103,9 @@ test("auth routes apply rate limiters before controllers", () => {
   const refreshRoute = authRoutes.stack.find((layer) => layer.route.path === "/refresh");
   const logoutRoute = authRoutes.stack.find((layer) => layer.route.path === "/logout");
   const logoutAllRoute = authRoutes.stack.find((layer) => layer.route.path === "/logout-all");
+  const recentAuthenticationRoute = authRoutes.stack.find(
+    (layer) => layer.route.path === "/recent-authentication"
+  );
 
   assert.equal(loginRoute.route.stack[0].handle, authLimiter);
   assert.equal(registerRoute.route.stack[0].handle, authLimiter);
@@ -102,6 +128,10 @@ test("auth routes apply rate limiters before controllers", () => {
   assert.equal(logoutAllRoute.route.stack[1].handle, securityMutationLimiter);
   assert.equal(logoutAllRoute.route.stack[2].handle, requireAuthCookieRequestSecurity);
   assert.equal(logoutAllRoute.route.stack[3].handle, logoutAllAuthSessions);
+  assert.equal(recentAuthenticationRoute.route.stack[0].handle, protect);
+  assert.equal(recentAuthenticationRoute.route.stack[1].handle, securityMutationLimiter);
+  assert.equal(recentAuthenticationRoute.route.stack[2].handle, requireAuthCookieRequestSecurity);
+  assert.equal(recentAuthenticationRoute.route.stack[3].handle, confirmRecentAuthentication);
   assert.deepEqual(routes["/login"], ["<anonymous>", "requireAuthCookieRequestSecurity", "loginUser"]);
   assert.deepEqual(routes["/register"], ["<anonymous>", "requireAuthCookieRequestSecurity", "registerUser"]);
   assert.deepEqual(routes["/google"], ["<anonymous>", "requireAuthCookieRequestSecurity", "googleAuth"]);
@@ -110,12 +140,21 @@ test("auth routes apply rate limiters before controllers", () => {
   assert.deepEqual(routes["/refresh"], ["<anonymous>", "requireAuthCookieRequestSecurity", "refreshAuthSession"]);
   assert.deepEqual(routes["/logout"], ["<anonymous>", "requireAuthCookieRequestSecurity", "logoutAuthSession"]);
   assert.deepEqual(routes["/logout-all"], ["protect", "<anonymous>", "requireAuthCookieRequestSecurity", "logoutAllAuthSessions"]);
+  assert.deepEqual(routes["/recent-authentication"], ["protect", "<anonymous>", "requireAuthCookieRequestSecurity", "confirmRecentAuthentication"]);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/refresh").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/logout").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/logout-all").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/register").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/login").length, 1);
   assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/google").length, 1);
+  assert.equal(authRoutes.stack.filter((layer) => layer.route.path === "/recent-authentication").length, 1);
+});
+
+test("recent-authentication rejects unauthenticated requests before its controller", async () => {
+  const response = await runRecentAuthenticationRouteWithoutCredentials();
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(response.body, { message: "Not authorized, no token" });
 });
 
 test("auth limiter returns 429 after threshold per IP", async () => {

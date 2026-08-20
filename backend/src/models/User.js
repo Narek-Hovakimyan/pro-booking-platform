@@ -406,6 +406,23 @@ const userSchema = new mongoose.Schema({
     },
     select: false,
   },
+  recentAuthAt: {
+    type: Date,
+    default: null,
+    select: false,
+  },
+  recentAuthVersion: {
+    type: Number,
+    default: null,
+    min: 0,
+    validate: {
+      validator(value) {
+        return value === null || Number.isInteger(value);
+      },
+      message: "recentAuthVersion must be a non-negative integer or null",
+    },
+    select: false,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

@@ -40,3 +40,22 @@ test("authVersion accepts only non-negative integers", () => {
     assert.ok(user.validateSync()?.errors.authVersion);
   }
 });
+
+test("recent-authentication markers are hidden and version-bound", () => {
+  const recentAuthAt = new Date("2026-08-20T10:00:00.000Z");
+  const user = new User({
+    name: "Recently Authenticated",
+    phone: "+37400111999",
+    email: "recent@example.com",
+    password: "hashed-password",
+    recentAuthAt,
+    recentAuthVersion: 4,
+  });
+
+  assert.equal(User.schema.path("recentAuthAt").options.select, false);
+  assert.equal(User.schema.path("recentAuthVersion").options.select, false);
+  assert.equal(user.validateSync(), undefined);
+
+  user.recentAuthVersion = -1;
+  assert.ok(user.validateSync()?.errors.recentAuthVersion);
+});

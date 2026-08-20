@@ -1,5 +1,6 @@
 import express from "express";
 import { loginUser, registerUser, forgotPassword, resetPassword, googleAuth } from "../../controllers/auth/authController.js";
+import { confirmRecentAuthentication } from "../../controllers/auth/recentAuthenticationController.js";
 import {
   logoutAllAuthSessions,
   logoutAuthSession,
@@ -22,6 +23,13 @@ router.post("/forgot-password", authLimiter, forgotPassword);
 router.post("/reset-password", authLimiter, resetPassword);
 router.post("/refresh", authLimiter, requireAuthCookieRequestSecurity, refreshAuthSession);
 router.post("/logout", authLimiter, requireAuthCookieRequestSecurity, logoutAuthSession);
+router.post(
+  "/recent-authentication",
+  protect,
+  securityMutationLimiter,
+  requireAuthCookieRequestSecurity,
+  confirmRecentAuthentication
+);
 router.post(
   "/logout-all",
   protect,
