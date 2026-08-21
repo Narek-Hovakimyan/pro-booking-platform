@@ -111,16 +111,18 @@ test("server installs security headers before CORS and scopes public CORP overri
   assert.ok(serverSource.indexOf(securityUse) >= 0);
   assert.ok(serverSource.indexOf(securityUse) < serverSource.indexOf("app.use(cors(corsOptions));"));
 
-  for (const route of ["/uploads/events", "/uploads/certificate-files"]) {
-    const routeStart = serverSource.indexOf(`\"${route}\"`);
-    const staticUse = serverSource.indexOf("express.static", routeStart);
-    assert.ok(routeStart >= 0, route);
-    assert.ok(serverSource.indexOf("publicMediaResourcePolicy", routeStart) < staticUse, route);
-  }
+  const eventRouteStart = serverSource.indexOf('"/uploads/events"');
+  const eventStaticUse = serverSource.indexOf("express.static", eventRouteStart);
+  assert.ok(eventRouteStart >= 0);
+  assert.ok(serverSource.indexOf("publicMediaResourcePolicy", eventRouteStart) < eventStaticUse);
 
   assert.match(
     serverSource,
     /app\.get\(\s*"\/uploads\/:kind\(avatars\|certifications\)\/:filename",\s*publicMediaResourcePolicy,\s*serveProfileMedia\s*\)/
+  );
+  assert.match(
+    serverSource,
+    /app\.get\(\s*"\/uploads\/certificate-files\/:filename",\s*publicMediaResourcePolicy,\s*serveEventCertificateMedia\s*\)/
   );
 
   assert.match(

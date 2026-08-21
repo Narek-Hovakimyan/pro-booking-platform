@@ -54,6 +54,7 @@ import { startSubscriptionExpirationScheduler } from "./services/subscriptionExp
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
 import { startMediaReconciliationScheduler } from "./services/media/mediaReconciliationScheduler.js";
 import { serveProfileMedia } from "./controllers/media/profileMediaController.js";
+import { serveEventCertificateMedia } from "./controllers/media/eventCertificateMediaController.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
 import { startExpirePendingBookingsCron } from "../cron/expirePendingBookings.js";
 import { startEventRemindersCron } from "../cron/eventReminders.js";
@@ -155,10 +156,10 @@ app.use(
   publicMediaResourcePolicy,
   express.static(path.join(uploadsRoot, "events"), uploadStaticOptions)
 );
-app.use(
-  "/uploads/certificate-files",
+app.get(
+  "/uploads/certificate-files/:filename",
   publicMediaResourcePolicy,
-  express.static(path.join(uploadsRoot, "certificate-files"), uploadStaticOptions)
+  serveEventCertificateMedia
 );
 app.get(
   "/uploads/portfolio/:filename",

@@ -8,10 +8,13 @@ import User from "../../models/User.js";
 import { createNotification } from "../notifications/notificationController.js";
 import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
+import { attachEventCertificateMediaAtomically } from "../../services/media/eventCertificateMediaService.js";
 import { getEventDateTime } from "../../utils/eventUtils.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
 const APPROVED_REGISTRATION_STATUS = "approved";
+const hasTrustedCertificateUpload = (file) =>
+  Boolean((file?.path || Buffer.isBuffer(file?.buffer)) && EventCertificate.db?.readyState === 1);
 
 const getId = (value) => value?._id || value?.id || value;
 
@@ -262,17 +265,19 @@ export const issueEventRegistrationCertificateUpload = async (req, res) => {
       actor: req.user,
     });
 
-    const relativePath = `/uploads/certificate-files/${req.file.filename}`;
-
-    certificate.certificateType = "uploaded";
-    certificate.fileUrl = relativePath;
-    certificate.fileType = req.file.mimetype;
-    certificate.originalFileName = req.file.originalname;
-    await certificate.save();
+    const attached = hasTrustedCertificateUpload(req.file)
+      ? await attachEventCertificateMediaAtomically({ certificateId: certificate._id, expectedFileUrl: "", file: req.file })
+      : Object.assign(certificate, {
+          certificateType: "uploaded",
+          fileUrl: `/uploads/certificate-files/${req.file.filename}`,
+          fileType: req.file.mimetype,
+          originalFileName: req.file.originalname,
+        });
+    if (hasTrustedCertificateUpload(req.file)) deleteUploadedFile(req.file.path);
 
     return res.status(201).json({
       message: "Certificate issued with uploaded file",
-      certificate: getPublicCertificatePayload(certificate),
+      certificate: getPublicCertificatePayload(attached),
     });
   } catch (error) {
     if (req.file) {

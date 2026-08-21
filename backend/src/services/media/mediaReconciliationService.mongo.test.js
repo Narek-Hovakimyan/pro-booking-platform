@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import Booking from "../../models/Booking.js";
+import EventCertificate from "../../models/EventCertificate.js";
 import MediaObject, { MEDIA_OBJECT_STATES } from "../../models/MediaObject.js";
 import PortfolioPhoto from "../../models/PortfolioPhoto.js";
 import { __mediaReconciliationTestHooks, reconcileMediaObject } from "./mediaReconciliationService.js";
@@ -13,8 +14,8 @@ const connect = async () => {
   const uri = new URL(process.env.MONGO_URI);
   uri.pathname = `/aud012_media_${process.pid}`;
   await mongoose.connect(uri.toString(), { serverSelectionTimeoutMS: 5000 });
-  await Promise.all([MediaObject.deleteMany({}), Booking.deleteMany({}), PortfolioPhoto.deleteMany({})]);
-  await Promise.all([MediaObject.createIndexes(), Booking.createIndexes(), PortfolioPhoto.createIndexes()]);
+  await Promise.all([MediaObject.deleteMany({}), Booking.deleteMany({}), PortfolioPhoto.deleteMany({}), EventCertificate.deleteMany({})]);
+  await Promise.all([MediaObject.createIndexes(), Booking.createIndexes(), PortfolioPhoto.createIndexes(), EventCertificate.createIndexes()]);
 };
 
 afterEach(async () => {
@@ -164,6 +165,17 @@ test("real Mongo referenced delete-pending object fails closed", { skip: !enable
   assert.equal(result.reason, "referenced");
   assert.equal(mediaStore.deleted.length, 0);
   assert.equal((await MediaObject.findById(media._id)).status, MEDIA_OBJECT_STATES.DELETE_PENDING);
+});
+
+test("real Mongo referenced EventCertificate media fails closed", { skip: !enabled }, async () => {
+  await connect();
+  const certificate = await EventCertificate.create({ eventId: new mongoose.Types.ObjectId(), registrationId: new mongoose.Types.ObjectId(), userId: new mongoose.Types.ObjectId(), organizerId: new mongoose.Types.ObjectId(), certificateId: "CERT-RECONCILE", verificationCode: "VERIFY-RECONCILE", fileUrl: "/uploads/certificate-files/current.pdf" });
+  const media = await createMedia({ mediaClass: "event-certificate", ownerModel: "EventCertificate", ownerId: certificate._id, legacyUrl: certificate.fileUrl, access: "public" });
+  await EventCertificate.updateOne({ _id: certificate._id }, { $set: { mediaObjectId: media._id } });
+  const mediaStore = storage();
+  const result = await reconcileMediaObject({ mediaObjectId: media._id, mediaStore, now: new Date("2026-01-01") });
+  assert.equal(result.reason, "referenced");
+  assert.equal(mediaStore.deleted.length, 0);
 });
 
 test("real Mongo Booking rows without valid legacyUrl fail closed", { skip: !enabled }, async () => {

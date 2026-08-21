@@ -24,6 +24,7 @@ import {
   runInRequiredTransaction,
 } from "./subscriptionPaymentMutationTransactionHelpers.js";
 import { updateSubscriptionSeatCount } from "./seatCapacityMutations.js";
+import { runAccountDeletionGuardedMutation } from "../users/accountDeletionGuardedMutations.js";
 
 const createWithOptionalSession = async (Model, payload, session) => {
   if (!session) return Model.create(payload);
@@ -116,7 +117,8 @@ export const createSubscriptionPaymentIntent = async ({
       action,
     },
   });
-  const attempt = await SubscriptionPaymentAttempt.create({
+  const attempt = await runAccountDeletionGuardedMutation({ userId: requester._id, operation: async (session) => {
+    const payload = {
     purpose: "subscription",
     ownerType,
     ownerId,
@@ -143,7 +145,12 @@ export const createSubscriptionPaymentIntent = async ({
     },
     createdBy: requester._id,
     expiresAt: buildPaymentAttemptExpiry(now),
-  });
+    };
+    const created = session
+      ? await SubscriptionPaymentAttempt.create([payload], { session })
+      : await SubscriptionPaymentAttempt.create(payload);
+    return Array.isArray(created) ? created[0] : created;
+  }});
 
   return {
     checkoutUrl: paymentIntent.checkoutUrl || null,

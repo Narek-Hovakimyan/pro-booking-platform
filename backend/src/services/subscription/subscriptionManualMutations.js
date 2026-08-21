@@ -20,23 +20,13 @@ import {
   addMonths,
 } from "./subscriptionHelpers.js";
 import { assertSeatCountCanContainActiveSeats } from "./seatCapacityMutations.js";
+import { guardSubscriptionMutation, runAccountDeletionGuardedMutation } from "../users/accountDeletionGuardedMutations.js";
+import {
+  createWithOptionalSession,
+  isSubscriptionOwnerDuplicateKeyError,
+} from "./subscriptionManualMutationHelpers.js";
 
-const createWithOptionalSession = async (Model, payload, session) => {
-  if (!session) return Model.create(payload);
-
-  const [document] = await Model.create([payload], { session });
-  return document;
-};
-
-export const isSubscriptionOwnerDuplicateKeyError = (error) => {
-  if (error?.code !== 11000) return false;
-
-  const keyPattern = error.keyPattern || {};
-  return (
-    (keyPattern.ownerType === 1 && keyPattern.ownerId === 1) ||
-    /ownerType_1_ownerId_1/.test(error.message || "")
-  );
-};
+export { isSubscriptionOwnerDuplicateKeyError } from "./subscriptionManualMutationHelpers.js";
 
 export const findCanonicalSubscription = ({ ownerType, ownerId, session = null }) =>
   Subscription.findOne(
@@ -341,6 +331,7 @@ export const extendManualSubscription = async ({
   session = null,
   plan: authoritativePlan = null,
 }) => {
+  if (!session && mongoose.connection.readyState === 1) return runAccountDeletionGuardedMutation({ userId: payerId, operation: (fencedSession) => extendManualSubscription({ ownerType, ownerId, payerId, seatCount, months, requester, now, session: fencedSession, plan: authoritativePlan }) });
   if (!["barber", "salon"].includes(ownerType)) {
     const error = new Error("ownerType must be 'barber' or 'salon'");
     error.statusCode = 400;
@@ -352,6 +343,7 @@ export const extendManualSubscription = async ({
     error.statusCode = 400;
     throw error;
   }
+  await guardSubscriptionMutation({ payerId, ownerType, ownerId, session });
 
   if (requester) {
     if (!requester._id) {

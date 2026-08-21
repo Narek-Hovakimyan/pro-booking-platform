@@ -28,6 +28,7 @@ import {
   openCurrentWorkHistory,
 } from "../../utils/salonHelpers.js";
 import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/controllerError.js";
+import { createSalonWithDeletionFence } from "../../services/salon/salonCreationMutationService.js";
 
 // Test hooks — allows tests to override dependencies without a DI framework
 let getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIdsForSalon;
@@ -383,41 +384,22 @@ export const createSalon = async (req, res) => {
       return res.status(400).json({ message: "Salon name is required" });
     }
 
-    const salon = await Salon.create({
+    const { salon, user } = await createSalonWithDeletionFence({
+      userId: req.user._id,
+      salonPayload: {
       name: name.trim(),
       city,
       address,
       phone,
       imageUrl: safeImageUrl,
       ownerId: req.user._id,
-
       admins: [],
+      },
+      ownerWorksAsSpecialist,
+      Salon,
+      User,
+      openCurrentWorkHistory,
     });
-
-    const user = await User.findById(req.user._id);
-
-    // Update new salons array
-    user.salons = user.salons || [];
-    const hasPrimary = user.salons.some((s) => s.isPrimary);
-    user.salons.push({
-      salon: salon._id,
-      status: "approved",
-      joinedAt: new Date(),
-      isPrimary: !hasPrimary,
-      relationshipType: "staff",
-      relationshipStatus: "accepted",
-      worksAsSpecialist: ownerWorksAsSpecialist !== false,
-    });
-
-    // Update legacy fields only if no primary exists yet
-    if (!hasPrimary) {
-      user.salon = salon._id;
-      user.salonStatus = "approved";
-    }
-    if (ownerWorksAsSpecialist !== false) {
-      openCurrentWorkHistory(user, salon);
-    }
-    await user.save();
 
     return res.status(201).json({
       salon: serializeSalon(salon),

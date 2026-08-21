@@ -48,62 +48,18 @@ import {
   isBookingSlotConflictError,
   isBookingSlotProtectionUnavailableError,
 } from "./bookingSlotHoldService.js";
+import { guardBookingMutation } from "../users/accountDeletionGuardedMutations.js";
+import {
+  createBookingMutationHooks,
+  createBookingRecord,
+} from "./bookingCreateMutationHelpers.js";
 
-const TRANSACTION_CAPABLE_TOPOLOGIES = new Set([
-  "ReplicaSetWithPrimary",
-  "Sharded",
-  "LoadBalanced",
-]);
-
-const getLogicalSessionTimeoutMinutes = (description) => {
-  if (Number.isInteger(description?.logicalSessionTimeoutMinutes)) {
-    return description.logicalSessionTimeoutMinutes;
-  }
-
-  if (!description?.servers?.values) return null;
-
-  let timeout = null;
-  for (const server of description.servers.values()) {
-    if (!Number.isInteger(server?.logicalSessionTimeoutMinutes)) continue;
-    timeout =
-      timeout == null
-        ? server.logicalSessionTimeoutMinutes
-        : Math.min(timeout, server.logicalSessionTimeoutMinutes);
-  }
-  return timeout;
-};
-
-const connectionSupportsTransactions = (connection = mongoose.connection) => {
-  if (
-    connection?.readyState !== 1 ||
-    typeof connection?.startSession !== "function"
-  ) {
-    return false;
-  }
-
-  const description = connection?.client?.topology?.description;
-  if (!description?.type) return false;
-  if (!TRANSACTION_CAPABLE_TOPOLOGIES.has(description.type)) return false;
-
-  return Number.isInteger(getLogicalSessionTimeoutMinutes(description));
-};
-
-const bookingCreateHooks = {
+const bookingCreateHooks = createBookingMutationHooks({
   activateBookingReferenceMedia,
   compensateBookingReferenceMediaFailure,
   promoteBookingReferenceMedia,
   stageBookingReferenceMedia,
-  supportsTransactions() {
-    return connectionSupportsTransactions();
-  },
-  async startSession() {
-    if (!connectionSupportsTransactions()) {
-      return null;
-    }
-    const session = await mongoose.connection.startSession();
-    return typeof session?.withTransaction === "function" ? session : null;
-  },
-};
+});
 
 export const __bookingCreateServiceTestHooks = bookingCreateHooks;
 
@@ -113,28 +69,6 @@ const createBookingTransactionRequiredResponse = () => ({
     message: "Booking slot protection is temporarily unavailable",
   },
 });
-
-const createBookingRecord = async ({ payload, session }) => {
-  if (!session) {
-    return Booking.create(payload);
-  }
-
-  if (typeof Booking.findOneAndUpdate === "function" && payload?._id) {
-    return Booking.findOneAndUpdate(
-      { _id: payload._id },
-      { $setOnInsert: payload },
-      {
-        new: true,
-        upsert: true,
-        session,
-        setDefaultsOnInsert: true,
-      }
-    );
-  }
-
-  const created = await Booking.create([payload], { session });
-  return Array.isArray(created) ? created[0] : created;
-};
 
 export const createBookingService = async ({
   body,
@@ -352,6 +286,7 @@ export const createBookingService = async ({
 
       const createInsideMutation = async () => {
         transactionEntered = true;
+        await guardBookingMutation({ barberId, clientId, isManualBooking, session });
         // ── Voucher claim ──
         const rawVoucherCode =
           body.promotionCode || body.voucherCode || body.voucher_code;
@@ -443,7 +378,7 @@ export const createBookingService = async ({
           duration: bookingDuration,
           session,
         });
-        booking = await createBookingRecord({ payload, session });
+        booking = await createBookingRecord({ Booking, payload, session });
         if (hasNewReferenceMedia) {
           await bookingCreateHooks.activateBookingReferenceMedia({
             media: stagedReferenceMedia,

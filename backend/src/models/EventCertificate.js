@@ -87,6 +87,12 @@ const eventCertificateSchema = new mongoose.Schema(
       enum: ["auto", "uploaded"],
       default: "auto",
     },
+    mediaObjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MediaObject",
+      default: null,
+      select: false,
+    },
     fileUrl: {
       type: String,
       default: "",
