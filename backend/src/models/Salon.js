@@ -41,6 +41,9 @@ const salonSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+salonSchema.index({ ownerId: 1 }, { name: "salons_ownerId_idx" });
+salonSchema.index({ admins: 1 }, { name: "salons_admins_idx" });
+
 const Salon = mongoose.model("Salon", salonSchema);
 
 export default Salon;
