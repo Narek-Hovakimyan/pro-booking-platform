@@ -2,17 +2,20 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 
 import Salon from "../src/models/Salon.js";
+import SalonJoinRequest from "../src/models/SalonJoinRequest.js";
 import User from "../src/models/User.js";
 import {
   buildLegacySalonAuditReport,
+  buildLegacySalonMigrationAudit,
   collectSalonReferenceIds,
 } from "./auditLegacySalonFieldsHelpers.js";
 
 dotenv.config({ quiet: true });
 
 export const USER_AUDIT_PROJECTION =
-  "_id role salon salonStatus salons.salon salons.status salons.relationshipType salons.isPrimary salons.worksAsSpecialist";
-export const SALON_AUDIT_PROJECTION = "_id";
+  "_id __v createdAt role salon salonStatus salons";
+export const SALON_AUDIT_PROJECTION = "_id ownerId admins";
+export const JOIN_REQUEST_AUDIT_PROJECTION = "_id salonId barberId status createdAt updatedAt";
 
 export const userAuditQuery = {
   $or: [
@@ -42,6 +45,17 @@ const loadUsers = () => User.find(userAuditQuery).select(USER_AUDIT_PROJECTION).
 const loadSalons = (salonIds) => salonIds.length > 0
   ? Salon.find({ _id: { $in: salonIds } }).select(SALON_AUDIT_PROJECTION).lean()
   : [];
+const loadJoinRequests = (userIds, salonIds) => userIds.length > 0 && salonIds.length > 0
+  ? SalonJoinRequest.find({
+    barberId: { $in: userIds },
+    salonId: { $in: salonIds },
+  }).select(JOIN_REQUEST_AUDIT_PROJECTION).lean()
+  : [];
+
+const buildAuditReport = ({ users, salons, joinRequests }) => ({
+  ...buildLegacySalonAuditReport({ users, salons }),
+  migration: buildLegacySalonMigrationAudit({ users, salons, joinRequests }),
+});
 
 const createAuditError = (phase, message) => {
   const error = new Error(message);
@@ -80,7 +94,8 @@ export const runAudit = async ({
   disconnect = disconnectAuditDatabase,
   getUsers = loadUsers,
   getSalons = loadSalons,
-  buildReport = buildLegacySalonAuditReport,
+  getJoinRequests,
+  buildReport = buildAuditReport,
   writeStdout = (value) => process.stdout.write(value),
   writeStderr = (value) => process.stderr.write(value),
   setExitCode = (code) => {
@@ -98,8 +113,19 @@ export const runAudit = async ({
     phase = "query";
     const users = await getUsers();
     const salons = await getSalons(collectSalonReferenceIds(users));
+    const joinRequests = getJoinRequests
+      ? await getJoinRequests(
+        users.map((user) => user?._id).filter(Boolean),
+        collectSalonReferenceIds(users)
+      )
+      : getUsers === loadUsers
+        ? await loadJoinRequests(
+          users.map((user) => user?._id).filter(Boolean),
+          collectSalonReferenceIds(users)
+        )
+        : [];
     phase = "classification";
-    report = buildReport({ users, salons });
+    report = buildReport({ users, salons, joinRequests });
     phase = "serialization";
     const json = JSON.stringify(report, null, 2);
     if (typeof json !== "string") throw new Error("Audit report is not JSON-serializable");

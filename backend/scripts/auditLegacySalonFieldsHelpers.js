@@ -339,3 +339,75 @@ export const buildLegacySalonAuditReport = ({
     findings,
   };
 };
+
+const migrationStatuses = new Set(["pending", "approved", "rejected"]);
+const joinRequestStatuses = new Set(["pending", "accepted", "rejected", "cancelled"]);
+const requestStatusForMembership = { pending: "pending", approved: "accepted", rejected: "rejected" };
+const relationshipStatusForMembership = { pending: "pending", approved: "accepted", rejected: "rejected" };
+const dateValue = (value) => {
+  const time = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(time) ? time : null;
+};
+const latestRequestFor = (requests, userId, salonId) => {
+  const matching = (requests || []).filter((request) => normalizeObjectId(request?.barberId) === userId && normalizeObjectId(request?.salonId) === salonId);
+  if (!matching.length) return {};
+  const ordered = matching.map((request) => ({ request, updatedAt: dateValue(request?.updatedAt), createdAt: dateValue(request?.createdAt), id: normalizeObjectId(request?._id) || "" }))
+    .sort((a, b) => (b.updatedAt - a.updatedAt) || (b.createdAt - a.createdAt) || b.id.localeCompare(a.id));
+  const first = ordered[0];
+  if (first.updatedAt === null || first.createdAt === null || !first.id || ordered.filter((item) => item.updatedAt === first.updatedAt && item.createdAt === first.createdAt && item.id === first.id).length !== 1 || !joinRequestStatuses.has(first.request?.status)) {
+    return { reason: "ambiguousLatestJoinRequest" };
+  }
+  return { request: first.request, requestId: first.id };
+};
+const membershipForLegacy = (user, salon, status) => ({ salon, status, joinedAt: status === "approved" && user?.createdAt ? user.createdAt : null, isPrimary: status === "approved", relationshipType: "staff", relationshipStatus: relationshipStatusForMembership[status], worksAsSpecialist: status !== "rejected" });
+const exactMembership = (entry, expected) => normalizeObjectId(entry?.salon) === expected.salon && entry?.status === expected.status && entry?.isPrimary === expected.isPrimary && entry?.relationshipType === expected.relationshipType && entry?.relationshipStatus === expected.relationshipStatus && entry?.worksAsSpecialist === expected.worksAsSpecialist;
+
+/** Shared, fail-closed migration classifier. Legacy data can only represent staff. */
+export const classifyLegacySalonMembership = ({ user, salons = [], joinRequests = [] } = {}) => {
+  const legacySalon = normalizeObjectId(user?.salon);
+  const legacyStatus = reportStatus(user?.salonStatus);
+  const entries = getEntries(user);
+  const snapshot = { userId: reportId(user?._id), version: Number.isInteger(user?.__v) ? user.__v : null, salon: user?.salon ?? null, salonStatus: user?.salonStatus ?? null, salons: user?.salons };
+  const blockers = [];
+  const add = (reason) => { if (!blockers.includes(reason)) blockers.push(reason); };
+  const result = (state, reason, membership = null, requestId = null) => ({ state, reason, membership, snapshot, blockers: state === "eligible" || state === "existing" || state === "skipped" ? [] : blockers.length ? blockers : [reason], references: { salonId: legacySalon || null, requestId } });
+  if (!legacySalon && !hasLegacySalon(user)) return legacyStatus && legacyStatus !== "none" ? result("malformed", "legacyStatusWithoutSalon") : result("skipped", "noLegacySalon");
+  if (!legacySalon) return result("malformed", "malformedLegacySalonId");
+  if (!migrationStatuses.has(legacyStatus)) return result("ambiguous", legacyStatus === "none" ? "legacyNoneCannotMigrate" : "invalidLegacyStatus");
+  if (user?.role !== "barber") return result("ambiguous", "nonBarberLegacyMembership");
+  const salon = (salons || []).find((candidate) => normalizeObjectId(candidate?._id) === legacySalon);
+  if (!salon) return result("orphan", "orphanLegacySalonReference");
+  if (normalizeObjectId(salon.ownerId) === normalizeObjectId(user?._id)) add("legacyOwnerBoundary");
+  if (Array.isArray(salon.admins) && salon.admins.some((adminId) => normalizeObjectId(adminId) === normalizeObjectId(user?._id))) add("legacyAdminBoundary");
+  if (!Array.isArray(user?.salons) && user?.salons !== undefined && user?.salons !== null) add("malformedCanonicalMemberships");
+  const ids = entries.map((entry) => normalizeObjectId(entry?.salon));
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) add("duplicateOrMalformedCanonicalMembership");
+  if (entries.filter((entry) => entry?.status === "approved" && entry?.isPrimary === true).length > 1) add("multiplePrimaryApprovedMemberships");
+  const latest = latestRequestFor(joinRequests, normalizeObjectId(user?._id), legacySalon);
+  if (latest.reason) add(latest.reason);
+  else if (latest.request && latest.request.status !== requestStatusForMembership[legacyStatus]) add(latest.request.status === "accepted" ? "acceptedJoinRequestMismatch" : "latestJoinRequestStateMismatch");
+  if (blockers.length) {
+    const reason = blockers[0];
+    const state = reason === "duplicateOrMalformedCanonicalMembership" || reason === "canonicalStateConflictsWithLegacy" || reason.endsWith("Mismatch") ? "conflict" : "ambiguous";
+    return result(state, reason, null, latest.requestId || null);
+  }
+  const membership = membershipForLegacy(user, legacySalon, legacyStatus);
+  if (!entries.length) return result("eligible", "legacyStateProven", membership);
+  if (entries.length === 1 && exactMembership(entries[0], membership)) return result("existing", "canonicalMembershipAlreadyExact", membership);
+  add("canonicalStateConflictsWithLegacy");
+  return result("conflict", "canonicalStateConflictsWithLegacy", membership, latest.requestId || null);
+};
+
+export const buildLegacySalonMigrationAudit = ({ users = [], salons = [], joinRequests = [] } = {}) => {
+  const summary = { scanned: 0, eligible: 0, existing: 0, skipped: 0, malformed: 0, orphan: 0, ambiguous: 0, conflicts: 0 };
+  const blockers = [];
+  for (const user of users) {
+    const decision = classifyLegacySalonMembership({ user, salons, joinRequests });
+    summary.scanned += 1;
+    const counter = decision.state === "conflict" ? "conflicts" : decision.state;
+    if (Object.hasOwn(summary, counter)) summary[counter] += 1;
+    if (decision.blockers.length) blockers.push({ userId: decision.snapshot.userId, ...decision.references, reasons: [...decision.blockers].sort() });
+  }
+  blockers.sort((a, b) => `${a.userId}\u0000${a.salonId || ""}\u0000${a.requestId || ""}\u0000${a.reasons.join("\u0000")}`.localeCompare(`${b.userId}\u0000${b.salonId || ""}\u0000${b.requestId || ""}\u0000${b.reasons.join("\u0000")}`));
+  return { ...summary, hasBlockingIssues: summary.malformed + summary.orphan + summary.ambiguous + summary.conflicts > 0, blockers };
+};

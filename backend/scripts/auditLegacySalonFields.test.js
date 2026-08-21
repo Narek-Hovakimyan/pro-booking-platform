@@ -208,9 +208,9 @@ test("findings exclude sensitive fixture fields", () => {
 test("uses narrow projections and testable JSON-only orchestration", async () => {
   assert.equal(
     USER_AUDIT_PROJECTION,
-    "_id role salon salonStatus salons.salon salons.status salons.relationshipType salons.isPrimary salons.worksAsSpecialist"
+    "_id __v createdAt role salon salonStatus salons"
   );
-  assert.equal(SALON_AUDIT_PROJECTION, "_id");
+  assert.equal(SALON_AUDIT_PROJECTION, "_id ownerId admins");
 
   const events = [];
   const stdout = [];
@@ -236,6 +236,23 @@ test("uses narrow projections and testable JSON-only orchestration", async () =>
   assert.equal(emittedReport.hasBlockingIssues, true);
   assert.deepEqual(stderr, []);
   assert.deepEqual(exitCodes, []);
+});
+
+test("default audit includes the shared migration blockers before any write mode exists", async () => {
+  const stdout = [];
+  await runAudit({
+    connect: async () => {},
+    disconnect: async () => {},
+    getUsers: async () => [user("31", { salons: [] })],
+    getSalons: async () => [{ _id: salonA }],
+    getJoinRequests: async () => [],
+    writeStdout: (value) => stdout.push(value),
+    writeStderr: () => assert.fail("audit must not fail"),
+    setExitCode: () => assert.fail("audit must not set an error code"),
+  });
+  const emitted = JSON.parse(stdout[0]);
+  assert.equal(emitted.migration.eligible, 1);
+  assert.equal(emitted.migration.hasBlockingIssues, false);
 });
 
 test("orchestration sends errors to stderr, sets non-zero state, and disconnects after failures", async () => {
