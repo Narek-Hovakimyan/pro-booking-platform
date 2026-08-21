@@ -439,6 +439,20 @@ test("updateMyProfile – explicitly empty avatarUrl still clears avatar", async
   assert.equal(updatesSeen.avatarUrl, "");
 });
 
+test("updateMyProfile – rejects another user's raw upload path", async () => {
+  const res = createResponse();
+  const req = createRequest({ body: { avatarUrl: "/uploads/avatars/another-user.png" } });
+  let writes = 0;
+
+  User.findByIdAndUpdate = async () => { writes += 1; };
+
+  await updateMyProfile(req, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.message, "Profile upload path is not authorized");
+  assert.equal(writes, 0);
+});
+
 test("updateMyProfile – barber profile edit without media keeps existing imageUrl", async () => {
   const res = createResponse();
   const req = createRequest({
@@ -525,10 +539,85 @@ test("updateMyProfile – uploaded avatar updates user avatar and barber image",
   assert.equal(res.body.avatarUrl, "/uploads/avatars/uploaded.png");
   assert.equal(res.body.imageUrl, "/uploads/avatars/uploaded.png");
   assert.equal(fs.existsSync(uploadedPath), true);
-  assert.equal(fs.existsSync(oldUserPath), false);
-  assert.equal(fs.existsSync(oldProfilePath), false);
+  assert.equal(fs.existsSync(oldUserPath), true);
+  assert.equal(fs.existsSync(oldProfilePath), true);
   createdFiles.delete(oldUserPath);
   createdFiles.delete(oldProfilePath);
+});
+
+test("updateSelfProfile delegates barber avatar references to one transactional CAS without pre-persisting imageUrl", async () => {
+  const writes = [];
+  const service = createUserProfileUpdateService({
+    UserModel: {
+      db: { readyState: 1 },
+      findByIdAndUpdate: async (_id, update) => {
+        writes.push({ target: "user", update });
+        return createBaseUser({ role: "barber", avatarUrl: "/uploads/avatars/old-user.png" });
+      },
+    },
+    BarberProfileModel: {
+      findOne: async () => ({ imageUrl: "/uploads/avatars/old-profile.png" }),
+      findOneAndUpdate: async (_filter, update) => {
+        writes.push({ target: "profile", update });
+        return { barberId: userId, imageUrl: "/uploads/avatars/old-profile.png" };
+      },
+    },
+    replaceBarberProfileAvatarAtomically: async (input) => {
+      assert.equal(input.expectedUserAvatarUrl, "/uploads/avatars/old-user.png");
+      assert.equal(input.expectedProfileImageUrl, "/uploads/avatars/old-profile.png");
+      return {
+        user: createBaseUser({ role: "barber", avatarUrl: "/uploads/avatars/transactional.png" }),
+        profile: { barberId: userId, imageUrl: "/uploads/avatars/transactional.png" },
+      };
+    },
+  });
+
+  const result = await service({
+    user: createBaseUser({ role: "barber", avatarUrl: "/uploads/avatars/old-user.png" }),
+    body: { bio: "Updated bio" },
+    file: { filename: "transactional.png", originalname: "transactional.png", buffer: Buffer.from("image") },
+    req: createRequest(),
+  });
+
+  assert.equal(writes.find((write) => write.target === "user").update.avatarUrl, undefined);
+  assert.equal(writes.find((write) => write.target === "profile").update.imageUrl, undefined);
+  assert.equal(result.user.avatarUrl, "/uploads/avatars/transactional.png");
+  assert.equal(result.profile.imageUrl, "/uploads/avatars/transactional.png");
+});
+
+test("updateSelfProfile leaves both barber avatar references untouched when transactional CAS fails", async () => {
+  const writes = [];
+  const failure = new Error("CAS failed");
+  const service = createUserProfileUpdateService({
+    UserModel: {
+      db: { readyState: 1 },
+      findByIdAndUpdate: async (_id, update) => {
+        writes.push({ target: "user", update });
+        return createBaseUser({ role: "barber", avatarUrl: "/uploads/avatars/old-user.png" });
+      },
+    },
+    BarberProfileModel: {
+      findOne: async () => ({ imageUrl: "/uploads/avatars/old-profile.png" }),
+      findOneAndUpdate: async (_filter, update) => {
+        writes.push({ target: "profile", update });
+        return { barberId: userId, imageUrl: "/uploads/avatars/old-profile.png" };
+      },
+    },
+    replaceBarberProfileAvatarAtomically: async () => { throw failure; },
+  });
+
+  await assert.rejects(
+    service({
+      user: createBaseUser({ role: "barber", avatarUrl: "/uploads/avatars/old-user.png" }),
+      body: {},
+      file: { filename: "failed.png", originalname: "failed.png", buffer: Buffer.from("image") },
+      req: createRequest(),
+    }),
+    failure
+  );
+
+  assert.equal(writes.find((write) => write.target === "user").update.avatarUrl, undefined);
+  assert.equal(writes.find((write) => write.target === "profile").update.imageUrl, undefined);
 });
 
 test("updateMyProfile – pre-persistence failure removes only the new uploaded avatar", async () => {

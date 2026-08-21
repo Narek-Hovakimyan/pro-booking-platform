@@ -457,6 +457,9 @@ export const createBarberProfileSelfMutationController = (dependencies = {}) => 
         trustedBarberId,
         userUpdates,
         profileUpdates,
+        ...((req.file?.path || Buffer.isBuffer(req.file?.buffer))
+          ? { uploadFile: req.file }
+          : {}),
       });
 
       return res.json(response);

@@ -1,6 +1,12 @@
 import BarberProfile from "../../models/BarberProfile.js";
 import EventCertificate from "../../models/EventCertificate.js";
+import mongoose from "mongoose";
 import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
+import {
+  addProfileCertificationAtomically,
+  deleteProfileCertificationAtomically,
+  replaceProfileCertificationMediaAtomically,
+} from "../../services/media/profileMediaService.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import {
   getPublicEventCertificatePayload,
@@ -20,6 +26,9 @@ const respondBeforeCertificationPersistence = (res, uploadedImageUrl, status, pa
   if (uploadedImageUrl) deleteUploadedFile(uploadedImageUrl);
   return res.status(status).json(payload);
 };
+
+const hasTrustedCertificationUpload = (file) =>
+  Boolean((file?.path || Buffer.isBuffer(file?.buffer)) && BarberProfile.db?.readyState === 1);
 
 export const getCertifications = async (req, res) => {
   try {
@@ -123,6 +132,7 @@ export const addCertification = async (req, res) => {
 
     let profile = await BarberProfile.findOne({ barberId: req.user._id });
     const certification = {
+      _id: new mongoose.Types.ObjectId(),
       title: title.trim(),
       issuedBy: issuedBy.trim(),
       issueDate: issueDateObj,
@@ -130,6 +140,17 @@ export const addCertification = async (req, res) => {
       imageUrl: uploadedImageUrl,
       description: description?.trim() || "",
     };
+
+    if (hasTrustedCertificationUpload(req.file)) {
+      const result = await addProfileCertificationAtomically({
+        ownerId: req.user._id,
+        certification,
+        file: req.file,
+      });
+      certificationPersisted = true;
+      deleteUploadedFile(req.file.path);
+      return res.status(201).json(result.certification);
+    }
 
     if (!profile) {
       try {
@@ -281,16 +302,31 @@ export const updateCertification = async (req, res) => {
 
     const previousImageUrl = cert.imageUrl || "";
 
+    if (hasTrustedCertificationUpload(req.file)) {
+      const result = await replaceProfileCertificationMediaAtomically({
+        ownerId: req.user._id,
+        certId,
+        expectedImageUrl: previousImageUrl,
+        updates: {
+          title: cert.title,
+          issuedBy: cert.issuedBy,
+          issueDate: cert.issueDate,
+          expiryDate: cert.expiryDate,
+          description: cert.description,
+        },
+        file: req.file,
+      });
+      certificationPersisted = true;
+      deleteUploadedFile(req.file.path);
+      return res.json(result.certification);
+    }
+
     if (req.file) {
       cert.imageUrl = uploadedImageUrl;
     }
 
     await profile.save();
     certificationPersisted = true;
-
-    if (uploadedImageUrl && previousImageUrl && previousImageUrl !== uploadedImageUrl) {
-      deleteUploadedFile(previousImageUrl);
-    }
 
     return res.json(cert);
   } catch (error) {
@@ -327,12 +363,17 @@ export const deleteCertification = async (req, res) => {
 
     const deletedImageUrl = cert.imageUrl || "";
 
+    if (BarberProfile.db?.readyState === 1) {
+      await deleteProfileCertificationAtomically({
+        ownerId: req.user._id,
+        certId,
+        expectedImageUrl: deletedImageUrl,
+      });
+      return res.json({ message: "Certification deleted" });
+    }
+
     profile.certifications.pull(certId);
     await profile.save();
-
-    if (deletedImageUrl) {
-      deleteUploadedFile(deletedImageUrl);
-    }
 
     return res.json({ message: "Certification deleted" });
   } catch (error) {

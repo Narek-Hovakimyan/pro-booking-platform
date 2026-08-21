@@ -277,6 +277,27 @@ test("barber can add certification with valid data", async () => {
   assert.equal(res.body.description, "Trims");
 });
 
+test("certification body paths cannot adopt another barber's upload", async () => {
+  const res = createResponse();
+  const profile = createProfileWithCert();
+  profile.certifications.length = 0;
+  profile.certifications.id = () => null;
+  BarberProfile.findOne = async () => profile;
+
+  await addCertification({
+    user: barber,
+    body: {
+      title: "Certificate",
+      issuedBy: "Academy",
+      issueDate: "2024-01-01",
+      imageUrl: "/uploads/certifications/another-barber.png",
+    },
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.imageUrl, "");
+});
+
 test("addCertification cleans only the new uploaded file when persistence fails", async () => {
   const res = createResponse();
   const uploadedPath = createUploadedFile(
@@ -1048,7 +1069,7 @@ test("updateCertification cleans uploaded file on validation, auth, and not-foun
   createdFiles.delete(missingCertPath);
 });
 
-test("updateCertification deletes the old file only after a successful save", async () => {
+test("updateCertification leaves a legacy prior file for reconciliation", async () => {
   const res = createResponse();
   const oldPath = createUploadedFile("certifications/old-cert.webp");
   const newPath = createUploadedFile("certifications/new-cert.webp");
@@ -1070,7 +1091,7 @@ test("updateCertification deletes the old file only after a successful save", as
 
   assert.equal(res.statusCode, 200);
   assert.equal(profile.saveCalled, true);
-  assert.equal(fs.existsSync(oldPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
   assert.equal(fs.existsSync(newPath), true);
   createdFiles.delete(oldPath);
 });
@@ -1113,42 +1134,32 @@ test("updateCertification preserves a committed replacement when response serial
   assert.equal(jsonCalls, 2);
   assert.equal(profile.certifications[0].imageUrl, "/uploads/certifications/post-save-new.webp");
   assert.equal(fs.existsSync(newPath), true);
-  assert.equal(fs.existsSync(oldPath), false);
+  assert.equal(fs.existsSync(oldPath), true);
 });
 
-test("updateCertification keeps the committed replacement when old-file unlink fails", async () => {
+test("updateCertification does not raw-delete the legacy prior file", async () => {
   const oldPath = createUploadedFile("certifications/unlink-old.webp");
   const newPath = createUploadedFile("certifications/unlink-new.webp");
   const profile = createProfileWithCert({
     imageUrl: "/uploads/certifications/unlink-old.webp",
   });
-  const originalUnlinkSync = fs.unlinkSync;
-  fs.unlinkSync = (filePath) => {
-    if (filePath === oldPath) throw new Error("unlink failed");
-    return originalUnlinkSync(filePath);
-  };
+  BarberProfile.findOne = async () => profile;
+  const res = createResponse();
 
-  try {
-    BarberProfile.findOne = async () => profile;
-    const res = createResponse();
+  await updateCertification(
+    {
+      user: barber,
+      params: { certId: "cert-a" },
+      file: { filename: "unlink-new.webp" },
+      body: { title: "Updated" },
+    },
+    res
+  );
 
-    await updateCertification(
-      {
-        user: barber,
-        params: { certId: "cert-a" },
-        file: { filename: "unlink-new.webp" },
-        body: { title: "Updated" },
-      },
-      res
-    );
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(profile.certifications[0].imageUrl, "/uploads/certifications/unlink-new.webp");
-    assert.equal(fs.existsSync(newPath), true);
-    assert.equal(fs.existsSync(oldPath), true);
-  } finally {
-    fs.unlinkSync = originalUnlinkSync;
-  }
+  assert.equal(res.statusCode, 200);
+  assert.equal(profile.certifications[0].imageUrl, "/uploads/certifications/unlink-new.webp");
+  assert.equal(fs.existsSync(newPath), true);
+  assert.equal(fs.existsSync(oldPath), true);
 });
 
 test("barber can delete their own certification", async () => {
@@ -1171,7 +1182,7 @@ test("barber can delete their own certification", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(profile.certifications.length, 0);
   assert.equal(profile.saveCalled, true);
-  assert.equal(fs.existsSync(uploadedPath), false);
+  assert.equal(fs.existsSync(uploadedPath), true);
   createdFiles.delete(uploadedPath);
 });
 

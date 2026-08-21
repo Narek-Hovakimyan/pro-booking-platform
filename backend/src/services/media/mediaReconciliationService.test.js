@@ -268,3 +268,26 @@ test("active objects are never selected for automatic deletion", async () => {
   assert.equal(summary.scanned, 0);
   assert.equal(docs[0].status, MEDIA_OBJECT_STATES.ACTIVE);
 });
+
+test("referenced certification media is protected from reconciliation deletion", async () => {
+  const docs = [mediaDoc({
+    mediaClass: "profile-certification",
+    ownerModel: "User",
+    ownerId: "barber-1",
+    legacyUrl: "/uploads/certifications/current.png",
+  })];
+  const { MediaObjectModel, BookingModel, PortfolioPhotoModel } = createModels({ media: docs });
+  const result = await reconcileMediaObject({
+    mediaObjectId: "media-1",
+    MediaObjectModel,
+    BookingModel,
+    PortfolioPhotoModel,
+    UserModel: { findOne: async () => null },
+    BarberProfileModel: { findOne: async () => ({ barberId: "barber-1" }) },
+    mediaStore: store(),
+    tokenFactory: () => "lease",
+    now: () => new Date("2026-01-01"),
+  });
+  assert.equal(result.reason, "referenced");
+  assert.equal(docs[0].status, MEDIA_OBJECT_STATES.DELETE_PENDING);
+});

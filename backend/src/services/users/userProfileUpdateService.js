@@ -4,6 +4,12 @@ import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
 import { sendEmailVerification } from "../auth/emailService.js";
 import { sanitizeMediaUrl } from "../../utils/mediaUrl.js";
 import {
+  clearBarberProfileAvatarAtomically,
+  clearUserAvatarAtomically,
+  replaceBarberProfileAvatarAtomically,
+  replaceUserAvatarAtomically,
+} from "../media/profileMediaService.js";
+import {
   createEmailVerificationToken,
   EMAIL_VERIFICATION_EXPIRY_MS,
   isValidEmail,
@@ -25,11 +31,6 @@ export class UserProfileUpdateError extends Error {
 const normalizePhone = (phone) => (typeof phone === "string" ? phone.trim() : "");
 const getUploadedAvatarPath = (file) =>
   file ? `/uploads/avatars/${file.filename}` : "";
-
-const deleteIfReplaced = (previousPath, nextPath) => {
-  if (!previousPath || previousPath === nextPath) return;
-  deleteUploadedFile(previousPath);
-};
 
 const selectQuery = (query, projection) => {
   if (query && typeof query.select === "function") {
@@ -89,6 +90,14 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
     UserModel: dependencies.UserModel || User,
     BarberProfileModel: dependencies.BarberProfileModel || BarberProfile,
     sendEmailVerification: dependencies.sendEmailVerification || sendEmailVerification,
+    replaceUserAvatarAtomically:
+      dependencies.replaceUserAvatarAtomically || replaceUserAvatarAtomically,
+    clearUserAvatarAtomically:
+      dependencies.clearUserAvatarAtomically || clearUserAvatarAtomically,
+    replaceBarberProfileAvatarAtomically:
+      dependencies.replaceBarberProfileAvatarAtomically || replaceBarberProfileAvatarAtomically,
+    clearBarberProfileAvatarAtomically:
+      dependencies.clearBarberProfileAvatarAtomically || clearBarberProfileAvatarAtomically,
   };
 
   return async function updateSelfProfile({ user, body = {}, file = null, req }) {
@@ -101,10 +110,19 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
     } = body;
     const { avatarUrl, imageUrl } = buildMediaValues(body, file);
     const uploadedAvatarPath = getUploadedAvatarPath(file);
+    const hasPhysicalUpload = Boolean(file?.path || Buffer.isBuffer(file?.buffer));
+    // Unit-only request mocks have no Mongo connection. Production uploads fail
+    // closed in the lifecycle service when transaction support is unavailable.
+    const transactionalAvatar = Boolean(uploadedAvatarPath && hasPhysicalUpload && deps.UserModel.db?.readyState === 1);
+    const transactionalClear = Boolean(
+      !uploadedAvatarPath &&
+      (avatarUrl === "" || imageUrl === "") &&
+      deps.UserModel.db?.readyState === 1
+    );
     const previousUserAvatarUrl =
       typeof user?.avatarUrl === "string" ? user.avatarUrl : "";
     let previousProfileImageUrl = "";
-    if (uploadedAvatarPath && user?.role === "barber") {
+    if ((transactionalAvatar || transactionalClear) && user?.role === "barber") {
       try {
         previousProfileImageUrl = await readExistingProfileImageUrl(
           deps.BarberProfileModel,
@@ -119,6 +137,11 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
     let avatarPersisted = false;
 
     try {
+      const requestedLocalAvatar = avatarUrl ?? imageUrl;
+      if (!uploadedAvatarPath && typeof requestedLocalAvatar === "string" &&
+        requestedLocalAvatar.startsWith("/uploads/") && requestedLocalAvatar !== previousUserAvatarUrl) {
+        throw new UserProfileUpdateError("Profile upload path is not authorized", 403);
+      }
       if (name !== undefined) userUpdates.name = name;
       if (phone !== undefined) {
         const normalizedPhone = normalizePhone(phone);
@@ -136,7 +159,7 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
         userUpdates.phone = normalizedPhone;
       }
       if (city !== undefined) userUpdates.city = city;
-      if (avatarUrl !== undefined || imageUrl !== undefined) {
+      if ((avatarUrl !== undefined || imageUrl !== undefined) && !transactionalAvatar && !transactionalClear) {
         userUpdates.avatarUrl = avatarUrl ?? imageUrl;
       }
 
@@ -184,7 +207,7 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
           ? { $set: userUpdates, $unset: userUnsets }
           : userUpdates;
 
-      const savedUser = await selectQuery(
+      let savedUser = await selectQuery(
         deps.UserModel.findByIdAndUpdate(user._id, updateOperation, {
           returnDocument: "after",
           runValidators: true,
@@ -192,9 +215,7 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
         "-password -emailVerificationTokenHash -emailVerificationExpires -emailVerificationSentAt"
       );
 
-      avatarPersisted = Boolean(
-        uploadedAvatarPath && savedUser && (userUpdates.avatarUrl === uploadedAvatarPath)
-      );
+      avatarPersisted = Boolean(uploadedAvatarPath && savedUser && (userUpdates.avatarUrl === uploadedAvatarPath));
 
       if (verificationToken) {
         await deps.sendEmailVerification({ user: savedUser, token: verificationToken, req });
@@ -202,7 +223,12 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
 
       let profile = null;
       if (savedUser.role === "barber") {
-        const profileUpdates = buildProfileUpdates({ city, bio, avatarUrl, imageUrl });
+        const profileUpdates = buildProfileUpdates({
+          city,
+          bio,
+          avatarUrl: transactionalAvatar || transactionalClear ? undefined : avatarUrl,
+          imageUrl: transactionalAvatar || transactionalClear ? undefined : imageUrl,
+        });
 
         profile = await retryBarberProfileUpsertOnDuplicate({
           BarberProfileModel: deps.BarberProfileModel,
@@ -214,9 +240,46 @@ export const createUserProfileUpdateService = (dependencies = {}) => {
         if (!profile) throw new BarberProfileConflictError();
       }
 
-      if (uploadedAvatarPath) {
-        deleteIfReplaced(previousUserAvatarUrl, uploadedAvatarPath);
-        deleteIfReplaced(previousProfileImageUrl, uploadedAvatarPath);
+      if (transactionalAvatar) {
+        if (savedUser.role === "barber") {
+          const result = await deps.replaceBarberProfileAvatarAtomically({
+            ownerId: savedUser._id,
+            expectedUserAvatarUrl: previousUserAvatarUrl,
+            expectedProfileImageUrl: previousProfileImageUrl,
+            file,
+            UserModel: deps.UserModel,
+            BarberProfileModel: deps.BarberProfileModel,
+          });
+          savedUser = result.user;
+          profile = result.profile;
+        } else {
+          savedUser = await deps.replaceUserAvatarAtomically({
+            ownerId: savedUser._id,
+            expectedAvatarUrl: previousUserAvatarUrl,
+            file,
+            UserModel: deps.UserModel,
+          });
+        }
+        avatarPersisted = true;
+        deleteUploadedFile(file.path);
+      } else if (transactionalClear) {
+        if (savedUser.role === "barber") {
+          const result = await deps.clearBarberProfileAvatarAtomically({
+            ownerId: savedUser._id,
+            expectedUserAvatarUrl: previousUserAvatarUrl,
+            expectedProfileImageUrl: previousProfileImageUrl,
+            UserModel: deps.UserModel,
+            BarberProfileModel: deps.BarberProfileModel,
+          });
+          savedUser = result.user;
+          profile = result.profile;
+        } else {
+          savedUser = await deps.clearUserAvatarAtomically({
+            ownerId: savedUser._id,
+            expectedAvatarUrl: previousUserAvatarUrl,
+            UserModel: deps.UserModel,
+          });
+        }
       }
 
       return { user: savedUser, profile };

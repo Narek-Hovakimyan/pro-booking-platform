@@ -253,3 +253,56 @@ test("missing trusted user in read-first flows returns bounded failure without p
     assert.equal(missing.calls.profileFindOne.length, 0);
   }
 });
+
+test("rejects body-supplied avatar paths before any trusted profile write", async () => {
+  const { service, calls } = createDependencies({
+    userResult: { _id: "trusted", role: "barber" },
+    profileResult: { barberId: "trusted" },
+  });
+  await assert.rejects(
+    service({
+      trustedBarberId: "trusted",
+      userUpdates: { avatarUrl: "/uploads/avatars/another-profile.png" },
+      profileUpdates: { imageUrl: "/uploads/avatars/another-profile.png" },
+    }),
+    (error) => error instanceof SelfBarberProfileMutationError && error.code === "BARBER_PROFILE_MEDIA_INVALID"
+  );
+  assert.equal(calls.userFindOneAndUpdate.length, 0);
+  assert.equal(calls.profileFindOneAndUpdate.length, 0);
+});
+
+const transactionalAvatarService = (failure) => createSelfBarberProfileMutationService({
+  UserModel: {
+    db: { readyState: 1 },
+    findOne: () => makeQuery({ _id: "trusted", role: "barber", avatarUrl: "/uploads/avatars/old.png" }, {}),
+    findOneAndUpdate: () => makeQuery({ _id: "trusted", role: "barber", avatarUrl: "/uploads/avatars/old.png" }, {}),
+  },
+  BarberProfileModel: {
+    findOne: () => makeQuery({ barberId: "trusted", imageUrl: "/uploads/avatars/old-profile.png" }, {}),
+  },
+  replaceBarberProfileAvatarAtomically: async () => { throw failure; },
+});
+
+test("proven barber-avatar CAS failure permits normal raw-upload cleanup", async () => {
+  const failure = new Error("CAS lost");
+  await assert.rejects(
+    transactionalAvatarService(failure)({
+      trustedBarberId: "trusted",
+      userUpdates: { avatarUrl: "/uploads/avatars/new.png" },
+      uploadFile: { filename: "new.png", buffer: Buffer.from("image") },
+    }),
+    (error) => error === failure && error.preserveUploadedFile === undefined
+  );
+});
+
+test("ambiguous barber-avatar commit preserves the raw upload for authoritative recovery", async () => {
+  const failure = Object.assign(new Error("unknown commit"), { profileMediaCommitOutcomeUnknown: true });
+  await assert.rejects(
+    transactionalAvatarService(failure)({
+      trustedBarberId: "trusted",
+      userUpdates: { avatarUrl: "/uploads/avatars/new.png" },
+      uploadFile: { filename: "new.png", buffer: Buffer.from("image") },
+    }),
+    (error) => error === failure && error.preserveUploadedFile === true
+  );
+});

@@ -53,6 +53,7 @@ import { serverLifecycleService } from "./services/serverLifecycleService.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
 import { startMediaReconciliationScheduler } from "./services/media/mediaReconciliationScheduler.js";
+import { serveProfileMedia } from "./controllers/media/profileMediaController.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
 import { startExpirePendingBookingsCron } from "../cron/expirePendingBookings.js";
 import { startEventRemindersCron } from "../cron/eventReminders.js";
@@ -148,16 +149,7 @@ const uploadStaticOptions = {
   index: false,
 };
 
-app.use(
-  "/uploads/avatars",
-  publicMediaResourcePolicy,
-  express.static(path.join(uploadsRoot, "avatars"), uploadStaticOptions)
-);
-app.use(
-  "/uploads/certifications",
-  publicMediaResourcePolicy,
-  express.static(path.join(uploadsRoot, "certifications"), uploadStaticOptions)
-);
+app.get("/uploads/:kind(avatars|certifications)/:filename", publicMediaResourcePolicy, serveProfileMedia);
 app.use(
   "/uploads/events",
   publicMediaResourcePolicy,

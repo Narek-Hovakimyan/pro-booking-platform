@@ -1,6 +1,10 @@
 import BarberProfile from "../../models/BarberProfile.js";
 import User from "../../models/User.js";
 import { deleteUploadedFile } from "../../middleware/uploadMiddleware.js";
+import {
+  clearBarberProfileAvatarAtomically,
+  replaceBarberProfileAvatarAtomically,
+} from "../media/profileMediaService.js";
 import { serializePrivateSelfBarberProfile } from "../../utils/privateSelfBarberProfileSerializer.js";
 import {
   BarberProfileConflictError,
@@ -33,15 +37,19 @@ const readTrustedUser = (UserModel, userFilter) =>
 const readSelfProfile = (BarberProfileModel, trustedBarberId) =>
   selectQuery(BarberProfileModel.findOne({ barberId: trustedBarberId }), profileProjection);
 
-const deleteIfReplaced = (previousPath, nextPath) => {
-  if (!previousPath || previousPath === nextPath) return;
-  deleteUploadedFile(previousPath);
+const withoutAvatar = (updates) => {
+  const { avatarUrl, imageUrl, ...rest } = updates;
+  return rest;
 };
 
 export const createSelfBarberProfileMutationService = (dependencies = {}) => {
   const deps = {
     UserModel: dependencies.UserModel || User,
     BarberProfileModel: dependencies.BarberProfileModel || BarberProfile,
+    replaceBarberProfileAvatarAtomically:
+      dependencies.replaceBarberProfileAvatarAtomically || replaceBarberProfileAvatarAtomically,
+    clearBarberProfileAvatarAtomically:
+      dependencies.clearBarberProfileAvatarAtomically || clearBarberProfileAvatarAtomically,
     serialize:
       dependencies.serializePrivateSelfBarberProfile || serializePrivateSelfBarberProfile,
   };
@@ -50,19 +58,29 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
     trustedBarberId,
     userUpdates = {},
     profileUpdates = {},
+    uploadFile = null,
   }) {
     const userFilter = { _id: trustedBarberId, role: "barber" };
     const hasUserUpdates = hasUpdates(userUpdates);
     const hasProfileUpdates = hasUpdates(profileUpdates);
-    const uploadedAvatarPath =
+    const requestedAvatarPath =
       typeof userUpdates.avatarUrl === "string" &&
       userUpdates.avatarUrl.startsWith(avatarUploadPrefix)
         ? userUpdates.avatarUrl
         : "";
-    const previousUser = uploadedAvatarPath
+    const hasTrustedUpload = Boolean(uploadFile?.path || Buffer.isBuffer(uploadFile?.buffer));
+    const transactionalAvatar = Boolean(
+      requestedAvatarPath && hasTrustedUpload && deps.UserModel.db?.readyState === 1
+    );
+    const transactionalClear = Boolean(
+      !requestedAvatarPath &&
+      (userUpdates.avatarUrl === "" || profileUpdates.imageUrl === "") &&
+      deps.UserModel.db?.readyState === 1
+    );
+    const previousUser = (transactionalAvatar || transactionalClear)
       ? await readTrustedUser(deps.UserModel, userFilter)
       : null;
-    const previousProfile = uploadedAvatarPath
+    const previousProfile = (transactionalAvatar || transactionalClear)
       ? await readSelfProfile(deps.BarberProfileModel, trustedBarberId)
       : null;
     const previousUserAvatarUrl =
@@ -72,12 +90,20 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
     let user;
     let avatarPersisted = false;
 
+    if (requestedAvatarPath && !hasTrustedUpload) {
+      throw new SelfBarberProfileMutationError(
+        "BARBER_PROFILE_MEDIA_INVALID",
+        "Invalid barber profile media",
+        400
+      );
+    }
+
     try {
       if (hasUserUpdates) {
         user = await selectQuery(
           deps.UserModel.findOneAndUpdate(
             userFilter,
-            { $set: { ...userUpdates } },
+            { $set: { ...(transactionalAvatar || transactionalClear ? withoutAvatar(userUpdates) : userUpdates) } },
             { returnDocument: "after", runValidators: true }
           ),
           userProjection
@@ -100,10 +126,6 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
       );
     }
 
-    avatarPersisted = Boolean(
-      uploadedAvatarPath && userUpdates.avatarUrl === uploadedAvatarPath
-    );
-
     try {
       let profile;
       try {
@@ -112,7 +134,7 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
             BarberProfileModel: deps.BarberProfileModel,
             barberId: trustedBarberId,
             update: {
-              $set: { ...profileUpdates },
+              $set: { ...(transactionalAvatar || transactionalClear ? withoutAvatar(profileUpdates) : profileUpdates) },
               $setOnInsert: { barberId: trustedBarberId },
             },
             options: { returnDocument: "after", runValidators: true, upsert: true },
@@ -138,17 +160,30 @@ export const createSelfBarberProfileMutationService = (dependencies = {}) => {
         );
       }
 
-      if (uploadedAvatarPath) {
-        deleteIfReplaced(previousUserAvatarUrl, uploadedAvatarPath);
-        deleteIfReplaced(previousProfileImageUrl, uploadedAvatarPath);
+      if (transactionalAvatar) {
+        ({ user, profile } = await deps.replaceBarberProfileAvatarAtomically({
+          ownerId: trustedBarberId,
+          expectedUserAvatarUrl: previousUserAvatarUrl,
+          expectedProfileImageUrl: previousProfileImageUrl,
+          file: uploadFile,
+        }));
+        avatarPersisted = true;
+        deleteUploadedFile(uploadFile.path);
+      } else if (transactionalClear) {
+        ({ user, profile } = await deps.clearBarberProfileAvatarAtomically({
+          ownerId: trustedBarberId,
+          expectedUserAvatarUrl: previousUserAvatarUrl,
+          expectedProfileImageUrl: previousProfileImageUrl,
+        }));
       }
 
       return deps.serialize({ user, profile });
     } catch (error) {
-      if (uploadedAvatarPath && !avatarPersisted) {
-        deleteUploadedFile(uploadedAvatarPath);
+      const commitOutcomeUnknown = Boolean(error?.profileMediaCommitOutcomeUnknown);
+      if (requestedAvatarPath && !avatarPersisted && !commitOutcomeUnknown) {
+        deleteUploadedFile(uploadFile?.path || requestedAvatarPath);
       }
-      if (uploadedAvatarPath && avatarPersisted) {
+      if (requestedAvatarPath && (avatarPersisted || commitOutcomeUnknown)) {
         error.preserveUploadedFile = true;
       }
       throw error;

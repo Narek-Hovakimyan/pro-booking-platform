@@ -6,6 +6,8 @@ import MediaObject, {
   MEDIA_OBJECT_STATES,
 } from "../../models/MediaObject.js";
 import PortfolioPhoto from "../../models/PortfolioPhoto.js";
+import BarberProfile from "../../models/BarberProfile.js";
+import User from "../../models/User.js";
 import { normalizeBookingReferenceImagePath } from "../booking/bookingReferenceImageHelpers.js";
 import { LocalMediaStore } from "./localMediaStore.js";
 
@@ -29,6 +31,8 @@ const DELETE_FAILURE_CODES = new Set([
 const mediaStoreFor = (mediaObject) =>
   String(mediaObject?.mediaClass || "").startsWith("portfolio-")
     ? new LocalMediaStore({ root: `${process.cwd()}/uploads/.portfolio-media-store` })
+    : String(mediaObject?.mediaClass || "").startsWith("profile-")
+      ? new LocalMediaStore({ root: `${process.cwd()}/uploads/.profile-media-store` })
     : new LocalMediaStore({ root: `${process.cwd()}/uploads/.booking-reference-media-store` });
 
 const getNow = (now) => {
@@ -97,7 +101,7 @@ const bookingReferencePaths = (legacyUrl) => {
   return normalized ? [normalized, `/${normalized}`] : [];
 };
 
-const checkReferences = async ({ mediaObject, BookingModel, PortfolioPhotoModel, allowMissingOwner = false }) => {
+const checkReferences = async ({ mediaObject, BookingModel, PortfolioPhotoModel, UserModel, BarberProfileModel, allowMissingOwner = false }) => {
   const paths = referencePaths(mediaObject.legacyUrl);
   try {
     if (mediaObject.ownerModel === "Booking" || mediaObject.mediaClass === "booking-reference") {
@@ -118,6 +122,16 @@ const checkReferences = async ({ mediaObject, BookingModel, PortfolioPhotoModel,
       });
       if (portfolio) return { referenced: true, ambiguous: false };
     }
+    if (mediaObject.ownerModel === "User" || String(mediaObject.mediaClass || "").startsWith("profile-")) {
+      const user = await findOne(UserModel, { _id: mediaObject.ownerId, avatarUrl: mediaObject.legacyUrl });
+      const profile = await findOne(
+        BarberProfileModel,
+        mediaObject.mediaClass === "profile-certification"
+          ? { barberId: mediaObject.ownerId, "certifications.imageUrl": mediaObject.legacyUrl }
+          : { barberId: mediaObject.ownerId, imageUrl: mediaObject.legacyUrl }
+      );
+      if (user || profile) return { referenced: true, ambiguous: false };
+    }
     if (!mediaObject.ownerModel && mediaObject.status === MEDIA_OBJECT_STATES.STAGED) {
       const booking = await findOne(BookingModel, { referenceImages: { $in: paths } });
       const portfolio = await findOne(PortfolioPhotoModel, {
@@ -135,7 +149,7 @@ const checkReferences = async ({ mediaObject, BookingModel, PortfolioPhotoModel,
     if (!mediaObject.ownerModel && allowMissingOwner) {
       return { referenced: false, ambiguous: false };
     }
-    if (mediaObject.ownerModel && !["Booking", "PortfolioPhoto"].includes(mediaObject.ownerModel)) {
+    if (mediaObject.ownerModel && !["Booking", "PortfolioPhoto", "User"].includes(mediaObject.ownerModel)) {
       return { referenced: false, ambiguous: true, reason: "unknown_owner_model" };
     }
     return { referenced: false, ambiguous: false };
@@ -234,6 +248,8 @@ export const reconcileMediaObject = async ({
   MediaObjectModel = MediaObject,
   BookingModel = Booking,
   PortfolioPhotoModel = PortfolioPhoto,
+  UserModel = User,
+  BarberProfileModel = BarberProfile,
   mediaStore,
   tokenFactory = randomUUID,
   leaseTtlMs = DEFAULT_MEDIA_RECONCILIATION_LEASE_TTL_MS,
@@ -280,7 +296,7 @@ export const reconcileMediaObject = async ({
     return { processed: false, reason: released ? "manual_required" : "lease_lost" };
   }
 
-  const references = await checkReferences({ mediaObject, BookingModel, PortfolioPhotoModel, allowMissingOwner: wasStaged });
+  const references = await checkReferences({ mediaObject, BookingModel, PortfolioPhotoModel, UserModel, BarberProfileModel, allowMissingOwner: wasStaged });
   if (references.referenced || references.ambiguous) {
     const retried = await scheduleRetry({ MediaObjectModel, mediaObject, token, fencingToken, expectedStatus: ownedStatus, now, error: new Error(references.reason || "media reference is not safely absent"), retryLimit, retryBaseMs, retryMaxMs });
     return { processed: false, reason: retried ? (references.referenced ? "referenced" : "ambiguous") : "lease_lost" };
@@ -295,7 +311,7 @@ export const reconcileMediaObject = async ({
     const current = await findOne(MediaObjectModel, { _id: mediaObject._id, reconciliationLeaseToken: token, status: { $in: [MEDIA_OBJECT_STATES.STAGED, MEDIA_OBJECT_STATES.DELETE_PENDING, MEDIA_OBJECT_STATES.FAILED] } });
     if (!current) return { processed: false, reason: "lease_lost" };
     ownedStatus = current.status;
-    const latestReferences = await checkReferences({ mediaObject: current, BookingModel, PortfolioPhotoModel, allowMissingOwner: wasStaged });
+    const latestReferences = await checkReferences({ mediaObject: current, BookingModel, PortfolioPhotoModel, UserModel, BarberProfileModel, allowMissingOwner: wasStaged });
     if (latestReferences.referenced || latestReferences.ambiguous) {
       const retried = await scheduleRetry({ MediaObjectModel, mediaObject: current, token, fencingToken, expectedStatus: ownedStatus, now, error: new Error(latestReferences.reason || "media reference changed"), retryLimit, retryBaseMs, retryMaxMs });
       return { processed: false, reason: retried ? (latestReferences.referenced ? "referenced" : "ambiguous") : "lease_lost" };
