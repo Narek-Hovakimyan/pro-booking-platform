@@ -23,6 +23,7 @@ import {
   updateSelfProfile,
 } from "../../services/users/userProfileUpdateService.js";
 import { parseOptionalPagination } from "../../utils/requestValidation.js";
+import { findPublicBarberDirectoryPage } from "../../services/users/publicBarberDirectoryQueryService.js";
 
 export const getBarbers = async (req, res) => {
   try {
@@ -31,22 +32,26 @@ export const getBarbers = async (req, res) => {
       return res.status(400).json({ message: pagination.error });
     }
 
-    const barbers = await User.find({ role: "barber" })
-      .sort({ createdAt: 1, _id: 1 })
-      .select("-password");
-    const paidAccessByBarberId = await getPaidAccessByBarberIds(
-      barbers.map((barber) => barber._id)
-    );
-    let paidBarbers = barbers.filter((barber) =>
-      paidAccessByBarberId.get(String(barber._id))
-    );
-    const readinessByBarberId = await getPublicBarberReadinessByIds(paidBarbers.map((barber) => barber._id));
-    paidBarbers = paidBarbers.filter((barber) => readinessByBarberId.get(String(barber._id))?.publicReady);
+    let paidBarbers;
+    let readinessByBarberId;
     if (pagination.value.enabled) {
-      paidBarbers = paidBarbers.slice(
-        pagination.value.skip,
-        pagination.value.skip + pagination.value.limit
+      paidBarbers = await findPublicBarberDirectoryPage(pagination.value);
+      readinessByBarberId = new Map(paidBarbers.map((barber) => [
+        String(barber._id),
+        { publicReady: true, eligibleSalonIds: new Set((barber._eligibleSalonIds || []).map(String)) },
+      ]));
+    } else {
+      const barbers = await User.find({ role: "barber" })
+        .sort({ createdAt: 1, _id: 1 })
+        .select("-password");
+      const paidAccessByBarberId = await getPaidAccessByBarberIds(
+        barbers.map((barber) => barber._id)
       );
+      paidBarbers = barbers.filter((barber) =>
+        paidAccessByBarberId.get(String(barber._id))
+      );
+      readinessByBarberId = await getPublicBarberReadinessByIds(paidBarbers.map((barber) => barber._id));
+      paidBarbers = paidBarbers.filter((barber) => readinessByBarberId.get(String(barber._id))?.publicReady);
     }
     const profiles = await BarberProfile.find({
       barberId: { $in: paidBarbers.map((barber) => barber._id) },

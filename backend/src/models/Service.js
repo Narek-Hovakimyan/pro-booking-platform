@@ -109,6 +109,7 @@ const serviceSchema = new mongoose.Schema(
 );
 
 serviceSchema.index({ barberId: 1, customCategoryId: 1 });
+serviceSchema.index({ barberId: 1, active: 1 });
 
 const Service = mongoose.model("Service", serviceSchema);
 

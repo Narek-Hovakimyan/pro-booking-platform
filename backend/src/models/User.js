@@ -1,7 +1,5 @@
 import mongoose from "mongoose";
-
 export const MAX_PHONE_LENGTH = 32;
-
 const defaultScheduleSchema = new mongoose.Schema(
   {
     startTime: { type: String, default: "09:00" },
@@ -12,7 +10,6 @@ const defaultScheduleSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
 const staffPaymentSchema = new mongoose.Schema(
   {
     type: {
@@ -60,7 +57,6 @@ const staffPaymentSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
 const salonEntrySchema = new mongoose.Schema(
   {
     salon: {
@@ -119,7 +115,6 @@ const salonEntrySchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
 const loyaltyDiscountSettingsSchema = new mongoose.Schema(
   {
     enabled: {
@@ -146,7 +141,6 @@ const loyaltyDiscountSettingsSchema = new mongoose.Schema(
   },
   { _id: false }
 );
-
 const specialistOnboardingSchema = new mongoose.Schema(
   {
     version: {
@@ -176,20 +170,17 @@ const specialistOnboardingSchema = new mongoose.Schema(
   },
   { _id: false, strict: "throw" }
 );
-
 const hasBarberRole = (doc) => doc?.role === "barber";
 const isLegacyPlatformRoleValue = (doc, value) =>
   !doc?.isNew &&
   typeof doc?.isModified === "function" &&
   !doc.isModified("platformRole") &&
   (value === "admin" || value === null);
-
 const isValidPlatformRole = function (value) {
   if (value === undefined) return true;
   if (value === "superuser") return true;
   return isLegacyPlatformRoleValue(this, value);
 };
-
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -428,7 +419,6 @@ const userSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
-
 // Pre-save: enforce profession/barberType consistency
 // - non-barber profession → clear barberType, keep specialty unisex
 // - barber profession → default barberType to "unisex", align legacy specialty
@@ -443,7 +433,6 @@ userSchema.pre("save", function () {
     this.specialty = this.barberType;
   }
 });
-
 // Pre-findOneAndUpdate: enforce invariants for findByIdAndUpdate queries
 // (findByIdAndUpdate bypasses pre('save'))
 userSchema.pre("findOneAndUpdate", function () {
@@ -469,7 +458,6 @@ userSchema.pre("findOneAndUpdate", function () {
     }
   }
 });
-
 // Pre-init: derive profession/barberType from old specialty for backward compatibility
 userSchema.pre("init", function (doc) {
   if (!doc.profession && doc.specialty) {
@@ -477,14 +465,12 @@ userSchema.pre("init", function (doc) {
     doc.barberType = doc.specialty;
   }
 });
-
 // Virtual getter for backward compatibility - returns the primary approved salon
 userSchema.virtual("primarySalon").get(function () {
   const approved = (this.salons || []).filter((s) => s.status === "approved");
   const primary = approved.find((s) => s.isPrimary);
   return primary?.salon || approved[0]?.salon || null;
 });
-
 // Helper: get all approved salons
 userSchema.methods.getApprovedSalons = function () {
   return (this.salons || []).filter((s) => s.status === "approved");
@@ -507,6 +493,7 @@ userSchema.index(
     partialFilterExpression: { platformRole: "superuser" },
   }
 );
+userSchema.index({ role: 1, createdAt: 1, _id: 1 });
 
 const User = mongoose.model("User", userSchema);
 

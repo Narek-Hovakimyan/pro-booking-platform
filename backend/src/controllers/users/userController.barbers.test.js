@@ -14,6 +14,7 @@ import User from "../../models/User.js";
 import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 
 const originalUserFind = User.find;
+const originalUserAggregate = User.aggregate;
 const originalBarberProfileFind = BarberProfile.find;
 const originalScheduleFind = Schedule.find;
 const originalSalonFind = Salon.find;
@@ -23,6 +24,7 @@ const originalSubscriptionSeatFind = SubscriptionSeat.find;
 
 afterEach(() => {
   User.find = originalUserFind;
+  User.aggregate = originalUserAggregate;
   BarberProfile.find = originalBarberProfileFind;
   Schedule.find = originalScheduleFind;
   Salon.find = originalSalonFind;
@@ -357,12 +359,19 @@ test("getBarbers supports optional bounded pagination without changing array sha
     makeBarber({ name: "Third" }),
   ];
 
-  User.find = () => chainableQuery(barbers);
+  User.aggregate = () => Promise.resolve([{ ...barbers[2], _eligibleSalonIds: [] }]);
+  User.find = () => {
+    throw new Error("paginated directory must not load all users");
+  };
   Subscription.find = () =>
     chainableQuery(barbers.map((barber) => ({ ownerId: barber._id, status: "active" })));
   SubscriptionSeat.find = () => chainableQuery([]);
-  BarberProfile.find = async () =>
-    barbers.map((barber) => ({ barberId: barber._id, address: `${barber.name} Street` }));
+  let profileQueries = 0;
+  BarberProfile.find = async (query) => {
+    profileQueries += 1;
+    assert.deepEqual(query.barberId.$in.map(String), [String(barbers[2]._id)]);
+    return [{ barberId: barbers[2]._id, address: "Third Street" }];
+  };
   Schedule.find = async () => barbers.map((barber) => workingSchedule(barber._id));
   Service.find = async () => barbers.map((barber) => ({ barberId: barber._id }));
   Salon.find = async () => [];
@@ -373,6 +382,7 @@ test("getBarbers supports optional bounded pagination without changing array sha
   assert.equal(res.statusCode, 200);
   assert.equal(Array.isArray(res.body), true);
   assert.deepEqual(res.body.map((barber) => barber.name), ["Third"]);
+  assert.equal(profileQueries, 1);
 });
 
 test("getBarbers pagination uses deterministic createdAt and _id ordering across pages", async () => {
@@ -404,22 +414,17 @@ test("getBarbers pagination uses deterministic createdAt and _id ordering across
     return 0;
   };
 
-  User.find = () => {
-    let sortedBarbers = unorderedBarbers;
-    return {
-      sort(sortSpec) {
-        sortedBarbers = [...unorderedBarbers].sort((left, right) =>
-          compareBySortSpec(left, right, sortSpec)
-        );
-        return this;
-      },
-      select() {
-        return this;
-      },
-      then(resolve) {
-        return Promise.resolve(sortedBarbers).then(resolve);
-      },
-    };
+  User.aggregate = (pipeline) => {
+    const sortStage = pipeline.find((stage) => stage.$sort)?.$sort;
+    const skip = pipeline.find((stage) => stage.$skip)?.$skip || 0;
+    const limit = pipeline.find((stage) => stage.$limit)?.$limit;
+    assert.deepEqual(sortStage, { createdAt: 1, _id: 1 });
+    return Promise.resolve(
+      [...unorderedBarbers]
+        .sort((left, right) => compareBySortSpec(left, right, sortStage))
+        .slice(skip, skip + limit)
+        .map((barber) => ({ ...barber, _eligibleSalonIds: [] }))
+    );
   };
   Subscription.find = () =>
     chainableQuery(unorderedBarbers.map((barber) => ({ ownerId: barber._id, status: "active" })));
