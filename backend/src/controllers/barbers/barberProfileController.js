@@ -28,6 +28,10 @@ import {
   getPublicAvailabilitySchedule,
   getPublicAvailabilityScheduleMaps,
 } from "../../services/barber/publicAvailabilityContextService.js";
+import {
+  getPaginatedBarberCardSummary,
+  isPaginatedCardSummaryRequest,
+} from "../../services/barbers/barberCardSummaryQueryService.js";
 
 export const barberProfileController = {
   getAll: async (_req, res) => {
@@ -165,7 +169,7 @@ const getApprovedSalonEntries = (barber, salonsById, eligibleSalonIds = new Set(
   return entries;
 };
 
-export const getBarberCardSummary = async (req, res) => {
+const getLegacyBarberCardSummary = async (req, res) => {
   try {
     const selectedServiceName = normalizeSearchValue(req.query?.serviceName);
     const selectedServiceCategory = normalizeSearchValue(req.query?.category);
@@ -344,6 +348,15 @@ export const getBarberCardSummary = async (req, res) => {
       reviewStats: responseReviewStats,
       availability: responseAvailability,
     });
+  } catch (error) {
+    return sendControllerError(res, error, "Could not fetch barber card summary");
+  }
+};
+
+export const getBarberCardSummary = async (req, res) => {
+  if (!isPaginatedCardSummaryRequest(req.query)) return getLegacyBarberCardSummary(req, res);
+  try {
+    return res.json(await getPaginatedBarberCardSummary({ query: req.query, user: req.user }));
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch barber card summary");
   }

@@ -22,7 +22,7 @@ import {
   getMyDepositSettings,
   updateMyDepositSettings,
 } from "../../controllers/bookings/depositSettingsController.js";
-import { protect } from "../../middleware/authMiddleware.js";
+import { optionalAuth, protect } from "../../middleware/authMiddleware.js";
 import { uploadLimiter } from "../../middleware/rateLimitMiddleware.js";
 import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 import {
@@ -50,7 +50,7 @@ const genericBarberProfileMutationTombstone = (_req, res) =>
   });
 
 router.get("/", barberProfileController.getAll);
-router.get("/card-summary", getBarberCardSummary);
+router.get("/card-summary", optionalAuth, getBarberCardSummary);
 router.get("/me/clients", protect, requireBarberSubscription, getMyBarberClients);
 router.get(
   "/me/loyalty-discount-settings",

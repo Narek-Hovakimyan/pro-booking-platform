@@ -63,6 +63,10 @@ const activeService = {
   price: 1000,
 };
 
+const summaryBarbers = (favorites = []) => favorites
+  .filter((favorite) => favorite?.type !== "salon")
+  .map((favorite) => favorite.barber || { id: favorite.barberId, name: "Summary barber" });
+
 function mockApi({ favorites = [] } = {}) {
   vi.mocked(api.get).mockImplementation((url) => {
     if (url === "/favorites") {
@@ -74,7 +78,7 @@ function mockApi({ favorites = [] } = {}) {
     if (url === "/barbers/card-summary") {
       return Promise.resolve({
         data: {
-          barbers: [],
+          barbers: summaryBarbers(favorites),
           services: [activeService],
           reviewStats: [],
           availability: [],
@@ -104,7 +108,7 @@ function mockFavoritesApi({ favorites = [], salonFavorites = [] } = {}) {
     if (url === "/barbers/card-summary") {
       return Promise.resolve({
         data: {
-          barbers: [],
+          barbers: summaryBarbers(favorites),
           services: [activeService],
           reviewStats: [],
           availability: [],
@@ -339,7 +343,7 @@ describe("FavoritesPage favorite removal protection", () => {
       if (url === "/barbers/card-summary") {
         return Promise.resolve({
           data: {
-            barbers: [],
+            barbers: [favorite.barber],
             services: [activeService],
             reviewStats: [],
             availability: [],
@@ -895,5 +899,25 @@ describe("FavoritesPage favorite removal protection", () => {
     await waitFor(() =>
       expect(routerMocks.dispatch).not.toHaveBeenCalled()
     );
+  });
+});
+
+describe("FavoritesPage scoped card summaries", () => {
+  it("requests only visible favorite IDs and hides missing public summaries", async () => {
+    const visible = { clientId: "client-1", barberId: "visible", barber: { id: "visible", name: "Visible Anna", salons: [] } };
+    const missing = { clientId: "client-1", barberId: "private", barber: { id: "private", name: "Private barber", salons: [] } };
+    state.currentUser = { id: "client-1" };
+    state.favorites = [visible, missing];
+    vi.mocked(api.get).mockImplementation((url) => {
+      if (url === "/favorites") return Promise.resolve({ data: [visible, missing] });
+      if (url === "/favorites/salons") return Promise.resolve({ data: [] });
+      if (url === "/barbers/card-summary") return Promise.resolve({ data: { barbers: [visible.barber], services: [], reviewStats: [], availability: [] } });
+      return Promise.resolve({ data: [] });
+    });
+
+    renderFavorites();
+    await screen.findByText("Visible Anna");
+    expect(api.get).toHaveBeenCalledWith("/barbers/card-summary", { params: { barberIds: "visible,private" } });
+    expect(screen.queryByText("Private barber")).not.toBeInTheDocument();
   });
 });

@@ -3,19 +3,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 
-import {
-  canBookAgain,
-  getBookingBarberId,
-  getBookingSalonId,
-  getEntityId,
-  sortBookingsDescending,
-} from "@/client/utils/bookingStatusUtils";
-import {
-  AVAILABILITY_STATUS,
-  uniqueById,
-  getBarberId,
-  mapByBarberId,
-} from "@/client/utils/favoriteHelpers";
+import { getBookingBarberId, getBookingSalonId, getEntityId } from "@/client/utils/bookingStatusUtils";
+import { uniqueById } from "@/client/utils/favoriteHelpers";
+import { getEligibleBookingByBarberId, getFavoriteRemovalKey, getVisibleFavoriteBarbers, normalizeFavoriteRemovalId, useFavoriteBarberSummaries } from "@/client/hooks/useFavoriteBarberSummaries";
 
 import api from "@/shared/api/axios";
 import FavoriteBarberCard from "@/client/components/favorites/FavoriteBarberCard";
@@ -36,24 +26,6 @@ import { fetchClientBookings } from "@/store/slices/bookingsSlice";
 import { updateCurrentUser } from "@/store/slices/authSlice";
 import { getMediaUrl } from "@/shared/utils/media";
 
-function normalizeFavoriteRemovalId(entityId) {
-  if (entityId === null || entityId === undefined) return null;
-  if (typeof entityId === "object") {
-    return entityId.id || entityId._id || null;
-  }
-
-  const normalizedId = String(entityId).trim();
-  return normalizedId || null;
-}
-
-function getFavoriteRemovalKey(clientId, type, entityId) {
-  const normalizedClientId = normalizeFavoriteRemovalId(clientId);
-  const normalizedId = normalizeFavoriteRemovalId(entityId);
-  return normalizedClientId && normalizedId
-    ? `${normalizedClientId}:${type}:${normalizedId}`
-    : null;
-}
-
 export default function FavoritesPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -61,12 +33,6 @@ export default function FavoritesPage() {
   const [activeTab, setActiveTab] = useState("barbers");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [firstAvailableSlotByBarberId, setFirstAvailableSlotByBarberId] = useState({});
-  const [availabilityStatusByBarberId, setAvailabilityStatusByBarberId] = useState({});
-  const [summaryBarbersById, setSummaryBarbersById] = useState({});
-  const [summaryServicesByBarberId, setSummaryServicesByBarberId] = useState({});
-  const [summaryReviewStatsByBarberId, setSummaryReviewStatsByBarberId] = useState({});
-  const [hasLoadedCardSummary, setHasLoadedCardSummary] = useState(false);
   const [pendingFavoriteRemovals, setPendingFavoriteRemovals] = useState({});
   const { currentUser } = useSelector((state) => state.auth);
   const users = useSelector((state) => state.users);
@@ -76,6 +42,7 @@ export default function FavoritesPage() {
   const bookings = useSelector((state) => state.bookings);
   const pendingFavoriteRemovalsRef = useRef({});
   const currentUserRef = useRef(currentUser || null);
+  const { availabilityStatusByBarberId, barbersById: summaryBarbersById, firstAvailableSlotByBarberId, hasLoadedCardSummary, reviewStatsByBarberId: summaryReviewStatsByBarberId, servicesByBarberId: summaryServicesByBarberId } = useFavoriteBarberSummaries({ favorites, clientId: currentUser?.id });
 
   useEffect(() => {
     currentUserRef.current = currentUser || null;
@@ -88,25 +55,15 @@ export default function FavoritesPage() {
 
   const beginFavoriteRemoval = (clientId, type, entityId) => {
     const removalKey = getFavoriteRemovalKey(clientId, type, entityId);
-    if (!removalKey || pendingFavoriteRemovalsRef.current[removalKey]) {
-      return null;
-    }
-
-    const nextPendingRemovals = {
-      ...pendingFavoriteRemovalsRef.current,
-      [removalKey]: true,
-    };
-
+    if (!removalKey || pendingFavoriteRemovalsRef.current[removalKey]) return null;
+    const nextPendingRemovals = { ...pendingFavoriteRemovalsRef.current, [removalKey]: true };
     pendingFavoriteRemovalsRef.current = nextPendingRemovals;
     setPendingFavoriteRemovals(nextPendingRemovals);
     return removalKey;
   };
 
   const endFavoriteRemoval = (removalKey) => {
-    if (!removalKey || !pendingFavoriteRemovalsRef.current[removalKey]) {
-      return;
-    }
-
+    if (!removalKey || !pendingFavoriteRemovalsRef.current[removalKey]) return;
     const nextPendingRemovals = { ...pendingFavoriteRemovalsRef.current };
     delete nextPendingRemovals[removalKey];
     pendingFavoriteRemovalsRef.current = nextPendingRemovals;
@@ -161,101 +118,7 @@ export default function FavoritesPage() {
     dispatch(fetchClientBookings(currentUser.id));
   }, [currentUser?.id, dispatch]);
 
-  // Non-blocking card-summary fetch for enriched barber data, services, review stats, and availability
-  useEffect(() => {
-    if (!currentUser?.id) return;
-
-    let isMounted = true;
-
-    async function fetchCardSummaryForFavorites() {
-      try {
-        const { data } = await api.get("/barbers/card-summary");
-        if (!isMounted) return;
-
-        // Build barber map by id for merging with favorite barbers
-        const barbersById = {};
-        (data.barbers || []).forEach((barber) => {
-          const bid = String(getBarberId(barber) || "");
-          if (bid) barbersById[bid] = barber;
-        });
-        setSummaryBarbersById(barbersById);
-
-        // Build services map by barberId
-        const servicesByBarberId = {};
-        (data.services || []).forEach((service) => {
-          const bid = String(service.barberId || "");
-          if (!bid) return;
-          if (!servicesByBarberId[bid]) servicesByBarberId[bid] = [];
-          servicesByBarberId[bid].push(service);
-        });
-        setSummaryServicesByBarberId(servicesByBarberId);
-
-        // Build review stats map by barberId
-        const reviewStatsByBarberId = {};
-        (data.reviewStats || []).forEach((stat) => {
-          const bid = String(stat.barberId || "");
-          if (bid) reviewStatsByBarberId[bid] = stat;
-        });
-        setSummaryReviewStatsByBarberId(reviewStatsByBarberId);
-
-        // Build availability maps
-        const availabilityItems = mapByBarberId(data.availability || []);
-        setFirstAvailableSlotByBarberId(
-          Object.fromEntries(
-            Object.entries(availabilityItems).map(([barberId, item]) => [
-              barberId,
-              item?.firstAvailableSlot || null,
-            ])
-          )
-        );
-        setAvailabilityStatusByBarberId(
-          Object.fromEntries(
-            (data.barbers || [])
-              .map((barber) => {
-                const bid = String(getBarberId(barber) || "");
-                if (!bid) return null;
-                return [bid, availabilityItems[bid]?.status || AVAILABILITY_STATUS.READY];
-              })
-              .filter(Boolean)
-          )
-        );
-      } catch {
-        // Card-summary is best-effort enrichment; fall through silently.
-      } finally {
-        if (isMounted) {
-          setHasLoadedCardSummary(true);
-        }
-      }
-    }
-
-    fetchCardSummaryForFavorites();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUser?.id]);
-
-  const favoriteBarbers = uniqueById(
-    (favorites || [])
-      .filter(
-        (favorite) =>
-          favorite?.type !== "salon" &&
-          String(favorite.clientId) === String(currentUser?.id)
-      )
-      .map((favorite) => {
-        const barberFromFavorite = favorite.barber;
-        const barberFromRedux = users.find(
-          (user) =>
-            user.role === "barber" &&
-            String(user.id) === String(favorite.barberId)
-        );
-        const barberId = barberFromFavorite?.id || barberFromFavorite?._id || barberFromRedux?.id || barberFromRedux?._id || String(favorite.barberId);
-        const summaryBarber = summaryBarbersById[String(barberId)];
-        // Merge: card-summary data is always freshest, fallback to favorite, then Redux
-        return { ...(barberFromFavorite || barberFromRedux), ...summaryBarber, id: summaryBarber?.id || summaryBarber?._id || barberId };
-      })
-      .filter(Boolean)
-  );
+  const favoriteBarbers = getVisibleFavoriteBarbers({ favorites, users, clientId: currentUser?.id, barbersById: summaryBarbersById, hasLoadedCardSummary });
   const favoriteSalons = uniqueById(
     (favorites || [])
       .filter(
@@ -275,21 +138,7 @@ export default function FavoritesPage() {
   const specialistsPanelId = `${tabIdBase}-specialists-panel`;
   const salonsPanelId = `${tabIdBase}-salons-panel`;
 
-  // Derive latest eligible booking per barber for "Book again" CTA
-  const clientBookings = (currentUser?.id
-    ? (bookings || []).filter(
-        (booking) => String(booking.clientId) === String(currentUser.id)
-      )
-    : []
-  ).filter(canBookAgain);
-  const sortedEligibleBookings = [...clientBookings].sort(sortBookingsDescending);
-  const eligibleBookingByBarberId = {};
-  for (const booking of sortedEligibleBookings) {
-    const barberId = getBookingBarberId(booking);
-    if (barberId && !eligibleBookingByBarberId[barberId]) {
-      eligibleBookingByBarberId[barberId] = booking;
-    }
-  }
+  const eligibleBookingByBarberId = getEligibleBookingByBarberId(bookings, currentUser?.id);
 
   const handleBookAgain = (barber, eligibleBooking) => (event) => {
     event.preventDefault();

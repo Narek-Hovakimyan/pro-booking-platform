@@ -930,6 +930,18 @@ test("card summary rejects invalid service category query", async () => {
   assert.equal(res.body.message, "Invalid service category");
 });
 
+test("card summary rejects malformed paginated queries before loading the directory", async () => {
+  const res = createResponse();
+  let queried = false;
+  User.find = () => { queried = true; return createFindChain([]); };
+
+  await getBarberCardSummary({ query: { page: "invalid" } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid page");
+  assert.equal(queried, false);
+});
+
 test("update certification rejects issue date that would invalidate existing expiry", async () => {
   const res = createResponse();
   const profile = createProfileWithCert();
