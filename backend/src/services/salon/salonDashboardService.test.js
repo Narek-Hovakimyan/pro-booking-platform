@@ -275,6 +275,30 @@ test("getSalonDashboard excludes chair renters from owner booking and revenue me
   }
 });
 
+test("dashboard pending counts and alerts exclude past Armenia bookings", async () => {
+  const pendingQueries = [];
+  configureDashboardMocks([]);
+  Booking.countDocuments = async (query) => {
+    if (query.status === "pending") pendingQueries.push(query);
+    return 0;
+  };
+
+  const result = await getSalonDashboard(
+    salonId,
+    ownerId,
+    new Date("2026-05-07T10:00:00+04:00")
+  );
+
+  assert.equal(result.bookingSummary.pendingBookings, 0);
+  assert.equal(pendingQueries.length, 2);
+  for (const query of pendingQueries) {
+    assert.deepEqual(query.barberId, { $in: [staffBarberId] });
+    assert.equal(query.status, "pending");
+    assert.ok(query.$or.some((condition) => condition.bookingDate === "2026-05-07"));
+    assert.ok(query.$or.some((condition) => condition.bookingDate?.$gt === "2026-05-07"));
+  }
+});
+
 test("dashboard monthly metrics use Armenia appointment months and completedAt fallback", async () => {
   const bookings = [
     {

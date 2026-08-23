@@ -1,5 +1,9 @@
 import Booking from "../../models/Booking.js";
 import {
+  getPendingBookingActionableFilter,
+  isPendingBookingActionable,
+} from "./bookingExpiration.js";
+import {
   serializeAvailabilityBooking,
   serializeBookingForResponse,
 } from "../../utils/bookingUtils.js";
@@ -21,7 +25,7 @@ export const getClientBookingsForRequester = async ({ clientId, requester }) => 
   return bookings.map((booking) => serializeBookingForResponse(booking, requester));
 };
 
-export const getBarberBookingsForRequester = async ({ barberId, requester }) => {
+export const getBarberBookingsForRequester = async ({ barberId, requester, now = new Date() }) => {
   const isOwnBarberCalendar =
     requester?.role === "barber" && String(requester._id) === String(barberId);
 
@@ -29,7 +33,14 @@ export const getBarberBookingsForRequester = async ({ barberId, requester }) => 
     throw new BookingReadError(403, "You can fetch only your own bookings");
   }
 
-  const bookings = await Booking.find({ barberId });
+  const actionablePendingFilter = getPendingBookingActionableFilter(now);
+  const bookings = (await Booking.find({
+    barberId,
+    $or: [
+      { status: { $ne: "pending" } },
+      { status: "pending", $or: actionablePendingFilter.$or },
+    ],
+  })).filter((booking) => isPendingBookingActionable(booking, now));
 
   if (isOwnBarberCalendar) {
     return bookings.map((booking) => serializeBookingForResponse(booking, requester));

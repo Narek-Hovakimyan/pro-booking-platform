@@ -9,6 +9,9 @@ import {
   __bookingExpirationTestHooks,
   EXPIRED_REASON,
   expirePendingBookings,
+  getPendingBookingActionableFilter,
+  isPendingBookingActionable,
+  runPendingBookingExpirationCatchup,
   shouldExpireBooking,
 } from "./bookingExpiration.js";
 import {
@@ -183,6 +186,37 @@ test("shouldExpireBooking expires past time today but not future today", async (
   );
 });
 
+test("pending actionability uses Armenia date and time boundaries", () => {
+  const now = new Date("2026-05-07T10:00:00+04:00");
+
+  assert.equal(isPendingBookingActionable(createBooking({ bookingDate: "2026-05-06" }), now), false);
+  assert.equal(isPendingBookingActionable(createBooking({ bookingDate: "2026-05-07", time: "10:00" }), now), true);
+  assert.equal(isPendingBookingActionable(createBooking({ bookingDate: "2026-05-07", time: "09:59" }), now), false);
+  assert.equal(isPendingBookingActionable(createBooking({ bookingDate: "2026-05-08", time: "00:01" }), now), true);
+  assert.equal(isPendingBookingActionable(createBooking({ bookingDate: "", dayKey: "2026-05-07", time: "10:01" }), now), true);
+
+  const filter = getPendingBookingActionableFilter(now);
+  assert.equal(filter.status, "pending");
+  assert.ok(filter.$or.some((condition) => condition.bookingDate === "2026-05-07"));
+  assert.ok(filter.$or.some((condition) => condition.bookingDate?.$gt === "2026-05-07"));
+});
+
+test("startup catch-up executes the expiration flow immediately", async () => {
+  let capturedNow;
+  Booking.find = (query) => {
+    capturedNow = query;
+    return [];
+  };
+
+  const result = await runPendingBookingExpirationCatchup(
+    new Date("2026-05-07T10:00:00+04:00")
+  );
+
+  assert.deepEqual(result, []);
+  assert.equal(capturedNow.status, "pending");
+  assert.ok(capturedNow.$or.some((condition) => condition.bookingDate?.$lte === "2026-05-07"));
+});
+
 test("duplicate expiration does not send duplicate notifications", async () => {
   const booking = createBooking({ time: "09:00" });
   let claimCount = 0;
@@ -228,6 +262,34 @@ test("duplicate expiration does not send duplicate notifications", async () => {
   assert.equal(result2.length, 0);
   assert.equal(notifications.length, 2); // No new notifications
   assert.equal(claimCount, 1); // Only one atomic claim succeeded
+});
+
+test("concurrent expiration attempts have one atomic claimant", async () => {
+  const booking = createBooking({ time: "09:00" });
+  let claimed = false;
+  let notifications = 0;
+
+  Booking.find = async () => [booking];
+  Booking.findOne = async () => booking;
+  Booking.findOneAndUpdate = async (query, update) => {
+    if (claimed || query.status !== "pending") return null;
+    claimed = true;
+    return { ...booking, ...(update.$set || {}) };
+  };
+  BookingSlotHold.deleteMany = async () => ({ deletedCount: 30 });
+  Notification.create = async (payload) => {
+    notifications += Array.isArray(payload) ? payload.length : 1;
+    return payload;
+  };
+  WaitlistEntry.find = async () => [];
+
+  const [first, second] = await Promise.all([
+    expirePendingBookings(new Date("2026-05-07T10:00:00+04:00")),
+    expirePendingBookings(new Date("2026-05-07T10:00:00+04:00")),
+  ]);
+
+  assert.equal(first.length + second.length, 1);
+  assert.equal(notifications, 2);
 });
 
 test("booking with no clientId still sends barber notification only", async () => {

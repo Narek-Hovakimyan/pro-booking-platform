@@ -27,6 +27,43 @@ const getBookingDateKey = (booking) => {
   return "";
 };
 
+const getArmeniaTimeKey = (now) => {
+  const minutes = getArmeniaMinutesOfDay(now);
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+};
+
+const DATE_KEY_QUERY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const TIME_KEY_QUERY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export const getPendingBookingActionableFilter = (now = new Date()) => {
+  const todayKey = getArmeniaDateKey(now);
+  const timeKey = getArmeniaTimeKey(now);
+
+  return {
+    status: "pending",
+    $or: [
+      { bookingDate: { $gt: todayKey, $regex: DATE_KEY_QUERY_PATTERN }, time: { $regex: TIME_KEY_QUERY_PATTERN } },
+      { bookingDate: todayKey, time: { $gte: timeKey, $regex: TIME_KEY_QUERY_PATTERN } },
+      { bookingDate: { $in: [null, ""] }, dayKey: { $gt: todayKey, $regex: DATE_KEY_QUERY_PATTERN }, time: { $regex: TIME_KEY_QUERY_PATTERN } },
+      { bookingDate: { $in: [null, ""] }, dayKey: todayKey, time: { $gte: timeKey, $regex: TIME_KEY_QUERY_PATTERN } },
+    ],
+  };
+};
+
+export const isPendingBookingActionable = (booking, now = new Date()) => {
+  if (booking?.status !== "pending") return true;
+
+  const dateKey = getBookingDateKey(booking);
+  const bookingMinutes = timeToMinutes(booking?.time || "");
+  if (!dateKey || bookingMinutes === null) return false;
+
+  const todayKey = getArmeniaDateKey(now);
+  if (dateKey > todayKey) return true;
+  if (dateKey < todayKey) return false;
+
+  return bookingMinutes >= getArmeniaMinutesOfDay(now);
+};
+
 const getBookingNotificationData = (booking) =>
   booking?._id ? { bookingId: booking._id } : undefined;
 
@@ -220,6 +257,9 @@ export const expirePendingBookings = async (nowOrOptions = new Date()) => {
 
   return expiredBookings;
 };
+
+export const runPendingBookingExpirationCatchup = (now = new Date()) =>
+  expirePendingBookings(now);
 
 export const __bookingExpirationTestHooks = {
   setNotifyMatchingWaitlistEntries(nextNotifyMatchingWaitlistEntries) {

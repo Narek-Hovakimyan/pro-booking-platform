@@ -53,6 +53,7 @@ import { serverLifecycleService } from "./services/serverLifecycleService.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
 import { startWaitlistExpirationScheduler } from "./services/waitlist/waitlistExpirationScheduler.js";
 import { startMediaReconciliationScheduler } from "./services/media/mediaReconciliationScheduler.js";
+import { runPendingBookingExpirationCatchup } from "./services/booking/bookingExpiration.js";
 import { serveProfileMedia } from "./controllers/media/profileMediaController.js";
 import { serveEventCertificateMedia } from "./controllers/media/eventCertificateMediaController.js";
 import { startCleanupNonWorkingDaysCron } from "../cron/cleanupNonWorkingDays.js";
@@ -237,11 +238,22 @@ const startServer = async () => {
       logger.info("Non-working days cleanup cron skipped (ENABLE_CLEANUP_NON_WORKING_DAYS_CRON !== true)");
     }
 
-    if (process.env.ENABLE_EXPIRE_PENDING_BOOKINGS_CRON === "true") {
+    if (process.env.ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== "false") {
       logger.info("Starting pending booking expiration cron");
+      try {
+        await runPendingBookingExpirationCatchup();
+      } catch (error) {
+        logger.error?.(
+          {
+            event: "booking_expiration.startup_catchup_failed",
+            error: { name: error?.name || "Error", code: error?.code },
+          },
+          "Pending booking expiration startup catch-up failed; scheduled retry remains active"
+        );
+      }
       cronTasks.push(startExpirePendingBookingsCron());
     } else {
-      logger.info("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON !== true)");
+      logger.info("Pending booking expiration cron skipped (ENABLE_EXPIRE_PENDING_BOOKINGS_CRON === false)");
     }
 
     if (process.env.ENABLE_EVENT_REMINDERS_CRON === "true") {

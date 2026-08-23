@@ -100,7 +100,10 @@ test("barber can fetch own full bookings with original shape and order", async (
   const storedBookings = [firstBooking, secondBooking];
 
   Booking.find = async (query) => {
-    assert.deepEqual(query, { barberId });
+    assert.deepEqual(query.barberId, barberId);
+    assert.equal(query.$or[0].status.$ne, "pending");
+    assert.equal(query.$or[1].status, "pending");
+    assert.ok(Array.isArray(query.$or[1].$or));
     return storedBookings;
   };
 
@@ -144,7 +147,9 @@ test("public barber bookings use serialized availability shape", async () => {
   });
 
   Booking.find = async (query) => {
-    assert.deepEqual(query, { barberId });
+    assert.deepEqual(query.barberId, barberId);
+    assert.equal(query.$or[0].status.$ne, "pending");
+    assert.equal(query.$or[1].status, "pending");
     return [ownClientBooking, otherClientBooking];
   };
 
@@ -179,4 +184,38 @@ test("public barber bookings use serialized availability shape", async () => {
       status: "accepted",
     },
   ]);
+});
+
+test("barber reads fail closed for past pending bookings", async () => {
+  const pastPending = createBooking({
+    _id: "past-pending",
+    bookingDate: "2026-05-06",
+    dayKey: "wed",
+    time: "23:59",
+    status: "pending",
+  });
+  const futurePending = createBooking({
+    _id: "future-pending",
+    bookingDate: "2026-05-07",
+    dayKey: "thu",
+    time: "10:01",
+    status: "pending",
+  });
+  const acceptedPast = createBooking({
+    _id: "accepted-past",
+    bookingDate: "2026-05-06",
+    dayKey: "wed",
+    time: "09:00",
+    status: "accepted",
+  });
+
+  Booking.find = async () => [pastPending, futurePending, acceptedPast];
+
+  const bookings = await getBarberBookingsForRequester({
+    barberId,
+    requester: { _id: barberId, role: "barber" },
+    now: new Date("2026-05-07T10:00:00+04:00"),
+  });
+
+  assert.deepEqual(bookings.map((booking) => booking._id), ["future-pending", "accepted-past"]);
 });

@@ -16,6 +16,7 @@ import {
   getArmeniaMonthBounds,
   isDateKey,
 } from "../../utils/bookingDateTime.js";
+import { getPendingBookingActionableFilter } from "../booking/bookingExpiration.js";
 
 export class DashboardError extends Error {
   constructor(statusCode, message) {
@@ -238,7 +239,7 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
       }),
       Booking.countDocuments({
         barberId: { $in: staffIds },
-        status: "pending",
+        ...getPendingBookingActionableFilter(now),
       }),
       getMonthBookings(staffIds, now),
     ]);
@@ -403,7 +404,7 @@ const getAlerts = async (
   // Pending bookings for staff
   const pendingBookings = await Booking.countDocuments({
     barberId: { $in: staffIds },
-    status: "pending",
+    ...getPendingBookingActionableFilter(now),
   });
   if (pendingBookings > 0) {
     alerts.push({
