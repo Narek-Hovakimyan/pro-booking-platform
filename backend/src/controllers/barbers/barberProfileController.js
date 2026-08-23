@@ -14,6 +14,7 @@ import {
   validateBarberProfileMutationPayload,
 } from "../../utils/barberProfileMutationPayload.js";
 import { sendControllerError } from "../../utils/controllerError.js";
+import { getLogger, sanitizeString } from "../../config/logger.js";
 import {
   serializePublicBarberCard,
   serializePublicBarberProfile,
@@ -32,6 +33,41 @@ import {
   getPaginatedBarberCardSummary,
   isPaginatedCardSummaryRequest,
 } from "../../services/barbers/barberCardSummaryQueryService.js";
+
+const CARD_SUMMARY_DIAGNOSTIC_MESSAGE_LIMIT = 240;
+const sanitizeCardSummaryDiagnostic = (value) => {
+  if (typeof value !== "string") return undefined;
+  const sanitized = sanitizeString(value)
+    .replace(/(?:mongodb(?:\+srv)?:\/\/)[^\s]+/gi, "mongodb://[REDACTED]")
+    .replace(/\b(?:email|phone|token|password|secret|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi, (match) => `${match.split(/[:=]/)[0]}=[REDACTED]`)
+    .replace(/\s+/g, " ")
+    .trim();
+  return sanitized.length > CARD_SUMMARY_DIAGNOSTIC_MESSAGE_LIMIT
+    ? `${sanitized.slice(0, CARD_SUMMARY_DIAGNOSTIC_MESSAGE_LIMIT)}…`
+    : sanitized;
+};
+
+const sanitizeCardSummaryCode = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return undefined;
+  const sanitized = sanitizeCardSummaryDiagnostic(value);
+  return sanitized && /^[A-Za-z0-9_.:-]{1,64}$/.test(sanitized) ? sanitized : undefined;
+};
+
+const logPaginatedCardSummaryFailure = (req, error) => {
+  try {
+    const logger = req?.log && typeof req.log.error === "function" ? req.log : getLogger();
+    logger?.error?.({
+      event: "barbers.card_summary_query_failed",
+      endpoint: "GET /api/barbers/card-summary",
+      mode: "paginated",
+      errorName: sanitizeCardSummaryDiagnostic(error?.name || error?.constructor?.name) || "Error",
+      errorCode: sanitizeCardSummaryCode(error?.code),
+      codeName: sanitizeCardSummaryCode(error?.codeName),
+      errorMessage: sanitizeCardSummaryDiagnostic(error?.message),
+    }, "Paginated barber card summary failed");
+  } catch {}
+};
 
 export const barberProfileController = {
   getAll: async (_req, res) => {
@@ -358,6 +394,7 @@ export const getBarberCardSummary = async (req, res) => {
   try {
     return res.json(await getPaginatedBarberCardSummary({ query: req.query, user: req.user }));
   } catch (error) {
+    logPaginatedCardSummaryFailure(req, error);
     return sendControllerError(res, error, "Could not fetch barber card summary");
   }
 };

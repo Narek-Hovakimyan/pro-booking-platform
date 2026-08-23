@@ -44,6 +44,7 @@ const originalMethods = {
   subscriptionSeatFindOne: SubscriptionSeat.findOne,
   userFind: User.find,
   userFindById: User.findById,
+  userAggregate: User.aggregate,
 };
 
 const barber = { _id: "barber-a", role: "barber" };
@@ -68,6 +69,7 @@ afterEach(() => {
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.find = originalMethods.userFind;
   User.findById = originalMethods.userFindById;
+  User.aggregate = originalMethods.userAggregate;
   for (const filePath of createdFiles) {
     try {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -940,6 +942,35 @@ test("card summary rejects malformed paginated queries before loading the direct
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Invalid page");
   assert.equal(queried, false);
+});
+
+test("paginated card summary logs bounded safe diagnostics and preserves the generic response", async () => {
+  const res = createResponse();
+  const logs = [];
+  const error = new Error(
+    "MongoError mongodb://user:secret@db.example/app email=person@example.com phone=+37499123456 token=abc123 " + "x".repeat(300)
+  );
+  error.name = "MongoServerError";
+  error.code = 31313;
+  error.codeName = "JSInterpreterFailure";
+  User.aggregate = () => { throw error; };
+
+  await getBarberCardSummary({
+    query: { page: "1", limit: "24", email: "person@example.com", token: "abc123" },
+    log: { error: (payload) => logs.push(payload) },
+  }, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not fetch barber card summary" });
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].event, "barbers.card_summary_query_failed");
+  assert.equal(logs[0].mode, "paginated");
+  assert.equal(logs[0].errorName, "MongoServerError");
+  assert.equal(logs[0].errorCode, 31313);
+  assert.equal(logs[0].codeName, "JSInterpreterFailure");
+  assert.ok(logs[0].errorMessage.length <= 241);
+  assert.doesNotMatch(logs[0].errorMessage, /secret|person@example\.com|\+37499123456|abc123|mongodb:\/\/user/);
+  assert.equal(Object.prototype.hasOwnProperty.call(logs[0], "stack"), false);
 });
 
 test("update certification rejects issue date that would invalidate existing expiry", async () => {
