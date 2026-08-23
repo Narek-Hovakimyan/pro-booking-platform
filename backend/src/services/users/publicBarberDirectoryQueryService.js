@@ -10,27 +10,81 @@ import mongoose from "mongoose";
 
 const PAID_STATUSES = ["trialing", "active"];
 
-// Mirrors validatePersonalWeeklySchedule for BSON data so malformed legacy schedules
-// cannot qualify a barber before Mongo applies pagination.
-const hasValidWeeklySchedule = function hasValidWeeklySchedule(weeklySchedule) {
-  const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-  if (!weeklySchedule || Array.isArray(weeklySchedule) || typeof weeklySchedule !== "object") return false;
-  if (Object.keys(weeklySchedule).length !== days.length || days.some((day) => !Object.prototype.hasOwnProperty.call(weeklySchedule, day))) return false;
-  let workingDays = 0;
-  const time = (value, allowEmpty) => typeof value === "string" && (allowEmpty && value === "" || /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
-  for (const dayName of days) {
-    const day = weeklySchedule[dayName];
-    if (!day || Array.isArray(day) || typeof day !== "object") return false;
-    const fields = Object.keys(day);
-    if (fields.length !== 5 || ["working", "from", "to", "breakFrom", "breakTo"].some((field) => !Object.prototype.hasOwnProperty.call(day, field))) return false;
-    if (typeof day.working !== "boolean") return false;
-    if (!day.working) continue;
-    if (!time(day.from, false) || !time(day.to, false) || day.to <= day.from) return false;
-    if (!time(day.breakFrom, true) || !time(day.breakTo, true) || Boolean(day.breakFrom) !== Boolean(day.breakTo)) return false;
-    if (day.breakFrom && (day.breakTo <= day.breakFrom || day.breakFrom < day.from || day.breakTo > day.to)) return false;
-    workingDays += 1;
-  }
-  return workingDays > 0;
+const WEEK_DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const WEEK_DAY_FIELDS = ["working", "from", "to", "breakFrom", "breakTo"];
+const TIME_PATTERN = "^([01]\\d|2[0-3]):[0-5]\\d$";
+
+const objectEntries = (value) => ({
+  $cond: [
+    { $eq: [{ $type: value }, "object"] },
+    { $objectToArray: value },
+    [],
+  ],
+});
+
+const isValidTime = (value, allowEmpty) => ({
+  $cond: [
+    { $eq: [{ $type: value }, "string"] },
+    allowEmpty
+      ? { $or: [{ $eq: [value, ""] }, { $regexMatch: { input: value, regex: TIME_PATTERN } }] }
+      : { $regexMatch: { input: value, regex: TIME_PATTERN } },
+    false,
+  ],
+});
+
+const validWeeklyScheduleExpression = (path) => {
+  const days = objectEntries(path);
+  const dayKeys = { $map: { input: days, as: "day", in: "$$day.k" } };
+  const validDay = (day) => {
+    const fields = objectEntries(`${day}.v`);
+    const value = (field) => `${day}.v.${field}`;
+    const workingDay = { $eq: [value("working"), true] };
+    return {
+      $and: [
+        { $eq: [{ $type: `${day}.v` }, "object"] },
+        { $eq: [{ $size: fields }, WEEK_DAY_FIELDS.length] },
+        { $setEquals: [{ $map: { input: fields, as: "field", in: "$$field.k" } }, WEEK_DAY_FIELDS] },
+        { $eq: [{ $type: value("working") }, "bool"] },
+        {
+          $cond: [
+            workingDay,
+            {
+              $and: [
+                isValidTime(value("from"), false),
+                isValidTime(value("to"), false),
+                { $gt: [value("to"), value("from")] },
+                isValidTime(value("breakFrom"), true),
+                isValidTime(value("breakTo"), true),
+                { $eq: [{ $ne: [value("breakFrom"), ""] }, { $ne: [value("breakTo"), ""] }] },
+                {
+                  $or: [
+                    { $eq: [value("breakFrom"), ""] },
+                    {
+                      $and: [
+                        { $gt: [value("breakTo"), value("breakFrom")] },
+                        { $gte: [value("breakFrom"), value("from")] },
+                        { $lte: [value("breakTo"), value("to")] },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            true,
+          ],
+        },
+      ],
+    };
+  };
+
+  return {
+    $and: [
+      { $eq: [{ $size: days }, WEEK_DAYS.length] },
+      { $setEquals: [dayKeys, WEEK_DAYS] },
+      { $allElementsTrue: { $map: { input: days, as: "day", in: validDay("$$day") } } },
+      { $gt: [{ $size: { $filter: { input: days, as: "day", cond: { $eq: ["$$day.v.working", true] } } } }, 0] },
+    ],
+  };
 };
 
 const unexpiredSubscription = (path, now) => ({
@@ -142,7 +196,7 @@ export const buildPublicBarberDirectoryPipeline = ({ skip, limit, now = new Date
     { $lookup: { from: names.profiles, let: { barberId: "$_id" }, pipeline: [{ $match: { $expr: { $eq: ["$barberId", "$$barberId"] } } }, { $project: { address: 1 } }, { $limit: 1 }], as: "_profile" } },
     { $lookup: { from: names.schedules, let: { barberId: "$_id" }, pipeline: [{ $match: { $expr: { $and: [{ $eq: ["$barberId", "$$barberId"] }, { $or: [{ $eq: ["$salonId", null] }, { $eq: [{ $type: "$salonId" }, "missing"] }] }] } } }, { $project: { weeklySchedule: 1 } }, { $limit: 1 }], as: "_schedule" } },
     { $set: { _profile: { $arrayElemAt: ["$_profile", 0] }, _schedule: { $arrayElemAt: ["$_schedule", 0] } } },
-    { $set: { _independentReady: { $and: ["$_independentSupported", { $regexMatch: { input: { $ifNull: ["$_profile.address", ""] }, regex: /\S/ } }, { $function: { body: hasValidWeeklySchedule.toString(), args: ["$_schedule.weeklySchedule"], lang: "js" } }] } } },
+    { $set: { _independentReady: { $and: ["$_independentSupported", { $regexMatch: { input: { $ifNull: ["$_profile.address", ""] }, regex: /\S/ } }, validWeeklyScheduleExpression("$_schedule.weeklySchedule")] } } },
     { $lookup: { from: names.seats, let: { barberId: "$_id", salons: "$salons", legacySalon: "$salon", legacySalonStatus: "$salonStatus" }, pipeline: [
       { $match: { $expr: { $and: [{ $eq: ["$barberId", "$$barberId"] }, { $eq: ["$status", "active"] }] } } },
       { $lookup: { from: names.subscriptions, localField: "subscriptionId", foreignField: "_id", as: "subscription" } },

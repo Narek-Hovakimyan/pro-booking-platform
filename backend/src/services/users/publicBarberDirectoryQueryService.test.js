@@ -31,6 +31,9 @@ test("directory page pipeline applies every eligibility lookup before determinis
   assert.equal(pipeline[limit].$limit, 10);
   assert.equal(pipeline.filter((stage) => stage.$lookup).length, 5);
   assert.equal(JSON.stringify(pipeline).includes("$anyElementTrue"), false);
+  assert.equal(JSON.stringify(pipeline).includes("$function"), false);
+  assert.equal(JSON.stringify(pipeline).includes("$allElementsTrue"), true);
+  assert.equal(JSON.stringify(pipeline).includes("$objectToArray"), true);
   assert.equal(JSON.stringify(pipeline).includes("$arrayElemAt"), true);
 });
 
