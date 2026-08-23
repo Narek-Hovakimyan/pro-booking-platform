@@ -150,7 +150,7 @@ const uploadStaticOptions = {
   index: false,
 };
 
-app.get("/uploads/:kind(avatars|certifications)/:filename", publicMediaResourcePolicy, serveProfileMedia);
+app.get("/uploads/:kind/:filename", publicMediaResourcePolicy, serveProfileMedia);
 app.use(
   "/uploads/events",
   publicMediaResourcePolicy,

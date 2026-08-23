@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { match, pathToRegexp } from "path-to-regexp";
 import cors from "cors";
 import {
   createSecurityHeadersMiddleware,
@@ -116,10 +117,21 @@ test("server installs security headers before CORS and scopes public CORP overri
   assert.ok(eventRouteStart >= 0);
   assert.ok(serverSource.indexOf("publicMediaResourcePolicy", eventRouteStart) < eventStaticUse);
 
+  const profileMediaRoute = "/uploads/:kind/:filename";
   assert.match(
     serverSource,
-    /app\.get\(\s*"\/uploads\/:kind\(avatars\|certifications\)\/:filename",\s*publicMediaResourcePolicy,\s*serveProfileMedia\s*\)/
+    /app\.get\(\s*"\/uploads\/:kind\/:filename",\s*publicMediaResourcePolicy,\s*serveProfileMedia\s*\)/
   );
+  assert.doesNotThrow(() => pathToRegexp(profileMediaRoute));
+  const matchProfileMediaRoute = match(profileMediaRoute);
+  const avatarParams = matchProfileMediaRoute("/uploads/avatars/avatar.png")?.params;
+  const certificationParams = matchProfileMediaRoute(
+    "/uploads/certifications/certificate.png"
+  )?.params;
+  assert.equal(avatarParams?.kind, "avatars");
+  assert.equal(avatarParams?.filename, "avatar.png");
+  assert.equal(certificationParams?.kind, "certifications");
+  assert.equal(certificationParams?.filename, "certificate.png");
   assert.match(
     serverSource,
     /app\.get\(\s*"\/uploads\/certificate-files\/:filename",\s*publicMediaResourcePolicy,\s*serveEventCertificateMedia\s*\)/
