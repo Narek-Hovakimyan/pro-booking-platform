@@ -3,6 +3,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import api from "@/shared/api/axios";
 import { buildClientBookingQuotePayload } from "@/client/utils/clientBookingPayload";
 
+export const CLIENT_BOOKING_REQUEST_TIMEOUT_MS = 15_000;
+
+const getBookingRequestErrorMessage = (requestError) => {
+  const isTimeout = [requestError?.code, requestError?.cause?.code].some(
+    (code) => code === "ECONNABORTED" || code === "ETIMEDOUT"
+  );
+
+  if (isTimeout) return "Price refresh timed out. Please try again.";
+
+  return (
+    requestError?.response?.data?.message ||
+    (requestError?.response ? requestError.message : null) ||
+    "Could not refresh service price. Please try again."
+  );
+};
+
 export function useClientBookingConfirmation({
   barberId,
   client,
@@ -31,8 +47,12 @@ export function useClientBookingConfirmation({
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -129,7 +149,9 @@ export function useClientBookingConfirmation({
     setError("");
 
     try {
-      const latestServices = await onRefreshServices?.();
+      const latestServices = await onRefreshServices?.({
+        timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
+      });
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return;
       }
@@ -173,7 +195,8 @@ export function useClientBookingConfirmation({
           time: selectedTime,
           voucherCode: voucherCode || undefined,
           selectedSalonId: selectedBookingSalonId,
-        })
+        }),
+        { timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS }
       );
 
       if (!mountedRef.current || requestId !== requestIdRef.current) {
@@ -186,10 +209,7 @@ export function useClientBookingConfirmation({
         return;
       }
 
-      const message =
-        requestError.response?.data?.message ||
-        requestError.message ||
-        "Could not refresh service price. Please try again.";
+      const message = getBookingRequestErrorMessage(requestError);
       setQuoteError(message);
       setError(message);
     } finally {

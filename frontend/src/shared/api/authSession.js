@@ -8,6 +8,8 @@ import {
 
 const authSessionApi = axios.create(API_CREDENTIALS_CONFIG);
 
+export const AUTH_SESSION_REQUEST_TIMEOUT_MS = 15_000;
+
 let refreshSessionPromise = null;
 let authSessionHandlers = {
   onRefresh: null,
@@ -51,7 +53,9 @@ export function resetAuthSessionHandlers() {
 export async function requestRefreshSession() {
   if (!refreshSessionPromise) {
     refreshSessionPromise = authSessionApi
-      .post("/auth/refresh")
+      .post("/auth/refresh", undefined, {
+        timeout: AUTH_SESSION_REQUEST_TIMEOUT_MS,
+      })
       .then(({ data }) => {
         if (!isValidAuthSession(data)) {
           throw invalidAuthSessionError();

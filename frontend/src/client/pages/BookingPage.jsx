@@ -12,6 +12,7 @@ import api from "@/shared/api/axios";
 import { getFriendlyApiError, isBarberUnavailableError } from "@/shared/api/errors";
 import BookingSummary from "@/client/components/BookingSummary";
 import ClientBooking from "@/client/components/ClientBooking";
+import { CLIENT_BOOKING_REQUEST_TIMEOUT_MS } from "@/client/hooks/useClientBookingConfirmation";
 import initialSchedule, {
   defaultPersonalSchedule,
   getDayScheduleFromDefaultSchedule,
@@ -356,7 +357,9 @@ export default function BookingPage({
       const servicesUrl = activeSelectedSalonId
         ? `/services/${barberId}?salonId=${activeSelectedSalonId}`
         : `/services/${barberId}`;
-      const servicesResponse = await api.get(servicesUrl);
+      const servicesResponse = await api.get(servicesUrl, {
+        timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
+      });
       dispatch(
         setServices({
           barberId,
@@ -369,7 +372,9 @@ export default function BookingPage({
         isBarberUnavailableError(requestError)
           ? getFriendlyApiError(requestError)
           : requestError.response?.data?.message ||
-            "Could not load services. Please try again.";
+            (requestError?.code === "ECONNABORTED" || requestError?.code === "ETIMEDOUT"
+              ? "Service refresh timed out. Please try again."
+              : "Could not load services. Please try again.");
       setError(message);
       throw new Error(message, { cause: requestError });
     } finally {

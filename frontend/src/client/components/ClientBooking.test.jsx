@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes } from "react-router-dom";
@@ -10,6 +10,7 @@ import ClientBooking from "./ClientBooking";
 import ClientBookingStepContent from "@/client/components/booking/ClientBookingStepContent";
 import api from "@/shared/api/axios";
 import { useBooking } from "@/shared/hooks/useBooking";
+import { CLIENT_BOOKING_REQUEST_TIMEOUT_MS } from "@/client/hooks/useClientBookingConfirmation";
 
 vi.mock("@/shared/api/axios", () => ({
   default: { get: vi.fn(), post: vi.fn() },
@@ -381,6 +382,21 @@ function ControlledBookingHarness({ mountSpy }) {
   );
 }
 
+function RetryableBookingHarness({ onRefreshServices }) {
+  const [step, setStep] = useState(4);
+
+  return (
+    <>
+      <button onClick={() => setStep(4)} type="button">
+        Return to client details
+      </button>
+      <ClientBooking
+        {...buildProps({ onRefreshServices, setStep, step })}
+      />
+    </>
+  );
+}
+
 async function completeFlow(props) {
   const user = userEvent.setup();
   const { createBookingMock } = setupStrictMocks();
@@ -613,6 +629,14 @@ describe("ClientBooking split boundaries", () => {
     expect(source).not.toMatch(/<Button|<Card|<ServiceStep|<ClientDetailsStep|<BookingConfirmationModal|<WaitlistForm/);
   });
 
+  it("uses the confirmation timeout when BookingPage refreshes services", () => {
+    const source = readFileSync("src/client/pages/BookingPage.jsx", "utf8");
+
+    expect(source).toContain(
+      "const servicesResponse = await api.get(servicesUrl, {\n        timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,\n      });"
+    );
+  });
+
   it("preserves the extracted step content flow", () => {
     const stepThree = renderWithProviders(
       <ClientBookingStepContent {...buildStepContentProps({ step: 3 })} />
@@ -666,6 +690,200 @@ describe("ClientBooking split boundaries", () => {
 });
 
 describe("ClientBooking booking flow", () => {
+  it("keeps confirmation active through StrictMode and blocks stale updates after unmount", async () => {
+    const user = userEvent.setup();
+    const pendingQuote = createDeferred();
+    const props = buildProps();
+    setupStrictMocks();
+    api.post.mockImplementationOnce((url) => {
+      if (url === "/bookings/quote") return pendingQuote.promise;
+      throw new Error(`Unexpected api.post call: ${url}`);
+    });
+
+    const { unmount } = renderBooking(
+      <StrictMode>
+        <Routes>
+          <Route path="/book" element={<ClientBooking {...props} />} />
+        </Routes>
+      </StrictMode>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Prepare booking confirmation" }));
+    await waitFor(() => expect(props.onRefreshServices).toHaveBeenCalledTimes(1));
+    expect(api.post).toHaveBeenCalledWith(
+      "/bookings/quote",
+      expect.any(Object),
+      { timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS }
+    );
+    expect(screen.getByRole("region", { name: "booking confirmation modal" })).toBeVisible();
+
+    unmount();
+    pendingQuote.resolve({ data: { ...quoteResponse, finalPrice: 99000 } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.queryByText("Quote total: 99000")).not.toBeInTheDocument();
+  });
+
+  it("recovers from a timed-out service refresh and permits retry", async () => {
+    vi.useFakeTimers();
+    const { AxiosError, default: axios } = await vi.importActual("axios");
+    const requests = [];
+    const serviceApi = axios.create({
+      adapter: (config) => {
+        requests.push(config);
+
+        if (requests.length > 1) {
+          return Promise.resolve({
+            config,
+            data: [baseService],
+            headers: {},
+            status: 200,
+            statusText: "OK",
+          });
+        }
+
+        return new Promise((_resolve, reject) => {
+          window.setTimeout(
+            () =>
+              reject(
+                new AxiosError(
+                  `timeout of ${config.timeout}ms exceeded`,
+                  "ECONNABORTED",
+                  config
+                )
+              ),
+            config.timeout
+          );
+        });
+      },
+    });
+    const onRefreshServices = vi.fn((config) =>
+      serviceApi.get(`/services/${BARBER_ID}`, config).then(({ data }) => data)
+    );
+    setupStrictMocks();
+
+    renderBooking(
+      <Routes>
+        <Route
+          path="/book"
+          element={<ClientBooking {...buildProps({ onRefreshServices })} />}
+        />
+      </Routes>
+    );
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Prepare booking confirmation" }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLIENT_BOOKING_REQUEST_TIMEOUT_MS - 1);
+    });
+    expect(requests).toHaveLength(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getAllByText("Price refresh timed out. Please try again.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Prepare booking confirmation" })).not.toBeDisabled();
+    expect(onRefreshServices).toHaveBeenNthCalledWith(1, {
+      timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
+    });
+    expect(requests[0]).toMatchObject({
+      timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
+      url: `/services/${BARBER_ID}`,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Prepare booking confirmation" }));
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Quote total: 12000")).toBeVisible();
+  });
+
+  it("recovers from a timed-out quote and succeeds on the next attempt", async () => {
+    vi.useFakeTimers();
+    const { AxiosError, default: axios } = await vi.importActual("axios");
+    const requests = [];
+    const quoteApi = axios.create({
+      adapter: (config) => {
+        requests.push(config);
+
+        if (requests.length > 1) {
+          return Promise.resolve({
+            config,
+            data: quoteResponse,
+            headers: {},
+            status: 200,
+            statusText: "OK",
+          });
+        }
+
+        return new Promise((_resolve, reject) => {
+          window.setTimeout(
+            () =>
+              reject(
+                new AxiosError(
+                  `timeout of ${config.timeout}ms exceeded`,
+                  "ECONNABORTED",
+                  config
+                )
+              ),
+            config.timeout
+          );
+        });
+      },
+    });
+    const onRefreshServices = vi.fn().mockResolvedValue([baseService]);
+    setupStrictMocks();
+    api.post.mockImplementation((url, payload, config) =>
+      quoteApi.post(url, payload, config)
+    );
+
+    renderBooking(
+      <Routes>
+        <Route
+          path="/book"
+          element={<RetryableBookingHarness onRefreshServices={onRefreshServices} />}
+        />
+      </Routes>
+    );
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Prepare booking confirmation" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("region", { name: "booking confirmation modal" })).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLIENT_BOOKING_REQUEST_TIMEOUT_MS - 1);
+    });
+    expect(requests).toHaveLength(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getAllByText("Price refresh timed out. Please try again.").length).toBeGreaterThan(0);
+    expect(screen.getByText("Quote ready")).toBeVisible();
+    expect(screen.queryByText("timeout of 15000ms exceeded")).not.toBeInTheDocument();
+    expect(requests[0]).toMatchObject({
+      timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
+      url: "/bookings/quote",
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close modal" }));
+      fireEvent.click(screen.getByRole("button", { name: "Return to client details" }));
+      fireEvent.click(screen.getByRole("button", { name: "Prepare booking confirmation" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Quote total: 12000")).toBeVisible();
+  });
+
   it("discovers barber vouchers with the selected booking context", async () => {
     setupStrictMocks();
 
@@ -767,6 +985,44 @@ describe("ClientBooking booking flow", () => {
     expect(payload.files[0]).toBeInstanceOf(File);
     expect(payload.files[0].name).toBe("reference.jpg");
     expect(await screen.findByText("Success marker")).toBeVisible();
+  });
+
+  it("navigates and resets after a StrictMode submission without duplicate creates", async () => {
+    const user = userEvent.setup();
+    const pendingBooking = createDeferred();
+    const createBookingMock = vi.fn(() => pendingBooking.promise);
+    const props = buildProps({
+      setSelectedServiceId: vi.fn(),
+      setStep: vi.fn(),
+    });
+    useBooking.mockReturnValue({ createBooking: createBookingMock });
+    api.get.mockResolvedValue({ data: [] });
+    api.post.mockImplementation((url, payload) => {
+      if (url === "/bookings/quote") {
+        return Promise.resolve({ data: { ...quoteResponse, echo: payload } });
+      }
+      throw new Error(`Unexpected api.post call: ${url}`);
+    });
+
+    renderBooking(
+      <StrictMode>
+        <Routes>
+          <Route path="/book" element={<ClientBooking {...props} />} />
+          <Route path="/success" element={<div>Success marker</div>} />
+        </Routes>
+      </StrictMode>
+    );
+
+    await prepareAndConfirmBooking(user);
+    const confirmButton = screen.getByRole("button", { name: "Confirm booking" });
+    await user.click(confirmButton);
+    await user.click(confirmButton);
+    expect(createBookingMock).toHaveBeenCalledTimes(1);
+
+    pendingBooking.resolve(createdBooking);
+    expect(await screen.findByText("Success marker")).toBeVisible();
+    expect(props.setStep).toHaveBeenCalledWith(2);
+    expect(props.setSelectedServiceId).toHaveBeenCalledWith(null);
   });
 
   it("shows a booking denial in the modal, keeps the dialog usable, and allows retry", async () => {
@@ -919,13 +1175,15 @@ describe("ClientBooking booking flow", () => {
     });
     const setStep = vi.fn();
     const { unmount } = renderBooking(
-      <Routes>
-        <Route
-          path="/book"
-          element={<ClientBooking {...buildProps({ setStep })} />}
-        />
-        <Route path="/success" element={<div>Success marker</div>} />
-      </Routes>
+      <StrictMode>
+        <Routes>
+          <Route
+            path="/book"
+            element={<ClientBooking {...buildProps({ setStep })} />}
+          />
+          <Route path="/success" element={<div>Success marker</div>} />
+        </Routes>
+      </StrictMode>
     );
 
     await prepareAndConfirmBooking(user);

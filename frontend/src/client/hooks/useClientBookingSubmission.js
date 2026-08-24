@@ -29,12 +29,13 @@ export function useClientBookingSubmission({
   const mountedRef = useRef(true);
   const submitLockRef = useRef(false);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
       mountedRef.current = false;
-    },
-    []
-  );
+    };
+  }, []);
 
   const submitBooking = useCallback(async () => {
     if (

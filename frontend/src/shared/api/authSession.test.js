@@ -56,6 +56,64 @@ describe("authSession", () => {
     expect(postMock).toHaveBeenCalledTimes(2);
   });
 
+  test("times out a pending refresh through an Axios adapter and allows retry", async () => {
+    vi.useFakeTimers();
+    const { AxiosError, default: axios } = await vi.importActual("axios");
+    const requests = [];
+    createMock.mockImplementationOnce((config) =>
+      axios.create({
+        ...config,
+        adapter: (requestConfig) => {
+          requests.push(requestConfig);
+
+          if (requests.length > 1) {
+            return Promise.resolve({
+              config: requestConfig,
+              data: { token: "retry-token", user: { id: "user-1" } },
+              headers: {},
+              status: 200,
+              statusText: "OK",
+            });
+          }
+
+          return new Promise((_resolve, reject) => {
+            window.setTimeout(
+              () =>
+                reject(
+                  new AxiosError(
+                    `timeout of ${requestConfig.timeout}ms exceeded`,
+                    "ECONNABORTED",
+                    requestConfig
+                  )
+                ),
+              requestConfig.timeout
+            );
+          });
+        },
+      })
+    );
+    const module = await importAuthSession();
+
+    const pendingRefresh = module.requestRefreshSession();
+    const timedOutRefresh = expect(pendingRefresh).rejects.toMatchObject({
+      code: "ECONNABORTED",
+    });
+    await vi.advanceTimersByTimeAsync(module.AUTH_SESSION_REQUEST_TIMEOUT_MS - 1);
+    expect(requests).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await timedOutRefresh;
+    expect(requests[0]).toMatchObject({
+      timeout: module.AUTH_SESSION_REQUEST_TIMEOUT_MS,
+      url: "/auth/refresh",
+    });
+
+    await expect(module.requestRefreshSession()).resolves.toMatchObject({
+      token: "retry-token",
+    });
+    expect(requests).toHaveLength(2);
+  });
+
   test("applies refreshed auth to memory and redux handler, and expires silently", async () => {
     const refreshed = vi.fn();
     const expired = vi.fn();
