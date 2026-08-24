@@ -2,9 +2,11 @@ import Schedule from "../../models/Schedule.js";
 import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import {
-  canUserManageSalon,
-  isUserApprovedForSalon,
-} from "../../services/salon/salonMembershipService.js";
+  getMemberRelationshipType,
+  getRelationshipType,
+  isBookableSalonSpecialist,
+  relationshipTypes,
+} from "../../services/salon/salonRelationshipService.js";
 import { barberHasBookingPaidAccessForSalon } from "../../services/subscription/subscriptionPaidAccessQueries.js";
 import {
   normalizePublicAvailabilityIds,
@@ -47,9 +49,24 @@ const canEditSalonSchedule = async ({ barberId, salonId, user }) => {
     return { allowed: false, status: 404, message: "Salon not found" };
   }
 
+  const canonicalMembership = Array.isArray(barber.salons)
+    ? barber.salons.find(
+        (entry) => getIdString(entry?.salon) === getIdString(salonId)
+      )
+    : null;
+  const relationship = canonicalMembership
+    ? canonicalMembership.status === "approved"
+      ? canonicalMembership
+      : null
+    : await getMemberRelationshipType(barberId, salonId);
+  const normalizedRelationship = relationship
+    ? { status: "approved", ...relationship }
+    : null;
+
   if (
-    canUserManageSalon(user, salon) ||
-    isUserApprovedForSalon(barber, salonId)
+    normalizedRelationship &&
+    relationshipTypes.has(getRelationshipType(normalizedRelationship)) &&
+    isBookableSalonSpecialist(normalizedRelationship)
   ) {
     return { allowed: true };
   }

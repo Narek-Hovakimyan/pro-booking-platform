@@ -40,6 +40,8 @@ const barberId = "64b000000000000000000001";
 const clientId = "64b000000000000000000003";
 const salonAId = "64b000000000000000000004";
 const salonBId = "64b000000000000000000005";
+const ownerId = "64b000000000000000000006";
+const adminId = "64b000000000000000000007";
 
 beforeEach(() => {
   User.find = () => createFindChain([createReadyBarber()]);
@@ -211,7 +213,13 @@ const mockSchedulePermissionDependencies = ({
   barber = {
     _id: barberId,
     role: "barber",
-    salons: [{ salon: salonAId, status: "approved" }],
+    salons: [{
+      salon: salonAId,
+      status: "approved",
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: true,
+    }],
     salonStatus: "none",
     salon: null,
   },
@@ -250,6 +258,213 @@ test("barber can update schedule for approved salon", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(updateQuery, { barberId, salonId: salonAId });
+});
+
+test("accepted chair renter can update their salon schedule", async () => {
+  const res = createResponse();
+  let updateCalled = false;
+
+  mockSchedulePermissionDependencies({
+    barber: {
+      _id: barberId,
+      role: "barber",
+      salons: [{
+        salon: salonAId,
+        status: "approved",
+        relationshipType: "chair_renter",
+        relationshipStatus: "accepted",
+        worksAsSpecialist: true,
+      }],
+    },
+  });
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    updateCalled = true;
+    return { ...payload, toObject() { return this; } };
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
+      body: createScheduleBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(updateCalled, true);
+});
+
+for (const [label, membership] of [
+  ["pending relationship", { status: "approved", relationshipStatus: "pending" }],
+  ["rejected relationship", { status: "approved", relationshipStatus: "rejected" }],
+  ["non-working specialist", { status: "approved", worksAsSpecialist: false }],
+]) {
+  test(`cannot update salon schedule with ${label}`, async () => {
+    const res = createResponse();
+    let updateCalled = false;
+
+    mockSchedulePermissionDependencies({
+      barber: {
+        _id: barberId,
+        role: "barber",
+        salons: [{ salon: salonAId, relationshipType: "staff", ...membership }],
+      },
+    });
+    Schedule.findOneAndUpdate = async () => {
+      updateCalled = true;
+    };
+
+    await upsertScheduleByBarberAndSalon(
+      {
+        user: { _id: barberId, role: "barber" },
+        params: { barberId, salonId: salonAId },
+        body: createScheduleBody(),
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(updateCalled, false);
+  });
+}
+
+for (const [label, managerId, salon] of [
+  ["owner", ownerId, { _id: salonAId, ownerId, admins: [] }],
+  ["admin", adminId, { _id: salonAId, ownerId: "another-owner", admins: [adminId] }],
+]) {
+  test(`${label} without an approved working relationship cannot update salon schedule`, async () => {
+    const res = createResponse();
+    let updateCalled = false;
+
+    mockSchedulePermissionDependencies({
+      barber: { _id: managerId, role: "barber", salons: [], salon: null, salonStatus: "none" },
+      salon,
+    });
+    Schedule.findOneAndUpdate = async () => {
+      updateCalled = true;
+    };
+
+    await upsertScheduleByBarberAndSalon(
+      {
+        user: { _id: managerId, role: "barber" },
+        params: { barberId: managerId, salonId: salonAId },
+        body: createScheduleBody(),
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(updateCalled, false);
+  });
+}
+
+for (const [label, managerId, salon] of [
+  ["owner", ownerId, { _id: salonAId, ownerId, admins: [] }],
+  ["admin", adminId, { _id: salonAId, ownerId: "another-owner", admins: [adminId] }],
+]) {
+  test(`${label} with an approved working relationship can update salon schedule`, async () => {
+    const res = createResponse();
+    let updateCalled = false;
+
+    mockSchedulePermissionDependencies({
+      barber: {
+        _id: managerId,
+        role: "barber",
+        salons: [{
+          salon: salonAId,
+          status: "approved",
+          relationshipType: "staff",
+          relationshipStatus: "accepted",
+          worksAsSpecialist: true,
+        }],
+      },
+      salon,
+    });
+    Schedule.findOneAndUpdate = async (query, payload) => {
+      updateCalled = true;
+      return { ...payload, toObject() { return this; } };
+    };
+
+    await upsertScheduleByBarberAndSalon(
+      {
+        user: { _id: managerId, role: "barber" },
+        params: { barberId: managerId, salonId: salonAId },
+        body: createScheduleBody(),
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(updateCalled, true);
+  });
+}
+
+test("invalid canonical membership overrides an approved legacy membership", async () => {
+  const res = createResponse();
+  let updateCalled = false;
+
+  mockSchedulePermissionDependencies({
+    barber: {
+      _id: barberId,
+      role: "barber",
+      salons: [{
+        salon: salonAId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus: "rejected",
+        worksAsSpecialist: true,
+      }],
+      salon: salonAId,
+      salonStatus: "approved",
+    },
+  });
+  Schedule.findOneAndUpdate = async () => {
+    updateCalled = true;
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
+      body: createScheduleBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(updateCalled, false);
+});
+
+test("legacy approved membership remains an accepted staff fallback", async () => {
+  const res = createResponse();
+  let updateCalled = false;
+
+  mockSchedulePermissionDependencies({
+    barber: {
+      _id: barberId,
+      role: "barber",
+      salons: [],
+      salon: salonAId,
+      salonStatus: "approved",
+    },
+  });
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    updateCalled = true;
+    return { ...payload, toObject() { return this; } };
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
+      body: createScheduleBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(updateCalled, true);
 });
 
 test("barber cannot update schedule for unrelated salon", async () => {
