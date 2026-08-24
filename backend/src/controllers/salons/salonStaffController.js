@@ -19,6 +19,9 @@ import {
 } from "../../utils/salonUtils.js";
 import { getSalonAdminsForSalon } from "../../services/salon/salonAdminService.js";
 import {
+  cancelAcceptedSalonJoinRequests,
+} from "../../services/salon/salonJoinRequestLifecycleService.js";
+import {
   getSalonStaff as getSalonStaffForSalon,
   respondToSalonMemberRelationshipType,
   SalonStaffError,
@@ -102,6 +105,11 @@ export const removeBarberFromSalon = async (req, res) => {
           (adminId) => !sameId(adminId, barber._id)
         );
       }
+      await cancelAcceptedSalonJoinRequests({
+        salonId: salon._id,
+        barberId: barber._id,
+        session,
+      });
       await barber.save({ session });
       if (wasAdmin) await salon.save({ session });
 

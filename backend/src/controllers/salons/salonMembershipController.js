@@ -25,6 +25,7 @@ import { sendControllerError } from "../../utils/controllerError.js";
 import {
   cancelSalonJoinRequestLifecycle,
   cancelSalonJoinRequestBySalonLifecycle,
+  cancelAcceptedSalonJoinRequests,
   decideSalonJoinRequestLifecycle,
   requestSalonJoinLifecycle,
 } from "../../services/salon/salonJoinRequestLifecycleService.js";
@@ -242,6 +243,11 @@ export const leaveSalon = async (req, res) => {
           (adminId) => !sameId(adminId, barber._id)
         );
       }
+      await cancelAcceptedSalonJoinRequests({
+        salonId: salon._id,
+        barberId: barber._id,
+        session,
+      });
       await barber.save({ session });
       if (wasAdmin) await salon.save({ session });
 

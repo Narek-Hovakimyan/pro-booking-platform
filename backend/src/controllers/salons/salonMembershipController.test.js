@@ -21,6 +21,7 @@ const originalMethods = {
   joinRequestFindById: SalonJoinRequest.findById,
   joinRequestFindOne: SalonJoinRequest.findOne,
   joinRequestFindOneAndUpdate: SalonJoinRequest.findOneAndUpdate,
+  joinRequestUpdateMany: SalonJoinRequest.updateMany,
   userFindById: User.findById,
   salonFindById: Salon.findById,
   salonFind: Salon.find,
@@ -40,6 +41,7 @@ afterEach(() => {
   SalonJoinRequest.findById = originalMethods.joinRequestFindById;
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
   SalonJoinRequest.findOneAndUpdate = originalMethods.joinRequestFindOneAndUpdate;
+  SalonJoinRequest.updateMany = originalMethods.joinRequestUpdateMany;
   User.findById = originalMethods.userFindById;
   Salon.findById = originalMethods.salonFindById;
   Salon.find = originalMethods.salonFind;
@@ -410,6 +412,7 @@ test("admin leaving removes salon authority and is idempotent", async () => {
       return this;
     },
   };
+  const acceptedRequest = { salonId, barberId: adminId, status: "accepted" };
 
   mongoose.startSession = async () => ({
     async withTransaction(callback) {
@@ -419,6 +422,13 @@ test("admin leaving removes salon authority and is idempotent", async () => {
   });
   Salon.findById = async () => salon;
   User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async (filter, update, options) => {
+    assert.deepEqual(filter, { salonId, barberId: adminId, status: "accepted" });
+    assert.equal(update.$set.status, "cancelled");
+    assert.ok(options.session);
+    acceptedRequest.status = update.$set.status;
+    return { modifiedCount: 1 };
+  };
   SubscriptionSeat.find = () => ({
     populate() {
       return this;
@@ -445,6 +455,40 @@ test("admin leaving removes salon authority and is idempotent", async () => {
   assert.equal(first.statusCode, 200);
   assert.equal(second.statusCode, 200);
   assert.deepEqual(salon.admins, []);
+  assert.equal(acceptedRequest.status, "cancelled");
+});
+
+test("leave does not save a removed membership when accepted-request invalidation fails", async () => {
+  const salon = { _id: salonId, ownerId, admins: [], name: "Owner Salon" };
+  let saved = false;
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+    salon: salonId,
+    salonStatus: "approved",
+    workHistory: [],
+    async save() {
+      saved = true;
+      return this;
+    },
+  };
+
+  mockSession();
+  Salon.findById = async () => salon;
+  User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async () => {
+    throw new Error("join request invalidation failed");
+  };
+
+  const res = createResponse();
+  await leaveSalon(
+    { user: { _id: barberId, role: "barber" }, body: { salonId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(saved, false);
 });
 
 test("former admin cannot list requests or applicant contact data", async () => {

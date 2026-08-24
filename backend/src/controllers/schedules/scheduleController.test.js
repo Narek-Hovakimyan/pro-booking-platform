@@ -206,11 +206,9 @@ const mockSchedulePermissionDependencies = ({
     salon: null,
   },
   salon = { _id: salonAId, ownerId: "owner-id", admins: [] },
-  acceptedJoinRequest = null,
 } = {}) => {
   User.findById = () => createQuery(barber);
   Salon.findById = () => createQuery(salon);
-  SalonJoinRequest.findOne = async () => acceptedJoinRequest;
   User.findOneAndUpdate = async () => ({});
 };
 
@@ -266,6 +264,37 @@ test("barber cannot update schedule for unrelated salon", async () => {
     {
       user: { _id: barberId, role: "barber" },
       params: { barberId, salonId: salonBId },
+      body: createScheduleBody(),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(updateCalled, false);
+});
+
+test("former member cannot update salon schedule from a historical accepted request", async () => {
+  const res = createResponse();
+  let updateCalled = false;
+  const staleAcceptedRequest = {
+    _id: "64b000000000000000000009",
+    salonId: salonAId,
+    barberId,
+    status: "accepted",
+  };
+
+  mockSchedulePermissionDependencies({
+    barber: { _id: barberId, role: "barber", salons: [], salon: null, salonStatus: "none" },
+  });
+  SalonJoinRequest.findOne = async () => staleAcceptedRequest;
+  Schedule.findOneAndUpdate = async () => {
+    updateCalled = true;
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
       body: createScheduleBody(),
     },
     res

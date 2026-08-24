@@ -1,5 +1,4 @@
 import Salon from "../../models/Salon.js";
-import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import User from "../../models/User.js";
 
 const membershipUserFields = "salon salonStatus salons role";
@@ -93,29 +92,6 @@ export const canUserManageSalon = (user, salon) => {
   return isUserSalonOwner(salon, userId) || isUserSalonAdmin(salon, userId);
 };
 
-export const hasAcceptedSalonJoinRequest = async (userId, salonId) => {
-  const acceptedJoinRequest = await SalonJoinRequest.findOne({
-    barberId: getIdString(userId),
-    salonId: getIdString(salonId),
-    status: "accepted",
-  });
-
-  return Boolean(acceptedJoinRequest);
-};
-
-const getAcceptedSalonJoinRequestSalonIds = async (userId) => {
-  const requestUserId = getIdString(userId);
-
-  if (!requestUserId) return [];
-
-  const salonIds = await SalonJoinRequest.find({
-    barberId: requestUserId,
-    status: "accepted",
-  }).distinct("salonId");
-
-  return toUniqueIdStrings(salonIds);
-};
-
 export const canUserCreateEventForSalon = async (user, salon) => {
   if (canUserManageSalon(user, salon)) {
     return true;
@@ -128,11 +104,7 @@ export const canUserCreateEventForSalon = async (user, salon) => {
   const membershipUser = await loadMembershipUser(user);
   const salonId = getIdString(salon);
 
-  if (isUserApprovedForSalon(membershipUser, salonId)) {
-    return true;
-  }
-
-  return hasAcceptedSalonJoinRequest(getUserId(user), salonId);
+  return isUserApprovedForSalon(membershipUser, salonId);
 };
 
 export const getManageableSalonQuery = async (user) => {

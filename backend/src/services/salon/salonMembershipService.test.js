@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test, mock } from "node:test";
+import { afterEach, test } from "node:test";
 
 import Salon from "../../models/Salon.js";
 import SalonJoinRequest from "../../models/SalonJoinRequest.js";
@@ -13,7 +13,6 @@ import {
 const originalMethods = {
   salonFindOne: Salon.findOne,
   salonFind: Salon.find,
-  joinRequestFind: SalonJoinRequest.find,
   joinRequestFindOne: SalonJoinRequest.findOne,
 };
 
@@ -29,7 +28,6 @@ const otherSalonId = "64b000000000000000000008";
 afterEach(() => {
   Salon.findOne = originalMethods.salonFindOne;
   Salon.find = originalMethods.salonFind;
-  SalonJoinRequest.find = originalMethods.joinRequestFind;
   SalonJoinRequest.findOne = originalMethods.joinRequestFindOne;
 });
 
@@ -87,8 +85,14 @@ test("legacy approved user.salon member has access", async () => {
   assert.equal(allowed, true);
 });
 
-test("accepted SalonJoinRequest fallback works", async () => {
-  SalonJoinRequest.findOne = async () => ({ _id: "accepted-request" });
+test("historical accepted join request alone cannot create salon events", async () => {
+  const staleAcceptedRequest = {
+    _id: "64b000000000000000000009",
+    salonId,
+    barberId: fallbackMemberId,
+    status: "accepted",
+  };
+  SalonJoinRequest.findOne = async () => staleAcceptedRequest;
 
   const allowed = await canUserCreateEventForSalon(
     {
@@ -101,12 +105,10 @@ test("accepted SalonJoinRequest fallback works", async () => {
     salon
   );
 
-  assert.equal(allowed, true);
+  assert.equal(allowed, false);
 });
 
 test("unrelated user has no access", async () => {
-  SalonJoinRequest.findOne = async () => null;
-
   const allowed = await canUserCreateEventForSalon(
     {
       _id: unrelatedUserId,
@@ -122,11 +124,6 @@ test("unrelated user has no access", async () => {
 });
 
 test("getManageableSalonQuery returns owner/admin only, not membership salons", async () => {
-  // Should NOT call SalonJoinRequest.find at all
-  SalonJoinRequest.find = () => {
-    throw new Error("should not query join requests for manageable query");
-  };
-
   const query = await getManageableSalonQuery({
     _id: memberId,
     role: "barber",

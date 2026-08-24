@@ -150,6 +150,13 @@ const runTransaction = async (callback) => {
   }
 };
 
+export const cancelAcceptedSalonJoinRequests = ({ salonId, barberId, session }) =>
+  SalonJoinRequest.updateMany(
+    { salonId, barberId, status: "accepted" },
+    { $set: { status: "cancelled" } },
+    { session }
+  );
+
 export const requestSalonJoinLifecycle = async ({ salonId, barber }) => {
   const barberId = barber?._id;
   let notification = null;
@@ -181,10 +188,6 @@ export const requestSalonJoinLifecycle = async ({ salonId, barber }) => {
         session
       );
 
-      if (acceptedRequest) {
-        throw new SalonJoinRequestLifecycleError(400, "You already work in this salon");
-      }
-
       const pendingRequest = await sessionQuery(
         SalonJoinRequest.findOne({
           salonId: salon._id,
@@ -202,7 +205,7 @@ export const requestSalonJoinLifecycle = async ({ salonId, barber }) => {
         };
       }
 
-      const closedRequest = await sessionQuery(
+      const closedRequest = acceptedRequest || await sessionQuery(
         SalonJoinRequest.findOne({
           salonId: salon._id,
           barberId,

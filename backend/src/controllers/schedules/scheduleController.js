@@ -3,7 +3,6 @@ import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import {
   canUserManageSalon,
-  hasAcceptedSalonJoinRequest,
   isUserApprovedForSalon,
 } from "../../services/salon/salonMembershipService.js";
 import { barberHasPaidAccessForSalon } from "../../services/subscriptionService.js";
@@ -52,10 +51,6 @@ const canEditSalonSchedule = async ({ barberId, salonId, user }) => {
     canUserManageSalon(user, salon) ||
     isUserApprovedForSalon(barber, salonId)
   ) {
-    return { allowed: true };
-  }
-
-  if (await hasAcceptedSalonJoinRequest(barberId, salonId)) {
     return { allowed: true };
   }
 

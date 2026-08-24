@@ -11,6 +11,7 @@ import {
 } from "./salonStaffController.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
+import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import { __notificationServiceTestHooks } from "../../services/notification/notificationService.js";
@@ -20,6 +21,7 @@ const originalStartSession = mongoose.startSession;
 const originalSalonFindById = Salon.findById;
 const originalSeatFind = SubscriptionSeat.find;
 const originalUserFindById = User.findById;
+const originalJoinRequestUpdateMany = SalonJoinRequest.updateMany;
 
 const chainableQuery = (result) => ({
   populate() {
@@ -49,6 +51,7 @@ afterEach(() => {
   Salon.findById = originalSalonFindById;
   SubscriptionSeat.find = originalSeatFind;
   User.findById = originalUserFindById;
+  SalonJoinRequest.updateMany = originalJoinRequestUpdateMany;
   __notificationServiceTestHooks.resetGetIO();
 });
 
@@ -102,11 +105,19 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
       return this;
     },
   };
+  const acceptedRequest = { salonId, barberId, status: "accepted" };
 
   __notificationServiceTestHooks.setGetIO(() => null);
   Notification.create = async (payload) => payload;
   Salon.findById = async () => salon;
   User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async (filter, update, options) => {
+    assert.deepEqual(filter, { salonId, barberId, status: "accepted" });
+    assert.equal(update.$set.status, "cancelled");
+    assert.ok(options.session);
+    acceptedRequest.status = update.$set.status;
+    return { modifiedCount: 1 };
+  };
   SubscriptionSeat.find = () => chainableQuery([activeSeat]);
 
   const res = createResponse();
@@ -124,6 +135,7 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
   assert.equal(activeSeat.subscriptionId.activeSeatCount, 0);
   assert.equal(barber.salons.length, 0);
   assert.equal(barber.salonStatus, "none");
+  assert.equal(acceptedRequest.status, "cancelled");
 });
 
 test("owner removal revokes promoted admin authority without affecting another salon", async () => {
@@ -167,6 +179,7 @@ test("owner removal revokes promoted admin authority without affecting another s
   Salon.findById = async (id) =>
     String(id) === String(salonId) ? salon : otherSalon;
   User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async () => ({ modifiedCount: 0 });
   SubscriptionSeat.find = () => chainableQuery([]);
   Notification.create = async (payload) => payload;
   __notificationServiceTestHooks.setGetIO(() => null);

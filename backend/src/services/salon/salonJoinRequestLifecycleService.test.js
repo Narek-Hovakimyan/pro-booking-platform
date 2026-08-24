@@ -269,12 +269,15 @@ test("rejected and cancelled requests reopen to pending with stale fields cleare
   }
 });
 
-test("accepted request and approved canonical membership block rerequest", async () => {
+test("stale accepted request reopens to pending while approved canonical membership blocks rerequest", async () => {
   requests.push(makeRequest({ status: "accepted" }));
-  await assert.rejects(
-    () => requestSalonJoinLifecycle({ salonId, barber: users.get(barberId) }),
-    /You already work in this salon/
-  );
+  const rejoined = await requestSalonJoinLifecycle({
+    salonId,
+    barber: users.get(barberId),
+  });
+  assert.equal(rejoined.statusCode, 201);
+  assert.equal(rejoined.request.status, "pending");
+  assert.equal(users.get(barberId).salons[0].status, "pending");
 
   requests = [];
   users.get(barberId).salons = [{ salon: salonId, status: "approved" }];
