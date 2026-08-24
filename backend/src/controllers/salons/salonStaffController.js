@@ -173,7 +173,11 @@ export const promoteToAdmin = async (req, res) => {
     // Check if barber is approved in this salon
     const isInSalon = (barber.salons || []).some(
       (s) => s.salon?.toString() === salon._id.toString() && s.status === "approved"
-    ) || (barber.salon && sameId(barber.salon, salon._id));
+    ) || (
+      barber.salonStatus === "approved" &&
+      barber.salon &&
+      sameId(barber.salon, salon._id)
+    );
 
     if (!isInSalon) {
       return res.status(400).json({

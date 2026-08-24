@@ -4,6 +4,7 @@ import { afterEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import {
+  promoteToAdmin,
   removeBarberFromSalon,
   respondToRelationshipType,
   updateMemberRelationshipType,
@@ -53,6 +54,132 @@ afterEach(() => {
   User.findById = originalUserFindById;
   SalonJoinRequest.updateMany = originalJoinRequestUpdateMany;
   __notificationServiceTestHooks.resetGetIO();
+});
+
+test("promotion requires approved canonical or legacy salon membership", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const otherSalonId = new mongoose.Types.ObjectId();
+  const deniedCases = [
+    { name: "pending canonical", salons: [{ salon: salonId, status: "pending" }] },
+    { name: "rejected canonical", salons: [{ salon: salonId, status: "rejected" }] },
+    { name: "pending legacy", salon: salonId, salonStatus: "pending" },
+    { name: "rejected legacy", salon: salonId, salonStatus: "rejected" },
+    { name: "empty legacy status", salon: salonId, salonStatus: "none" },
+    { name: "outsider", salons: [] },
+    { name: "another salon", salons: [{ salon: otherSalonId, status: "approved" }] },
+  ];
+
+  for (const denied of deniedCases) {
+    const targetId = new mongoose.Types.ObjectId();
+    const salon = {
+      _id: salonId,
+      name: "Promotion Salon",
+      ownerId,
+      admins: [],
+      async save() {
+        throw new Error("denied promotion must not save salon");
+      },
+    };
+    const notifications = [];
+    const barber = {
+      _id: targetId,
+      name: denied.name,
+      role: "barber",
+      salons: [],
+      salon: null,
+      salonStatus: "none",
+      ...denied,
+    };
+
+    Salon.findById = async () => salon;
+    User.findById = async () => barber;
+    Notification.create = async (payload) => notifications.push(payload);
+
+    const res = createResponse();
+    await promoteToAdmin(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId: String(salonId), barberId: String(targetId) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400, denied.name);
+    assert.deepEqual(salon.admins, [], denied.name);
+    assert.deepEqual(notifications, [], denied.name);
+  }
+});
+
+test("only owner can promote approved barbers and preserves approved compatibility", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const nonOwnerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const approvedMembers = [
+    { name: "canonical", salons: [{ salon: salonId, status: "approved" }] },
+    { name: "legacy", salons: [], salon: salonId, salonStatus: "approved" },
+  ];
+
+  for (const member of approvedMembers) {
+    const targetId = new mongoose.Types.ObjectId();
+    const salon = {
+      _id: salonId,
+      name: "Promotion Salon",
+      ownerId,
+      admins: [],
+      async save() {
+        return this;
+      },
+    };
+    const notifications = [];
+    const barber = { _id: targetId, role: "barber", ...member };
+
+    Salon.findById = async () => salon;
+    User.findById = async () => barber;
+    Notification.create = async (payload) => notifications.push(payload);
+
+    const res = createResponse();
+    await promoteToAdmin(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId: String(salonId), barberId: String(targetId) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200, member.name);
+    assert.deepEqual(salon.admins, [targetId], member.name);
+    assert.equal(notifications.length, 1, member.name);
+  }
+
+  const salon = { _id: salonId, ownerId, admins: [] };
+  Salon.findById = async () => salon;
+  User.findById = async () => ({ _id: new mongoose.Types.ObjectId(), role: "client" });
+  Notification.create = () => {
+    throw new Error("denied promotion must not notify");
+  };
+
+  const nonOwnerResponse = createResponse();
+  await promoteToAdmin(
+    {
+      user: { _id: nonOwnerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(new mongoose.Types.ObjectId()) },
+    },
+    nonOwnerResponse
+  );
+  assert.equal(nonOwnerResponse.statusCode, 403);
+  assert.deepEqual(salon.admins, []);
+
+  const nonBarberResponse = createResponse();
+  await promoteToAdmin(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(new mongoose.Types.ObjectId()) },
+    },
+    nonBarberResponse
+  );
+  assert.equal(nonBarberResponse.statusCode, 404);
+  assert.deepEqual(salon.admins, []);
 });
 
 test("removeBarberFromSalon revokes active subscription seat", async () => {
