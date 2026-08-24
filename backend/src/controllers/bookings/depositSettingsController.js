@@ -1,8 +1,4 @@
 import BarberProfile from "../../models/BarberProfile.js";
-import User from "../../models/User.js";
-import Salon from "../../models/Salon.js";
-import { isAcceptedStaffMember } from "../../services/salon/salonRelationshipService.js";
-import { canManageSalon, sameId } from "../../utils/salonPermissions.js";
 
 export const MAX_NO_SHOW_POLICY_TEXT_LENGTH = 1000;
 
@@ -216,82 +212,7 @@ export const updateMyDepositSettings = async (req, res) => {
  * Salon owner/admin can update deposit settings for accepted staff (NOT chair_renter).
  */
 export const updateStaffDepositSettingsBySalonOwner = async (req, res) => {
-  try {
-    const { salonId, barberId } = req.params;
-
-    // Verify salon exists
-    const salon = await Salon.findById(salonId);
-    if (!salon) {
-      return res.status(404).json({ message: "Salon not found" });
-    }
-
-    // Verify requester is salon owner or admin
-    if (!canManageSalon(salon, req.user._id)) {
-      return res.status(403).json({ message: "Only salon owner or admin can update staff deposit settings" });
-    }
-
-    // Verify barber exists
-    const barber = await User.findById(barberId);
-    if (!barber || barber.role !== "barber") {
-      return res.status(404).json({ message: "Barber not found" });
-    }
-
-    // Verify barber is approved member of this salon
-    const approvedEntry = (barber.salons || []).find(
-      (entry) => sameId(entry?.salon, salon._id) && entry?.status === "approved"
-    );
-    const isLegacyStaff = barber.salonStatus === "approved" && sameId(barber.salon, salon._id);
-
-    if (!approvedEntry && !isLegacyStaff) {
-      return res.status(400).json({ message: "Barber is not an approved member of this salon" });
-    }
-
-    // Chair renters and unconfirmed staff control their own deposit settings.
-    const entry = approvedEntry || {
-      salon: salon._id,
-      status: "approved",
-      relationshipType: "staff",
-      relationshipStatus: "accepted",
-    };
-    if (!isAcceptedStaffMember(entry)) {
-      return res.status(403).json({
-        message: "Only accepted staff deposit settings can be modified by salon owner or admin.",
-      });
-    }
-
-    // Get barber profile
-    const profile = await BarberProfile.findOne({ barberId });
-    if (!profile) {
-      return res.status(404).json({ message: "Barber profile not found" });
-    }
-
-    const newSettings = normalizeDepositSettings(req.body, profile.depositSettings);
-
-    const errors = validateDepositSettings(newSettings);
-    if (errors.length > 0) {
-      return res.status(400).json({ message: errors.join("; ") });
-    }
-
-    profile.depositSettings = newSettings;
-    await profile.save();
-
-    return res.json({
-      message: "Staff deposit settings updated",
-      depositSettings: profile.depositSettings,
-    });
-  } catch (error) {
-    logRequestError(
-      req,
-      {
-        err: error,
-        event: "deposit_settings.staff_update_failed",
-        requestId: req.id,
-        userId: req.user?._id || req.user?.id,
-        salonId: req.params?.salonId,
-        barberId: req.params?.barberId,
-      },
-      "Could not update staff deposit settings"
-    );
-    return res.status(500).json({ message: "Could not update staff deposit settings" });
-  }
+  return res.status(403).json({
+    message: "Salon managers cannot update barber-owned global deposit settings",
+  });
 };

@@ -289,6 +289,24 @@ describe("deposit settings controller", () => {
     assert.equal(res.body.depositSettings.value, 25);
   });
 
+  it("barber can still update own global deposit settings", async () => {
+    const profile = createProfile();
+    BarberProfile.findOne = async () => profile;
+    const res = createResponse();
+
+    await updateMyDepositSettings(
+      {
+        user: { _id: "barber-1", role: "barber" },
+        body: { enabled: true, mode: "fixed", value: 25 },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(profile.saveCalled, true);
+    assert.equal(profile.depositSettings.value, 25);
+  });
+
   it("logs structured safe context and preserves 500 response for own deposit read errors", async () => {
     const error = new Error("db failed");
     BarberProfile.findOne = async () => {
@@ -394,8 +412,14 @@ describe("deposit settings controller", () => {
     return profile;
   };
 
-  it("owner can update accepted staff deposit settings", async () => {
+  it("owner cannot update barber-owned global deposit settings", async () => {
     const profile = setupStaffUpdate();
+    const originalSettings = structuredClone(profile.depositSettings);
+    let profileRead = false;
+    BarberProfile.findOne = async () => {
+      profileRead = true;
+      return profile;
+    };
     const res = createResponse();
 
     await updateStaffDepositSettingsBySalonOwner(
@@ -407,62 +431,32 @@ describe("deposit settings controller", () => {
       res
     );
 
-    assert.equal(res.statusCode, 200);
-    assert.equal(profile.saveCalled, true);
-    assert.equal(res.body.depositSettings.value, 20);
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, {
+      message: "Salon managers cannot update barber-owned global deposit settings",
+    });
+    assert.deepEqual(profile.depositSettings, originalSettings);
+    assert.equal(profile.saveCalled, false);
+    assert.equal(profileRead, false);
   });
 
-  it("logs structured safe context and preserves 500 response for staff deposit update errors", async () => {
-    Salon.findById = async () => ({
-      _id: "salon-1",
-      ownerId: "owner-1",
-      admins: [],
-    });
-    User.findById = async () => ({
-      _id: "barber-2",
-      role: "barber",
-      salons: [
-        {
-          salon: "salon-1",
-          status: "approved",
-          relationshipType: "staff",
-          relationshipStatus: "accepted",
-        },
-      ],
-    });
-    const error = new Error("write failed");
-    BarberProfile.findOne = async () => {
-      throw error;
-    };
-    const reqLog = createRequestLogger();
-    const req = createRequest({
-      user: { _id: "owner-1", role: "barber", phone: "+37400000000" },
-      params: { salonId: "salon-1", barberId: "barber-2" },
-      body: {
-        enabled: true,
-        mode: "fixed",
-        value: 15,
-        noShowPolicyText: "private policy text",
-      },
-      id: "req-staff-1",
-      log: reqLog,
-    });
+  it("admin cannot update barber-owned global deposit settings", async () => {
+    const profile = setupStaffUpdate();
+    const originalSettings = structuredClone(profile.depositSettings);
     const res = createResponse();
 
-    await updateStaffDepositSettingsBySalonOwner(req, res);
+    await updateStaffDepositSettingsBySalonOwner(
+      {
+        user: { _id: "admin-1", role: "barber" },
+        params: { salonId: "salon-2", barberId: "barber-1" },
+        body: { enabled: true, mode: "fixed", value: 15 },
+      },
+      res
+    );
 
-    assert.equal(res.statusCode, 500);
-    assert.deepEqual(res.body, { message: "Could not update staff deposit settings" });
-    assert.equal(reqLog.calls.length, 1);
-    const [context, message] = reqLog.calls[0];
-    assert.equal(message, "Could not update staff deposit settings");
-    assert.equal(context.event, "deposit_settings.staff_update_failed");
-    assert.equal(context.requestId, "req-staff-1");
-    assert.equal(context.userId, "owner-1");
-    assert.equal(context.salonId, "salon-1");
-    assert.equal(context.barberId, "barber-2");
-    assert.equal(context.err, error);
-    assertNoSensitiveLeak(reqLog.calls);
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(profile.depositSettings, originalSettings);
+    assert.equal(profile.saveCalled, false);
   });
 
   it("owner cannot update chair renter deposit settings", async () => {
