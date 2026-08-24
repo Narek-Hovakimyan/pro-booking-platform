@@ -200,6 +200,67 @@ describe("authorizeDebugAccess", () => {
     assert.equal(result.allowed, true);
   });
 
+  test("denies salon managers access to chair renters", async () => {
+    Salon.findById = async () => existingSalon;
+    User.findById = mockUserFindById({
+      _id: barberId,
+      role: "barber",
+      salons: [{ salon: salonId, status: "approved", relationshipType: "chair_renter" }],
+    });
+
+    const result = await authorizeDebugAccess({
+      requester: { _id: ownerId, role: "barber" },
+      barberId,
+      salonId,
+    });
+
+    assert.equal(result.allowed, false);
+    assert.equal(result.status, 400);
+  });
+
+  for (const [label, membership] of [
+    ["pending relationships", { status: "approved", relationshipStatus: "pending" }],
+    ["rejected relationships", { status: "approved", relationshipStatus: "rejected" }],
+    ["non-working specialists", { status: "approved", worksAsSpecialist: false }],
+  ]) {
+    test(`denies salon managers access to ${label}`, async () => {
+      Salon.findById = async () => existingSalon;
+      User.findById = mockUserFindById({
+        _id: barberId,
+        role: "barber",
+        salons: [{ salon: salonId, ...membership }],
+      });
+
+      const result = await authorizeDebugAccess({
+        requester: { _id: ownerId, role: "barber" },
+        barberId,
+        salonId,
+      });
+
+      assert.equal(result.allowed, false);
+      assert.equal(result.status, 400);
+    });
+  }
+
+  test("allows managers to debug a legacy approved staff membership", async () => {
+    Salon.findById = async () => existingSalon;
+    User.findById = mockUserFindById({
+      _id: barberId,
+      role: "barber",
+      salon: salonId,
+      salonStatus: "approved",
+      salons: [],
+    });
+
+    const result = await authorizeDebugAccess({
+      requester: { _id: ownerId, role: "barber" },
+      barberId,
+      salonId,
+    });
+
+    assert.equal(result.allowed, true);
+  });
+
   test("rejects unrelated barber with 403 when debugging another barber", async () => {
     Salon.findById = async () => existingSalon;
 
@@ -341,6 +402,24 @@ describe("debugAvailability", () => {
         status: "accepted",
         salonId,
       },
+      {
+        _id: "salon-b-booking",
+        barberId,
+        bookingDate,
+        time: "11:00",
+        duration: 60,
+        status: "accepted",
+        salonId: "salon-b",
+      },
+      {
+        _id: "independent-booking",
+        barberId,
+        bookingDate,
+        time: "12:00",
+        duration: 60,
+        status: "accepted",
+        salonId: null,
+      },
     ];
 
     Schedule.findOne = async () => ({
@@ -352,7 +431,12 @@ describe("debugAvailability", () => {
       defaultSchedule: null,
     });
     Service.findOne = async () => defaultService;
-    Booking.find = mockBookingFind(existingBookings);
+    Booking.find = (query) => ({
+      lean: async () =>
+        query.salonId === salonId
+          ? existingBookings.filter((booking) => booking.salonId === salonId)
+          : existingBookings,
+    });
     User.findById = mockUserFindById({ _id: barberId, salons: [{ salon: salonId }] });
 
     const result = await debugAvailability({
@@ -366,12 +450,14 @@ describe("debugAvailability", () => {
     assert.equal(result.available, false);
     assert.match(result.explanation, /already booked/i);
     assert.equal(Array.isArray(result.blockingBookings), true);
-    assert.ok(result.blockingBookings.length > 0);
-    // No client data exposed
+    assert.deepEqual(result.blockingBookings, [
+      { time: "10:00", duration: 60, endTime: "11:00" },
+    ]);
     for (const booking of result.blockingBookings) {
+      assert.deepEqual(Object.keys(booking).sort(), ["duration", "endTime", "time"]);
       assert.equal(booking.clientId, undefined);
-      assert.equal(booking.clientName, undefined);
-      assert.equal(booking.clientPhone, undefined);
+      assert.equal(booking.status, undefined);
+      assert.equal(booking.salonId, undefined);
     }
   });
 

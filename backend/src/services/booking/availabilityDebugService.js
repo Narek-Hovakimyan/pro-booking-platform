@@ -4,9 +4,6 @@ import Schedule from "../../models/Schedule.js";
 import Service from "../../models/Service.js";
 import User from "../../models/User.js";
 import {
-  getApprovedUserSalonIds,
-} from "../salon/salonMembershipService.js";
-import {
   normalizeScheduleForAvailability,
   serializeDefaultSchedule,
 } from "../../utils/scheduleUtils.js";
@@ -28,6 +25,10 @@ import {
   canUserManageSalon,
   isUserApprovedForSalon,
 } from "../salon/salonMembershipService.js";
+import {
+  getMemberRelationshipType,
+  isWorkingSpecialist,
+} from "../salon/salonRelationshipService.js";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -90,7 +91,21 @@ export const authorizeDebugAccess = async ({ requester, barberId, salonId }) => 
     return { allowed: false, status: 404, message: "Barber not found" };
   }
 
-  if (!isUserApprovedForSalon(targetBarber, salonId)) {
+  const targetMembership = Array.isArray(targetBarber.salons)
+    ? targetBarber.salons.find(
+        (entry) => getIdString(entry?.salon) === getIdString(salonId)
+      )
+    : null;
+  const targetRelationship = targetMembership
+    ? targetMembership.status === "approved"
+      ? targetMembership
+      : null
+    : await getMemberRelationshipType(barberId, salonId);
+
+  if (
+    !targetRelationship ||
+    !isWorkingSpecialist({ status: "approved", ...targetRelationship })
+  ) {
     return { allowed: false, status: 400, message: "Barber is not approved for this salon" };
   }
 
@@ -235,9 +250,10 @@ export const checkSlotAvailability = ({
 /**
  * Load blocking bookings for a given date, excluding client details.
  */
-export const loadBlockingBookings = async ({ barberId, date }) => {
+export const loadBlockingBookings = async ({ barberId, salonId, date }) => {
   const bookings = await Booking.find({
     barberId,
+    salonId,
     status: { $in: blockingBookingStatuses },
     bookingDate: date,
   }).lean();
@@ -351,7 +367,12 @@ export const debugAvailability = async ({
   } = await buildScheduleContext({ barberId, salonId, date });
 
   // Build blocking bookings
-  const blockingBookings = await loadBlockingBookings({ barberId, date });
+  const blockingBookings = await loadBlockingBookings({ barberId, salonId, date });
+  const blockingBookingsResponse = blockingBookings.map((booking) => ({
+    time: booking.time,
+    duration: booking.duration,
+    endTime: booking.endTime,
+  }));
 
   if (service.isActive === false) {
     return {
@@ -381,7 +402,7 @@ export const debugAvailability = async ({
         blockingBookings,
         duration,
       }),
-      blockingBookings,
+      blockingBookings: blockingBookingsResponse,
     };
   }
 
@@ -414,7 +435,7 @@ export const debugAvailability = async ({
         blockingBookings,
         duration,
       }),
-      blockingBookings,
+      blockingBookings: blockingBookingsResponse,
     };
   }
 
@@ -457,6 +478,6 @@ export const debugAvailability = async ({
       blockingBookings,
       duration,
     }),
-    blockingBookings,
+    blockingBookings: blockingBookingsResponse,
   };
 };
