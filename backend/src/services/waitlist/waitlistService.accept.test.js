@@ -54,6 +54,7 @@ const originalSlotHoldMethods = {
   supportsTransactions: __bookingSlotHoldServiceTestHooks.supportsTransactions,
   startSession: __bookingSlotHoldServiceTestHooks.startSession,
 };
+const originalSubscriptionSeatFind = SubscriptionSeat.find;
 const rollbackLogger = getLogger();
 const originalRollbackLoggerWarn = rollbackLogger.warn;
 
@@ -71,6 +72,7 @@ afterEach(() => {
   __bookingSlotHoldServiceTestHooks.startSession = originalSlotHoldMethods.startSession;
   __waitlistNotificationTestHooks.resetLogger();
   rollbackLogger.warn = originalRollbackLoggerWarn;
+  SubscriptionSeat.find = originalSubscriptionSeatFind;
 });
 
 const installProtectionUnavailableHooks = (startSession) => {
@@ -850,13 +852,37 @@ const installRollbackCleanupFailureScenario = ({
   User.findById = (id) => ({
     select: async () => {
       if (String(id) === String(clientId)) return { _id: clientId, name: "Client" };
-      if (String(id) === String(barberId)) return { _id: barberId, name: "Barber", role: "barber" };
+      if (String(id) === String(barberId)) return {
+        _id: barberId,
+        name: "Barber",
+        role: "barber",
+        salons: [{
+          salon: "salon-rollback",
+          status: "approved",
+          relationshipType: "staff",
+          relationshipStatus: "accepted",
+        }],
+      };
       return null;
     },
   });
   Service.findOne = async () => ({ _id: serviceId, barberId, name: "Haircut", duration: 30, price: 50 });
   Salon.findById = async (id) =>
     String(id) === "salon-rollback" ? { _id: "salon-rollback", name: "Rollback Salon" } : null;
+  SubscriptionSeat.find = () => ({
+    populate: () => ({
+      lean: async () => [{
+        barberId,
+        salonId: "salon-rollback",
+        status: "active",
+        subscriptionId: {
+          ownerId: "salon-rollback",
+          status: "active",
+          currentPeriodEnd: new Date("2099-01-01T00:00:00.000Z"),
+        },
+      }],
+    }),
+  });
   Booking.find = async () => [];
   Booking.create = async (payload) => {
     bookingCreateCalls += 1;

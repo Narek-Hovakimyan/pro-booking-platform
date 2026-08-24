@@ -18,8 +18,7 @@ const isOnboardingReady = (user) => {
 };
 const isEligibleSalonMembership = (membership) =>
   membership?.status === "approved" &&
-  membership?.relationshipStatus !== "pending" &&
-  membership?.relationshipStatus !== "rejected" &&
+  (membership?.relationshipStatus || "accepted") === "accepted" &&
   membership?.worksAsSpecialist !== false;
 const hasValidPersonalSchedule = (schedule) => {
   try { validatePersonalWeeklySchedule(schedule?.weeklySchedule); return true; } catch { return false; }

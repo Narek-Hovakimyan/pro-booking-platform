@@ -1,7 +1,6 @@
 import {
-  barberHasPaidAccessForSalon,
-  barberHasPaidSeatAccessForSalon,
-} from "../subscriptionService.js";
+  barberHasBookingPaidAccessForSalon,
+} from "../subscription/subscriptionPaidAccessQueries.js";
 import { buildBookingPricing } from "./bookingPricingService.js";
 import {
   normalizeScopedBookingReadinessIds,
@@ -36,10 +35,7 @@ export const executeBookingPriceQuote = async ({ body, user }) => {
   if (normalizedIds.body) return normalizedIds;
 
   const { barberId, serviceId, salonId } = normalizedIds;
-  const hasExplicitSalonContext = salonId !== null;
-  const barberPaidAccess = hasExplicitSalonContext
-    ? await barberHasPaidSeatAccessForSalon(barberId, salonId)
-    : await barberHasPaidAccessForSalon(barberId, null);
+  const barberPaidAccess = await barberHasBookingPaidAccessForSalon(barberId, salonId);
   if (!barberPaidAccess) {
     return {
       status: 403,

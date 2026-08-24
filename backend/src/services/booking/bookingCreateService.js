@@ -5,9 +5,8 @@ import Booking from "../../models/Booking.js";
 import { calculateDeposit } from "../../controllers/bookings/depositSettingsController.js";
 import { createNotification } from "../../controllers/notifications/notificationController.js";
 import {
-  barberHasPaidAccessForSalon,
-  barberHasPaidSeatAccessForSalon,
-} from "../subscriptionService.js";
+  barberHasBookingPaidAccessForSalon,
+} from "../subscription/subscriptionPaidAccessQueries.js";
 import {
   buildBookingPricing,
 } from "./bookingPricingService.js";
@@ -162,10 +161,7 @@ export const createBookingService = async ({
   const { barberId, serviceId, salonId } = normalizedIds;
 
   // Block booking creation for unpaid barbers in the selected salon context.
-  const hasExplicitSalonContext = salonId !== null;
-  const barberPaidAccess = hasExplicitSalonContext
-    ? await barberHasPaidSeatAccessForSalon(barberId, salonId)
-    : await barberHasPaidAccessForSalon(barberId, null);
+  const barberPaidAccess = await barberHasBookingPaidAccessForSalon(barberId, salonId);
   if (!barberPaidAccess) {
     cleanup();
     return {

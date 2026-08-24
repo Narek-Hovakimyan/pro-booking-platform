@@ -5,7 +5,7 @@ import Service from "../../models/Service.js";
 import ServiceCategory from "../../models/ServiceCategory.js";
 import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { sendControllerError } from "../../utils/controllerError.js";
-import { barberHasPaidAccessForSalon as _barberHasPaidAccess } from "../../services/subscriptionService.js";
+import { barberHasBookingPaidAccessForSalon as _barberHasPaidAccess } from "../../services/subscription/subscriptionPaidAccessQueries.js";
 import {
   calculateServiceDiscountedPrice,
   validateServicePayload,

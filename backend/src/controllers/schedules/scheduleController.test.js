@@ -51,9 +51,19 @@ beforeEach(() => {
   Subscription.findOne = async () => ({ _id: "subscription-1", status: "active" });
   SubscriptionSeat.find = () => ({
     populate: () => ({
-      lean: async () => [],
+      lean: async () => [{
+        barberId,
+        salonId: salonAId,
+        status: "active",
+        subscriptionId: {
+          ownerId: salonAId,
+          status: "active",
+          currentPeriodEnd: new Date("2099-01-01T00:00:00.000Z"),
+        },
+      }],
     }),
   });
+  User.findById = () => createQuery(createReadyBarber());
 });
 
 afterEach(() => {
@@ -116,7 +126,7 @@ const createReadyBarber = (overrides = {}) => ({
     {
       salon: salonAId,
       status: "approved",
-      relationshipStatus: "active",
+      relationshipStatus: "accepted",
       worksAsSpecialist: true,
     },
   ],
@@ -877,6 +887,9 @@ test("salon schedule endpoint preserves paid-access rejection before schedule ex
   let scheduleFindOneCalled = false;
 
   Subscription.findOne = async () => null;
+  SubscriptionSeat.find = () => ({
+    populate: () => ({ lean: async () => [] }),
+  });
   Schedule.findOne = async () => {
     scheduleFindOneCalled = true;
     return null;

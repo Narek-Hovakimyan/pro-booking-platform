@@ -4,7 +4,7 @@ import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import Schedule from "../../models/Schedule.js";
 import User from "../../models/User.js";
 import { getPublicBarberReadinessByIds } from "../../services/barber/publicBarberReadinessService.js";
-import { getPaidAccessByBarberIdsForSalon } from "../../services/subscriptionService.js";
+import { getBookingPaidAccessByBarberIdsForSalon as getPaidAccessByBarberIdsForSalon } from "../../services/subscription/subscriptionPaidAccessQueries.js";
 import { sanitizeMediaUrl } from "../../utils/mediaUrl.js";
 import {
   findManageableSalonsForUser,

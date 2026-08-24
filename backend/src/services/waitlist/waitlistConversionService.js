@@ -8,7 +8,7 @@ import {
   releaseBookingSlotHolds,
   runBookingSlotTransaction,
 } from "../booking/bookingSlotHoldService.js";
-import { barberHasPaidAccessForSalon } from "../subscriptionService.js";
+import { barberHasBookingPaidAccessForSalon } from "../subscription/subscriptionPaidAccessQueries.js";
 import {
   getActionableWaitlistEntry,
   getValidatedWaitlistConversionContext,
@@ -103,7 +103,7 @@ export const acceptWaitlistOffer = async ({ entryId, clientId }) => {
     );
   }
 
-  const barberHasAccess = await barberHasPaidAccessForSalon(
+  const barberHasAccess = await barberHasBookingPaidAccessForSalon(
     claimedEntry.barberId,
     claimedEntry.salonId || null
   );
@@ -243,7 +243,7 @@ export const approveWaitlistEntry = async ({ entryId, barberId, time }) => {
     );
   }
 
-  const barberHasAccess = await barberHasPaidAccessForSalon(
+  const barberHasAccess = await barberHasBookingPaidAccessForSalon(
     claimedEntry.barberId,
     claimedEntry.salonId || null
   );

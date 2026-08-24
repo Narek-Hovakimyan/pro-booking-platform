@@ -7,6 +7,7 @@ import Service from "../../models/Service.js";
 import User from "../../models/User.js";
 import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 import {
+  buildPublicBarberReadiness,
   getPublicBarberReadiness,
   getPublicBarberReadinessByIds,
 } from "./publicBarberReadinessService.js";
@@ -267,6 +268,26 @@ test("readiness rejects pending, rejected, and non-specialist salon memberships"
     assert.deepEqual([...readiness.get(barberId).eligibleSalonIds], []);
     assert.equal(readiness.get(barberId).publicReady, false);
   }
+});
+
+test("readiness rejects non-accepted salon relationship states", () => {
+  const readiness = buildPublicBarberReadiness({
+    barber: {
+      _id: "active-barber",
+      role: "barber",
+      specialistOnboarding: completedState("salon"),
+      salons: [{
+        salon: "salon-a",
+        status: "approved",
+        relationshipStatus: "active",
+        worksAsSpecialist: true,
+      }],
+    },
+    activeServices: [{ barberId: "active-barber" }],
+  });
+
+  assert.deepEqual([...readiness.eligibleSalonIds], []);
+  assert.equal(readiness.publicReady, false);
 });
 
 test("readiness keeps unrelated canonical salon memberships from qualifying another salon", async () => {

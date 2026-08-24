@@ -39,6 +39,7 @@ import {
   updateSalonSubscriptionSeatCount,
   isManualActivationAvailable,
 } from "./subscriptionService.js";
+import { barberHasBookingPaidAccessForSalon } from "./subscription/subscriptionPaidAccessQueries.js";
 
 /* ── Stub state ─────────────────────────────────────────── */
 const originalPlanFindOne = SubscriptionPlan.findOne;
@@ -2168,6 +2169,115 @@ test("chair renter own active subscription still grants paid access", async () =
 
   const hasAccess = await barberHasPaidAccess(barberId);
   assert.equal(hasAccess, true);
+});
+
+test("salon booking access uses staff seats and chair-renter individual subscriptions", async () => {
+  const cases = [
+    {
+      name: "accepted staff with active salon seat",
+      user: makeSalonRelationshipUser(),
+      individualSubscription: null,
+      seat: makeSubscriptionSeat(),
+      salonId,
+      expected: true,
+    },
+    {
+      name: "accepted staff with individual subscription but no seat",
+      user: makeSalonRelationshipUser(),
+      individualSubscription: makeSubDoc(),
+      seat: null,
+      salonId,
+      expected: false,
+    },
+    {
+      name: "accepted chair renter with individual subscription",
+      user: makeSalonRelationshipUser({ relationshipType: "chair_renter" }),
+      individualSubscription: makeSubDoc(),
+      seat: null,
+      salonId,
+      expected: true,
+    },
+    {
+      name: "legacy accepted chair renter without relationship status",
+      user: makeBarberUser({
+        salon: null,
+        salonStatus: "none",
+        salons: [{
+          salon: salonId,
+          status: "approved",
+          relationshipType: "chair_renter",
+        }],
+      }),
+      individualSubscription: makeSubDoc(),
+      seat: null,
+      salonId,
+      expected: true,
+    },
+    {
+      name: "chair renter without individual subscription",
+      user: makeSalonRelationshipUser({ relationshipType: "chair_renter" }),
+      individualSubscription: null,
+      seat: null,
+      salonId,
+      expected: false,
+    },
+    {
+      name: "pending chair renter with individual subscription",
+      user: makeSalonRelationshipUser({
+        relationshipType: "chair_renter",
+        relationshipStatus: "pending",
+      }),
+      individualSubscription: makeSubDoc(),
+      seat: null,
+      salonId,
+      expected: false,
+    },
+    {
+      name: "rejected chair renter with individual subscription",
+      user: makeSalonRelationshipUser({
+        relationshipType: "chair_renter",
+        relationshipStatus: "rejected",
+      }),
+      individualSubscription: makeSubDoc(),
+      seat: null,
+      salonId,
+      expected: false,
+    },
+    {
+      name: "expired staff seat",
+      user: makeSalonRelationshipUser(),
+      individualSubscription: null,
+      seat: makeSubscriptionSeat({
+        subscriptionId: makeSubDoc({
+          ownerType: "salon",
+          ownerId: salonId,
+          currentPeriodEnd: new Date(Date.now() - 60 * 1000),
+        }),
+      }),
+      salonId,
+      expected: false,
+    },
+    {
+      name: "independent barber with individual subscription",
+      user: null,
+      individualSubscription: makeSubDoc(),
+      seat: null,
+      salonId: null,
+      expected: true,
+    },
+  ];
+
+  for (const scenario of cases) {
+    Subscription.findOne = async () => scenario.individualSubscription;
+    SubscriptionSeat.find = () => chainableQuery(scenario.seat ? [scenario.seat] : []);
+    User.findById = () => chainableQuery(scenario.user);
+
+    assert.equal(
+      await barberHasBookingPaidAccessForSalon(barberId, scenario.salonId),
+      scenario.expected,
+      scenario.name
+    );
+  }
 });
 
 test("expired salon subscription + active seat does not grant access", async () => {

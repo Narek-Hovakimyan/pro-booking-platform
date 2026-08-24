@@ -5,7 +5,7 @@ import {
   canUserManageSalon,
   isUserApprovedForSalon,
 } from "../../services/salon/salonMembershipService.js";
-import { barberHasPaidAccessForSalon } from "../../services/subscriptionService.js";
+import { barberHasBookingPaidAccessForSalon } from "../../services/subscription/subscriptionPaidAccessQueries.js";
 import {
   normalizePublicAvailabilityIds,
   resolvePublicScheduleContext,
@@ -100,7 +100,7 @@ export const getScheduleByBarberAndSalon = async (req, res) => {
       return res.status(normalizedIds.status).json(normalizedIds.body);
     }
 
-    const hasPaidAccess = await barberHasPaidAccessForSalon(
+    const hasPaidAccess = await barberHasBookingPaidAccessForSalon(
       normalizedIds.barberId,
       normalizedIds.salonId
     );
