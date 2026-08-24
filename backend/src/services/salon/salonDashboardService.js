@@ -56,11 +56,12 @@ const getAppointmentMonthKey = (booking) => {
       : "");
 };
 
-const getMonthBookings = async (staffIds, now) => {
+const getMonthBookings = async (salonId, staffIds, now) => {
   const monthBounds = getArmeniaMonthBounds(now);
   const monthKey = getArmeniaDateKey(monthBounds.start).slice(0, 7);
   const nextMonthKey = getArmeniaDateKey(monthBounds.end).slice(0, 7);
   const candidates = await Booking.find({
+    salonId,
     barberId: { $in: staffIds },
     $or: [
       { bookingDate: { $gte: `${monthKey}-01`, $lt: `${nextMonthKey}-01` } },
@@ -209,7 +210,7 @@ const getStaffSummary = async (salonId, staffIds, chairRenterIds) => {
 };
 
 /** Get booking summary (staff-only). */
-const getBookingSummary = async (staffIds, now = new Date()) => {
+const getBookingSummary = async (salonId, staffIds, now = new Date()) => {
   if (staffIds.length === 0) {
     return {
       todayBookings: 0,
@@ -228,20 +229,23 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
   const [todayBookings, upcomingBookings, pendingBookings, monthBookings] =
     await Promise.all([
       Booking.countDocuments({
+        salonId,
         barberId: { $in: staffIds },
         $or: [{ bookingDate: todayKey }, { dayKey: todayKey }],
         status: { $in: ["confirmed", "in_progress", "completed"] },
       }),
       Booking.countDocuments({
+        salonId,
         barberId: { $in: staffIds },
         startTime: { $gte: now },
         status: "confirmed",
       }),
       Booking.countDocuments({
+        salonId,
         barberId: { $in: staffIds },
         ...getPendingBookingActionableFilter(now),
       }),
-      getMonthBookings(staffIds, now),
+      getMonthBookings(salonId, staffIds, now),
     ]);
 
   let completedThisMonth = 0;
@@ -283,7 +287,7 @@ const getBookingSummary = async (staffIds, now = new Date()) => {
 };
 
 /** Get revenue summary (staff-only, completed bookings). */
-const getRevenueSummary = async (staffIds, now = new Date()) => {
+const getRevenueSummary = async (salonId, staffIds, now = new Date()) => {
   if (staffIds.length === 0) {
     return { todayRevenue: 0, monthRevenue: 0 };
   }
@@ -292,11 +296,12 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
 
   const [todayCompleted, monthCompleted] = await Promise.all([
     Booking.find({
+      salonId,
       barberId: { $in: staffIds },
       status: "completed",
       $or: [{ bookingDate: todayKey }, { dayKey: todayKey }],
     }).lean(),
-    getMonthBookings(staffIds, now).then((bookings) =>
+    getMonthBookings(salonId, staffIds, now).then((bookings) =>
       bookings.filter((booking) => booking.status === "completed")
     ),
   ]);
@@ -314,13 +319,26 @@ const getRevenueSummary = async (staffIds, now = new Date()) => {
 };
 
 /** Get review summary (staff-only). */
-const getReviewSummary = async (staffIds) => {
+const getReviewSummary = async (salonId, staffIds) => {
   if (staffIds.length === 0) {
+    return { averageRating: 0, totalReviews: 0 };
+  }
+
+  const salonBookings = await Booking.find({
+    salonId,
+    barberId: { $in: staffIds },
+  })
+    .select("_id")
+    .lean();
+  const bookingIds = salonBookings.map((booking) => booking?._id).filter(Boolean);
+
+  if (bookingIds.length === 0) {
     return { averageRating: 0, totalReviews: 0 };
   }
 
   const reviews = await Review.find({
     barberId: { $in: staffIds },
+    bookingId: { $in: bookingIds },
   }).lean();
 
   let totalRating = 0;
@@ -337,10 +355,11 @@ const getReviewSummary = async (staffIds) => {
 /**
  * Get upcoming bookings (staff-only), next 5.
  */
-const getUpcomingBookings = async (staffIds, now = new Date()) => {
+const getUpcomingBookings = async (salonId, staffIds, now = new Date()) => {
   if (staffIds.length === 0) return [];
 
   const bookings = await Booking.find({
+    salonId,
     barberId: { $in: staffIds },
     startTime: { $gte: now },
   })
@@ -403,6 +422,7 @@ const getAlerts = async (
 
   // Pending bookings for staff
   const pendingBookings = await Booking.countDocuments({
+    salonId,
     barberId: { $in: staffIds },
     ...getPendingBookingActionableFilter(now),
   });
@@ -473,10 +493,10 @@ export const getSalonDashboard = async (salonId, requestingUserId, now = new Dat
     upcomingBookings,
     alerts,
   ] = await Promise.all([
-    getBookingSummary(staffIds, now),
-    getRevenueSummary(staffIds, now),
-    getReviewSummary(staffIds),
-    getUpcomingBookings(staffIds, now),
+    getBookingSummary(salonId, staffIds, now),
+    getRevenueSummary(salonId, staffIds, now),
+    getReviewSummary(salonId, staffIds),
+    getUpcomingBookings(salonId, staffIds, now),
     getAlerts(salonId, subscriptionSummary, staffSummary, staffIds, now),
   ]);
 
