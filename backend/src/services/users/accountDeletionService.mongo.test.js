@@ -7,6 +7,7 @@ import Booking from "../../models/Booking.js";
 import PaymentEvent from "../../models/PaymentEvent.js";
 import Salon from "../../models/Salon.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import { AccountDeletionError, accountDeletionModels, deleteAccountAtomically } from "./accountDeletionService.js";
 import { extendManualSubscription } from "../subscription/subscriptionManualMutations.js";
@@ -58,6 +59,26 @@ test("real Mongo deletes a barber, scrubs history, and retry is idempotent", { s
   assert.equal((await deleteAccountAtomically({ userId: barber._id })).deleted, true);
 });
 
+test("real Mongo revokes only the deleting barber's active seat", { skip: !enabled }, async () => {
+  await connect();
+  const deletingBarber = await makeUser("barber");
+  const assignedBarber = await makeUser("barber");
+  const subscriptionId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const ownSeat = await SubscriptionSeat.create({
+    subscriptionId, salonId, barberId: deletingBarber._id, assignedBy: assignedBarber._id,
+  });
+  const assignedSeat = await SubscriptionSeat.create({
+    subscriptionId: new mongoose.Types.ObjectId(), salonId, barberId: assignedBarber._id, assignedBy: deletingBarber._id,
+  });
+
+  await deleteAccountAtomically({ userId: deletingBarber._id });
+
+  assert.equal((await SubscriptionSeat.findById(ownSeat._id)).status, "revoked");
+  assert.equal((await SubscriptionSeat.findById(assignedSeat._id)).status, "active");
+  assert.equal(await SubscriptionSeat.countDocuments({ barberId: assignedBarber._id, status: "active" }), 1);
+});
+
 test("real Mongo blocks pending and requires_action payment attempts without deleting", { skip: !enabled }, async () => {
   for (const status of ["pending", "requires_action"]) {
     await connect();
@@ -94,11 +115,18 @@ test("real Mongo injected mid-deletion failure rolls every privacy and authority
   const client = await makeUser();
   const barber = await makeUser("barber");
   const booking = await Booking.create({ barberId: barber._id, clientId: client._id, serviceId: new mongoose.Types.ObjectId(), dayKey: "2026-01-01", time: "09:00", duration: 30, price: 1, status: "completed", clientName: "Private", note: "private" });
+  const seat = await SubscriptionSeat.create({
+    subscriptionId: new mongoose.Types.ObjectId(),
+    salonId: new mongoose.Types.ObjectId(),
+    barberId: client._id,
+    assignedBy: barber._id,
+  });
   const models = { ...accountDeletionModels, Notification: { deleteMany: async () => { throw new Error("injected"); } } };
   await assert.rejects(deleteAccountAtomically({ userId: client._id, models }), /injected/);
   assert.ok(await User.exists({ _id: client._id }));
   assert.equal((await Booking.findById(booking._id)).clientName, "Private");
   assert.equal((await Booking.findById(booking._id)).note, "private");
+  assert.equal((await SubscriptionSeat.findById(seat._id)).status, "active");
   assert.equal((await AccountDeletionRecord.findOne({ userId: client._id })).state, "active");
 });
 

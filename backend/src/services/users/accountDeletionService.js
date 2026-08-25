@@ -154,7 +154,7 @@ const removePrivateState = async ({ userId, session, models }) => {
     models.PortfolioPhoto.deleteMany({ barberId: userId }, { session }),
     update(models.User, { favoriteBarbers: userId }, { $pull: { favoriteBarbers: userId } }, session),
     update(models.Salon, { admins: userId }, { $pull: { admins: userId } }, session),
-    update(models.SubscriptionSeat, { $or: [{ barberId: userId }, { assignedBy: userId }], status: "active" }, { $set: { status: "revoked", revokedAt: new Date() } }, session),
+    update(models.SubscriptionSeat, { barberId: userId, status: "active" }, { $set: { status: "revoked", revokedAt: new Date() } }, session),
     markMediaPending(models, { ownerModel: "User", ownerId: userId, mediaClass: { $in: ["profile-avatar", "profile-certification"] } }, session),
   ]);
   if (portfolios.length) {
