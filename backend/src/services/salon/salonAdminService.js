@@ -1,5 +1,6 @@
 import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
+import { canManageSalon } from "../../utils/salonPermissions.js";
 import { serializeUser } from "../../utils/salonUtils.js";
 
 const salonAdminUserFields = "name avatarUrl city";
@@ -12,11 +13,15 @@ export class SalonAdminError extends Error {
   }
 }
 
-export const getSalonAdminsForSalon = async (salonId) => {
+export const getSalonAdminsForSalon = async (salonId, requesterId) => {
   const salon = await Salon.findById(salonId);
 
   if (!salon) {
     throw new SalonAdminError(404, "Salon not found");
+  }
+
+  if (!canManageSalon(salon, requesterId)) {
+    throw new SalonAdminError(403, "You do not have permission to view salon admins");
   }
 
   const owner = await User.findById(salon.ownerId).select(salonAdminUserFields);

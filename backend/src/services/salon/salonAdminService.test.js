@@ -14,6 +14,8 @@ const originalMethods = {
 const salonId = "64b000000000000000000011";
 const ownerId = "64b000000000000000000012";
 const adminId = "64b000000000000000000013";
+const memberId = "64b000000000000000000014";
+const unrelatedId = "64b000000000000000000015";
 
 afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
@@ -64,7 +66,7 @@ test("returns serialized owner and admins", async () => {
     };
   };
 
-  const payload = await getSalonAdminsForSalon(salonId);
+  const payload = await getSalonAdminsForSalon(salonId, ownerId);
 
   assert.equal(ownerSelect, "name avatarUrl city");
   assert.equal(adminsSelect, "name avatarUrl city");
@@ -74,6 +76,23 @@ test("returns serialized owner and admins", async () => {
   assert.deepEqual(payload.admins.map((admin) => admin.id), [adminId]);
   assert.equal(payload.admins[0].password, undefined);
   assert.equal(payload.admins[0].phone, undefined);
+});
+
+test("current salon admin may receive the roster", async () => {
+  Salon.findById = async () => ({
+    _id: salonId,
+    ownerId,
+    admins: [adminId],
+  });
+  User.findById = () => ({ select: () => createUser() });
+  User.find = () => ({
+    select: () => [createUser({ _id: adminId, name: "Admin" })],
+  });
+
+  const payload = await getSalonAdminsForSalon(salonId, adminId);
+
+  assert.equal(payload.owner.id, ownerId);
+  assert.deepEqual(payload.admins.map((admin) => admin.id), [adminId]);
 });
 
 test("returns empty admins without admin lookup when salon has no admin IDs", async () => {
@@ -92,17 +111,46 @@ test("returns empty admins without admin lookup when salon has no admin IDs", as
     return [];
   };
 
-  const payload = await getSalonAdminsForSalon(salonId);
+  const payload = await getSalonAdminsForSalon(salonId, ownerId);
 
   assert.deepEqual(payload.admins, []);
   assert.equal(findCalled, false);
 });
 
+for (const [name, requesterId] of [
+  ["approved ordinary member", memberId],
+  ["unrelated barber", unrelatedId],
+  ["stale legacy-only member", memberId],
+]) {
+  test(`${name} cannot receive the roster or trigger roster user lookups`, async () => {
+    let ownerLookup = false;
+    let adminsLookup = false;
+    Salon.findById = async () => ({
+      _id: salonId,
+      ownerId,
+      admins: [adminId],
+    });
+    User.findById = () => { ownerLookup = true; };
+    User.find = () => { adminsLookup = true; };
+
+    await assert.rejects(
+      getSalonAdminsForSalon(salonId, requesterId),
+      {
+        statusCode: 403,
+        message: "You do not have permission to view salon admins",
+      }
+    );
+
+    assert.equal(ownerLookup, false);
+    assert.equal(adminsLookup, false);
+  });
+}
+
 test("missing salon returns structured 404", async () => {
   Salon.findById = async () => null;
 
   await assert.rejects(
-    getSalonAdminsForSalon(salonId),
+    getSalonAdminsForSalon(salonId, ownerId),
     {
       statusCode: 404,
       message: "Salon not found",

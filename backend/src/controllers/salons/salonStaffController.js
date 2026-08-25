@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import {
+  canManageSalon,
   canRemoveBarber,
   isSalonAdmin,
   isSalonOwner,
@@ -271,7 +272,9 @@ export const demoteAdmin = async (req, res) => {
 
 export const getSalonAdmins = async (req, res) => {
   try {
-    const payload = await getSalonAdminsForSalon(req.params.salonId);
+    if (!requireBarber(req, res)) return undefined;
+
+    const payload = await getSalonAdminsForSalon(req.params.salonId, req.user._id);
 
     return res.json(payload);
   } catch (error) {
