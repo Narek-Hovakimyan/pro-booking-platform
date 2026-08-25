@@ -4,9 +4,20 @@ import { afterEach, test } from "node:test";
 import Schedule from "../../models/Schedule.js";
 import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
 import {
+  createPersonalScheduleController,
+} from "./personalScheduleController.js";
+
+const createOnboardingController = (overrides = {}) =>
+  createPersonalScheduleController({
+    getBarberOnboardingStatus: async () => ({ needsOnboarding: true }),
+    barberHasPaidAccess: async () => false,
+    ...overrides,
+  });
+
+const {
   getPersonalScheduleByBarber,
   upsertPersonalScheduleByBarber,
-} from "./personalScheduleController.js";
+} = createOnboardingController();
 
 const barberId = "64b000000000000000000001";
 const otherBarberId = "64b000000000000000000002";
@@ -80,6 +91,115 @@ test("personal schedule endpoints require the authenticated target barber", asyn
     assert.equal(res.statusCode, 403);
     assert.equal(res.body.code, "FORBIDDEN_PERSONAL_SCHEDULE_ACCESS");
   }
+});
+
+test("personal schedule denies client and cross-user requests before access checks", async () => {
+  let onboardingChecks = 0;
+  let paidChecks = 0;
+  const { getPersonalScheduleByBarber: getSchedule } = createOnboardingController({
+    getBarberOnboardingStatus: async () => { onboardingChecks += 1; return { needsOnboarding: true }; },
+    barberHasPaidAccess: async () => { paidChecks += 1; return true; },
+  });
+
+  for (const request of [
+    barberRequest({ user: { _id: barberId, role: "client" } }),
+    barberRequest({ params: { barberId: otherBarberId } }),
+  ]) {
+    const res = createResponse();
+    await getSchedule(request, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.code, "FORBIDDEN_PERSONAL_SCHEDULE_ACCESS");
+  }
+  assert.equal(onboardingChecks, 0);
+  assert.equal(paidChecks, 0);
+});
+
+test("incomplete onboarding allows unpaid personal schedule GET and PUT", async () => {
+  let paidChecks = 0;
+  const { getPersonalScheduleByBarber: getSchedule, upsertPersonalScheduleByBarber: saveSchedule } =
+    createOnboardingController({
+      getBarberOnboardingStatus: async () => ({ needsOnboarding: true }),
+      barberHasPaidAccess: async () => { paidChecks += 1; return false; },
+    });
+  Schedule.findOne = async () => null;
+  Schedule.findOneAndUpdate = async (_filter, update) => ({
+    weeklySchedule: update.$set.weeklySchedule,
+    updatedAt: new Date(),
+  });
+
+  const getRes = createResponse();
+  await getSchedule(barberRequest(), getRes);
+  assert.equal(getRes.statusCode, 200);
+
+  const putRes = createResponse();
+  await saveSchedule(
+    barberRequest({ body: { weeklySchedule: createCanonicalPersonalSchedule().weeklySchedule } }),
+    putRes
+  );
+  assert.equal(putRes.statusCode, 200);
+  assert.equal(paidChecks, 0);
+});
+
+for (const [name, onboarding] of [
+  ["completed", { needsOnboarding: false, legacyCompatible: false }],
+  ["legacy-compatible", { needsOnboarding: false, legacyCompatible: true }],
+]) {
+  test(`${name} unpaid barber receives the subscription-required contract before personal schedule access`, async () => {
+    let scheduleRead = false;
+    const { getPersonalScheduleByBarber: getSchedule } = createOnboardingController({
+      getBarberOnboardingStatus: async () => onboarding,
+      barberHasPaidAccess: async () => false,
+    });
+    Schedule.findOne = async () => { scheduleRead = true; return null; };
+
+    const res = createResponse();
+    await getSchedule(barberRequest(), res);
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, {
+      code: "SUBSCRIPTION_REQUIRED",
+      message: "An active subscription or salon seat assignment is required to access this feature.",
+    });
+    assert.equal(scheduleRead, false);
+  });
+}
+
+test("completed barber with individual or accepted-staff seat paid access can manage personal schedules", async () => {
+  for (const source of ["individual subscription", "accepted-staff salon seat"]) {
+    const { getPersonalScheduleByBarber: getSchedule } = createOnboardingController({
+      getBarberOnboardingStatus: async () => ({ needsOnboarding: false }),
+      barberHasPaidAccess: async () => source.length > 0,
+    });
+    Schedule.findOne = async () => null;
+    const res = createResponse();
+    await getSchedule(barberRequest(), res);
+    assert.equal(res.statusCode, 200);
+  }
+});
+
+test("onboarding status failures fail closed before personal schedule reads or writes", async () => {
+  let read = false;
+  let write = false;
+  const { getPersonalScheduleByBarber: getSchedule, upsertPersonalScheduleByBarber: saveSchedule } =
+    createOnboardingController({
+      getBarberOnboardingStatus: async () => { throw new Error("status unavailable"); },
+      barberHasPaidAccess: async () => { throw new Error("must not run"); },
+    });
+  Schedule.findOne = async () => { read = true; return null; };
+  Schedule.findOneAndUpdate = async () => { write = true; };
+
+  const getRes = createResponse();
+  await getSchedule(barberRequest(), getRes);
+  assert.equal(getRes.statusCode, 500);
+  assert.equal(read, false);
+
+  const putRes = createResponse();
+  await saveSchedule(
+    barberRequest({ body: { weeklySchedule: createCanonicalPersonalSchedule().weeklySchedule } }),
+    putRes
+  );
+  assert.equal(putRes.statusCode, 500);
+  assert.equal(write, false);
 });
 
 test("personal PUT rejects mass assignment and validates before writing", async () => {

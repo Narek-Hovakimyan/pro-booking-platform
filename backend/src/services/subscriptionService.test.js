@@ -3660,6 +3660,9 @@ test("paid barber/admin routes require subscription", async () => {
   assert.match(voucherRoutes, /router\.delete\("\/:id",\s*protect,\s*deleteVoucher/);
   assert.match(revenueRoutes, /router\.get\("\/me",\s*protect,\s*requireBarberSubscription/);
   assert.match(barberRoutes, /router\.get\("\/me\/clients",\s*protect,\s*requireBarberSubscription/);
+  assert.match(barberRoutes, /router\.post\(\s*"\/certifications",\s*protect,\s*requireBarberSubscription/);
+  assert.match(barberRoutes, /router\.put\(\s*"\/certifications\/:certId",\s*protect,\s*requireBarberSubscription/);
+  assert.match(barberRoutes, /router\.delete\("\/certifications\/:certId",\s*protect,\s*requireBarberSubscription/);
   assert.match(portfolioRoutes, /router\.post\("\/",\s*protect,\s*requireBarberSubscription/);
   assert.match(portfolioRoutes, /router\.put\("\/:id",\s*protect,\s*requireBarberSubscription/);
   assert.match(portfolioRoutes, /router\.delete\("\/:id",\s*protect,\s*requireBarberSubscription/);

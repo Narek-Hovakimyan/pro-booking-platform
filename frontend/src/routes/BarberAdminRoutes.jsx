@@ -58,7 +58,7 @@ export function getBarberAdminRoutes({ renderAdminPage }) {
       />
       <Route
         path="/admin/settings/certifications"
-        element={guardBarberOnboarding(renderAdminPage("settings-certifications"))}
+        element={guardBarberOnboarding(renderAdminPage("settings-certifications", { requireSubscription: true }))}
       />
       <Route
         path="/admin/settings/deposit"

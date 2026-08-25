@@ -8,6 +8,10 @@ import {
   serializePersonalSchedule,
   validatePersonalWeeklySchedule,
 } from "../../utils/personalScheduleUtils.js";
+import { getBarberOnboardingStatus } from "../../services/onboarding/barberOnboardingStatusService.js";
+import { barberHasPaidAccess } from "../../services/subscriptionService.js";
+
+const defaultDependencies = { getBarberOnboardingStatus, barberHasPaidAccess };
 
 const forbiddenResponse = (res) =>
   res.status(403).json({
@@ -35,42 +39,81 @@ const invalidScheduleResponse = (res) =>
     message: "Invalid personal schedule",
   });
 
-export const getPersonalScheduleByBarber = async (req, res) => {
-  if (!canAccessPersonalSchedule(req, res)) return undefined;
+const subscriptionRequiredResponse = (res) =>
+  res.status(403).json({
+    code: "SUBSCRIPTION_REQUIRED",
+    message: "An active subscription or salon seat assignment is required to access this feature.",
+  });
 
-  try {
-    const schedule = await getPersonalSchedule(req.user._id);
-    return res.json(serializePersonalSchedule(schedule, Boolean(schedule)));
-  } catch {
-    return res.status(500).json({ message: "Could not fetch personal schedule" });
-  }
-};
+export const createPersonalScheduleController = (dependencies = defaultDependencies) => {
+  const canAccessWithOnboarding = async (req, res, failureMessage) => {
+    if (!canAccessPersonalSchedule(req, res)) return false;
 
-export const upsertPersonalScheduleByBarber = async (req, res) => {
-  if (!canAccessPersonalSchedule(req, res)) return undefined;
+    try {
+      const onboarding = await dependencies.getBarberOnboardingStatus(req.user._id);
+      if (onboarding?.needsOnboarding === true && onboarding?.legacyCompatible !== true) {
+        return true;
+      }
+      if (onboarding?.needsOnboarding !== false) {
+        res.status(500).json({ message: failureMessage });
+        return false;
+      }
+      if (await dependencies.barberHasPaidAccess(req.user._id)) return true;
+      subscriptionRequiredResponse(res);
+      return false;
+    } catch {
+      res.status(500).json({ message: failureMessage });
+      return false;
+    }
+  };
 
-  let weeklySchedule;
+  const getPersonalScheduleByBarber = async (req, res) => {
+    if (!await canAccessWithOnboarding(req, res, "Could not fetch personal schedule")) {
+      return undefined;
+    }
 
-  try {
-    weeklySchedule = validatePersonalWeeklySchedule(
-      getPersonalScheduleRequestWeeklySchedule(req.body)
-    );
-  } catch (error) {
-    if (error instanceof PersonalScheduleValidationError) {
+    try {
+      const schedule = await getPersonalSchedule(req.user._id);
+      return res.json(serializePersonalSchedule(schedule, Boolean(schedule)));
+    } catch {
+      return res.status(500).json({ message: "Could not fetch personal schedule" });
+    }
+  };
+
+  const upsertPersonalScheduleByBarber = async (req, res) => {
+    if (!await canAccessWithOnboarding(req, res, "Could not save personal schedule")) {
+      return undefined;
+    }
+
+    let weeklySchedule;
+
+    try {
+      weeklySchedule = validatePersonalWeeklySchedule(
+        getPersonalScheduleRequestWeeklySchedule(req.body)
+      );
+    } catch (error) {
+      if (error instanceof PersonalScheduleValidationError) {
+        return invalidScheduleResponse(res);
+      }
       return invalidScheduleResponse(res);
     }
 
-    return invalidScheduleResponse(res);
-  }
+    try {
+      const schedule = await upsertPersonalSchedule(req.user._id, weeklySchedule);
+      return res.json(serializePersonalSchedule(schedule, true));
+    } catch (error) {
+      if (error instanceof PersonalScheduleValidationError) {
+        return invalidScheduleResponse(res);
+      }
 
-  try {
-    const schedule = await upsertPersonalSchedule(req.user._id, weeklySchedule);
-    return res.json(serializePersonalSchedule(schedule, true));
-  } catch (error) {
-    if (error instanceof PersonalScheduleValidationError) {
-      return invalidScheduleResponse(res);
+      return res.status(500).json({ message: "Could not save personal schedule" });
     }
+  };
 
-    return res.status(500).json({ message: "Could not save personal schedule" });
-  }
+  return { getPersonalScheduleByBarber, upsertPersonalScheduleByBarber };
 };
+
+export const {
+  getPersonalScheduleByBarber,
+  upsertPersonalScheduleByBarber,
+} = createPersonalScheduleController();
