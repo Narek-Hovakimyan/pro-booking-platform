@@ -122,12 +122,12 @@ const normalizeStaffPayment = (staffPayment, updatedBy) => {
 };
 
 const getApprovedSalonEntry = (user, salonId) => {
-  const approvedEntry = (user?.salons || []).find(
-    (entry) => sameId(entry?.salon, salonId) && entry?.status === "approved"
+  const canonicalEntry = (user?.salons || []).find(
+    (entry) => sameId(entry?.salon, salonId)
   );
 
-  if (approvedEntry) {
-    return approvedEntry;
+  if (canonicalEntry) {
+    return canonicalEntry.status === "approved" ? canonicalEntry : null;
   }
 
   if (user?.salonStatus === "approved" && sameId(user?.salon, salonId)) {
@@ -141,6 +141,11 @@ const getApprovedSalonEntry = (user, salonId) => {
   }
 
   return null;
+};
+
+const clearRelationshipTransition = (salonEntry) => {
+  salonEntry.relationshipPreviousType = undefined;
+  salonEntry.relationshipPreviousStatus = undefined;
 };
 
 export class SalonStaffError extends Error {
@@ -205,7 +210,7 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
     const profile = profilesByBarberId.get(String(user._id));
     const approvedSalonEntry = getApprovedSalonEntry(user, salonId);
 
-    if (approvedSalonEntry?.worksAsSpecialist === false) {
+    if (!approvedSalonEntry || approvedSalonEntry.worksAsSpecialist === false) {
       return null;
     }
 
@@ -232,7 +237,10 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
       bio: profile?.bio || "",
       roleInSalon,
       ...serializeRelationshipFields(approvedSalonEntry),
-      ...(isOwner || isAdmin
+      ...((isOwner || isAdmin) &&
+      approvedSalonEntry?.status === "approved" &&
+      getRelationshipType(approvedSalonEntry) === "staff" &&
+      getRelationshipStatus(approvedSalonEntry) === "accepted"
         ? { staffPayment: serializeStaffPayment(approvedSalonEntry?.staffPayment) }
         : {}),
     };
@@ -299,6 +307,13 @@ export const updateSalonStaffPaymentSettings = async (
     throw new SalonStaffError(
       400,
       "Staff payment settings apply only to staff members"
+    );
+  }
+
+  if (getRelationshipStatus(salonEntry) !== "accepted") {
+    throw new SalonStaffError(
+      400,
+      "Staff payment settings require an accepted staff relationship"
     );
   }
 
@@ -378,12 +393,33 @@ export const updateSalonMemberRelationshipType = async (
       );
     }
 
-    barber.salons[salonEntryIndex].relationshipType = relationshipType;
-    barber.salons[salonEntryIndex].relationshipStatus = "pending";
-    barber.salons[salonEntryIndex].relationshipRequestedBy = requestingUserId;
-    barber.salons[salonEntryIndex].relationshipRequestedAt = new Date();
-    barber.salons[salonEntryIndex].relationshipRespondedAt = null;
+    const currentRelationshipStatus = getRelationshipStatus(salonEntry);
+    if (currentRelationshipStatus === "pending") {
+      throw new SalonStaffError(400, "A relationship change is already pending");
+    }
+
+    if (currentRelationshipStatus !== "accepted") {
+      throw new SalonStaffError(400, "Barber must have an accepted relationship in this salon");
+    }
+
+    const expectedRelationshipType = getRelationshipType(salonEntry);
+    const salonEntryPath = `salons.${salonEntryIndex}`;
+    barber.$where = {
+      [`${salonEntryPath}.salon`]: salon._id, [`${salonEntryPath}.status`]: "approved",
+      [`${salonEntryPath}.relationshipType`]: expectedRelationshipType === "staff" ? { $in: ["staff", null] } : expectedRelationshipType,
+      [`${salonEntryPath}.relationshipStatus`]: { $in: ["accepted", null] },
+    };
+
+    salonEntry.relationshipPreviousType = expectedRelationshipType;
+    salonEntry.relationshipPreviousStatus = currentRelationshipStatus;
+
+    salonEntry.relationshipType = relationshipType;
+    salonEntry.relationshipStatus = "pending";
+    salonEntry.relationshipRequestedBy = requestingUserId;
+    salonEntry.relationshipRequestedAt = new Date();
+    salonEntry.relationshipRespondedAt = null;
   } else if (barber.salonStatus === "approved" && sameId(barber.salon, salon._id)) {
+    barber.$where = { salon: salon._id, salonStatus: "approved", $nor: [{ salons: { $elemMatch: { salon: salon._id } } }] };
     barber.salons.push({
       salon: salon._id,
       status: "approved",
@@ -393,6 +429,8 @@ export const updateSalonMemberRelationshipType = async (
       relationshipRequestedBy: requestingUserId,
       relationshipRequestedAt: new Date(),
       relationshipRespondedAt: null,
+      relationshipPreviousType: "staff",
+      relationshipPreviousStatus: "accepted",
       defaultSchedule: {},
     });
   } else {
@@ -403,7 +441,17 @@ export const updateSalonMemberRelationshipType = async (
   }
 
   syncLegacySalonFields(barber);
-  await barber.save();
+  try {
+    await barber.save();
+  } catch (error) {
+    if (error?.name === "DocumentNotFoundError" || error?.name === "VersionError") {
+      throw new SalonStaffError(
+        409,
+        "Salon relationship changed; please refresh and try again"
+      );
+    }
+    throw error;
+  }
 
   return {
     id: barber._id,
@@ -460,8 +508,27 @@ export const respondToSalonMemberRelationshipType = async (
     throw new SalonStaffError(400, "No pending relationship request");
   }
 
-  salonEntry.relationshipStatus = response;
+  const proposedType = getRelationshipType(salonEntry);
+  const previousType = salonEntry.relationshipPreviousType;
+  let finalStatus = response;
+
+  if (response === "accepted") {
+    salonEntry.relationshipStatus = "accepted";
+    if (proposedType === "chair_renter" || previousType === "chair_renter") {
+      salonEntry.staffPayment = emptyStaffPayment();
+    }
+  } else {
+    if (salonEntry.relationshipPreviousType && salonEntry.relationshipPreviousStatus) {
+      salonEntry.relationshipType = salonEntry.relationshipPreviousType;
+      salonEntry.relationshipStatus = salonEntry.relationshipPreviousStatus;
+      finalStatus = salonEntry.relationshipStatus;
+    } else {
+      salonEntry.relationshipStatus = "rejected";
+    }
+  }
+
   salonEntry.relationshipRespondedAt = new Date();
+  clearRelationshipTransition(salonEntry);
 
   syncLegacySalonFields(barber);
   await barber.save();
@@ -470,6 +537,6 @@ export const respondToSalonMemberRelationshipType = async (
     id: barber._id,
     name: barber.name,
     relationshipType: getRelationshipType(salonEntry),
-    relationshipStatus: response,
+    relationshipStatus: finalStatus,
   };
 };

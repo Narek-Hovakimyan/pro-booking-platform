@@ -46,6 +46,16 @@ const createResponse = () => ({
   },
 });
 
+const setupRelationshipFixture = ({ salonId, ownerId, barber }) => {
+  Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+  User.findById = (id) => {
+    if (String(id) === String(ownerId)) {
+      return { select: async () => ({ _id: ownerId, role: "barber" }) };
+    }
+    return String(id) === String(barber._id) ? barber : null;
+  };
+};
+
 afterEach(() => {
   mongoose.startSession = originalStartSession;
   Notification.create = originalNotificationCreate;
@@ -430,6 +440,201 @@ test("admin request sets pending relationshipType", async () => {
   assert.equal(res.body.barber.relationshipStatus, "pending");
   assert.equal(barber.salons[0].relationshipStatus, "pending");
   assert.equal(String(barber.salons[0].relationshipRequestedBy), String(adminId));
+});
+
+for (const [fromType, toType] of [["staff", "chair_renter"], ["chair_renter", "staff"]]) {
+  test(`accepting ${fromType} to ${toType} commits the transition safely`, async () => {
+    const ownerId = new mongoose.Types.ObjectId();
+    const salonId = new mongoose.Types.ObjectId();
+    const barberId = new mongoose.Types.ObjectId();
+    const barber = {
+      _id: barberId,
+      name: "Transition Member",
+      role: "barber",
+      salons: [{
+        salon: salonId,
+        status: "approved",
+        relationshipType: fromType,
+        relationshipStatus: "accepted",
+        staffPayment: fromType === "staff" ? { type: "commission" } : undefined,
+      }],
+      async save() {
+        return this;
+      },
+    };
+    setupRelationshipFixture({ salonId, ownerId, barber });
+
+    const requestRes = createResponse();
+    await updateMemberRelationshipType(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId: String(salonId), barberId: String(barberId) },
+        body: { relationshipType: toType },
+      },
+      requestRes
+    );
+
+    assert.equal(requestRes.statusCode, 200);
+    assert.equal(barber.salons[0].relationshipType, toType);
+    assert.equal(barber.salons[0].relationshipStatus, "pending");
+    assert.equal(barber.salons[0].relationshipPreviousType, fromType);
+    assert.equal(barber.salons[0].relationshipPreviousStatus, "accepted");
+
+    const responseRes = createResponse();
+    await respondToRelationshipType(
+      {
+        user: { _id: barberId, role: "barber" },
+        params: { salonId: String(salonId) },
+        body: { response: "accepted" },
+      },
+      responseRes
+    );
+
+    assert.equal(responseRes.statusCode, 200);
+    assert.equal(responseRes.body.barber.relationshipType, toType);
+    assert.equal(responseRes.body.barber.relationshipStatus, "accepted");
+    assert.equal(barber.salons[0].relationshipStatus, "accepted");
+    assert.equal(barber.salons[0].relationshipPreviousType, undefined);
+    assert.equal(barber.salons[0].relationshipPreviousStatus, undefined);
+    if (toType === "chair_renter" || fromType === "chair_renter") {
+      assert.equal(barber.salons[0].staffPayment.type, "none");
+    }
+  });
+
+  test(`rejecting ${fromType} to ${toType} restores the prior relationship`, async () => {
+    const ownerId = new mongoose.Types.ObjectId();
+    const salonId = new mongoose.Types.ObjectId();
+    const barberId = new mongoose.Types.ObjectId();
+    const originalPayment = fromType === "staff" ? { type: "commission" } : undefined;
+    const barber = {
+      _id: barberId,
+      name: "Transition Member",
+      role: "barber",
+      salons: [{
+        salon: salonId,
+        status: "approved",
+        relationshipType: fromType,
+        relationshipStatus: "accepted",
+        staffPayment: originalPayment,
+      }],
+      async save() {
+        return this;
+      },
+    };
+    setupRelationshipFixture({ salonId, ownerId, barber });
+
+    await updateMemberRelationshipType(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId: String(salonId), barberId: String(barberId) },
+        body: { relationshipType: toType },
+      },
+      createResponse()
+    );
+
+    const responseRes = createResponse();
+    await respondToRelationshipType(
+      {
+        user: { _id: barberId, role: "barber" },
+        params: { salonId: String(salonId) },
+        body: { response: "rejected" },
+      },
+      responseRes
+    );
+
+    assert.equal(responseRes.statusCode, 200);
+    assert.equal(responseRes.body.barber.relationshipType, fromType);
+    assert.equal(responseRes.body.barber.relationshipStatus, "accepted");
+    assert.equal(barber.salons[0].relationshipType, fromType);
+    assert.equal(barber.salons[0].relationshipStatus, "accepted");
+    assert.equal(barber.salons[0].relationshipPreviousType, undefined);
+    assert.deepEqual(barber.salons[0].staffPayment, originalPayment);
+  });
+}
+
+test("second pending relationship request fails without overwriting the first", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    salons: [{
+      salon: salonId,
+      status: "approved",
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+    }],
+    async save() {
+      return this;
+    },
+  };
+  setupRelationshipFixture({ salonId, ownerId, barber });
+
+  await updateMemberRelationshipType(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { relationshipType: "chair_renter" },
+    },
+    createResponse()
+  );
+  const requestedAt = barber.salons[0].relationshipRequestedAt;
+
+  const secondResponse = createResponse();
+  await updateMemberRelationshipType(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { relationshipType: "staff" },
+    },
+    secondResponse
+  );
+
+  assert.equal(secondResponse.statusCode, 400);
+  assert.match(secondResponse.body.message, /already pending/);
+  assert.equal(barber.salons[0].relationshipType, "chair_renter");
+  assert.equal(barber.salons[0].relationshipRequestedAt, requestedAt);
+});
+
+test("legacy approved staff can start a transition and roll it back", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    salons: [],
+    salon: salonId,
+    salonStatus: "approved",
+    async save() {
+      return this;
+    },
+  };
+  setupRelationshipFixture({ salonId, ownerId, barber });
+
+  await updateMemberRelationshipType(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+      body: { relationshipType: "chair_renter" },
+    },
+    createResponse()
+  );
+
+  assert.equal(barber.salons[0].relationshipPreviousType, "staff");
+  const responseRes = createResponse();
+  await respondToRelationshipType(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { salonId: String(salonId) },
+      body: { response: "rejected" },
+    },
+    responseRes
+  );
+
+  assert.equal(responseRes.body.barber.relationshipType, "staff");
+  assert.equal(responseRes.body.barber.relationshipStatus, "accepted");
 });
 
 test("owner cannot update own relationshipType as salon staff", async () => {
@@ -920,6 +1125,53 @@ test("pending member cannot receive staff payment settings", async () => {
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /approved member/);
 });
+
+for (const relationshipStatus of ["pending", "rejected"]) {
+  test(`${relationshipStatus} staff relationship cannot receive payment settings`, async () => {
+    const ownerId = new mongoose.Types.ObjectId();
+    const salonId = new mongoose.Types.ObjectId();
+    const barberId = new mongoose.Types.ObjectId();
+    let saveCalled = false;
+    const barber = {
+      _id: barberId,
+      role: "barber",
+      salons: [{
+        salon: salonId,
+        status: "approved",
+        relationshipType: "staff",
+        relationshipStatus,
+        staffPayment: { type: "fixed", fixedAmount: 100 },
+      }],
+      async save() {
+        saveCalled = true;
+        return this;
+      },
+    };
+
+    Salon.findById = async () => ({ _id: salonId, ownerId, admins: [] });
+    User.findById = (id) => {
+      if (String(id) === String(ownerId)) {
+        return { select: async () => ({ _id: ownerId, role: "barber" }) };
+      }
+      return String(id) === String(barberId) ? barber : null;
+    };
+
+    const res = createResponse();
+    await updateStaffPaymentSettings(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId: String(salonId), barberId: String(barberId) },
+        body: { staffPayment: { type: "none" } },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.message, /accepted staff relationship/);
+    assert.equal(saveCalled, false);
+    assert.equal(barber.salons[0].staffPayment.fixedAmount, 100);
+  });
+}
 
 test("staff payment validation rejects bad commission and fixed payloads", async () => {
   const ownerId = new mongoose.Types.ObjectId();

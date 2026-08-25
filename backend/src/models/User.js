@@ -108,6 +108,16 @@ const salonEntrySchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    relationshipPreviousType: {
+      type: String,
+      enum: ["staff", "chair_renter"],
+      default: undefined,
+    },
+    relationshipPreviousStatus: {
+      type: String,
+      enum: ["pending", "accepted", "rejected"],
+      default: undefined,
+    },
     staffPayment: {
       type: staffPaymentSchema,
       default: () => ({ type: "none" }),
