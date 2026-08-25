@@ -3638,7 +3638,6 @@ test("paid barber/admin routes require subscription", async () => {
     serviceRoutes,
     scheduleRoutes,
     bookingRoutes,
-    voucherRoutes,
     revenueRoutes,
     barberRoutes,
     portfolioRoutes,
@@ -3655,9 +3654,10 @@ test("paid barber/admin routes require subscription", async () => {
   assert.match(bookingRoutes, /router\.put\("\/:id",\s*protect,\s*requireBarberSubscription/);
   assert.match(bookingRoutes, /router\.patch\("\/:id\/no-show",\s*protect,\s*requireBarberSubscription/);
   assert.match(bookingRoutes, /router\.patch\("\/:id\/late-cancel",\s*protect,\s*requireBarberSubscription/);
-  assert.match(voucherRoutes, /router\.post\("\/",\s*protect,\s*requireBarberSubscription/);
-  assert.match(voucherRoutes, /router\.put\("\/:id",\s*protect,\s*requireBarberSubscription/);
-  assert.match(voucherRoutes, /router\.delete\("\/:id",\s*protect,\s*requireBarberSubscription/);
+  assert.ok(!voucherRoutes.includes("requireBarberSubscription"));
+  assert.match(voucherRoutes, /router\.post\("\/",\s*protect,\s*createVoucher/);
+  assert.match(voucherRoutes, /router\.put\("\/:id",\s*protect,\s*updateVoucher/);
+  assert.match(voucherRoutes, /router\.delete\("\/:id",\s*protect,\s*deleteVoucher/);
   assert.match(revenueRoutes, /router\.get\("\/me",\s*protect,\s*requireBarberSubscription/);
   assert.match(barberRoutes, /router\.get\("\/me\/clients",\s*protect,\s*requireBarberSubscription/);
   assert.match(portfolioRoutes, /router\.post\("\/",\s*protect,\s*requireBarberSubscription/);

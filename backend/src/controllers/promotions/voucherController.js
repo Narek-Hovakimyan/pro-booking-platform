@@ -3,6 +3,10 @@ import Service from "../../models/Service.js";
 import Voucher from "../../models/Voucher.js";
 import { resolveVoucherForBooking } from "../../services/booking/bookingPricingService.js";
 import {
+  barberHasPaidAccess,
+  salonHasActiveSubscription,
+} from "../../services/subscriptionService.js";
+import {
   assertVoucherOwnerAccess,
   calculateVoucherDiscountPreview,
   generateVoucherCode,
@@ -20,6 +24,28 @@ const logRequestError = (req, context, message) => {
   } catch {
     // Logging must not affect response behavior.
   }
+};
+
+const assertVoucherMutationPaidAccess = async ({ user, ownerType, ownerId }) => {
+  if (ownerType === "salon") {
+    if (await salonHasActiveSubscription(ownerId)) return null;
+    return {
+      code: 403,
+      body: {
+        code: "SALON_SUBSCRIPTION_REQUIRED",
+        message: "An active salon subscription is required to manage promotions",
+      },
+    };
+  }
+
+  if (await barberHasPaidAccess(user._id)) return null;
+  return {
+    code: 403,
+    body: {
+      code: "SUBSCRIPTION_REQUIRED",
+      message: "An active subscription or salon seat assignment is required to access this feature.",
+    },
+  };
 };
 
 /* ── Handlers ─────────────────────────────────────────────── */
@@ -45,6 +71,15 @@ export const createVoucher = async (req, res) => {
     });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
+    }
+
+    const subscriptionAccess = await assertVoucherMutationPaidAccess({
+      user: req.user,
+      ownerType,
+      ownerId,
+    });
+    if (subscriptionAccess) {
+      return res.status(subscriptionAccess.code).json(subscriptionAccess.body);
     }
 
     // If type=service, verify the service belongs to this barber
@@ -220,6 +255,15 @@ export const updateVoucher = async (req, res) => {
       return res.status(access.code).json({ message: access.error });
     }
 
+    const subscriptionAccess = await assertVoucherMutationPaidAccess({
+      user: req.user,
+      ownerType: voucher.ownerType,
+      ownerId: voucher.ownerId,
+    });
+    if (subscriptionAccess) {
+      return res.status(subscriptionAccess.code).json(subscriptionAccess.body);
+    }
+
     // Protected fields — cannot change
     const protectedFields = ["ownerType", "ownerId", "code", "currentUses", "redemptionBookingIds"];
     for (const field of protectedFields) {
@@ -340,6 +384,15 @@ export const deleteVoucher = async (req, res) => {
     });
     if (access.error) {
       return res.status(access.code).json({ message: access.error });
+    }
+
+    const subscriptionAccess = await assertVoucherMutationPaidAccess({
+      user: req.user,
+      ownerType: voucher.ownerType,
+      ownerId: voucher.ownerId,
+    });
+    if (subscriptionAccess) {
+      return res.status(subscriptionAccess.code).json(subscriptionAccess.body);
     }
 
     await Voucher.findByIdAndUpdate(id, { $set: { active: false } });

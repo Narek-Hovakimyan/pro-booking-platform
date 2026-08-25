@@ -1,6 +1,5 @@
 import express from "express";
 import { protect } from "../../middleware/authMiddleware.js";
-import { requireBarberSubscription } from "../../middleware/subscriptionMiddleware.js";
 import {
   createVoucher,
   deleteVoucher,
@@ -20,10 +19,10 @@ router.post("/validate", protect, promoValidationLimiter, validateVoucherCode);
 // GET /api/vouchers/public/:ownerType/:ownerId — must be before /:id
 router.get("/public/:ownerType/:ownerId", getPublicVouchers);
 
-router.post("/", protect, requireBarberSubscription, createVoucher);
+router.post("/", protect, createVoucher);
 router.get("/owner/:ownerType/:ownerId", protect, getOwnerVouchers);
 router.get("/:id", protect, getVoucherById);
-router.put("/:id", protect, requireBarberSubscription, updateVoucher);
-router.delete("/:id", protect, requireBarberSubscription, deleteVoucher);
+router.put("/:id", protect, updateVoucher);
+router.delete("/:id", protect, deleteVoucher);
 
 export default router;

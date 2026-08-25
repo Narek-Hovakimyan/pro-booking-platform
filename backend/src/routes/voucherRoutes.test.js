@@ -23,7 +23,7 @@ test("voucher routes expose CRUD and validate endpoints in safe order", () => {
   assert.deepEqual(routes.find((route) => route.path === "/"), {
     path: "/",
     methods: ["post"],
-    handlers: ["protect", "requireBarberSubscription", "createVoucher"],
+    handlers: ["protect", "createVoucher"],
   });
   assert.deepEqual(routes.find((route) => route.path === "/owner/:ownerType/:ownerId"), {
     path: "/owner/:ownerType/:ownerId",
@@ -38,11 +38,11 @@ test("voucher routes expose CRUD and validate endpoints in safe order", () => {
   assert.deepEqual(routes.find((route) => route.path === "/:id" && route.methods.includes("put")), {
     path: "/:id",
     methods: ["put"],
-    handlers: ["protect", "requireBarberSubscription", "updateVoucher"],
+    handlers: ["protect", "updateVoucher"],
   });
   assert.deepEqual(routes.find((route) => route.path === "/:id" && route.methods.includes("delete")), {
     path: "/:id",
     methods: ["delete"],
-    handlers: ["protect", "requireBarberSubscription", "deleteVoucher"],
+    handlers: ["protect", "deleteVoucher"],
   });
 });

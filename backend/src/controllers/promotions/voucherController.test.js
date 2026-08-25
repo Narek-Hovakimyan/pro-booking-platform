@@ -7,6 +7,8 @@ import Salon from "../../models/Salon.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Schedule from "../../models/Schedule.js";
 import Service from "../../models/Service.js";
+import Subscription from "../../models/Subscription.js";
+import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
 import { createCanonicalPersonalSchedule } from "../../utils/personalScheduleUtils.js";
@@ -37,6 +39,8 @@ const originalBarberProfileFindOne = BarberProfile.findOne;
 const originalScheduleFindOne = Schedule.findOne;
 const originalServiceFindOne = Service.findOne;
 const originalServiceFindById = Service.findById;
+const originalSubscriptionFindOne = Subscription.findOne;
+const originalSubscriptionSeatFindOne = SubscriptionSeat.findOne;
 const originalUserFindById = User.findById;
 
 const barberA = { _id: new mongoose.Types.ObjectId(), role: "barber" };
@@ -74,11 +78,18 @@ afterEach(() => {
   Schedule.findOne = originalScheduleFindOne;
   Service.findOne = originalServiceFindOne;
   Service.findById = originalServiceFindById;
+  Subscription.findOne = originalSubscriptionFindOne;
+  SubscriptionSeat.findOne = originalSubscriptionSeatFindOne;
   User.findById = originalUserFindById;
 });
 
 beforeEach(() => {
   Service.findOne = () => chainableSelect(serviceDoc);
+  Subscription.findOne = () => chainableSelect({
+    status: "active",
+    currentPeriodEnd: new Date(Date.now() + 60_000),
+  });
+  SubscriptionSeat.findOne = () => chainableSelect(null);
   User.findById = () => chainableSelect({ _id: barberA._id, role: "barber", salons: [] });
   BarberProfile.findOne = () => chainableSelect({ barberId: barberA._id, address: "1 Main St" });
   Schedule.findOne = () => chainableSelect(createCanonicalPersonalSchedule());
@@ -136,6 +147,7 @@ const chainableSelect = (result) => {
   const leanFn = async () => result;
   return {
     select: () => ({ lean: leanFn }),
+    populate() { return this; },
     lean: leanFn,
     then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
   };
@@ -211,6 +223,23 @@ test("barber can create barber-scoped voucher", async () => {
   assert.ok(res.body.code);
   assert.equal(res.body.code.length, 8);
   assert.match(res.body.code, /^[A-Z0-9]+$/);
+});
+
+test("unpaid barber cannot create a barber-scoped voucher", async () => {
+  Subscription.findOne = () => chainableSelect(null);
+  SubscriptionSeat.findOne = () => chainableSelect(null);
+  Voucher.create = async () => {
+    throw new Error("must not create");
+  };
+
+  const res = createResponse();
+  await createVoucher({
+    user: barberA,
+    body: { ownerType: "barber", ownerId: barberA._id, title: "Test", type: "amount", amount: 100 },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, "SUBSCRIPTION_REQUIRED");
 });
 
 test("client cannot create voucher", async () => {
@@ -311,6 +340,73 @@ test("salon-scoped voucher works for salon admin", async () => {
   await createVoucher(req, res);
 
   assert.equal(res.statusCode, 201);
+});
+
+test("active salon permits an unpaid authorized manager to create a voucher", async () => {
+  Salon.findById = () => chainableSelect(salonDoc);
+  Subscription.findOne = (filter) => chainableSelect(
+    filter.ownerType === "salon" && String(filter.ownerId) === String(salonId)
+      ? { status: "active", currentPeriodEnd: new Date(Date.now() + 60_000) }
+      : null
+  );
+  SubscriptionSeat.findOne = () => {
+    throw new Error("salon voucher access must not require a manager seat");
+  };
+  Voucher.findOne = () => chainableSelect(null);
+  Voucher.create = async (payload) => payload;
+
+  const res = createResponse();
+  await createVoucher({
+    user: salonOwner,
+    body: { ownerType: "salon", ownerId: salonId, title: "Salon", type: "amount", amount: 100 },
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+});
+
+for (const [name, seat] of [
+  ["individual subscription", null],
+  ["unrelated salon seat", {
+    status: "active",
+    subscriptionId: { status: "active", ownerType: "salon", ownerId: new mongoose.Types.ObjectId() },
+  }],
+]) {
+  test(`inactive target salon cannot be bypassed by manager ${name}`, async () => {
+    Salon.findById = () => chainableSelect(salonDoc);
+    Subscription.findOne = (filter) => chainableSelect(
+      filter.ownerType === "barber"
+        ? { status: "active", currentPeriodEnd: new Date(Date.now() + 60_000) }
+        : null
+    );
+    SubscriptionSeat.findOne = () => chainableSelect(seat);
+    Voucher.create = async () => {
+      throw new Error("must not create");
+    };
+
+    const res = createResponse();
+    await createVoucher({
+      user: salonAdmin,
+      body: { ownerType: "salon", ownerId: salonId, title: "Salon", type: "amount", amount: 100 },
+    }, res);
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.code, "SALON_SUBSCRIPTION_REQUIRED");
+  });
+}
+
+test("unauthorized salon barber is denied before subscription access", async () => {
+  Salon.findById = () => chainableSelect(salonDoc);
+  Subscription.findOne = () => {
+    throw new Error("must not check subscription");
+  };
+
+  const res = createResponse();
+  await createVoucher({
+    user: barberB,
+    body: { ownerType: "salon", ownerId: salonId, title: "Salon", type: "amount", amount: 100 },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
 });
 
 test("duplicate manual code returns clean 400", async () => {
@@ -715,6 +811,44 @@ test("deleteVoucher sets active=false", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.ok(updated);
+});
+
+test("inactive salon blocks generic voucher update and delete before mutation", async () => {
+  const voucherDoc = makeVoucherDoc({ ownerType: "salon", ownerId: salonId });
+  let saved = false;
+  let deleted = false;
+  voucherDoc.save = async () => {
+    saved = true;
+    return voucherDoc;
+  };
+  Salon.findById = () => chainableSelect(salonDoc);
+  Subscription.findOne = () => chainableSelect(null);
+
+  Voucher.findById = async () => voucherDoc;
+  const updateRes = createResponse();
+  await updateVoucher({
+    user: salonOwner,
+    params: { id: voucherDoc._id },
+    body: { title: "Changed" },
+  }, updateRes);
+
+  assert.equal(updateRes.statusCode, 403);
+  assert.equal(updateRes.body.code, "SALON_SUBSCRIPTION_REQUIRED");
+  assert.equal(saved, false);
+
+  Voucher.findById = () => chainableFindById(voucherDoc);
+  Voucher.findByIdAndUpdate = async () => {
+    deleted = true;
+  };
+  const deleteRes = createResponse();
+  await deleteVoucher({
+    user: salonOwner,
+    params: { id: voucherDoc._id },
+  }, deleteRes);
+
+  assert.equal(deleteRes.statusCode, 403);
+  assert.equal(deleteRes.body.code, "SALON_SUBSCRIPTION_REQUIRED");
+  assert.equal(deleted, false);
 });
 
 test("deleteVoucher failure logs structured voucher id", async () => {
