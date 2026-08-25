@@ -12,6 +12,11 @@ import {
   loginUser,
   registerUser,
 } from "./authController.js";
+import {
+  __resetAuthSessionControllerDependencies,
+  __setAuthSessionControllerDependencies,
+  refreshAuthSession,
+} from "./authSessionController.js";
 
 const originalFindOne = User.findOne;
 const originalCreate = User.create;
@@ -73,6 +78,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetAuthControllerDependencies();
+  __resetAuthSessionControllerDependencies();
   User.findOne = originalFindOne;
   User.create = originalCreate;
   resetLogger();
@@ -130,6 +136,14 @@ test("loginUser returns a 15-minute JWT and public user contract for valid passw
     role: "barber",
   });
   assert.deepEqual(res.body.user.salons, user.salons);
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    version: 0,
+    status: "legacy",
+    currentStep: null,
+    workplace: null,
+    completedAt: null,
+    needsOnboarding: false,
+  });
   assert.equal("token" in res.body.user, false);
 });
 
@@ -206,6 +220,7 @@ test("registerUser creates a client with normalized auth fields and returns a 15
     email: "client@example.com",
     role: "client",
   });
+  assert.equal("specialistOnboarding" in res.body.user, false);
   assert.equal(JSON.stringify(res.body).includes(password), false);
 });
 
@@ -236,4 +251,83 @@ test("loginUser returns a generic server error when JWT_SECRET is missing", asyn
   assert.equal("token" in res.body, false);
   assert.equal(JSON.stringify(res.body).includes("JWT_SECRET"), false);
   assert.equal(JSON.stringify(res.body).includes(password), false);
+});
+
+test("loginUser gives a legacy-only approved salon the canonical raw membership fallback", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const password = "Password123!";
+  const user = {
+    _id: userId,
+    name: "Legacy Barber",
+    phone: "+37400111222",
+    email: "legacy@example.com",
+    role: "barber",
+    salon: "64d000000000000000000010",
+    salonStatus: "approved",
+    salons: [],
+    password: await bcrypt.hash(password, 10),
+  };
+  User.findOne = async () => user;
+
+  const res = createResponse();
+  await loginUser({ body: { phone: user.phone, password } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.user.salons, [{
+    salon: user.salon,
+    status: "approved",
+    isPrimary: true,
+  }]);
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    version: 0,
+    status: "legacy",
+    currentStep: null,
+    workplace: null,
+    completedAt: null,
+    needsOnboarding: false,
+  });
+});
+
+test("refreshAuthSession preserves normalized legacy onboarding and salon fallback", async () => {
+  process.env.JWT_SECRET = jwtSecret;
+  const user = {
+    _id: userId,
+    name: "Legacy Barber",
+    phone: "+37400111222",
+    email: "legacy@example.com",
+    role: "barber",
+    salon: "64d000000000000000000010",
+    salonStatus: "approved",
+    salons: [],
+    authVersion: 0,
+  };
+  __setAuthSessionControllerDependencies({
+    readRuntimeRefreshToken: () => "refresh-token",
+    rotateRefreshSession: async () => ({
+      refreshToken: "replacement-token",
+      session: { userId, familyId: "family", authVersion: 0 },
+    }),
+    User: {
+      findById: () => ({ select: () => user }),
+    },
+    setRuntimeRefreshCookie: () => {},
+  });
+
+  const res = createResponse();
+  await refreshAuthSession({ headers: {} }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.user.salons, [{
+    salon: user.salon,
+    status: "approved",
+    isPrimary: true,
+  }]);
+  assert.deepEqual(res.body.user.specialistOnboarding, {
+    version: 0,
+    status: "legacy",
+    currentStep: null,
+    workplace: null,
+    completedAt: null,
+    needsOnboarding: false,
+  });
 });

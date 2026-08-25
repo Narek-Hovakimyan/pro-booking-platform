@@ -10,6 +10,22 @@ export function signAccessToken(user) {
   return signAccessTokenForUser({ _id: user, authVersion: 0 });
 }
 
+const getRawSalonMemberships = (user) => {
+  if (Array.isArray(user.salons) && user.salons.length > 0) {
+    return user.salons;
+  }
+
+  if (user.role === "barber" && user.salonStatus === "approved" && user.salon) {
+    return [{
+      salon: user.salon,
+      status: "approved",
+      isPrimary: true,
+    }];
+  }
+
+  return [];
+};
+
 export function serializeAuthUser(user) {
   const specialistOnboarding = serializeSpecialistOnboardingState(user);
 
@@ -25,7 +41,7 @@ export function serializeAuthUser(user) {
     role: user.role,
     salon: user.salon || null,
     salonStatus: user.salonStatus || "none",
-    salons: user.salons || [],
+    salons: getRawSalonMemberships(user),
     profession: user.profession || "barber",
     barberType: user.barberType || "",
     specialty: user.specialty || "unisex",
