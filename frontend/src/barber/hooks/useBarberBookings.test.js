@@ -11,9 +11,9 @@ vi.mock("@/shared/api/axios", () => ({ default: { get: mocks.get, post: mocks.po
 vi.mock("@/shared/lib/socket", () => ({ getSocket: () => mocks.socket }));
 vi.mock("@/store/slices/bookingsSlice", () => ({ addBooking: vi.fn((data) => data), fetchBarberBookings: vi.fn(() => ({ type: "fetch" })), updateBooking: vi.fn((data) => data) }));
 
-const Harness = forwardRef(({ selectedDate = "2026-08-26", services = [] }, ref) => {
+const Harness = forwardRef(({ selectedDate = "2026-08-26", services = [], manageLifecycle = true }, ref) => {
   const [date, setDate] = useState(selectedDate);
-  const value = useBarberBookings({ services, selectedDate: date, setSelectedDate: setDate });
+  const value = useBarberBookings({ services, selectedDate: date, setSelectedDate: setDate, manageLifecycle });
   useImperativeHandle(ref, () => value, [value]);
   return null;
 });
@@ -50,5 +50,14 @@ describe("useBarberBookings", () => {
     act(() => { ref.current.updateManualBooking("clientName", "Alex"); ref.current.updateManualBooking("clientPhone", "123"); ref.current.updateManualBooking("serviceId", "service-1"); ref.current.updateManualBooking("time", "10:00"); });
     await act(async () => ref.current.createManualBooking({ preventDefault: vi.fn() }));
     expect(mocks.post).toHaveBeenCalledWith("/bookings", expect.objectContaining({ salonId: "salon-1", createdBy: "barber" }));
+  });
+
+  it("opens one prefilled manual booking without a second calendar lifecycle", async () => {
+    const ref = { current: null };
+    render(createElement(Harness, { ref, manageLifecycle: false }));
+    await waitFor(() => expect(ref.current).toBeTruthy());
+    act(() => ref.current.openAddBookingModal({ bookingDate: "2026-08-30", time: "10:10" }));
+    expect(ref.current.manualBooking).toMatchObject({ bookingDate: "2026-08-30", time: "10:10" });
+    expect(mocks.socket.on).not.toHaveBeenCalled();
   });
 });

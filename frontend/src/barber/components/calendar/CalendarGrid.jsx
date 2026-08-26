@@ -67,11 +67,16 @@ export default function CalendarGrid({
             );
             const visibleLabels = sortedBookings.slice(0, 2);
             const extraCount = dayBookings.length - 2;
+            const bookingLabel = dayBookings.length === 0
+              ? "No bookings"
+              : `${dayBookings.length} booking${dayBookings.length === 1 ? "" : "s"}`;
 
             return (
               <button
+                type="button"
                 key={dateStr}
                 onClick={() => handleDayClick(day)}
+                aria-label={`${dateStr}: ${bookingLabel}${isNonWorking ? ", non-working day" : ""}`}
                 className={`relative flex min-h-[70px] flex-col items-center justify-start gap-0.5 border border-neutral-100 p-1 text-sm transition-colors hover:bg-neutral-50 sm:min-h-[90px] ${
                   isDaySelected(day, viewYear, viewMonth, selectedDateKey)
                     ? "bg-neutral-50 ring-2 ring-inset ring-neutral-900"
@@ -89,6 +94,13 @@ export default function CalendarGrid({
                 >
                   {day}
                 </span>
+
+                {dayBookings.length > 0 && (
+                  <span className="flex items-center gap-1 text-[10px] font-semibold text-neutral-600 sm:hidden" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 rounded-full bg-neutral-700" />
+                    {dayBookings.length}
+                  </span>
+                )}
 
                 {visibleLabels.length > 0 && (
                   <div className="hidden w-full space-y-0.5 sm:block">

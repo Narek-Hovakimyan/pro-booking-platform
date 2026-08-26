@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -6,26 +6,21 @@ import api from "@/shared/api/axios";
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
+import ManualBookingModal from "@/barber/components/bookings/ManualBookingModal";
 import DayTimelineView from "@/barber/components/calendar/DayTimelineView";
+import useBarberBookings from "@/barber/hooks/useBarberBookings";
 import { getSocket } from "@/shared/lib/socket";
 import {
   fetchBarberBookings,
   updateBooking,
 } from "@/store/slices/bookingsSlice";
-import { formatDateKey, isDateKey, parseDateKey } from "@/shared/utils/dates";
+import { getArmeniaDateKey, isArmeniaDateKey, addArmeniaDays, formatArmeniaCalendarDate } from "@/shared/utils/armeniaDateTime";
 import {
   FALLBACK_DEFAULT_SCHEDULE,
   getBookingId,
   getBookingTime,
   getEffectiveDaySchedule,
 } from "@/barber/utils/calendarHelpers";
-
-function addDays(dateKey, offset) {
-  const date = parseDateKey(dateKey);
-  if (!date) return dateKey;
-  date.setDate(date.getDate() + offset);
-  return formatDateKey(date);
-}
 
 export default function BarberCalendarDayPage() {
   const dispatch = useDispatch();
@@ -36,20 +31,24 @@ export default function BarberCalendarDayPage() {
   const [rejectingBooking, setRejectingBooking] = useState(null);
   const [isRejectingBooking, setIsRejectingBooking] = useState(false);
   const [rejectionError, setRejectionError] = useState("");
+  const [pendingBookingIds, setPendingBookingIds] = useState(() => new Set());
+  const pendingBookingIdsRef = useRef(new Set());
   const { currentUser } = useSelector((state) => state.auth);
   const currentUserId = currentUser?.id || currentUser?._id;
   const bookings = useSelector((state) => state.bookings);
   const schedule = useSelector((state) => state.schedule);
+  const services = useSelector((state) => state.services);
   const scheduleEntry = schedule[currentUserId];
 
   // Validate the date parameter
-  const isValidDate = isDateKey(routeDate);
-  const dateObject = useMemo(
-    () => (isValidDate ? parseDateKey(routeDate) : null),
-    [isValidDate, routeDate]
-  );
-
-  const todayKey = useMemo(() => formatDateKey(new Date()), []);
+  const isValidDate = isArmeniaDateKey(routeDate);
+  const todayKey = getArmeniaDateKey();
+  const manualBooking = useBarberBookings({
+    services: Array.isArray(services) ? services : [],
+    selectedDate: routeDate || todayKey,
+    setSelectedDate: (dateKey) => navigate(`/admin/calendar/day/${dateKey}`),
+    manageLifecycle: false,
+  });
 
   const barberBookings = useMemo(
     () =>
@@ -148,51 +147,60 @@ export default function BarberCalendarDayPage() {
 
   const updateBookingNoShow = async (booking) => {
     if (!window.confirm("Mark this booking as no-show? This cannot be undone.")) return;
-    setError("");
-
-    try {
+    await runBookingMutation(booking, async () => {
+      setError("");
       const bookingId = getBookingId(booking);
       const { data } = await api.patch(`/bookings/${bookingId}/no-show`);
       dispatch(updateBooking(data));
       await fetchBookings({ silent: true });
-    } catch (requestError) {
+    }, (requestError) => {
       setError(
         requestError.response?.data?.message ||
           "Could not mark no-show. Please try again."
       );
-    }
+    });
   };
 
   const updateBookingLateCancel = async (booking) => {
     if (!window.confirm("Mark this booking as late cancellation? This cannot be undone.")) return;
-    setError("");
-
-    try {
+    await runBookingMutation(booking, async () => {
+      setError("");
       const bookingId = getBookingId(booking);
       const { data } = await api.patch(`/bookings/${bookingId}/late-cancel`);
       dispatch(updateBooking(data));
       await fetchBookings({ silent: true });
-    } catch (requestError) {
+    }, (requestError) => {
       setError(
         requestError.response?.data?.message ||
           "Could not mark late cancellation. Please try again."
       );
-    }
+    });
   };
 
   const updateBookingStatus = async (booking, status) => {
-    setError("");
-
-    try {
+    await runBookingMutation(booking, async () => {
+      setError("");
       const bookingId = getBookingId(booking);
       const { data } = await api.put(`/bookings/${bookingId}`, { status });
       dispatch(updateBooking(data));
       await fetchBookings({ silent: true });
-    } catch (requestError) {
+    }, (requestError) => {
       setError(
         requestError.response?.data?.message ||
           "Could not update booking. Please try again."
       );
+    });
+  };
+
+  const runBookingMutation = async (booking, request, onError) => {
+    const bookingId = String(getBookingId(booking));
+    if (!bookingId || pendingBookingIdsRef.current.has(bookingId)) return;
+    pendingBookingIdsRef.current.add(bookingId);
+    setPendingBookingIds(new Set(pendingBookingIdsRef.current));
+    try { await request(); } catch (requestError) { onError(requestError); }
+    finally {
+      pendingBookingIdsRef.current.delete(bookingId);
+      setPendingBookingIds(new Set(pendingBookingIdsRef.current));
     }
   };
 
@@ -207,8 +215,7 @@ export default function BarberCalendarDayPage() {
 
     setRejectionError("");
     setIsRejectingBooking(true);
-
-    try {
+    await runBookingMutation(rejectingBooking, async () => {
       const { data } = await api.put(`/bookings/${getBookingId(rejectingBooking)}`, {
         status: "rejected",
         rejectionReason,
@@ -216,14 +223,13 @@ export default function BarberCalendarDayPage() {
       dispatch(updateBooking(data));
       await fetchBookings({ silent: true });
       setRejectingBooking(null);
-    } catch (requestError) {
+    }, (requestError) => {
       setRejectionError(
         requestError.response?.data?.message ||
           "Could not reject booking. Please try again."
       );
-    } finally {
-      setIsRejectingBooking(false);
-    }
+    });
+    setIsRejectingBooking(false);
   };
 
   // --- Invalid date state ---
@@ -250,10 +256,10 @@ export default function BarberCalendarDayPage() {
   }
 
   // --- Valid date state ---
-  const prevDate = addDays(routeDate, -1);
-  const nextDate = addDays(routeDate, 1);
+  const prevDate = addArmeniaDays(routeDate, -1);
+  const nextDate = addArmeniaDays(routeDate, 1);
 
-  const dateLabel = dateObject.toLocaleDateString("en-US", {
+  const dateLabel = formatArmeniaCalendarDate(routeDate, {
     weekday: "long",
     month: "long",
     day: "numeric",
@@ -271,7 +277,7 @@ export default function BarberCalendarDayPage() {
 
   const handleDateInputChange = (event) => {
     const val = event.target.value;
-    if (isDateKey(val)) {
+    if (isArmeniaDateKey(val)) {
       navigate(`/admin/calendar/day/${val}`);
     }
   };
@@ -373,6 +379,8 @@ export default function BarberCalendarDayPage() {
         onComplete={handleComplete}
         onNoShow={updateBookingNoShow}
         onLateCancel={updateBookingLateCancel}
+        onCreateSlot={(time) => manualBooking.openAddBookingModal({ bookingDate: routeDate, time })}
+        pendingBookingIds={pendingBookingIds}
       />
 
       {rejectingBooking && (
@@ -382,6 +390,18 @@ export default function BarberCalendarDayPage() {
           isSubmitting={isRejectingBooking}
           onClose={() => setRejectingBooking(null)}
           onSubmit={rejectBooking}
+        />
+      )}
+
+      {manualBooking.isAddModalOpen && (
+        <ManualBookingModal
+          activeServices={manualBooking.activeServices}
+          error={manualBooking.actionError}
+          isAddingBooking={manualBooking.isAddingBooking}
+          manualBooking={manualBooking.manualBooking}
+          onClose={() => manualBooking.setIsAddModalOpen(false)}
+          onSubmit={manualBooking.createManualBooking}
+          onUpdateManualBooking={manualBooking.updateManualBooking}
         />
       )}
     </div>

@@ -7,19 +7,11 @@ import CalendarGrid from "@/barber/components/calendar/CalendarGrid";
 import WeeklyCalendarView from "@/barber/components/calendar/WeeklyCalendarView";
 import { getSocket } from "@/shared/lib/socket";
 import { fetchBarberBookings } from "@/store/slices/bookingsSlice";
-import { formatDateKey } from "@/shared/utils/dates";
+import { getArmeniaDateKey, getArmeniaWeekStartKey } from "@/shared/utils/armeniaDateTime";
 import {
   FALLBACK_DEFAULT_SCHEDULE,
   getMonthDays,
 } from "@/barber/utils/calendarHelpers";
-
-function getSundayOfWeek(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  d.setDate(d.getDate() - day);
-  return d;
-}
 
 export default function BarberCalendarPage() {
   const dispatch = useDispatch();
@@ -33,11 +25,12 @@ export default function BarberCalendarPage() {
   const scheduleEntry = schedule[currentUserId];
 
   // Calendar navigation state
-  const today = useMemo(() => new Date(), []);
+  const todayKey = getArmeniaDateKey();
+  const [todayYear, todayMonth] = todayKey.split("-").map(Number);
   const [viewMode, setViewMode] = useState("month"); // "month" | "week"
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [weekStart, setWeekStart] = useState(() => getSundayOfWeek(new Date()));
+  const [viewYear, setViewYear] = useState(todayYear);
+  const [viewMonth, setViewMonth] = useState(todayMonth - 1);
+  const [weekStart, setWeekStart] = useState(() => getArmeniaWeekStartKey());
 
   const barberBookings = useMemo(
     () =>
@@ -149,9 +142,9 @@ export default function BarberCalendarPage() {
   };
 
   const goToTodayMonth = () => {
-    const now = new Date();
-    setViewYear(now.getFullYear());
-    setViewMonth(now.getMonth());
+    const [year, month] = getArmeniaDateKey().split("-").map(Number);
+    setViewYear(year);
+    setViewMonth(month - 1);
   };
 
   const monthDays = useMemo(
@@ -163,8 +156,6 @@ export default function BarberCalendarPage() {
     month: "long",
     year: "numeric",
   });
-
-  const todayKey = formatDateKey(today);
 
   const handleDayClick = (dateStr) => {
     navigate(`/admin/calendar/day/${dateStr}`);

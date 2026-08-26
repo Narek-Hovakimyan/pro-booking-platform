@@ -74,6 +74,7 @@ export default function CalendarBookingCard({
   onComplete,
   onNoShow,
   onLateCancel,
+  isActionPending = false,
 }) {
   const showNoShowLateCancel = isEligibleForNoShowLateCancel(booking);
 
@@ -156,29 +157,29 @@ export default function CalendarBookingCard({
 
       <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
         {status === "pending" && (
-          <Button className="w-full sm:w-auto" onClick={onAccept}>
+          <Button className="w-full sm:w-auto" onClick={onAccept} disabled={isActionPending}>
             Accept
           </Button>
         )}
 
         {status === "pending" && (
-          <Button className="w-full sm:w-auto" onClick={onReject} variant="outline">
+          <Button className="w-full sm:w-auto" onClick={onReject} variant="outline" disabled={isActionPending}>
             Reject
           </Button>
         )}
 
         {status === "accepted" && (
-          <Button className="w-full sm:w-auto" onClick={onComplete}>
+          <Button className="w-full sm:w-auto" onClick={onComplete} disabled={isActionPending}>
             Mark completed
           </Button>
         )}
 
         {showNoShowLateCancel && (
           <>
-            <Button className="w-full sm:w-auto" onClick={onNoShow} variant="outline">
+            <Button className="w-full sm:w-auto" onClick={onNoShow} variant="outline" disabled={isActionPending}>
               Mark no-show
             </Button>
-            <Button className="w-full sm:w-auto" onClick={onLateCancel} variant="outline">
+            <Button className="w-full sm:w-auto" onClick={onLateCancel} variant="outline" disabled={isActionPending}>
               Late cancellation
             </Button>
           </>

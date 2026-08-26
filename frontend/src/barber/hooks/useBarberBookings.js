@@ -20,7 +20,7 @@ const getPrimarySalonId = (entry) => {
   return entry.id || entry._id || "";
 };
 
-export default function useBarberBookings({ services, selectedDate, setSelectedDate }) {
+export default function useBarberBookings({ services = [], selectedDate, setSelectedDate, manageLifecycle = true }) {
   const dispatch = useDispatch();
   const { currentUser } = useSelector((state) => state.auth);
   const notifications = useSelector((state) => state.notifications);
@@ -75,13 +75,13 @@ export default function useBarberBookings({ services, selectedDate, setSelectedD
     } finally { if (shouldUpdate()) setIsInitialLoading(false); }
   }, [currentUserId, dispatch, highlightNewBookings]);
   useEffect(() => {
-    if (!currentUserId || !selectedDate) return undefined;
+    if (!manageLifecycle || !currentUserId || !selectedDate) return undefined;
     let mounted = true;
     const immediateFetchId = setTimeout(() => fetchBookings({ clearError: false, shouldUpdate: () => mounted }), 0);
     return () => { mounted = false; clearTimeout(immediateFetchId); };
-  }, [currentUserId, fetchBookings, notifications.length, selectedDate]);
+  }, [currentUserId, fetchBookings, manageLifecycle, notifications.length, selectedDate]);
   useEffect(() => {
-    if (!currentUserId) return undefined;
+    if (!manageLifecycle || !currentUserId) return undefined;
     const socket = getSocket();
     if (!socket) return undefined;
     const handleBookingUpdated = (data) => {
@@ -90,7 +90,7 @@ export default function useBarberBookings({ services, selectedDate, setSelectedD
     };
     socket.on("bookingUpdated", handleBookingUpdated);
     return () => socket.off("bookingUpdated", handleBookingUpdated);
-  }, [currentUserId, fetchBookings]);
+  }, [currentUserId, fetchBookings, manageLifecycle]);
   useEffect(() => () => {
     highlightTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     highlightTimeoutsRef.current.clear();
@@ -136,7 +136,7 @@ export default function useBarberBookings({ services, selectedDate, setSelectedD
     catch (error) { setActionError(error?.response?.data?.message || error?.message || `Could not ${action} reschedule request. Please try again.`); }
     finally { setRescheduleAction(null); }
   };
-  const openAddBookingModal = () => { setManualBooking(getInitialManualBooking(selectedDate)); setActionError(""); setSuccessMessage(""); setIsAddModalOpen(true); };
+  const openAddBookingModal = (prefill = {}) => { setManualBooking({ ...getInitialManualBooking(selectedDate), ...prefill }); setActionError(""); setSuccessMessage(""); setIsAddModalOpen(true); };
   const updateManualBooking = (field, value) => setManualBooking((current) => ({ ...current, [field]: value }));
   const createManualBooking = async (event) => {
     event.preventDefault();

@@ -5,6 +5,8 @@ import {
   getArmeniaMonthKey,
   getArmeniaTimeKey,
   getArmeniaWeekBounds,
+  addArmeniaDays,
+  getArmeniaWeekStartKey,
   parseArmeniaDateTime,
 } from "./armeniaDateTime";
 
@@ -27,5 +29,11 @@ describe("armeniaDateTime", () => {
     expect(parseArmeniaDateTime("2026-02-01", "00:30")).toEqual(
       new Date("2026-01-31T20:30:00.000Z")
     );
+  });
+
+  it("keeps Today navigation and week boundaries in Armenia calendar keys", () => {
+    expect(addArmeniaDays("2026-02-01", -1)).toBe("2026-01-31");
+    expect(addArmeniaDays("2026-01-31", 1)).toBe("2026-02-01");
+    expect(getArmeniaWeekStartKey(new Date("2026-01-31T20:30:00.000Z"))).toBe("2026-01-26");
   });
 });

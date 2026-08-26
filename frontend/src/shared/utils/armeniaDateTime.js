@@ -78,6 +78,18 @@ export const getArmeniaWeekBounds = (date = new Date()) => {
   };
 };
 
+export const addArmeniaDays = (dateKey, offset) => {
+  if (!isArmeniaDateKey(dateKey) || !Number.isInteger(offset)) return dateKey;
+
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + offset);
+  return formatUtcDateKey(date);
+};
+
+export const getArmeniaWeekStartKey = (date = new Date()) =>
+  getArmeniaWeekBounds(date)?.startKey || "";
+
 export const parseArmeniaDateTime = (dateKey, time) => {
   if (!isArmeniaDateKey(dateKey) || !isArmeniaTimeKey(time)) return null;
 

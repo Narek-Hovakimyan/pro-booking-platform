@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
 import { timeToMinutes, minutesToTime } from "@/shared/utils/time";
-import { formatDateKey } from "@/shared/utils/dates";
+import { addArmeniaDays, formatArmeniaCalendarDate, getArmeniaDateKey, getArmeniaWeekStartKey } from "@/shared/utils/armeniaDateTime";
 import {
   getBookingId,
   getBookingTime,
@@ -22,37 +22,16 @@ const HOUR_HEIGHT_PX = 60;
 
 // ─── Helpers ───
 
-function getSundayOfWeek(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  d.setDate(d.getDate() - day);
-  return d;
-}
-
 function getWeekDays(weekStart) {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
+  return Array.from({ length: 7 }, (_, i) => addArmeniaDays(weekStart, i));
 }
 
 function formatWeekLabel(weekStart) {
-  const start = new Date(weekStart);
-  const end = new Date(weekStart);
-  end.setDate(end.getDate() + 6);
-
   const opts = { month: "short", day: "numeric" };
-  const yearOpts = { year: "numeric", ...opts };
-  const startStr = start.toLocaleDateString("en-US", opts);
-  const endStr = end.toLocaleDateString("en-US", start.getFullYear() !== end.getFullYear() ? yearOpts : opts);
+  const startStr = formatArmeniaCalendarDate(weekStart, opts);
+  const endStr = formatArmeniaCalendarDate(addArmeniaDays(weekStart, 6), opts);
 
   return `${startStr} – ${endStr}`;
-}
-
-function isSameDay(dateA, dateB) {
-  return formatDateKey(dateA) === formatDateKey(dateB);
 }
 
 function getBookingBlockColor(status) {
@@ -161,13 +140,14 @@ function TimeGutter({ rangeStart, rangeEnd, rangeHours }) {
 // ─── Sub-component: Day column ───
 
 function DayColumn({
-  date,
+  dateKey,
   isCurrentDay,
   isNonWorking,
   bookings,
   onBookingClick,
   rangeStart,
   rangeHours,
+  daySchedule,
 }) {
   const navigate = useNavigate();
 
@@ -187,7 +167,7 @@ function DayColumn({
         }`}
       >
         <div className="text-[10px] font-medium uppercase leading-tight text-neutral-500">
-          {date.toLocaleDateString("en-US", { weekday: "short" })}
+          {formatArmeniaCalendarDate(dateKey, { weekday: "short" })}
         </div>
         <div
           className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
@@ -196,8 +176,9 @@ function DayColumn({
               : "text-neutral-800"
           }`}
         >
-          {date.getDate()}
+          {Number(dateKey.slice(-2))}
         </div>
+        {!isNonWorking && daySchedule?.from && daySchedule?.to && <div className="truncate text-[9px] text-neutral-500">{daySchedule.from}–{daySchedule.to}</div>}
       </div>
 
       {/* Time slots area */}
@@ -228,6 +209,13 @@ function DayColumn({
             </span>
           </div>
         )}
+
+        {!isNonWorking && daySchedule?.breakFrom && daySchedule?.breakTo && (() => {
+          const start = timeToMinutes(daySchedule.breakFrom);
+          const end = timeToMinutes(daySchedule.breakTo);
+          if (start === null || end === null || end <= start) return null;
+          return <div className="pointer-events-none absolute left-0 right-0 z-10 flex items-center justify-center border-y border-sky-200 bg-sky-100/60" style={{ top: `${Math.max(0, start - rangeStart)}px`, height: `${Math.max(16, end - start)}px` }}><span className="text-[9px] font-medium text-sky-700">Break</span></div>;
+        })()}
 
         {/* Booking blocks */}
         {overlapGroups.length > 0 && (
@@ -268,7 +256,7 @@ function DayColumn({
                         key={getBookingId(booking)}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onBookingClick ? onBookingClick(booking) : navigate(`/admin/calendar/day/${formatDateKey(date)}`);
+                          onBookingClick ? onBookingClick(booking) : navigate(`/admin/calendar/day/${dateKey}`);
                         }}
                         title={`${clientName} - ${serviceName} ${time}`}
                         className={`absolute left-0 right-0 overflow-hidden rounded-md border text-left text-[10px] leading-tight shadow-sm transition-all hover:shadow-md hover:brightness-95 active:brightness-90 ${blockColor}`}
@@ -332,10 +320,7 @@ export default function WeeklyCalendarView({
   }, [bookings]);
 
   // Filter to only this week's dates
-  const weekDateStrs = useMemo(
-    () => weekDays.map((d) => formatDateKey(d)),
-    [weekDays]
-  );
+  const weekDateStrs = weekDays;
 
   const weekBookingsByDate = useMemo(() => {
     const map = {};
@@ -378,29 +363,22 @@ export default function WeeklyCalendarView({
   }, [dayScheduleMap, weekBookingsByDate, weekDateStrs]);
 
   const goToPrevWeek = () => {
-    const prev = new Date(weekStart);
-    prev.setDate(prev.getDate() - 7);
-    onWeekChange(prev);
+    onWeekChange(addArmeniaDays(weekStart, -7));
   };
 
   const goToNextWeek = () => {
-    const next = new Date(weekStart);
-    next.setDate(next.getDate() + 7);
-    onWeekChange(next);
+    onWeekChange(addArmeniaDays(weekStart, 7));
   };
 
   const goToToday = () => {
-    onWeekChange(getSundayOfWeek(new Date()));
+    onWeekChange(getArmeniaWeekStartKey());
   };
 
   const isCurrentWeek = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const sun = getSundayOfWeek(today);
-    return isSameDay(weekStart, sun);
+    return weekStart === getArmeniaWeekStartKey();
   }, [weekStart]);
 
-  const todayDateStr = useMemo(() => formatDateKey(new Date()), []);
+  const todayDateStr = getArmeniaDateKey();
 
   return (
     <div className="space-y-4">
@@ -436,7 +414,7 @@ export default function WeeklyCalendarView({
           />
 
           {/* Day columns */}
-          {weekDays.map((date, idx) => {
+          {weekDays.map((dateKey, idx) => {
             const dateStr = weekDateStrs[idx];
             const { isNonWorkingDay } = dayScheduleMap[dateStr] || { isNonWorkingDay: false };
             const dayBookings = weekBookingsByDate[dateStr] || [];
@@ -445,7 +423,7 @@ export default function WeeklyCalendarView({
             return (
               <DayColumn
                 key={dateStr}
-                date={date}
+                dateKey={dateKey}
                 isCurrentDay={isCurrentDay}
                 isNonWorking={isNonWorkingDay}
                 bookings={dayBookings}
@@ -453,6 +431,7 @@ export default function WeeklyCalendarView({
                 rangeStart={weekRange.start}
                 rangeEnd={weekRange.end}
                 rangeHours={weekRange.hours}
+                daySchedule={dayScheduleMap[dateStr]?.selectedDaySchedule}
               />
             );
           })}

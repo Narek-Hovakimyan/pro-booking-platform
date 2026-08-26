@@ -26,7 +26,7 @@ describe("WeeklyCalendarView", () => {
           onBookingClick={onBookingClick}
           onWeekChange={vi.fn()}
           scheduleEntry={{ nonWorkingDays: ["2026-08-02"] }}
-          weekStart={new Date(2026, 7, 2)}
+          weekStart="2026-07-27"
         />
       </MemoryRouter>
     );
