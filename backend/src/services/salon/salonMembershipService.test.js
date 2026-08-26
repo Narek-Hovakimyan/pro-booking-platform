@@ -6,7 +6,10 @@ import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import {
   canUserCreateEventForSalon,
   findManageableSalonsForUser,
+  getApprovedUserSalonIds,
   getManageableSalonQuery,
+  getPrimaryApprovedSalonId,
+  isUserApprovedForSalon,
   userHasAnyManageableSalon,
 } from "./salonMembershipService.js";
 
@@ -36,6 +39,47 @@ const salon = {
   ownerId,
   admins: [adminId],
 };
+
+test("canonical same-salon status takes precedence over legacy approval", () => {
+  for (const status of ["pending", "rejected", "cancelled"]) {
+    const user = {
+      salon: salonId,
+      salonStatus: "approved",
+      salons: [{ salon: salonId, status }],
+    };
+
+    assert.deepEqual(getApprovedUserSalonIds(user), [], status);
+    assert.equal(isUserApprovedForSalon(user, salonId), false, status);
+    assert.equal(getPrimaryApprovedSalonId(user), null, status);
+  }
+
+  const approved = {
+    salon: salonId,
+    salonStatus: "approved",
+    salons: [{ salon: salonId, status: "approved" }],
+  };
+  assert.deepEqual(getApprovedUserSalonIds(approved), [salonId]);
+  assert.equal(getPrimaryApprovedSalonId(approved), salonId);
+});
+
+test("distinct and legacy-only approved salon fallbacks remain compatible", () => {
+  const distinct = {
+    salon: salonId,
+    salonStatus: "approved",
+    salons: [{ salon: otherSalonId, status: "pending" }],
+  };
+  const legacyOnly = {
+    salon: salonId,
+    salonStatus: "approved",
+    salons: [],
+  };
+
+  assert.deepEqual(getApprovedUserSalonIds(distinct), [salonId]);
+  assert.equal(isUserApprovedForSalon(distinct, salonId), true);
+  assert.equal(getPrimaryApprovedSalonId(distinct), salonId);
+  assert.deepEqual(getApprovedUserSalonIds(legacyOnly), [salonId]);
+  assert.equal(getPrimaryApprovedSalonId(legacyOnly), salonId);
+});
 
 test("owner has access", async () => {
   const allowed = await canUserCreateEventForSalon(

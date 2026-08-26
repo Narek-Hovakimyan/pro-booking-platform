@@ -458,6 +458,44 @@ test("admin leaving removes salon authority and is idempotent", async () => {
   assert.equal(acceptedRequest.status, "cancelled");
 });
 
+test("leave denies stale same-salon legacy approval without mutation", async () => {
+  mockSession();
+  const salon = { _id: salonId, ownerId, admins: [], name: "Owner Salon" };
+  let saved = false;
+  let requestsCancelled = false;
+  const barber = {
+    _id: barberId,
+    name: "Rejected Member",
+    role: "barber",
+    salons: [{ salon: salonId, status: "rejected" }],
+    salon: salonId,
+    salonStatus: "approved",
+    workHistory: [{ salon: salonId, endDate: null }],
+    async save() {
+      saved = true;
+    },
+  };
+
+  Salon.findById = async () => salon;
+  User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async () => {
+    requestsCancelled = true;
+  };
+
+  const res = createResponse();
+  await leaveSalon(
+    { user: { _id: barberId, role: "barber" }, body: { salonId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.message, "You are not currently part of this salon");
+  assert.equal(saved, false);
+  assert.equal(requestsCancelled, false);
+  assert.equal(barber.salons[0].status, "rejected");
+  assert.equal(barber.workHistory[0].endDate, null);
+});
+
 test("leave does not save a removed membership when accepted-request invalidation fails", async () => {
   const salon = { _id: salonId, ownerId, admins: [], name: "Owner Salon" };
   let saved = false;
@@ -489,6 +527,51 @@ test("leave does not save a removed membership when accepted-request invalidatio
 
   assert.equal(res.statusCode, 400);
   assert.equal(saved, false);
+});
+
+test("leave ignores stale legacy approval when canonical membership is not approved", async () => {
+  const salon = { _id: salonId, ownerId, admins: [], name: "Owner Salon" };
+
+  mockSession();
+  for (const status of ["pending", "rejected"]) {
+    let saved = false;
+    const barber = {
+      _id: barberId,
+      name: "Stale Legacy Member",
+      role: "barber",
+      salons: [{ salon: salonId, status, isPrimary: true }],
+      salon: salonId,
+      salonStatus: "approved",
+      workHistory: [],
+      async save() {
+        saved = true;
+        throw new Error("denied leave must not save barber");
+      },
+    };
+
+    Salon.findById = async () => salon;
+    User.findById = async () => barber;
+    SalonJoinRequest.updateMany = async () => {
+      throw new Error("denied leave must not invalidate join requests");
+    };
+    SubscriptionSeat.find = () => {
+      throw new Error("denied leave must not revoke seats");
+    };
+    Notification.create = async () => {
+      throw new Error("denied leave must not notify");
+    };
+
+    const res = createResponse();
+    await leaveSalon(
+      { user: { _id: barberId, role: "barber" }, body: { salonId } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200, status);
+    assert.equal(res.body.message, "You are not currently part of this salon", status);
+    assert.equal(saved, false, status);
+    assert.deepEqual(barber.salons, [{ salon: salonId, status, isPrimary: true }], status);
+  }
 });
 
 test("former admin cannot list requests or applicant contact data", async () => {

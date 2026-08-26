@@ -20,6 +20,7 @@ import {
   serializeUser,
 } from "../../utils/salonUtils.js";
 import { revokeSalonSeatsForRemovedMember } from "../../services/subscriptionService.js";
+import { isUserApprovedForSalon } from "../../services/salon/salonMembershipService.js";
 import { createNotification } from "../notifications/notificationController.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import {
@@ -215,9 +216,7 @@ export const leaveSalon = async (req, res) => {
         throw error;
       }
 
-      const isInSalon = (barber.salons || []).some(
-        (s) => s.salon?.toString() === salonId.toString() && s.status === "approved"
-      ) || (barber.salonStatus === "approved" && sameId(barber.salon, salonId));
+      const isInSalon = isUserApprovedForSalon(barber, salonId);
       const wasAdmin = isSalonAdmin(salon, barber._id);
 
       if (!isInSalon && !wasAdmin) {

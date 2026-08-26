@@ -48,13 +48,20 @@ export const getUserSalonIds = (user) => {
 };
 
 export const getApprovedUserSalonIds = (user) => {
-  const approvedSalonIds = Array.isArray(user?.salons)
-    ? user.salons
-        .filter((entry) => entry?.status === "approved")
-        .map((entry) => entry?.salon)
-    : [];
+  const canonicalEntries = Array.isArray(user?.salons) ? user.salons : [];
+  const approvedSalonIds = canonicalEntries
+    .filter((entry) => entry?.status === "approved")
+    .map((entry) => entry?.salon);
 
-  if (user?.salonStatus === "approved" && user?.salon) {
+  const hasCanonicalLegacySalon = canonicalEntries.some(
+    (entry) => getIdString(entry?.salon) === getIdString(user?.salon)
+  );
+
+  if (
+    user?.salonStatus === "approved" &&
+    user?.salon &&
+    !hasCanonicalLegacySalon
+  ) {
     approvedSalonIds.push(user.salon);
   }
 
@@ -62,14 +69,22 @@ export const getApprovedUserSalonIds = (user) => {
 };
 
 export const getPrimaryApprovedSalonId = (user) => {
-  const approvedEntries = Array.isArray(user?.salons)
-    ? user.salons.filter((entry) => entry?.status === "approved")
-    : [];
+  const canonicalEntries = Array.isArray(user?.salons) ? user.salons : [];
+  const approvedEntries = canonicalEntries.filter(
+    (entry) => entry?.status === "approved"
+  );
   const primaryEntry = approvedEntries.find((entry) => entry?.isPrimary);
 
   if (primaryEntry?.salon) return getIdString(primaryEntry.salon);
   if (approvedEntries.length === 1) return getIdString(approvedEntries[0].salon);
-  if (user?.salonStatus === "approved" && user?.salon) {
+  const hasCanonicalLegacySalon = canonicalEntries.some(
+    (entry) => getIdString(entry?.salon) === getIdString(user?.salon)
+  );
+  if (
+    user?.salonStatus === "approved" &&
+    user?.salon &&
+    !hasCanonicalLegacySalon
+  ) {
     return getIdString(user.salon);
   }
 

@@ -128,6 +128,32 @@ test("getSalonStaff uses an elemMatch filter for approved array memberships", as
   });
 });
 
+test("getSalonStaff denies stale same-salon legacy approval", async () => {
+  Salon.findById = async () => ({ _id: salonB, ownerId: "owner", admins: [] });
+
+  for (const status of ["pending", "rejected", "cancelled"]) {
+    let rosterQueried = false;
+    User.findById = async () => ({
+      _id: requesterId,
+      role: "barber",
+      salons: [{ salon: salonB, status }],
+      salon: salonB,
+      salonStatus: "approved",
+    });
+    User.find = () => {
+      rosterQueried = true;
+      return { select: async () => [] };
+    };
+
+    await assert.rejects(
+      getSalonStaff(salonB, requesterId),
+      (error) => error.statusCode === 403,
+      status
+    );
+    assert.equal(rosterQueried, false, status);
+  }
+});
+
 test("getSalonStaff hides staff payment for non-accepted or non-staff relationships", async () => {
   const users = [
     staffUser("accepted-staff", [{

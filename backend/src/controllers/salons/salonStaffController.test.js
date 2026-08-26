@@ -73,6 +73,36 @@ test("promotion requires approved canonical or legacy salon membership", async (
   const deniedCases = [
     { name: "pending canonical", salons: [{ salon: salonId, status: "pending" }] },
     { name: "rejected canonical", salons: [{ salon: salonId, status: "rejected" }] },
+    {
+      name: "pending canonical overrides legacy approval",
+      salons: [{ salon: salonId, status: "pending" }],
+      salon: salonId,
+      salonStatus: "approved",
+    },
+    {
+      name: "rejected canonical overrides legacy approval",
+      salons: [{ salon: salonId, status: "rejected" }],
+      salon: salonId,
+      salonStatus: "approved",
+    },
+    {
+      name: "pending canonical with stale legacy approval",
+      salons: [{ salon: salonId, status: "pending" }],
+      salon: salonId,
+      salonStatus: "approved",
+    },
+    {
+      name: "rejected canonical with stale legacy approval",
+      salons: [{ salon: salonId, status: "rejected" }],
+      salon: salonId,
+      salonStatus: "approved",
+    },
+    {
+      name: "cancelled canonical with stale legacy approval",
+      salons: [{ salon: salonId, status: "cancelled" }],
+      salon: salonId,
+      salonStatus: "approved",
+    },
     { name: "pending legacy", salon: salonId, salonStatus: "pending" },
     { name: "rejected legacy", salon: salonId, salonStatus: "rejected" },
     { name: "empty legacy status", salon: salonId, salonStatus: "none" },
@@ -128,6 +158,12 @@ test("only owner can promote approved barbers and preserves approved compatibili
   const approvedMembers = [
     { name: "canonical", salons: [{ salon: salonId, status: "approved" }] },
     { name: "legacy", salons: [], salon: salonId, salonStatus: "approved" },
+    {
+      name: "distinct canonical and legacy",
+      salons: [{ salon: new mongoose.Types.ObjectId(), status: "pending" }],
+      salon: salonId,
+      salonStatus: "approved",
+    },
   ];
 
   for (const member of approvedMembers) {
@@ -275,6 +311,53 @@ test("removeBarberFromSalon revokes active subscription seat", async () => {
   assert.equal(acceptedRequest.status, "cancelled");
 });
 
+test("remove denies stale same-salon legacy approval without mutation", async () => {
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+    },
+    async endSession() {},
+  });
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const barberId = new mongoose.Types.ObjectId();
+  const salon = { _id: salonId, ownerId, admins: [], name: "Secure Salon" };
+  let saved = false;
+  let requestsCancelled = false;
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    salons: [{ salon: salonId, status: "rejected" }],
+    salon: salonId,
+    salonStatus: "approved",
+    workHistory: [{ salon: salonId, endDate: null }],
+    async save() {
+      saved = true;
+    },
+  };
+
+  Salon.findById = async () => salon;
+  User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async () => {
+    requestsCancelled = true;
+  };
+
+  const res = createResponse();
+  await removeBarberFromSalon(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { salonId: String(salonId), barberId: String(barberId) },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(saved, false);
+  assert.equal(requestsCancelled, false);
+  assert.equal(barber.salons[0].status, "rejected");
+  assert.equal(barber.workHistory[0].endDate, null);
+});
+
 test("owner removal revokes promoted admin authority without affecting another salon", async () => {
   const ownerId = new mongoose.Types.ObjectId();
   const adminId = new mongoose.Types.ObjectId();
@@ -333,6 +416,70 @@ test("owner removal revokes promoted admin authority without affecting another s
   assert.equal(res.statusCode, 200);
   assert.deepEqual(salon.admins, []);
   assert.deepEqual(otherSalon.admins, [adminId]);
+});
+
+test("owner cannot remove canonical non-approved members through stale legacy approval", async () => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+
+  mongoose.startSession = async () => ({
+    async withTransaction(callback) {
+      await callback();
+    },
+    async endSession() {},
+  });
+  for (const status of ["pending", "rejected"]) {
+    const barberId = new mongoose.Types.ObjectId();
+    const salon = {
+      _id: salonId,
+      name: "Primary Salon",
+      ownerId,
+      admins: [],
+      async save() {
+        throw new Error("denied removal must not save salon");
+      },
+    };
+    let saved = false;
+    const barber = {
+      _id: barberId,
+      name: "Stale Legacy Member",
+      role: "barber",
+      salons: [{ salon: salonId, status, isPrimary: true }],
+      salon: salonId,
+      salonStatus: "approved",
+      workHistory: [],
+      async save() {
+        saved = true;
+        throw new Error("denied removal must not save barber");
+      },
+    };
+
+    Salon.findById = async () => salon;
+    User.findById = async () => barber;
+    SalonJoinRequest.updateMany = async () => {
+      throw new Error("denied removal must not invalidate join requests");
+    };
+    SubscriptionSeat.find = () => {
+      throw new Error("denied removal must not revoke seats");
+    };
+    Notification.create = async () => {
+      throw new Error("denied removal must not notify");
+    };
+
+    const res = createResponse();
+    await removeBarberFromSalon(
+      {
+        user: { _id: ownerId, role: "barber" },
+        params: { salonId: String(salonId), barberId: String(barberId) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400, status);
+    assert.equal(saved, false, status);
+    assert.deepEqual(barber.salons, [{ salon: salonId, status, isPrimary: true }], status);
+    assert.deepEqual(salon.admins, [], status);
+  }
 });
 
 test("owner request sets pending relationshipType", async () => {

@@ -19,6 +19,7 @@ import {
   serializeUser,
 } from "../../utils/salonUtils.js";
 import { getSalonAdminsForSalon } from "../../services/salon/salonAdminService.js";
+import { isUserApprovedForSalon } from "../../services/salon/salonMembershipService.js";
 import {
   cancelAcceptedSalonJoinRequests,
 } from "../../services/salon/salonJoinRequestLifecycleService.js";
@@ -76,9 +77,7 @@ export const removeBarberFromSalon = async (req, res) => {
         throw error;
       }
 
-      const isInSalon = (barber.salons || []).some(
-        (s) => s.salon?.toString() === salon._id.toString() && s.status === "approved"
-      ) || (barber.salon && sameId(barber.salon, salon._id));
+      const isInSalon = isUserApprovedForSalon(barber, salon._id);
       const wasAdmin = isSalonAdmin(salon, barber._id);
 
       if (!isInSalon && !wasAdmin) {
@@ -172,13 +171,7 @@ export const promoteToAdmin = async (req, res) => {
     }
 
     // Check if barber is approved in this salon
-    const isInSalon = (barber.salons || []).some(
-      (s) => s.salon?.toString() === salon._id.toString() && s.status === "approved"
-    ) || (
-      barber.salonStatus === "approved" &&
-      barber.salon &&
-      sameId(barber.salon, salon._id)
-    );
+    const isInSalon = isUserApprovedForSalon(barber, salon._id);
 
     if (!isInSalon) {
       return res.status(400).json({

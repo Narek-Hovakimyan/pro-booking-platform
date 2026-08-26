@@ -3,6 +3,7 @@ import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import { sameId } from "../../utils/salonPermissions.js";
 import { syncLegacySalonFields } from "../../utils/salonHelpers.js";
+import { isUserApprovedForSalon } from "./salonMembershipService.js";
 import {
   getRelationshipStatus,
   getRelationshipType,
@@ -179,11 +180,7 @@ export const getSalonStaff = async (salonId, requestingUserId) => {
   const isOwner = sameId(salon.ownerId, requestingUserId);
   const isAdmin = Array.isArray(salon.admins) &&
     salon.admins.some((adminId) => sameId(adminId, requestingUserId));
-  const isApprovedMember = (requester.salons || []).some(
-    (s) => s.salon?.toString() === salonId.toString() && s.status === "approved"
-  ) || (
-    requester.salonStatus === "approved" && sameId(requester.salon, salonId)
-  );
+  const isApprovedMember = isUserApprovedForSalon(requester, salonId);
 
   if (!isOwner && !isAdmin && !isApprovedMember) {
     throw new SalonStaffError(403, "You are not a member of this salon");
