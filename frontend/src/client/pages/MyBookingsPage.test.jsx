@@ -150,6 +150,16 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
       </MemoryRouter>
     );
 
+  const historyBookings = (count) => Array.from({ length: count }, (_, index) => ({
+    id: `history-${index}`,
+    clientId: "client-1",
+    barberId: "barber-1",
+    bookingDate: index < 31 ? `2020-01-${String(index + 1).padStart(2, "0")}` : `2020-02-${String(index - 30).padStart(2, "0")}`,
+    time: "10:00",
+    status: "completed",
+    service: { name: `History ${index}` },
+  }));
+
   it("shows the nearest upcoming booking once and leaves later active bookings visible", async () => {
     state.bookings = [
       {
@@ -490,6 +500,48 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
     rerender(<MemoryRouter initialEntries={["/booking-history"]}><MyBookingsPage view="history" /></MemoryRouter>);
     expect(screen.getByTestId("booking-card-history-history-completed")).toBeInTheDocument();
     expect(screen.queryByTestId("booking-card-history-history-cancelled")).not.toBeInTheDocument();
+  });
+
+  it("progressively renders globally newest-first history without duplicates at page boundaries", async () => {
+    state.bookings = historyBookings(41);
+    const result = renderPage("history");
+    await screen.findByTestId("booking-card-history-history-40");
+    expect(screen.getByText("20 / 41")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/booking-card-history-/)).toHaveLength(20);
+    expect(screen.queryByTestId("booking-card-history-history-0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("40 / 41")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/booking-card-history-/)).toHaveLength(40);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("41 / 41")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    const visibleIds = screen.getAllByTestId(/booking-card-history-/).map((item) => item.dataset.testid);
+    expect(new Set(visibleIds).size).toBe(41);
+
+    for (const [count, label] of [[0, "No booking history yet"], [1, "1 / 1"], [20, "20 / 20"], [21, "20 / 21"], [40, "20 / 40"]]) {
+      state.bookings = historyBookings(count);
+      result.rerender(<MemoryRouter initialEntries={["/booking-history"]}><MyBookingsPage view="history" /></MemoryRouter>);
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it("filters before pagination and resets the visible count for filter, reset, and refresh", async () => {
+    const bookings = historyBookings(41).map((booking, index) => ({ ...booking, status: index < 30 ? "completed" : "cancelled" }));
+    state.bookings = bookings;
+    const result = renderPage("history");
+    await screen.findByText("20 / 41");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("40 / 41")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
+    expect(await screen.findByText("20 / 30")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(await screen.findByText("20 / 41")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("40 / 41")).toBeInTheDocument();
+    state.bookings = [...bookings];
+    result.rerender(<MemoryRouter initialEntries={["/booking-history"]}><MyBookingsPage view="history" /></MemoryRouter>);
+    expect(await screen.findByText("20 / 41")).toBeInTheDocument();
   });
 
   it("preserves the booking salonId in the rebook query", async () => {

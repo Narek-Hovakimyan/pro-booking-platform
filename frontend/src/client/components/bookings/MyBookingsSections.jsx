@@ -9,6 +9,7 @@ export default function MyBookingsSections({
   groupedHistoryBookings,
   historyBookings,
   historyFilters,
+  historyPagination,
   historyEmptyText = "No booking history yet",
   initialLoading,
   renderBookingCard,
@@ -51,6 +52,7 @@ export default function MyBookingsSections({
             emptyIcon={HeartCrack}
             emptyCta={{ label: "Browse specialists", to: "/specialists" }}
           />
+          {historyPagination}
         </>
       )}
     </div>

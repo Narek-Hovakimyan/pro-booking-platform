@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import BookingCard from "@/client/components/BookingCard";
@@ -16,6 +16,8 @@ import { getBookingBarberId, getBookingDate, getBookingId, getBookingSalonId, ge
 import useClientBookingActions from "@/client/hooks/useClientBookingActions";
 import useClientBookingsData from "@/client/hooks/useClientBookingsData";
 
+const PAGE_SIZE = 20;
+
 export default function MyBookingsPage({ view = "active" }) {
   const navigate = useNavigate();
   const data = useClientBookingsData();
@@ -30,6 +32,7 @@ export default function MyBookingsPage({ view = "active" }) {
   });
   const isHistoryView = view === "history";
   const [historyFilters, setHistoryFilters] = useState({ fromDate: "", toDate: "", status: "", specialistId: "", salonId: "" });
+  const [visibleHistoryCount, setVisibleHistoryCount] = useState(PAGE_SIZE);
   const initialLoading = data.isLoading && data.myBookings.length === 0;
   const getServiceName = (booking) => {
     const service = booking?.service;
@@ -74,10 +77,15 @@ export default function MyBookingsPage({ view = "active" }) {
     if (historyFilters.salonId && String(getBookingSalonId(booking)) !== historyFilters.salonId) return false;
     return true;
   }), [data.historyBookings, historyFilters]);
+  useEffect(() => { setVisibleHistoryCount(PAGE_SIZE); }, [data.historyBookings, historyFilters]);
+  const visibleHistoryBookings = useMemo(
+    () => filteredHistoryBookings.slice(0, visibleHistoryCount),
+    [filteredHistoryBookings, visibleHistoryCount]
+  );
   const filteredGroupedHistoryBookings = useMemo(() => data.groupedHistoryBookings.map((group) => ({
     ...group,
-    bookings: group.bookings.filter((booking) => filteredHistoryBookings.includes(booking)),
-  })), [data.groupedHistoryBookings, filteredHistoryBookings]);
+    bookings: group.bookings.filter((booking) => visibleHistoryBookings.includes(booking)),
+  })), [data.groupedHistoryBookings, visibleHistoryBookings]);
   const hasHistoryFilters = Object.values(historyFilters).some(Boolean);
   const updateHistoryFilter = (field, value) => setHistoryFilters((current) => ({ ...current, [field]: value }));
   const renderBookingCard = (booking, section) => {
@@ -110,9 +118,10 @@ export default function MyBookingsPage({ view = "active" }) {
         onFindBarber={() => navigate("/specialists")} onMessage={actions.messageBarber} onViewDetails={() => actions.openBookingDetailsModal(data.nextBooking)} />
     </CardContent></Card>}
     <MyBookingsSections activeBookings={data.visibleActiveBookings} groupedActiveBookings={data.groupedActiveBookings}
-      groupedHistoryBookings={filteredGroupedHistoryBookings} historyBookings={filteredHistoryBookings} initialLoading={initialLoading} renderBookingCard={renderBookingCard} view={view}
+      groupedHistoryBookings={filteredGroupedHistoryBookings} historyBookings={visibleHistoryBookings} initialLoading={initialLoading} renderBookingCard={renderBookingCard} view={view}
       historyEmptyText={hasHistoryFilters ? "No booking history matches these filters" : "No booking history yet"}
-      historyFilters={isHistoryView && <BookingHistoryFilters filters={historyFilters} specialistOptions={specialistOptions} salonOptions={salonOptions} onChange={updateHistoryFilter} onReset={() => setHistoryFilters({ fromDate: "", toDate: "", status: "", specialistId: "", salonId: "" })} />} />
+      historyFilters={isHistoryView && <BookingHistoryFilters filters={historyFilters} specialistOptions={specialistOptions} salonOptions={salonOptions} onChange={updateHistoryFilter} onReset={() => setHistoryFilters({ fromDate: "", toDate: "", status: "", specialistId: "", salonId: "" })} />}
+      historyPagination={isHistoryView && filteredHistoryBookings.length > 0 && <div className="flex items-center justify-between gap-3 text-sm text-neutral-600"><span>{visibleHistoryBookings.length} / {filteredHistoryBookings.length}</span>{visibleHistoryBookings.length < filteredHistoryBookings.length && <button className="rounded-lg border px-3 py-2 font-medium text-neutral-900" type="button" onClick={() => setVisibleHistoryCount((count) => count + PAGE_SIZE)}>Load more</button>}</div>} />
     <MyBookingsModals cancelError={actions.cancelError} cancellingBooking={actions.cancellingBooking} closeBookingDetailsModal={actions.closeBookingDetailsModal}
       createReview={actions.createReview} createSalonReview={actions.createSalonReview} delayError={actions.delayError} delayingBooking={actions.delayingBooking}
       getBarberForBooking={data.getBarberForBooking} getSalonName={getSalonName} isCancelSubmitting={actions.isCancelSubmitting} isDelaySubmitting={actions.isDelaySubmitting}

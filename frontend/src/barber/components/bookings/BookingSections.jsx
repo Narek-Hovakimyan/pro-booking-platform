@@ -21,6 +21,7 @@ export default function BookingSections({
   onAcceptRescheduleRequest,
   onRejectRescheduleRequest,
   rescheduleAction,
+  historyPagination,
   showActions = true,
 }) {
   if ((isLoading || isInitialLoading) && filteredBookings.length === 0) {
@@ -91,6 +92,7 @@ export default function BookingSections({
           </section>
         );
       })}
+      {historyPagination}
     </div>
   );
 }

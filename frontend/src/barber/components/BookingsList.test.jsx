@@ -42,14 +42,17 @@ vi.mock("@/barber/components/bookings/BookingsHeaderFilters", () => ({
 }));
 
 vi.mock("@/barber/components/bookings/BookingSections", () => ({
-  default: ({ groupedBookings, showActions }) => (
+  default: ({ filteredBookings, groupedBookings, historyPagination, showActions }) => (
     <div data-testid="booking-sections">
       <span data-testid="history-actions">{String(showActions)}</span>
+      {filteredBookings.length === 0 && <span>No bookings yet</span>}
+      {filteredBookings.map((booking) => <span data-testid={`visible-booking-${booking.id}`} key={booking.id} />)}
       {groupedBookings.map((group) => (
         <span data-testid={`booking-group-${group.key}`} key={group.key}>
           {group.bookings.length}
         </span>
       ))}
+      {historyPagination}
     </div>
   ),
 }));
@@ -114,6 +117,12 @@ function renderBookingsList(salons, { bookings = [], view = "active" } = {}) {
     }
   );
 }
+
+const historyBookings = (count) => Array.from({ length: count }, (_, index) => ({
+  id: `history-${index}`,
+  bookingDate: index < 31 ? `2020-01-${String(index + 1).padStart(2, "0")}` : `2020-02-${String(index - 30).padStart(2, "0")}`,
+  status: "completed",
+}));
 
 async function submitManualBooking() {
   const user = userEvent.setup();
@@ -282,6 +291,43 @@ describe("BookingsList manual booking salon context", () => {
     );
     expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("1");
     expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("0");
+  });
+
+  it("progressively renders globally newest-first history without duplicates at page boundaries", () => {
+    const result = renderBookingsList([], { bookings: historyBookings(41), view: "history" });
+    expect(screen.getByText("20 / 41")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/visible-booking-/)).toHaveLength(20);
+    expect(screen.getByTestId("visible-booking-history-40")).toBeInTheDocument();
+    expect(screen.queryByTestId("visible-booking-history-0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("40 / 41")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/visible-booking-/)).toHaveLength(40);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("41 / 41")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    const visibleIds = screen.getAllByTestId(/visible-booking-/).map((item) => item.dataset.testid);
+    expect(new Set(visibleIds).size).toBe(41);
+
+    [[0, "No bookings yet"], [1, "1 / 1"], [20, "20 / 20"], [21, "20 / 21"], [40, "20 / 40"]].forEach(([count, label]) => {
+      result.rerender(<BookingsList bookings={historyBookings(count)} services={[]} view="history" />);
+      expect(screen.getByText(label)).toBeInTheDocument();
+    });
+  });
+
+  it("filters before pagination and resets the visible count for filter, reset, and refresh", () => {
+    const bookings = historyBookings(41).map((booking, index) => ({ ...booking, status: index < 30 ? "completed" : "cancelled" }));
+    const result = renderBookingsList([], { bookings, view: "history" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("40 / 41")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
+    expect(screen.getByText("20 / 30")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(screen.getByText("20 / 41")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("40 / 41")).toBeInTheDocument();
+    result.rerender(<BookingsList bookings={[...bookings]} services={[]} view="history" />);
+    expect(screen.getByText("20 / 41")).toBeInTheDocument();
   });
 
   it("keeps the dashboard analytics input intact while its booking pane is active-only", async () => {
