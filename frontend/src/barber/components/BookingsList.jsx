@@ -29,7 +29,7 @@ const getInitialManualBooking = (dateKey) => ({
   time: "",
 });
 
-const bookingSections = [
+const activeBookingSections = [
   {
     key: "pending",
     title: "Pending",
@@ -44,6 +44,9 @@ const bookingSections = [
     shouldAlwaysShow: true,
     statuses: ["accepted"],
   },
+];
+
+const historyBookingSections = [
   {
     key: "completed",
     title: "Completed",
@@ -90,7 +93,9 @@ export default function BookingsList({
   services = [],
   isLoading = false,
   error = "",
+  view = "active",
 }) {
+  const isHistoryView = view === "history";
   const dispatch = useDispatch();
   const { currentUser } = useSelector((state) => state.auth);
   const currentUserId = currentUser?.id;
@@ -126,7 +131,10 @@ export default function BookingsList({
   const filteredBookings = bookings.filter(
     (booking) => booking?.bookingDate === selectedDate
   );
-  const groupedBookings = bookingSections.map((section) => {
+  const groupedBookings = (isHistoryView
+    ? historyBookingSections
+    : activeBookingSections
+  ).map((section) => {
     const sectionStatuses = new Set(section.statuses);
     const sectionBookings = filteredBookings
       .filter((booking) => sectionStatuses.has(getBookingStatus(booking)))
@@ -507,7 +515,8 @@ export default function BookingsList({
           selectedDate={selectedDate}
           selectedDateLabel={selectedDateLabel}
           successMessage={successMessage}
-          onAddBooking={openAddBookingModal}
+          view={view}
+          onAddBooking={isHistoryView ? undefined : openAddBookingModal}
           onDateInputChange={handleDateInputChange}
           onSelectDate={setSelectedDate}
         />
@@ -524,6 +533,7 @@ export default function BookingsList({
           isEligibleForNoShowLateCancel={isEligibleForNoShowLateCancel}
           isInitialLoading={isInitialLoading}
           isLoading={isLoading}
+          showActions={!isHistoryView}
           onMarkLateCancelBooking={markLateCancelBooking}
           onMarkNoShowBooking={markNoShowBooking}
           onOpenRejectBookingModal={openRejectBookingModal}
@@ -537,7 +547,7 @@ export default function BookingsList({
           onUpdateBookingStatus={updateBookingStatus}
         />
 
-        {isAddModalOpen && (
+        {!isHistoryView && isAddModalOpen && (
           <ManualBookingModal
             activeServices={activeServices}
             error={actionError}
@@ -549,7 +559,7 @@ export default function BookingsList({
           />
         )}
 
-        {rejectingBooking && (
+        {!isHistoryView && rejectingBooking && (
           <RejectBookingModal
             booking={rejectingBooking}
             error={rejectionError}

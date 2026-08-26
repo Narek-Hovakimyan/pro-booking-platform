@@ -28,6 +28,7 @@ export default function BookingListItem({
   onAcceptRescheduleRequest,
   onRejectRescheduleRequest,
   rescheduleAction,
+  showActions = true,
 }) {
   const rescheduleRequest = booking?.rescheduleRequest;
   const rescheduleStatus = rescheduleRequest?.status || "";
@@ -169,23 +170,25 @@ export default function BookingListItem({
               Note: {rescheduleRequest.requestNote}
             </p>
           )}
-          <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap">
-            <Button
-              className="w-full sm:w-auto"
-              disabled={isRescheduleActionLoading}
-              onClick={() => onAcceptRescheduleRequest?.(booking)}
-            >
-              {isAcceptingReschedule ? "Accepting..." : "Accept request"}
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              disabled={isRescheduleActionLoading}
-              onClick={() => onRejectRescheduleRequest?.(booking)}
-              variant="outline"
-            >
-              {isRejectingReschedule ? "Rejecting..." : "Reject request"}
-            </Button>
-          </div>
+          {showActions && (
+            <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap">
+              <Button
+                className="w-full sm:w-auto"
+                disabled={isRescheduleActionLoading}
+                onClick={() => onAcceptRescheduleRequest?.(booking)}
+              >
+                {isAcceptingReschedule ? "Accepting..." : "Accept request"}
+              </Button>
+              <Button
+                className="w-full sm:w-auto"
+                disabled={isRescheduleActionLoading}
+                onClick={() => onRejectRescheduleRequest?.(booking)}
+                variant="outline"
+              >
+                {isRejectingReschedule ? "Rejecting..." : "Reject request"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -202,54 +205,56 @@ export default function BookingListItem({
         </p>
       )}
 
-      <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
-        {status === "pending" && (
-          <Button
-            className="w-full sm:w-auto"
-            onClick={() => onUpdateBookingStatus(booking, "accepted")}
-          >
-            Accept
-          </Button>
-        )}
-
-        {(status === "pending" || status === "accepted") && (
-          <Button
-            className="w-full sm:w-auto"
-            onClick={() => onOpenRejectBookingModal(booking)}
-            variant="outline"
-          >
-            Reject
-          </Button>
-        )}
-
-        {status === "accepted" && (
-          <Button
-            className="w-full sm:w-auto"
-            onClick={() => onUpdateBookingStatus(booking, "completed")}
-          >
-            Complete
-          </Button>
-        )}
-
-        {isEligibleForNoShowLateCancel(booking) && (
-          <>
+      {showActions && (
+        <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
+          {status === "pending" && (
             <Button
               className="w-full sm:w-auto"
-              onClick={() => onMarkNoShowBooking(booking)}
-              variant="outline"
+              onClick={() => onUpdateBookingStatus(booking, "accepted")}
             >
-              Mark no-show
+              Accept
             </Button>
+          )}
+
+          {(status === "pending" || status === "accepted") && (
             <Button
               className="w-full sm:w-auto"
-              onClick={() => onMarkLateCancelBooking(booking)}
+              onClick={() => onOpenRejectBookingModal(booking)}
               variant="outline"
             >
-              Late cancellation
+              Reject
             </Button>
-          </>
-        )}
-      </div>
+          )}
+
+          {status === "accepted" && (
+            <Button
+              className="w-full sm:w-auto"
+              onClick={() => onUpdateBookingStatus(booking, "completed")}
+            >
+              Complete
+            </Button>
+          )}
+
+          {isEligibleForNoShowLateCancel(booking) && (
+            <>
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() => onMarkNoShowBooking(booking)}
+                variant="outline"
+              >
+                Mark no-show
+              </Button>
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() => onMarkLateCancelBooking(booking)}
+                variant="outline"
+              >
+                Late cancellation
+              </Button>
+            </>
+          )}
+        </div>
+      )}
 
       <ClientReliabilitySummary
         clientId={booking?.client?.id || booking?.client?._id || booking?.clientId}

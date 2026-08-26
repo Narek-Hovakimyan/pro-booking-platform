@@ -1,5 +1,6 @@
 import { CalendarDays, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link, useInRouterContext } from "react-router-dom";
 
 import { Button } from "@/shared/components/ui/button";
 
@@ -13,22 +14,53 @@ export default function BookingsHeaderFilters({
   onAddBooking,
   onSelectDate,
   onDateInputChange,
+  view = "active",
 }) {
   const { t } = useTranslation();
+  const isHistoryView = view === "history";
+  const hasRouter = useInRouterContext();
+  const BookingViewLink = hasRouter ? Link : "a";
+  const upcomingLinkProps = hasRouter
+    ? { to: "/admin/bookings" }
+    : { href: "/admin/bookings" };
+  const historyLinkProps = hasRouter
+    ? { to: "/admin/booking-history" }
+    : { href: "/admin/booking-history" };
 
   return (
     <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
           <CalendarDays className="h-6 w-6" />
-          {t("nav.bookings")}
+          {isHistoryView ? "Booking History" : t("nav.bookings")}
         </h2>
 
-        <Button className="w-full sm:w-auto" onClick={onAddBooking}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Booking
-        </Button>
+        {!isHistoryView && (
+          <Button className="w-full sm:w-auto" onClick={onAddBooking}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Booking
+          </Button>
+        )}
       </div>
+
+      <nav aria-label="Booking views" className="flex gap-2">
+        <Button
+          aria-current={!isHistoryView ? "page" : undefined}
+          as={BookingViewLink}
+          {...upcomingLinkProps}
+          variant={!isHistoryView ? "default" : "outline"}
+        >
+          Upcoming
+        </Button>
+        <Button
+          aria-current={isHistoryView ? "page" : undefined}
+          as={BookingViewLink}
+          {...historyLinkProps}
+          variant={isHistoryView ? "default" : "outline"}
+        >
+          History
+        </Button>
+      </nav>
 
       {error && (
         <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">

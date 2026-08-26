@@ -69,6 +69,10 @@ export function getBarberAdminRoutes({ renderAdminPage }) {
         element={guardBarberOnboarding(renderAdminPage("bookings", { requireSubscription: true }))}
       />
       <Route
+        path="/admin/booking-history"
+        element={guardBarberOnboarding(renderAdminPage("booking-history", { requireSubscription: true }))}
+      />
+      <Route
         path="/admin/clients"
         element={guardBarberOnboarding(
           <SubscriptionGuard>

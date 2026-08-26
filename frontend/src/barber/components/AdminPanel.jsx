@@ -33,12 +33,13 @@ export default function AdminPanel({
       <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
         {section === "dashboard" && <DashboardAnalytics bookings={bookings} />}
 
-        {(section === "dashboard" || section === "bookings") && (
+        {(section === "dashboard" || section === "bookings" || section === "booking-history") && (
           <BookingsList
             bookings={bookings}
             error={error}
             isLoading={isLoading}
             services={services}
+            view={section === "booking-history" ? "history" : "active"}
           />
         )}
 

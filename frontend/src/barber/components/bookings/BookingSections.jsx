@@ -21,6 +21,7 @@ export default function BookingSections({
   onAcceptRescheduleRequest,
   onRejectRescheduleRequest,
   rescheduleAction,
+  showActions = true,
 }) {
   if ((isLoading || isInitialLoading) && filteredBookings.length === 0) {
     return (
@@ -73,6 +74,7 @@ export default function BookingSections({
                       isEligibleForNoShowLateCancel={isEligibleForNoShowLateCancel}
                       isHighlighted={isHighlighted}
                       key={bookingId}
+                      showActions={showActions}
                       status={status}
                       onMarkLateCancelBooking={onMarkLateCancelBooking}
                       onMarkNoShowBooking={onMarkNoShowBooking}

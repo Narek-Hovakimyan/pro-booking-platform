@@ -15,6 +15,7 @@ test("account deletion fails closed when the authoritative user cannot be loaded
 const unknownCommitError = Object.assign(new Error("unknown"), { errorLabels: ["UnknownTransactionCommitResult"] });
 const absentUserModels = { User: { findById: () => ({ lean: async () => null }) }, AccountDeletionRecord: {} };
 const unknownSession = { async withTransaction() { throw unknownCommitError; }, async endSession() {} };
+const stableNow = new Date("2026-08-25T12:00:00.000Z");
 
 const createSeatCleanupHarness = ({ seatedUser = false, failAfterSeatCleanup = false } = {}) => {
   const deletingUserId = "deleting-user";
@@ -48,7 +49,7 @@ const createSeatCleanupHarness = ({ seatedUser = false, failAfterSeatCleanup = f
         select: () => ({
           session: () => ({
             authVersion: 0,
-            recentAuthAt: new Date(),
+            recentAuthAt: new Date(stableNow),
             recentAuthVersion: 0,
           }),
         }),
@@ -87,6 +88,7 @@ const createSeatCleanupHarness = ({ seatedUser = false, failAfterSeatCleanup = f
     beginFence: async () => ({ deletionId: "seat-cleanup" }),
     completeFence: async () => {},
     releaseFence: async () => {},
+    now: stableNow,
   };
 };
 
