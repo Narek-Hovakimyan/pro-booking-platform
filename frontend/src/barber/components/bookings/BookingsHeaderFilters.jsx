@@ -15,6 +15,7 @@ export default function BookingsHeaderFilters({
   onSelectDate,
   onDateInputChange,
   view = "active",
+  historyFilters,
 }) {
   const { t } = useTranslation();
   const isHistoryView = view === "history";
@@ -78,32 +79,34 @@ export default function BookingsHeaderFilters({
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {dateOptions.map((day) => (
-          <Button
-            className="flex-1 sm:flex-none"
-            key={day.value}
-            onClick={() => onSelectDate(day.value)}
-            variant={selectedDate === day.value ? "default" : "outline"}
-          >
-            {day.label}
-          </Button>
-        ))}
-      </div>
+      {isHistoryView ? historyFilters : <>
+        <div className="flex flex-wrap gap-2">
+          {dateOptions.map((day) => (
+            <Button
+              className="flex-1 sm:flex-none"
+              key={day.value}
+              onClick={() => onSelectDate(day.value)}
+              variant={selectedDate === day.value ? "default" : "outline"}
+            >
+              {day.label}
+            </Button>
+          ))}
+        </div>
 
-      <label className="grid max-w-xs gap-2 text-sm font-semibold">
-        Filter by date
-        <input
-          className="rounded-2xl border p-3 font-normal"
-          type="date"
-          value={selectedDate}
-          onChange={(event) => onDateInputChange(event.target.value)}
-        />
-      </label>
+        <label className="grid max-w-xs gap-2 text-sm font-semibold">
+          Filter by date
+          <input
+            className="rounded-2xl border p-3 font-normal"
+            type="date"
+            value={selectedDate}
+            onChange={(event) => onDateInputChange(event.target.value)}
+          />
+        </label>
 
-      <p className="text-sm font-medium text-neutral-600">
-        Showing bookings for {selectedDateLabel}
-      </p>
+        <p className="text-sm font-medium text-neutral-600">
+          Showing bookings for {selectedDateLabel}
+        </p>
+      </>}
     </>
   );
 }

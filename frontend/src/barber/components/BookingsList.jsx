@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import BookingsHeaderFilters from "@/barber/components/bookings/BookingsHeaderFilters";
 import BookingSections from "@/barber/components/bookings/BookingSections";
+import BookingHistoryFilters from "@/barber/components/bookings/BookingHistoryFilters";
 import ManualBookingModal from "@/barber/components/bookings/ManualBookingModal";
 import RejectBookingModal from "@/barber/components/RejectBookingModal";
 import useBarberBookings from "@/barber/hooks/useBarberBookings";
@@ -25,11 +26,22 @@ const getBookingTime = (booking) => booking?.time || "";
 export default function BookingsList({ bookings, services = [], isLoading = false, error = "", view = "active" }) {
   const isHistoryView = view === "history";
   const [selectedDate, setSelectedDate] = useState(getNext7Days()[0].value);
+  const [historyFilters, setHistoryFilters] = useState({ fromDate: "", toDate: "", status: "", clientSearch: "" });
   const dateOptions = getNext7Days();
   const hook = useBarberBookings({ services, selectedDate, setSelectedDate });
   const selectedDateObject = parseDateKey(selectedDate);
   const selectedDateLabel = selectedDateObject ? formatDateLabel(selectedDateObject) : selectedDate;
-  const filteredBookings = bookings.filter((booking) => booking?.bookingDate === selectedDate);
+  const filteredBookings = isHistoryView
+    ? bookings.filter((booking) => {
+      const date = booking?.bookingDate || "";
+      const clientSearch = historyFilters.clientSearch.trim().toLowerCase();
+      if (historyFilters.fromDate && (!date || date < historyFilters.fromDate)) return false;
+      if (historyFilters.toDate && (!date || date > historyFilters.toDate)) return false;
+      if (historyFilters.status && booking?.status !== historyFilters.status) return false;
+      if (clientSearch && !`${getBookingName(booking)} ${booking?.clientPhone || booking?.phone || ""}`.toLowerCase().includes(clientSearch)) return false;
+      return true;
+    })
+    : bookings.filter((booking) => booking?.bookingDate === selectedDate);
   const sections = isHistoryView ? historyBookingSections : activeBookingSections;
   const groupedBookings = sections.map((section) => ({
     ...section,
@@ -39,7 +51,8 @@ export default function BookingsList({ bookings, services = [], isLoading = fals
 
   return <Card className="rounded-2xl sm:rounded-3xl lg:col-span-2"><CardContent className="space-y-5 p-4 sm:p-6">
     <BookingsHeaderFilters actionError={actionError} dateOptions={dateOptions} error={error} selectedDate={selectedDate} selectedDateLabel={selectedDateLabel}
-      successMessage={hook.successMessage} view={view} onAddBooking={isHistoryView ? undefined : hook.openAddBookingModal} onDateInputChange={(value) => setSelectedDate(value || formatDateKey(new Date()))} onSelectDate={setSelectedDate} />
+      successMessage={hook.successMessage} view={view} onAddBooking={isHistoryView ? undefined : hook.openAddBookingModal} onDateInputChange={(value) => setSelectedDate(value || formatDateKey(new Date()))} onSelectDate={setSelectedDate}
+      historyFilters={isHistoryView && <BookingHistoryFilters filters={historyFilters} onChange={(field, value) => setHistoryFilters((current) => ({ ...current, [field]: value }))} onReset={() => setHistoryFilters({ fromDate: "", toDate: "", status: "", clientSearch: "" })} />} />
     <BookingSections filteredBookings={filteredBookings} getBookingId={getBookingId} getBookingStatus={getBookingStatus} getBookingTime={getBookingTime}
       getClientName={getBookingName} getServiceName={getServiceName} groupedBookings={groupedBookings} highlightedBookingIds={hook.highlightedBookingIds}
       isEligibleForNoShowLateCancel={hook.isEligibleForNoShowLateCancel} isInitialLoading={hook.isInitialLoading} isLoading={isLoading} showActions={!isHistoryView}

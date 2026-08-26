@@ -41,11 +41,11 @@ export default function useClientBookingsData() {
     [bookings, currentUserId]
   );
   const activeBookings = useMemo(
-    () => myBookings.filter(isActiveBooking).sort(sortBookingsAscending),
+    () => myBookings.filter((booking) => isActiveBooking(booking)).sort(sortBookingsAscending),
     [myBookings]
   );
   const historyBookings = useMemo(
-    () => myBookings.filter(isHistoryBooking).sort(sortBookingsDescending),
+    () => myBookings.filter((booking) => isHistoryBooking(booking)).sort(sortBookingsDescending),
     [myBookings]
   );
   const groupedHistoryBookings = useMemo(

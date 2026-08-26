@@ -28,7 +28,7 @@ vi.mock("@/shared/lib/socket", () => ({
 }));
 
 vi.mock("@/barber/components/bookings/BookingsHeaderFilters", () => ({
-  default: ({ onAddBooking, view }) => (
+  default: ({ onAddBooking, view, historyFilters }) => (
     <div>
       <span data-testid="bookings-view">{view}</span>
       {view !== "history" && (
@@ -36,6 +36,7 @@ vi.mock("@/barber/components/bookings/BookingsHeaderFilters", () => ({
           Open add booking
         </button>
       )}
+      {view === "history" && historyFilters}
     </div>
   ),
 }));
@@ -215,6 +216,72 @@ describe("BookingsList manual booking salon context", () => {
     expect(screen.queryByTestId("booking-group-pending")).not.toBeInTheDocument();
     expect(screen.getByTestId("history-actions")).toHaveTextContent("false");
     expect(screen.queryByRole("button", { name: "Open add booking" })).not.toBeInTheDocument();
+  });
+
+  it("filters history by inclusive dates, terminal status, and client name or phone", () => {
+    const bookings = [
+      { id: "completed", bookingDate: "2026-08-10", status: "completed", clientName: "Ava", clientPhone: "555-100" },
+      { id: "cancelled", bookingDate: "2026-08-11", status: "cancelled", clientName: "Ben", phone: "555-200" },
+    ];
+    renderBookingsList([], { bookings, view: "history" });
+    fireEvent.change(screen.getByLabelText("Client search"), { target: { value: "aVa" } });
+    expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("0");
+    fireEvent.change(screen.getByLabelText("Client search"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-08-10" } });
+    fireEvent.change(screen.getByLabelText("To date"), { target: { value: "2026-08-10" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
+    fireEvent.change(screen.getByLabelText("Client search"), { target: { value: "555-100" } });
+    expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("0");
+    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-08-12" } });
+    expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("0");
+    expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("0");
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("1");
+  });
+
+  it("filters each terminal history status exactly", () => {
+    const terminalStatuses = ["completed", "rejected", "cancelled", "expired", "no_show", "late_cancelled"];
+    const bookings = terminalStatuses.map((status, index) => ({
+      id: status,
+      bookingDate: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      status,
+    }));
+    renderBookingsList([], { bookings, view: "history" });
+
+    terminalStatuses.forEach((status) => {
+      fireEvent.change(screen.getByLabelText("Status"), { target: { value: status } });
+      expect(screen.getByTestId("booking-group-completed")).toHaveTextContent(status === "completed" ? "1" : "0");
+      expect(screen.getByTestId("booking-group-closed")).toHaveTextContent(status === "completed" ? "0" : "1");
+    });
+  });
+
+  it("keeps history filters out of the active view when switching views", () => {
+    const bookingDate = getNext7Days()[0].value;
+    const bookings = [
+      { id: "pending", bookingDate, status: "pending" },
+      { id: "completed", bookingDate: "2026-08-10", status: "completed" },
+      { id: "cancelled", bookingDate: "2026-08-11", status: "cancelled" },
+    ];
+    const result = renderBookingsList([], { bookings, view: "history" });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
+    expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("0");
+
+    result.rerender(
+      <BookingsList bookings={bookings} services={[{ id: SERVICE_ID, barberId: BARBER_ID, active: true, duration: 30, name: "Haircut" }]} view="active" />
+    );
+    expect(screen.getByTestId("booking-group-pending")).toHaveTextContent("1");
+    expect(screen.queryByLabelText("Status")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("booking-group-completed")).not.toBeInTheDocument();
+
+    result.rerender(
+      <BookingsList bookings={bookings} services={[{ id: SERVICE_ID, barberId: BARBER_ID, active: true, duration: 30, name: "Haircut" }]} view="history" />
+    );
+    expect(screen.getByTestId("booking-group-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("booking-group-closed")).toHaveTextContent("0");
   });
 
   it("keeps the dashboard analytics input intact while its booking pane is active-only", async () => {

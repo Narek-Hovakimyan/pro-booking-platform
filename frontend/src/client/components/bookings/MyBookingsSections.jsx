@@ -8,6 +8,8 @@ export default function MyBookingsSections({
   groupedActiveBookings,
   groupedHistoryBookings,
   historyBookings,
+  historyFilters,
+  historyEmptyText = "No booking history yet",
   initialLoading,
   renderBookingCard,
   view = "active",
@@ -37,16 +39,19 @@ export default function MyBookingsSections({
         />
       )}
       {view === "history" && (
-        <BookingSection
-          title="History"
-          emptyText="No booking history yet"
-          bookings={historyBookings}
-          groups={groupedHistoryBookings}
-          section="history"
-          renderBooking={renderBookingCard}
-          emptyIcon={HeartCrack}
-          emptyCta={{ label: "Browse specialists", to: "/specialists" }}
-        />
+        <>
+          {historyFilters}
+          <BookingSection
+            title="History"
+            emptyText={historyEmptyText}
+            bookings={historyBookings}
+            groups={groupedHistoryBookings}
+            section="history"
+            renderBooking={renderBookingCard}
+            emptyIcon={HeartCrack}
+            emptyCta={{ label: "Browse specialists", to: "/specialists" }}
+          />
+        </>
       )}
     </div>
   );

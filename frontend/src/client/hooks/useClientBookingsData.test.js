@@ -51,6 +51,25 @@ describe("useClientBookingsData", () => {
     expect(mocks.socket.off).toHaveBeenCalledTimes(1);
   });
 
+  it("classifies past accepted and confirmed bookings as history without changing other statuses", async () => {
+    state.bookings = [
+      { id: "past-accepted", clientId: "client-1", bookingDate: "2000-08-01", time: "10:00", status: "accepted" },
+      { id: "past-confirmed", clientId: "client-1", bookingDate: "2000-08-02", time: "10:00", status: "confirmed" },
+      { id: "completed", clientId: "client-1", bookingDate: "2000-08-03", time: "10:00", status: "completed" },
+      { id: "pending", clientId: "client-1", bookingDate: "2099-08-04", time: "10:00", status: "pending" },
+      { id: "other-client", clientId: "other", bookingDate: "2000-08-05", time: "10:00", status: "completed" },
+    ];
+    mocks.dispatch.mockResolvedValue(state.bookings);
+    const ref = { current: null };
+    render(createElement(Harness, { ref }));
+
+    await waitFor(() => expect(ref.current?.myBookings).toHaveLength(4));
+    expect(ref.current.historyBookings.map((booking) => booking.id).sort()).toEqual([
+      "completed", "past-accepted", "past-confirmed",
+    ]);
+    expect(ref.current.activeBookings.map((booking) => booking.id)).toEqual(["pending"]);
+  });
+
   it("surfaces loading errors without writing stale state", async () => {
     mocks.dispatch.mockRejectedValueOnce(new Error("offline"));
     const ref = { current: null };

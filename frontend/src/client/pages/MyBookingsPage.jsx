@@ -1,7 +1,9 @@
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import BookingCard from "@/client/components/BookingCard";
 import MyBookingsHeader from "@/client/components/bookings/MyBookingsHeader";
+import BookingHistoryFilters from "@/client/components/bookings/BookingHistoryFilters";
 import MyBookingsModals from "@/client/components/bookings/MyBookingsModals";
 import MyBookingsSections from "@/client/components/bookings/MyBookingsSections";
 import NextBookingSection from "@/client/components/bookings/NextBookingSection";
@@ -10,7 +12,7 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { formatCurrency } from "@/platform/utils/billingFormatters";
 import { Container } from "@/shared/components/ui/Container";
 import { canReviewSalonBooking, hasSalonReviewForBooking, isBookingReviewed } from "@/client/utils/bookingReviewUtils";
-import { getBookingBarberId, getBookingDate, getBookingId, getBookingTime, getEntityId, getUpcomingStatusClass, getUpcomingStatusLabel } from "@/client/utils/bookingStatusUtils";
+import { getBookingBarberId, getBookingDate, getBookingId, getBookingSalonId, getBookingTime, getEntityId, getUpcomingStatusClass, getUpcomingStatusLabel } from "@/client/utils/bookingStatusUtils";
 import useClientBookingActions from "@/client/hooks/useClientBookingActions";
 import useClientBookingsData from "@/client/hooks/useClientBookingsData";
 
@@ -27,6 +29,7 @@ export default function MyBookingsPage({ view = "active" }) {
     addSalonReview: data.addSalonReview,
   });
   const isHistoryView = view === "history";
+  const [historyFilters, setHistoryFilters] = useState({ fromDate: "", toDate: "", status: "", specialistId: "", salonId: "" });
   const initialLoading = data.isLoading && data.myBookings.length === 0;
   const getServiceName = (booking) => {
     const service = booking?.service;
@@ -45,6 +48,38 @@ export default function MyBookingsPage({ view = "active" }) {
     if (!barberId) return name;
     return <button className="cursor-pointer font-semibold text-neutral-900 hover:underline" onClick={() => actions.openBarberProfile(booking)} type="button">{name}</button>;
   };
+  const specialistOptions = useMemo(() => {
+    const options = new Map();
+    data.historyBookings.forEach((booking) => {
+      const id = getBookingBarberId(booking);
+      if (id) options.set(String(id), data.getBarberForBooking(booking)?.name || "Specialist");
+    });
+    return [...options].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [data.historyBookings, data.getBarberForBooking]);
+  const salonOptions = useMemo(() => {
+    const options = new Map();
+    data.historyBookings.forEach((booking) => {
+      const id = getBookingSalonId(booking);
+      if (id) options.set(String(id), getSalonName(booking) || "Salon");
+    });
+    return [...options].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [data.historyBookings, data.getSalonForBooking]);
+  const filteredHistoryBookings = useMemo(() => data.historyBookings.filter((booking) => {
+    const date = getBookingDate(booking);
+    if (historyFilters.fromDate && (!date || date < historyFilters.fromDate)) return false;
+    if (historyFilters.toDate && (!date || date > historyFilters.toDate)) return false;
+    if (historyFilters.status === "confirmed" && !["accepted", "confirmed"].includes(booking?.status)) return false;
+    if (historyFilters.status && historyFilters.status !== "confirmed" && booking?.status !== historyFilters.status) return false;
+    if (historyFilters.specialistId && String(getBookingBarberId(booking)) !== historyFilters.specialistId) return false;
+    if (historyFilters.salonId && String(getBookingSalonId(booking)) !== historyFilters.salonId) return false;
+    return true;
+  }), [data.historyBookings, historyFilters]);
+  const filteredGroupedHistoryBookings = useMemo(() => data.groupedHistoryBookings.map((group) => ({
+    ...group,
+    bookings: group.bookings.filter((booking) => filteredHistoryBookings.includes(booking)),
+  })), [data.groupedHistoryBookings, filteredHistoryBookings]);
+  const hasHistoryFilters = Object.values(historyFilters).some(Boolean);
+  const updateHistoryFilter = (field, value) => setHistoryFilters((current) => ({ ...current, [field]: value }));
   const renderBookingCard = (booking, section) => {
     const price = booking?.finalPrice ?? booking?.price;
     return <BookingCard
@@ -75,7 +110,9 @@ export default function MyBookingsPage({ view = "active" }) {
         onFindBarber={() => navigate("/specialists")} onMessage={actions.messageBarber} onViewDetails={() => actions.openBookingDetailsModal(data.nextBooking)} />
     </CardContent></Card>}
     <MyBookingsSections activeBookings={data.visibleActiveBookings} groupedActiveBookings={data.groupedActiveBookings}
-      groupedHistoryBookings={data.groupedHistoryBookings} historyBookings={data.historyBookings} initialLoading={initialLoading} renderBookingCard={renderBookingCard} view={view} />
+      groupedHistoryBookings={filteredGroupedHistoryBookings} historyBookings={filteredHistoryBookings} initialLoading={initialLoading} renderBookingCard={renderBookingCard} view={view}
+      historyEmptyText={hasHistoryFilters ? "No booking history matches these filters" : "No booking history yet"}
+      historyFilters={isHistoryView && <BookingHistoryFilters filters={historyFilters} specialistOptions={specialistOptions} salonOptions={salonOptions} onChange={updateHistoryFilter} onReset={() => setHistoryFilters({ fromDate: "", toDate: "", status: "", specialistId: "", salonId: "" })} />} />
     <MyBookingsModals cancelError={actions.cancelError} cancellingBooking={actions.cancellingBooking} closeBookingDetailsModal={actions.closeBookingDetailsModal}
       createReview={actions.createReview} createSalonReview={actions.createSalonReview} delayError={actions.delayError} delayingBooking={actions.delayingBooking}
       getBarberForBooking={data.getBarberForBooking} getSalonName={getSalonName} isCancelSubmitting={actions.isCancelSubmitting} isDelaySubmitting={actions.isDelaySubmitting}

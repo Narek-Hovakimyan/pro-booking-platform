@@ -416,6 +416,82 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
     );
   });
 
+  it("filters history inclusively by status, specialist, salon, and date without changing active output", async () => {
+    state.bookings = [
+      { id: "completed-ava", clientId: "client-1", barberId: "barber-ava", bookingDate: "2026-08-10", time: "10:00", status: "completed", service: { name: "Cut" }, barber: { id: "barber-ava", name: "Ava" }, salon: { id: "salon-north", name: "North" } },
+      { id: "cancelled-ben", clientId: "client-1", barberId: "barber-ben", bookingDate: "2026-08-11", time: "11:00", status: "cancelled", service: { name: "Color" }, barber: { id: "barber-ben", name: "Ben" }, salon: { id: "salon-south", name: "South" } },
+    ];
+
+    renderPage("history");
+    await screen.findByTestId("booking-card-history-completed-ava");
+    expect(screen.getByRole("option", { name: "Ava" })).toHaveValue("barber-ava");
+    expect(screen.getByRole("option", { name: "North" })).toHaveValue("salon-north");
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
+    fireEvent.change(screen.getByLabelText("Specialist"), { target: { value: "barber-ava" } });
+    fireEvent.change(screen.getByLabelText("Salon"), { target: { value: "salon-north" } });
+    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-08-10" } });
+    fireEvent.change(screen.getByLabelText("To date"), { target: { value: "2026-08-10" } });
+    expect(screen.getByTestId("booking-card-history-completed-ava")).toBeInTheDocument();
+    expect(screen.queryByTestId("booking-card-history-cancelled-ben")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-08-12" } });
+    expect(screen.getByText("No booking history matches these filters")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(screen.getByTestId("booking-card-history-completed-ava")).toBeInTheDocument();
+    expect(screen.getByTestId("booking-card-history-cancelled-ben")).toBeInTheDocument();
+  });
+
+  it("maps Confirmed to accepted and confirmed while each terminal filter remains exact", async () => {
+    const terminalStatuses = ["completed", "cancelled", "expired", "no_show", "late_cancelled", "rejected"];
+    state.bookings = ["accepted", "confirmed", ...terminalStatuses].map((status, index) => ({
+      id: `${status}-booking`,
+      clientId: "client-1",
+      barberId: "barber-1",
+      bookingDate: `2000-08-${String(index + 1).padStart(2, "0")}`,
+      time: "10:00",
+      status,
+      service: { name: status },
+    }));
+
+    renderPage("history");
+    await screen.findByTestId("booking-card-history-accepted-booking");
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "confirmed" } });
+    expect(screen.getByTestId("booking-card-history-accepted-booking")).toBeInTheDocument();
+    expect(screen.getByTestId("booking-card-history-confirmed-booking")).toBeInTheDocument();
+    expect(screen.queryByTestId("booking-card-history-completed-booking")).not.toBeInTheDocument();
+
+    terminalStatuses.forEach((status) => {
+      fireEvent.change(screen.getByLabelText("Status"), { target: { value: status } });
+      expect(screen.getByTestId(`booking-card-history-${status}-booking`)).toBeInTheDocument();
+      terminalStatuses.filter((otherStatus) => otherStatus !== status).forEach((otherStatus) => {
+        expect(screen.queryByTestId(`booking-card-history-${otherStatus}-booking`)).not.toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("booking-card-history-accepted-booking")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("booking-card-history-confirmed-booking")).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps history filters out of the active view when switching views", async () => {
+    state.bookings = [
+      { id: "active-pending", clientId: "client-1", barberId: "barber-1", bookingDate: "2099-08-01", status: "pending", service: { name: "Active" } },
+      { id: "history-completed", clientId: "client-1", barberId: "barber-1", bookingDate: "2000-08-01", time: "10:00", status: "completed", service: { name: "Completed" } },
+      { id: "history-cancelled", clientId: "client-1", barberId: "barber-1", bookingDate: "2000-08-02", time: "10:00", status: "cancelled", service: { name: "Cancelled" } },
+    ];
+
+    const { rerender } = renderPage("history");
+    await screen.findByTestId("booking-card-history-history-completed");
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
+    expect(screen.queryByTestId("booking-card-history-history-cancelled")).not.toBeInTheDocument();
+
+    rerender(<MemoryRouter initialEntries={["/my-bookings"]}><MyBookingsPage view="active" /></MemoryRouter>);
+    expect(await screen.findByTestId("booking-card-active-active-pending")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Status")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("booking-card-history-history-completed")).not.toBeInTheDocument();
+
+    rerender(<MemoryRouter initialEntries={["/booking-history"]}><MyBookingsPage view="history" /></MemoryRouter>);
+    expect(screen.getByTestId("booking-card-history-history-completed")).toBeInTheDocument();
+    expect(screen.queryByTestId("booking-card-history-history-cancelled")).not.toBeInTheDocument();
+  });
+
   it("preserves the booking salonId in the rebook query", async () => {
     state.bookings = [
       {
