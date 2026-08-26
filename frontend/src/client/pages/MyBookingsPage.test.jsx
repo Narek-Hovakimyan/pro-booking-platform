@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,45 +48,13 @@ vi.mock("@/shared/lib/socket", () => ({
   }),
 }));
 
-vi.mock("@/client/components/bookings/MyBookingsHeader", () => ({
-  default: () => null,
-}));
-
 vi.mock("@/client/components/bookings/MyBookingsModals", () => ({
-  default: () => null,
-}));
-
-vi.mock("@/client/components/bookings/MyBookingsSections", () => ({
-  default: ({
-    activeBookings,
-    groupedActiveBookings,
-    groupedHistoryBookings,
-    historyBookings,
-    renderBookingCard,
-  }) => (
-    <div>
-      <section aria-label={`Active bookings ${activeBookings.length}`}>
-        {groupedActiveBookings.map((group) => (
-          <div data-testid={`active-group-${group.key}`} key={group.key}>
-            <h2>
-              {group.title} ({group.bookings.length})
-            </h2>
-            {group.bookings.map((booking) => renderBookingCard(booking, "active"))}
-          </div>
-        ))}
-      </section>
-      <section aria-label={`History ${historyBookings.length}`}>
-        {groupedHistoryBookings.map((group) => (
-          <div data-testid={`history-group-${group.key}`} key={group.key}>
-            <h2>
-              {group.title} ({group.bookings.length})
-            </h2>
-            {group.bookings.map((booking) => renderBookingCard(booking, "history"))}
-          </div>
-        ))}
-      </section>
-    </div>
-  ),
+  default: ({ selectedBookingForDetails, showBookingDetailsModal }) =>
+    showBookingDetailsModal ? (
+      <div data-testid="booking-details">
+        {selectedBookingForDetails?.service?.name || "Booking details"}
+      </div>
+    ) : null,
 }));
 
 vi.mock("@/client/components/bookings/NextBookingSection", () => ({
@@ -98,25 +66,31 @@ vi.mock("@/client/components/bookings/NextBookingSection", () => ({
 }));
 
 vi.mock("@/client/components/LoyaltyBanner", () => ({
-  default: () => null,
+  default: () => <div data-testid="loyalty-banner" />,
 }));
 
 vi.mock("@/client/components/BookingCard", () => ({
   default: ({
     booking,
     bookingId,
+    barberName,
     isActive,
     isBookAgainEligible,
     isSalonReviewed,
     canReviewSalon,
     onBookAgain,
+    onDetails,
     onReviewSalon,
     price,
     serviceName,
   }) => (
     <article data-testid={`booking-card-${isActive ? "active" : "history"}-${bookingId || "missing"}`}>
       <span>{serviceName}</span>
+      <span>{barberName}</span>
       {price ? <span>{price}</span> : null}
+      <button type="button" onClick={() => onDetails(booking)}>
+        View details
+      </button>
       {isBookAgainEligible ? (
         <button type="button" onClick={() => onBookAgain(booking)}>
           Book again
@@ -169,10 +143,10 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
     });
   });
 
-  const renderPage = () =>
+  const renderPage = (view = "active") =>
     render(
-      <MemoryRouter initialEntries={["/my-bookings"]}>
-        <MyBookingsPage />
+      <MemoryRouter initialEntries={[view === "history" ? "/booking-history" : "/my-bookings"]}>
+        <MyBookingsPage view={view} />
       </MemoryRouter>
     );
 
@@ -285,7 +259,7 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
     expect(screen.getByText("Confirmed (1)")).toBeInTheDocument();
   });
 
-  it("leaves history bookings unchanged", async () => {
+  it("shows active bookings only and keeps History available through the view tab", async () => {
     state.bookings = [
       {
         id: "next-booking",
@@ -325,21 +299,77 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
       },
     ];
 
-    renderPage();
+    renderPage("active");
 
     expect(await screen.findByTestId("next-booking")).toHaveTextContent("Upcoming appointment");
-    expect(screen.getByTestId("booking-card-history-completed-booking")).toHaveTextContent(
-      "Completed appointment"
+    expect(screen.getByTestId("loyalty-banner")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "History" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
+      "href",
+      "/booking-history"
     );
-    expect(screen.getByTestId("booking-card-history-cancelled-booking")).toHaveTextContent(
-      "Cancelled appointment"
+    expect(screen.getByRole("link", { name: "Upcoming" })).toHaveAttribute(
+      "href",
+      "/my-bookings"
     );
-    expect(screen.getByTestId("booking-card-history-rejected-booking")).toHaveTextContent(
-      "Rejected appointment"
-    );
-    expect(screen.getByText("Completed (1)")).toBeInTheDocument();
+  });
+
+  it("keeps history grouping, details, and specialist navigation in history view", async () => {
+    state.bookings = [
+      {
+        id: "completed-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2026-07-01",
+        time: "10:00",
+        status: "completed",
+        service: { name: "Completed appointment" },
+        barber: { id: "barber-1", name: "Anna" },
+      },
+      {
+        id: "cancelled-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2026-07-02",
+        time: "10:00",
+        status: "cancelled",
+        service: { name: "Cancelled appointment" },
+      },
+      {
+        id: "rejected-booking",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2026-07-03",
+        time: "10:00",
+        status: "rejected",
+        service: { name: "Rejected appointment" },
+      },
+    ];
+
+    renderPage("history");
+
+    expect(await screen.findByText("Completed (1)")).toBeInTheDocument();
     expect(screen.getByText("Cancelled (1)")).toBeInTheDocument();
     expect(screen.getByText("Rejected (1)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    expect(screen.queryByRole("heading", { name: "Active bookings" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Next booking")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("loyalty-banner")).not.toBeInTheDocument();
+
+    const completedCard = screen.getByTestId("booking-card-history-completed-booking");
+    fireEvent.click(within(completedCard).getByRole("button", { name: "View details" }));
+    expect(await screen.findByTestId("booking-details")).toHaveTextContent(
+      "Completed appointment"
+    );
+
+    fireEvent.click(within(completedCard).getByRole("button", { name: "Anna" }));
+    expect(routerMocks.navigate).toHaveBeenCalledWith(
+      "/specialists/barber-1/profile",
+      expect.objectContaining({ state: { barber: expect.objectContaining({ name: "Anna" }) } })
+    );
   });
 
   it("preserves the booking salonId in the rebook query", async () => {
@@ -359,7 +389,7 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
       },
     ];
 
-    renderPage();
+    renderPage("history");
 
     expect(await screen.findByText(formatCurrency(1000))).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Book again" }));
@@ -406,7 +436,7 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
       return Promise.resolve({ data: [] });
     });
 
-    renderPage();
+    renderPage("history");
 
     expect(
       await screen.findByText("Salon reviewed ✓")
@@ -443,14 +473,14 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
       return Promise.resolve({ data: [] });
     });
 
-    const { rerender } = renderPage();
+    const { rerender } = renderPage("history");
     expect(await screen.findByText("Salon reviewed ✓")).toBeInTheDocument();
 
     state.auth.currentUser = { id: "client-2" };
     state.bookings = [{ ...booking, clientId: "client-2" }];
     rerender(
-      <MemoryRouter initialEntries={["/my-bookings"]}>
-        <MyBookingsPage />
+      <MemoryRouter initialEntries={["/booking-history"]}>
+        <MyBookingsPage view="history" />
       </MemoryRouter>
     );
 

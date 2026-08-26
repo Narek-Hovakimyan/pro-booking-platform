@@ -6,6 +6,7 @@ import { Route } from "react-router-dom";
 import ProtectedRoute from "../shared/components/ProtectedRoute";
 
 const MyBookingsPage = lazy(() => import("../client/pages/MyBookingsPage"));
+const BookingHistoryPage = lazy(() => import("../client/pages/BookingHistoryPage"));
 const MyWaitlistPage = lazy(() => import("../client/pages/MyWaitlistPage"));
 const FavoritesPage = lazy(() => import("../client/pages/FavoritesPage"));
 const ClientProfilePage = lazy(() => import("../client/pages/ClientProfilePage"));
@@ -21,6 +22,14 @@ export const accountRoutes = (
       element={
         <ProtectedRoute role="client">
           <MyBookingsPage />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/booking-history"
+      element={
+        <ProtectedRoute role="client">
+          <BookingHistoryPage />
         </ProtectedRoute>
       }
     />

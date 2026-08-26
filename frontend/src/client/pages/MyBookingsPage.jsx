@@ -62,7 +62,8 @@ const getComparableBookingId = (booking) => {
   return String(bookingId).trim();
 };
 
-export default function MyBookingsPage() {
+export default function MyBookingsPage({ view = "active" }) {
+  const isHistoryView = view === "history";
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [selectedBookingForDetails, setSelectedBookingForDetails] = useState(null);
@@ -660,31 +661,33 @@ export default function MyBookingsPage() {
   return (
     <Container size="wide">
       <div className="space-y-6 sm:space-y-8">
-      <MyBookingsHeader error={error} />
-      <LoyaltyBanner />
+      <MyBookingsHeader error={error} view={view} />
+      {!isHistoryView && <LoyaltyBanner />}
 
-      <Card className="rounded-2xl sm:rounded-3xl">
-        <CardContent className="space-y-4 p-4 sm:p-6">
-          <NextBookingSection
-            barberId={nextBookingBarberId}
-            barberName={getBarberName(nextBooking)}
-            bookingDate={getBookingDate(nextBooking)}
-            bookingTime={getBookingTime(nextBooking)}
-            canCancel={canChangeBooking(nextBooking)}
-            canDelay={canDelayClientBooking(nextBooking)}
-            nextBooking={nextBooking}
-            salonName={getSalonName(nextBooking)}
-            serviceName={getServiceName(nextBooking)}
-            statusClass={getUpcomingStatusClass(nextBooking?.status)}
-            statusLabel={getUpcomingStatusLabel(nextBooking?.status)}
-            onCancel={() => openCancelBookingModal(nextBooking)}
-            onDelay={() => openDelayBookingModal(nextBooking)}
-            onFindBarber={() => navigate("/specialists")}
-            onMessage={messageBarber}
-            onViewDetails={() => openBookingDetailsModal(nextBooking)}
-          />
-        </CardContent>
-      </Card>
+      {!isHistoryView && (
+        <Card className="rounded-2xl sm:rounded-3xl">
+          <CardContent className="space-y-4 p-4 sm:p-6">
+            <NextBookingSection
+              barberId={nextBookingBarberId}
+              barberName={getBarberName(nextBooking)}
+              bookingDate={getBookingDate(nextBooking)}
+              bookingTime={getBookingTime(nextBooking)}
+              canCancel={canChangeBooking(nextBooking)}
+              canDelay={canDelayClientBooking(nextBooking)}
+              nextBooking={nextBooking}
+              salonName={getSalonName(nextBooking)}
+              serviceName={getServiceName(nextBooking)}
+              statusClass={getUpcomingStatusClass(nextBooking?.status)}
+              statusLabel={getUpcomingStatusLabel(nextBooking?.status)}
+              onCancel={() => openCancelBookingModal(nextBooking)}
+              onDelay={() => openDelayBookingModal(nextBooking)}
+              onFindBarber={() => navigate("/specialists")}
+              onMessage={messageBarber}
+              onViewDetails={() => openBookingDetailsModal(nextBooking)}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <MyBookingsSections
         activeBookings={visibleActiveBookings}
@@ -693,6 +696,7 @@ export default function MyBookingsPage() {
         historyBookings={historyBookings}
         initialLoading={initialLoading}
         renderBookingCard={renderBookingCard}
+        view={view}
       />
 
       <MyBookingsModals

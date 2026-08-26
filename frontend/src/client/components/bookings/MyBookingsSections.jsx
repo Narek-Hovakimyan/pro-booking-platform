@@ -10,6 +10,7 @@ export default function MyBookingsSections({
   historyBookings,
   initialLoading,
   renderBookingCard,
+  view = "active",
 }) {
   if (initialLoading) {
     return (
@@ -23,26 +24,30 @@ export default function MyBookingsSections({
 
   return (
     <div className="space-y-8">
-      <BookingSection
-        title="Active bookings"
-        emptyText="No active bookings"
-        bookings={activeBookings}
-        groups={groupedActiveBookings}
-        section="active"
-        renderBooking={renderBookingCard}
-        emptyIcon={CalendarX}
-        emptyCta={{ label: "Browse specialists", to: "/specialists" }}
-      />
-      <BookingSection
-        title="History"
-        emptyText="No booking history yet"
-        bookings={historyBookings}
-        groups={groupedHistoryBookings}
-        section="history"
-        renderBooking={renderBookingCard}
-        emptyIcon={HeartCrack}
-        emptyCta={{ label: "Browse specialists", to: "/specialists" }}
-      />
+      {view !== "history" && (
+        <BookingSection
+          title="Active bookings"
+          emptyText="No active bookings"
+          bookings={activeBookings}
+          groups={groupedActiveBookings}
+          section="active"
+          renderBooking={renderBookingCard}
+          emptyIcon={CalendarX}
+          emptyCta={{ label: "Browse specialists", to: "/specialists" }}
+        />
+      )}
+      {view === "history" && (
+        <BookingSection
+          title="History"
+          emptyText="No booking history yet"
+          bookings={historyBookings}
+          groups={groupedHistoryBookings}
+          section="history"
+          renderBooking={renderBookingCard}
+          emptyIcon={HeartCrack}
+          emptyCta={{ label: "Browse specialists", to: "/specialists" }}
+        />
+      )}
     </div>
   );
 }
