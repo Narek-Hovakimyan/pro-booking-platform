@@ -224,6 +224,50 @@ describe("MyBookingsPage salon-context rebook navigation", () => {
     expect(screen.getByText("Confirmed (2)")).toBeInTheDocument();
   });
 
+  it("renders multiple booking cards with stable list keys", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    state.bookings = [
+      {
+        id: "first-card",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "10:00",
+        status: "accepted",
+        service: { name: "First" },
+      },
+      {
+        id: "second-card",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "11:00",
+        status: "accepted",
+        service: { name: "Second" },
+      },
+      {
+        id: "third-card",
+        clientId: "client-1",
+        barberId: "barber-1",
+        bookingDate: "2099-08-01",
+        time: "12:00",
+        status: "accepted",
+        service: { name: "Third" },
+      },
+    ];
+
+    try {
+      renderPage();
+      await screen.findByTestId("booking-card-active-second-card");
+      expect(screen.getByTestId("booking-card-active-third-card")).toBeInTheDocument();
+      expect(consoleError.mock.calls.some(([message]) =>
+        String(message).includes("Each child in a list should have a unique")
+      )).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("keeps Armenia midnight-boundary active grouping from suppressing the wrong booking", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2099-08-01T23:55:00+04:00"));

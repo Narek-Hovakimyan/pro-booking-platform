@@ -219,6 +219,7 @@ describe("BookingsList manual booking salon context", () => {
 
   it("keeps the dashboard analytics input intact while its booking pane is active-only", async () => {
     const bookingDate = getNext7Days()[0].value;
+    await import("./BookingsList");
     renderWithProviders(
       <AdminPanel
         bookings={[
