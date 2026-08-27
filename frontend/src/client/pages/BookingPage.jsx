@@ -10,11 +10,11 @@ import { useSelector } from "react-redux";
 
 import BookingSummary from "@/client/components/BookingSummary";
 import ClientBooking from "@/client/components/ClientBooking";
+import useBookingPageAvailability from "@/client/hooks/useBookingPageAvailability";
 import useBookingPageData from "@/client/hooks/useBookingPageData";
 import {
   getBookingScheduleEntry,
   getDefaultSchedule,
-  getEffectiveDaySchedule,
   getEntityId,
   getScheduleOverrides,
   getStateSelectedSalonId,
@@ -27,14 +27,8 @@ import {
   getNext7ArmeniaDays,
   isDateKey,
 } from "@/shared/utils/dates";
-import { getSalonSlotAvailabilitySummary } from "@/shared/utils/slots";
 
 const EMPTY_NON_WORKING_DAYS = [];
-const EMPTY_SLOT_SUMMARY = {
-  availableSlots: [],
-  blockedByTime: false,
-  blockedByBooking: false,
-};
 
 const getRebookContext = (state) => {
   if (!state?.rebook) return null;
@@ -306,21 +300,6 @@ export default function BookingPage({
   ]);
 
   const selectedDateDayKey = selectedDateOption?.dayKey || "";
-  const selectedOverride = barberScheduleOverrides[selectedDate];
-  const selectedDaySchedule = useMemo(() => getEffectiveDaySchedule({
-    selectedOverride,
-    selectedDateDayKey,
-    weeklySchedule: barberWeeklySchedule,
-    scheduleEntry: barberScheduleEntry,
-    defaultSchedule: barberDefaultSchedule,
-  }), [
-    barberDefaultSchedule,
-    barberWeeklySchedule,
-    barberScheduleEntry,
-    selectedDateDayKey,
-    selectedOverride,
-  ]);
-  const isWeeklyDayOff = !selectedDaySchedule?.working;
 
   useEffect(() => {
     if (selectedDateOption?.dayKey) {
@@ -366,65 +345,30 @@ export default function BookingPage({
     setStep,
   ]);
 
-  const isSelectedDateNonWorking = (nonWorkingDays || []).includes(selectedDate);
-  const isBarberNotWorking = isSelectedDateNonWorking || isWeeklyDayOff;
-  const slotSummary = useMemo(() => {
-    if (
-      step < 3 ||
-      String(activeBarberId) !== String(barberId) ||
-      !barber ||
-      !selectedService ||
-      !selectedDate ||
-      !selectedDateDayKey ||
-      isScheduleBlocked ||
-      isBarberNotWorking
-    ) {
-      return EMPTY_SLOT_SUMMARY;
-    }
-
-    return getSalonSlotAvailabilitySummary(
-      selectedDaySchedule,
-      selectedService?.duration || 20,
-      barberBookings,
-      selectedDateDayKey,
-      { selectedDate }
-    );
-  }, [
+  const {
+    availableSlots,
+    isSelectedTimeValid,
+    slotMessage,
+  } = useBookingPageAvailability({
     activeBarberId,
-    barberId,
     barber,
     barberBookings,
-    isBarberNotWorking,
+    barberDefaultSchedule,
+    barberId,
+    barberScheduleEntry,
+    barberScheduleOverrides,
+    barberWeeklySchedule,
+    isLoading,
     isScheduleBlocked,
+    isServicesLoading,
+    nonWorkingDays,
     selectedDate,
     selectedDateDayKey,
-    selectedDaySchedule,
     selectedService,
+    selectedTime,
+    setSelectedTime,
     step,
-  ]);
-  const availableSlots = slotSummary.availableSlots;
-
-  useEffect(() => {
-    if (isLoading || isServicesLoading) return;
-
-    if (selectedTime && !availableSlots.includes(selectedTime)) {
-      setSelectedTime("");
-    }
-  }, [availableSlots, isLoading, isServicesLoading, selectedTime, setSelectedTime]);
-
-  const slotMessage = isScheduleBlocked
-    ? "This barber is not currently accepting bookings at this salon."
-    : !selectedService
-    ? "Select service first"
-    : !selectedDate
-      ? "Choose a date first"
-    : isBarberNotWorking
-      ? "Specialist is not working this day"
-      : slotSummary.blockedByTime
-        ? "Not enough time for selected service"
-        : slotSummary.blockedByBooking
-          ? "This time is already booked"
-          : "No available slots";
+  });
 
   if (!barber && !isLoading && !isBarberLoading && isRebooking) {
     return (
@@ -494,9 +438,7 @@ export default function BookingPage({
           selectedTime={selectedTime}
           setSelectedTime={setSelectedTime}
           availableSlots={availableSlots}
-          isSelectedTimeValid={
-            Boolean(selectedTime) && availableSlots.includes(selectedTime)
-          }
+          isSelectedTimeValid={isSelectedTimeValid}
           isRebooking={isRebooking}
           client={client}
           currentUser={currentUser}
