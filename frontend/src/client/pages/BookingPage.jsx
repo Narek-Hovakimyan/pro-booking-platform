@@ -13,11 +13,17 @@ import { getFriendlyApiError, isBarberUnavailableError } from "@/shared/api/erro
 import BookingSummary from "@/client/components/BookingSummary";
 import ClientBooking from "@/client/components/ClientBooking";
 import { CLIENT_BOOKING_REQUEST_TIMEOUT_MS } from "@/client/hooks/useClientBookingConfirmation";
-import initialSchedule, {
-  defaultPersonalSchedule,
-  getDayScheduleFromDefaultSchedule,
-  isWeeklyDayExplicit,
-} from "@/shared/data/schedule";
+import {
+  getBookingScheduleEntry,
+  getDefaultSchedule,
+  getEffectiveDaySchedule,
+  getEntityId,
+  getScheduleOverrides,
+  getStateSelectedSalonId,
+  getWeeklySchedule,
+  resolveBookingSalonId,
+} from "@/client/utils/bookingPageSchedule";
+import initialSchedule, { defaultPersonalSchedule } from "@/shared/data/schedule";
 import { setBookings } from "@/store/slices/bookingsSlice";
 import { setSchedule } from "@/store/slices/scheduleSlice";
 import { setServices } from "@/store/slices/servicesSlice";
@@ -29,7 +35,6 @@ import {
   isDateKey,
 } from "@/shared/utils/dates";
 import { getSalonSlotAvailabilitySummary } from "@/shared/utils/slots";
-import { timeToMinutes } from "@/shared/utils/time";
 
 const EMPTY_NON_WORKING_DAYS = [];
 const EMPTY_SLOT_SUMMARY = {
@@ -37,58 +42,6 @@ const EMPTY_SLOT_SUMMARY = {
   blockedByTime: false,
   blockedByBooking: false,
 };
-
-const getEntityId = (entity) =>
-  typeof entity === "string" ? entity : entity?.id || entity?._id || "";
-
-const getSalonEntryId = (salonEntry) => {
-  if (!salonEntry) return "";
-  if (typeof salonEntry === "string") return salonEntry;
-
-  const explicitSalonId = getEntityId(salonEntry?.salonId);
-  if (explicitSalonId) return explicitSalonId;
-
-  const nestedSalonId = getEntityId(salonEntry?.salon);
-  if (nestedSalonId) return nestedSalonId;
-
-  return getEntityId(salonEntry);
-};
-
-const getApprovedSalonEntries = (barber) =>
-  (Array.isArray(barber?.approvedSalons) && barber.approvedSalons.length > 0
-    ? barber.approvedSalons
-    : Array.isArray(barber?.salons)
-      ? barber.salons
-      : []
-  ).filter(
-    (salonEntry) =>
-      salonEntry &&
-      (salonEntry.status === "approved" || salonEntry.status === undefined)
-  );
-
-const getSingleApprovedSalonId = (barber) => {
-  const uniqueSalonIds = Array.from(
-    new Set(getApprovedSalonEntries(barber).map(getSalonEntryId).filter(Boolean))
-  );
-
-  return uniqueSalonIds.length === 1 ? uniqueSalonIds[0] : "";
-};
-
-const isMeaningfulWeeklyDay = (daySchedule) =>
-  Boolean(daySchedule?.working) &&
-  timeToMinutes(daySchedule.from) !== null &&
-  timeToMinutes(daySchedule.to) !== null;
-
-const getExplicitWeeklyDayOff = (daySchedule) =>
-  daySchedule?.working === false
-    ? {
-        working: false,
-        from: daySchedule.from || "",
-        to: daySchedule.to || "",
-        breakFrom: daySchedule.breakFrom || "",
-        breakTo: daySchedule.breakTo || "",
-      }
-    : null;
 
 const getRebookContext = (state) => {
   if (!state?.rebook) return null;
@@ -170,8 +123,7 @@ export default function BookingPage({
   const dispatch = useDispatch();
   const initialRebookContext = getRebookContext(location.state);
   const querySelectedSalonId = searchParams.get("salonId");
-  const stateSelectedSalonId =
-    location.state?.selectedSalonId || getEntityId(location.state?.salon) || null;
+  const stateSelectedSalonId = getStateSelectedSalonId(location.state);
   const users = useSelector((state) => state.users);
   const barberFromState = location.state?.barber;
   const barberFromStore = (users || []).find(
@@ -189,9 +141,11 @@ export default function BookingPage({
         barberFromState.depositSettings ?? barberFromStore?.depositSettings,
     };
   }, [barberFromState, barberFromStore]);
-  const derivedSelectedSalonId = getSingleApprovedSalonId(barber);
-  const initialSelectedSalonId =
-    querySelectedSalonId || stateSelectedSalonId || derivedSelectedSalonId || null;
+  const initialSelectedSalonId = resolveBookingSalonId({
+    querySelectedSalonId,
+    stateSelectedSalonId,
+    barber,
+  });
   const [rebookContext, setRebookContext] = useState(initialRebookContext);
   const [isLoading, setIsLoading] = useState(true);
   const [isServicesLoading, setIsServicesLoading] = useState(true);
@@ -203,12 +157,12 @@ export default function BookingPage({
   );
   const [activeBarberId, setActiveBarberId] = useState(null);
   const [selectedSalonId, setSelectedSalonId] = useState(initialSelectedSalonId);
-  const activeSelectedSalonId =
-    querySelectedSalonId ||
-    stateSelectedSalonId ||
-    selectedSalonId ||
-    derivedSelectedSalonId ||
-    null;
+  const activeSelectedSalonId = resolveBookingSalonId({
+    querySelectedSalonId,
+    stateSelectedSalonId,
+    selectedSalonId,
+    barber,
+  });
   const [priceAdjustment, setPriceAdjustment] = useState({
     discountPreview: 0,
     pricingQuote: null,
@@ -235,28 +189,23 @@ export default function BookingPage({
     : barberServices.find(
         (service) => String(service?.id || service?._id) === String(selectedServiceId)
       ) || null;
-  const barberScheduleEntry = useMemo(
-    () =>
-      schedule?.[barberId] || {
-        weeklySchedule: {},
-        dateSchedules: {},
-        defaultSchedule: barber?.defaultSchedule || defaultPersonalSchedule,
-        nonWorkingDays: [],
-      },
-    [barber?.defaultSchedule, barberId, schedule]
-  );
+  const barberScheduleEntry = useMemo(() => getBookingScheduleEntry({
+    schedule,
+    barberId,
+    barberDefaultSchedule: barber?.defaultSchedule,
+  }), [barber?.defaultSchedule, barberId, schedule]);
   const barberScheduleOverrides = useMemo(
-    () => barberScheduleEntry.scheduleOverrides || {},
-    [barberScheduleEntry.scheduleOverrides]
+    () => getScheduleOverrides(barberScheduleEntry),
+    [barberScheduleEntry]
   );
   const barberWeeklySchedule = useMemo(
-    () => barberScheduleEntry.weeklySchedule || {},
-    [barberScheduleEntry.weeklySchedule]
+    () => getWeeklySchedule(barberScheduleEntry),
+    [barberScheduleEntry]
   );
-  const barberDefaultSchedule =
-    barberScheduleEntry.defaultSchedule ||
-    barber?.defaultSchedule ||
-    defaultPersonalSchedule;
+  const barberDefaultSchedule = getDefaultSchedule(
+    barberScheduleEntry,
+    barber?.defaultSchedule
+  );
   const nonWorkingDays = barberScheduleEntry.nonWorkingDays || EMPTY_NON_WORKING_DAYS;
   const dateOptions = useMemo(() => getNext7ArmeniaDays(), []);
   const customSelectedDateOption = isDateKey(selectedDate)
@@ -319,7 +268,7 @@ export default function BookingPage({
         { replace: true, state: location.state }
       );
     },
-    [location.pathname, location.search, location.state, navigate]
+    [location.pathname, location.search, location.state, navigate, setSelectedSalonId]
   );
 
   useEffect(() => {
@@ -381,7 +330,7 @@ export default function BookingPage({
     } finally {
       setIsServicesLoading(false);
     }
-  }, [activeSelectedSalonId, barberId, dispatch]);
+  }, [activeSelectedSalonId, barberId, dispatch, setError, setIsServicesLoading]);
 
   useEffect(() => {
     if (!needsEnrichedBarber) return undefined;
@@ -420,35 +369,13 @@ export default function BookingPage({
 
   const selectedDateDayKey = selectedDateOption?.dayKey || "";
   const selectedOverride = barberScheduleOverrides[selectedDate];
-  const selectedDaySchedule = useMemo(() => {
-    // Keep frontend slot visibility aligned with backend getScheduleForDate.
-    if (selectedOverride) {
-      return {
-        working: Boolean(selectedOverride.isWorking),
-        from: selectedOverride.startTime || "",
-        to: selectedOverride.endTime || "",
-        breakFrom: selectedOverride.breakStart || "",
-        breakTo: selectedOverride.breakEnd || "",
-      };
-    }
-
-    const weeklyDaySchedule = selectedDateDayKey
-      ? barberWeeklySchedule[selectedDateDayKey]
-      : null;
-    const explicitWeeklyDayOff = getExplicitWeeklyDayOff(weeklyDaySchedule);
-    const explicitWeeklyDay = isWeeklyDayExplicit(
-      barberScheduleEntry,
-      selectedDateDayKey
-    );
-
-    if (explicitWeeklyDay && explicitWeeklyDayOff) {
-      return explicitWeeklyDayOff;
-    }
-
-    return explicitWeeklyDay && isMeaningfulWeeklyDay(weeklyDaySchedule)
-      ? weeklyDaySchedule
-      : getDayScheduleFromDefaultSchedule(barberDefaultSchedule);
-  }, [
+  const selectedDaySchedule = useMemo(() => getEffectiveDaySchedule({
+    selectedOverride,
+    selectedDateDayKey,
+    weeklySchedule: barberWeeklySchedule,
+    scheduleEntry: barberScheduleEntry,
+    defaultSchedule: barberDefaultSchedule,
+  }), [
     barberDefaultSchedule,
     barberWeeklySchedule,
     barberScheduleEntry,

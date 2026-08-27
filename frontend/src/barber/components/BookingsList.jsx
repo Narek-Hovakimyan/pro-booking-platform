@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Card, CardContent } from "@/shared/components/ui/card";
 import BookingsHeaderFilters from "@/barber/components/bookings/BookingsHeaderFilters";
@@ -30,7 +30,11 @@ export default function BookingsList({ bookings, services = [], isLoading = fals
   const isHistoryView = view === "history";
   const [selectedDate, setSelectedDate] = useState(getNext7Days()[0].value);
   const [historyFilters, setHistoryFilters] = useState({ fromDate: "", toDate: "", status: "", clientSearch: "" });
-  const [visibleHistoryCount, setVisibleHistoryCount] = useState(PAGE_SIZE);
+  const [historyPagination, setHistoryPagination] = useState(() => ({
+    bookings,
+    filters: historyFilters,
+    visibleCount: PAGE_SIZE,
+  }));
   const dateOptions = getNext7Days();
   const hook = useBarberBookings({ services, selectedDate, setSelectedDate });
   const selectedDateObject = parseDateKey(selectedDate);
@@ -47,7 +51,11 @@ export default function BookingsList({ bookings, services = [], isLoading = fals
     })
     .filter((booking) => historyBookingSections.some((section) => section.statuses.includes(getBookingStatus(booking))))
     .sort((a, b) => getBookingSortValue(b).localeCompare(getBookingSortValue(a))), [bookings, historyFilters]);
-  useEffect(() => { setVisibleHistoryCount(PAGE_SIZE); }, [historyFilters, bookings]);
+  const visibleHistoryCount =
+    historyPagination.bookings === bookings &&
+    historyPagination.filters === historyFilters
+      ? historyPagination.visibleCount
+      : PAGE_SIZE;
   const filteredBookings = isHistoryView
     ? filteredHistoryBookings.slice(0, visibleHistoryCount)
     : bookings.filter((booking) => booking?.bookingDate === selectedDate);
@@ -68,7 +76,7 @@ export default function BookingsList({ bookings, services = [], isLoading = fals
       onMarkLateCancelBooking={hook.markLateCancelBooking} onMarkNoShowBooking={hook.markNoShowBooking} onOpenRejectBookingModal={hook.openRejectBookingModal}
       onAcceptRescheduleRequest={(booking) => hook.respondToRescheduleRequest(booking, "accept")} onRejectRescheduleRequest={(booking) => hook.respondToRescheduleRequest(booking, "reject")}
       rescheduleAction={hook.rescheduleAction} onUpdateBookingStatus={hook.updateBookingStatus}
-      historyPagination={isHistoryView && filteredHistoryBookings.length > 0 && <div className="flex items-center justify-between gap-3 text-sm text-neutral-600"><span>{filteredBookings.length} / {filteredHistoryBookings.length}</span>{filteredBookings.length < filteredHistoryBookings.length && <button className="rounded-lg border px-3 py-2 font-medium text-neutral-900" type="button" onClick={() => setVisibleHistoryCount((count) => count + PAGE_SIZE)}>Load more</button>}</div>} />
+      historyPagination={isHistoryView && filteredHistoryBookings.length > 0 && <div className="flex items-center justify-between gap-3 text-sm text-neutral-600"><span>{filteredBookings.length} / {filteredHistoryBookings.length}</span>{filteredBookings.length < filteredHistoryBookings.length && <button className="rounded-lg border px-3 py-2 font-medium text-neutral-900" type="button" onClick={() => setHistoryPagination({ bookings, filters: historyFilters, visibleCount: visibleHistoryCount + PAGE_SIZE })}>Load more</button>}</div>} />
     {!isHistoryView && hook.isAddModalOpen && <ManualBookingModal activeServices={hook.activeServices} error={hook.actionError} isAddingBooking={hook.isAddingBooking} manualBooking={hook.manualBooking}
       onClose={() => hook.setIsAddModalOpen(false)} onSubmit={hook.createManualBooking} onUpdateManualBooking={hook.updateManualBooking} />}
     {!isHistoryView && hook.rejectingBooking && <RejectBookingModal booking={hook.rejectingBooking} error={hook.rejectionError} isSubmitting={hook.isRejectingBooking}
