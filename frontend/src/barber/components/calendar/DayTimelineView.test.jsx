@@ -117,4 +117,13 @@ describe("DayTimelineView", () => {
     fireEvent.click(bookingControl);
     expect(onCreateSlot).not.toHaveBeenCalled();
   });
+
+  it("uses exact schedule boundaries and keeps edge time labels inside the gutter", () => {
+    render(<DayTimelineView bookings={[]} dateKey="2099-08-03" isNonWorkingDay={false} selectedDaySchedule={{ working: true, from: "13:30", to: "20:00" }} />);
+    const first = screen.getByTestId("time-label-13:30");
+    const last = screen.getByTestId("time-label-20:00");
+    expect(first).toHaveStyle({ top: "0px", transform: "none" });
+    expect(last).toHaveStyle({ transform: "translateY(-100%)" });
+    expect(screen.queryByTestId("time-label-13:00")).not.toBeInTheDocument();
+  });
 });

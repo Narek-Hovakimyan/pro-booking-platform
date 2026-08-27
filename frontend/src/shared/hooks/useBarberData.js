@@ -1,23 +1,59 @@
 import { useEffect, useMemo, useState } from "react";
 
 import api from "../api/axios";
-import initialSchedule, { defaultPersonalSchedule } from "../data/schedule";
+import { defaultPersonalSchedule } from "../data/schedule";
 import { setServices } from "../../store/slices/servicesSlice";
 import { setSchedule } from "../../store/slices/scheduleSlice";
 
-const personalScheduleDayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-const normalizePersonalWeeklySchedule = (weeklySchedule) => {
-  const source =
-    weeklySchedule && typeof weeklySchedule === "object" ? weeklySchedule : {};
-
-  return Object.fromEntries(
-    personalScheduleDayKeys.map((dayKey) => [
-      dayKey,
-      source[dayKey] || initialSchedule[dayKey],
-    ])
-  );
+const getSalonId = (entry) => {
+  if (!entry) return null;
+  if (typeof entry.salon === "object" && entry.salon) {
+    return entry.salon.id || entry.salon._id || null;
+  }
+  return entry.salon || entry.salonId || null;
 };
+
+const isApprovedSalon = (entry) => {
+  const status = entry?.status || entry?.salon?.status;
+  const relationshipStatus =
+    entry?.relationshipStatus || entry?.salon?.relationshipStatus;
+  if (relationshipStatus && relationshipStatus !== "accepted") return false;
+  return status === "approved" || (!status && relationshipStatus === "accepted");
+};
+
+/**
+ * Return a salon only when the authenticated user already provides an
+ * unambiguous context. A primary membership disambiguates multiple salons;
+ * otherwise multiple approved memberships deliberately fall back to the
+ * personal schedule endpoint rather than guessing.
+ */
+export const getUnambiguousSalonId = (user) => {
+  const allSalonEntries = Array.isArray(user?.salons) ? user.salons : [];
+  const approvedSalons = allSalonEntries.filter(
+    (entry) => isApprovedSalon(entry) && getSalonId(entry)
+  );
+  const primarySalons = approvedSalons.filter((entry) => entry.isPrimary === true);
+
+  if (primarySalons.length === 1) return String(getSalonId(primarySalons[0]));
+  if (approvedSalons.length === 1) return String(getSalonId(approvedSalons[0]));
+
+  if (approvedSalons.length === 0 && user?.salonStatus === "approved") {
+    const legacySalonId = getSalonId(user);
+    const canonicalEntryForLegacySalon = allSalonEntries.some(
+      (entry) =>
+        legacySalonId && String(getSalonId(entry)) === String(legacySalonId)
+    );
+    if (canonicalEntryForLegacySalon) return null;
+    return legacySalonId ? String(legacySalonId) : null;
+  }
+
+  return null;
+};
+
+export const getLoadedWeeklySchedule = (weeklySchedule) =>
+  weeklySchedule && typeof weeklySchedule === "object" && !Array.isArray(weeklySchedule)
+    ? weeklySchedule
+    : {};
 
 export function useBarberData({
   currentUser,
@@ -47,20 +83,40 @@ export function useBarberData({
     [currentUserId, services]
   );
 
+  const salonContextId = useMemo(
+    () => getUnambiguousSalonId(currentUser),
+    [currentUser]
+  );
+  const salonContextDefaultSchedule = useMemo(() => {
+    if (!salonContextId || !Array.isArray(currentUser?.salons)) return null;
+    const contextEntry = currentUser.salons.find(
+      (entry) => String(getSalonId(entry)) === String(salonContextId)
+    );
+    return contextEntry?.defaultSchedule || null;
+  }, [currentUser, salonContextId]);
+
   const barberScheduleEntry = useMemo(
     () =>
       schedule[currentUserId] || {
-        weeklySchedule: initialSchedule,
+        weeklySchedule: {},
         dateSchedules: {},
         scheduleOverrides: {},
-        defaultSchedule: currentUser?.defaultSchedule || defaultPersonalSchedule,
+        defaultSchedule:
+          salonContextDefaultSchedule ||
+          currentUser?.defaultSchedule ||
+          defaultPersonalSchedule,
         nonWorkingDays: [],
       },
-    [currentUser?.defaultSchedule, currentUserId, schedule]
+    [
+      currentUser?.defaultSchedule,
+      currentUserId,
+      salonContextDefaultSchedule,
+      schedule,
+    ]
   );
 
   const barberSchedule = useMemo(
-    () => barberScheduleEntry.weeklySchedule || initialSchedule,
+    () => barberScheduleEntry.weeklySchedule || {},
     [barberScheduleEntry]
   );
 
@@ -120,7 +176,10 @@ export function useBarberData({
 
       try {
         if (currentUserRole === "barber") {
-          const scheduleResponse = await api.get(`/schedules/${currentUserId}/personal`);
+          const schedulePath = salonContextId
+            ? `/schedules/${currentUserId}/${salonContextId}`
+            : `/schedules/${currentUserId}/personal`;
+          const scheduleResponse = await api.get(schedulePath);
 
           if (!isMounted) return;
 
@@ -130,9 +189,8 @@ export function useBarberData({
           dispatch(
             setSchedule({
               barberId: currentUserId,
-              weeklySchedule: normalizePersonalWeeklySchedule(
-                scheduleData.weeklySchedule
-              ),
+              weeklySchedule: getLoadedWeeklySchedule(scheduleData.weeklySchedule),
+              explicitWeeklyDays: scheduleData.explicitWeeklyDays,
               dateSchedules: scheduleData.dateSchedules || {},
               scheduleOverrides: scheduleData.scheduleOverrides || {},
               defaultSchedule:
@@ -160,7 +218,7 @@ export function useBarberData({
     return () => {
       isMounted = false;
     };
-  }, [currentUserId, currentUserRole, dispatch, setDataError]);
+  }, [currentUserId, currentUserRole, dispatch, salonContextId, setDataError]);
 
   return {
     barberBookings,

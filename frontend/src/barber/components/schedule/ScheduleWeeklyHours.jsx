@@ -1,4 +1,6 @@
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { Button } from "@/shared/components/ui/button";
+import { getExplicitWeeklyDays } from "@/shared/data/schedule";
 
 const DAYS = [
   { label: "Mon", key: "mon" },
@@ -50,7 +52,12 @@ const getWeeklyDayState = (daySchedule, defaultDayState) => {
 export default function ScheduleWeeklyHours({
   defaultSchedule,
   weeklySchedule = {},
+  explicitWeeklyDays,
+  isSaving = false,
+  onUseDefaultHours,
 }) {
+  const scheduleWithProvenance = { weeklySchedule, explicitWeeklyDays };
+  const customDayKeys = getExplicitWeeklyDays(scheduleWithProvenance);
   const defaultDayState = getDefaultDayState(defaultSchedule);
   const breakLabel = defaultDayState.breakLabel || "No default break";
 
@@ -81,8 +88,19 @@ export default function ScheduleWeeklyHours({
           </span>
         </div>
         <p className="mt-2 text-sm leading-6 text-neutral-500">
-          These default hours apply unless a date-specific override or day off is added.
+          These default hours apply unless a weekday or date-specific override is added.
         </p>
+        {onUseDefaultHours && (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-3"
+            disabled={isSaving || customDayKeys.length === 0}
+            onClick={onUseDefaultHours}
+          >
+            Use default hours for weekdays
+          </Button>
+        )}
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-purple-100 bg-purple-50/60 p-4">
             <div className="flex items-center gap-2">
@@ -109,7 +127,10 @@ export default function ScheduleWeeklyHours({
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {DAYS.map(({ label, key }) => {
-            const dayState = getWeeklyDayState(weeklySchedule?.[key], defaultDayState);
+            const dayState = getWeeklyDayState(
+              customDayKeys.includes(key) ? weeklySchedule?.[key] : null,
+              defaultDayState
+            );
 
             return (
               <div

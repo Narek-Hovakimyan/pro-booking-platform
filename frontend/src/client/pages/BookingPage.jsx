@@ -16,6 +16,7 @@ import { CLIENT_BOOKING_REQUEST_TIMEOUT_MS } from "@/client/hooks/useClientBooki
 import initialSchedule, {
   defaultPersonalSchedule,
   getDayScheduleFromDefaultSchedule,
+  isWeeklyDayExplicit,
 } from "@/shared/data/schedule";
 import { setBookings } from "@/store/slices/bookingsSlice";
 import { setSchedule } from "@/store/slices/scheduleSlice";
@@ -435,17 +436,22 @@ export default function BookingPage({
       ? barberWeeklySchedule[selectedDateDayKey]
       : null;
     const explicitWeeklyDayOff = getExplicitWeeklyDayOff(weeklyDaySchedule);
+    const explicitWeeklyDay = isWeeklyDayExplicit(
+      barberScheduleEntry,
+      selectedDateDayKey
+    );
 
-    if (explicitWeeklyDayOff) {
+    if (explicitWeeklyDay && explicitWeeklyDayOff) {
       return explicitWeeklyDayOff;
     }
 
-    return isMeaningfulWeeklyDay(weeklyDaySchedule)
+    return explicitWeeklyDay && isMeaningfulWeeklyDay(weeklyDaySchedule)
       ? weeklyDaySchedule
       : getDayScheduleFromDefaultSchedule(barberDefaultSchedule);
   }, [
     barberDefaultSchedule,
     barberWeeklySchedule,
+    barberScheduleEntry,
     selectedDateDayKey,
     selectedOverride,
   ]);
@@ -509,6 +515,7 @@ export default function BookingPage({
           setSchedule({
             barberId,
             weeklySchedule: scheduleResponse.data?.weeklySchedule || initialSchedule,
+            explicitWeeklyDays: scheduleResponse.data?.explicitWeeklyDays,
             dateSchedules: scheduleResponse.data?.dateSchedules || {},
             scheduleOverrides: scheduleResponse.data?.scheduleOverrides || {},
             defaultSchedule:

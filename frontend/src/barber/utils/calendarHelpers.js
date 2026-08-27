@@ -1,5 +1,8 @@
 import { timeToMinutes } from "@/shared/utils/time";
-import { getDayScheduleFromDefaultSchedule } from "@/shared/data/schedule";
+import {
+  getDayScheduleFromDefaultSchedule,
+  isWeeklyDayExplicit,
+} from "@/shared/data/schedule";
 import { getArmeniaDayKey } from "@/shared/utils/dates";
 
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -31,6 +34,7 @@ export function getVisibleTimeRange({
   bookings = [],
   fallbackStart = FALLBACK_VISIBLE_START,
   fallbackEnd = FALLBACK_VISIBLE_END,
+  exactBoundaries = false,
 } = {}) {
   let startMin, endMin;
 
@@ -72,13 +76,12 @@ export function getVisibleTimeRange({
     }
   }
 
-  // Round to nearest hour
-  startMin = Math.max(0, Math.floor(startMin / 60) * 60);
-  endMin = Math.min(24 * 60, Math.ceil(endMin / 60) * 60);
-
-  // Enforce minimum range (at least 2 hours)
-  if (endMin - startMin < 120) {
-    endMin = startMin + 120;
+  if (!exactBoundaries) {
+    startMin = Math.max(0, Math.floor(startMin / 60) * 60);
+    endMin = Math.min(24 * 60, Math.ceil(endMin / 60) * 60);
+    if (endMin - startMin < 120) {
+      endMin = startMin + 120;
+    }
   }
 
   return { start: startMin, end: endMin, hours: (endMin - startMin) / 60 };
@@ -152,8 +155,9 @@ export function getEffectiveDaySchedule(scheduleEntry, selectedDateKey, defaultS
   const nonWorkingDays = scheduleEntry?.nonWorkingDays || [];
   const selectedOverride = scheduleOverrides[selectedDateKey];
   const baseDefaultSchedule = defaultSchedule || FALLBACK_DEFAULT_SCHEDULE;
-  const weeklyDaySchedule =
-    scheduleEntry?.weeklySchedule?.[getArmeniaDayKey(selectedDateKey)];
+  const selectedDayKey = getArmeniaDayKey(selectedDateKey);
+  const weeklyDaySchedule = scheduleEntry?.weeklySchedule?.[selectedDayKey];
+  const explicitWeeklyDay = isWeeklyDayExplicit(scheduleEntry, selectedDayKey);
   const selectedDaySchedule = selectedOverride
     ? {
         working: Boolean(selectedOverride.isWorking),
@@ -162,7 +166,7 @@ export function getEffectiveDaySchedule(scheduleEntry, selectedDateKey, defaultS
         breakFrom: selectedOverride.breakStart || "",
         breakTo: selectedOverride.breakEnd || "",
       }
-    : weeklyDaySchedule?.working === false
+    : explicitWeeklyDay && weeklyDaySchedule?.working === false
       ? {
           working: false,
           from: weeklyDaySchedule.from || "",
@@ -170,7 +174,7 @@ export function getEffectiveDaySchedule(scheduleEntry, selectedDateKey, defaultS
           breakFrom: weeklyDaySchedule.breakFrom || "",
           breakTo: weeklyDaySchedule.breakTo || "",
         }
-      : weeklyDaySchedule?.working === true &&
+      : explicitWeeklyDay && weeklyDaySchedule?.working === true &&
           timeToMinutes(weeklyDaySchedule.from) !== null &&
           timeToMinutes(weeklyDaySchedule.to) !== null
         ? weeklyDaySchedule

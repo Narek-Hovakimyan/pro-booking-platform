@@ -281,6 +281,67 @@ test("weekly working hours override default card availability hours", () => {
   assert.equal(result.firstAvailableSlot.time, "10:00");
 });
 
+test("generated weekdays inherit the saved default when provenance is empty", () => {
+  const result = getAvailability([], {
+    salons: [makeSalon({ startTime: "13:00", endTime: "18:00" })],
+    schedulesBySalonId: new Map([
+      [
+        "salon-a",
+        {
+          weeklySchedule: {
+            mon: { working: true, from: "09:00", to: "18:00" },
+          },
+          explicitWeeklyDays: [],
+          defaultSchedule: {
+            startTime: "13:00",
+            endTime: "18:00",
+            hasBreak: false,
+          },
+        },
+      ],
+    ]),
+  });
+
+  assert.equal(result.firstAvailableSlot.time, "13:00");
+});
+
+test("explicit weekdays and legacy schedules retain their existing meaning", () => {
+  for (const schedule of [
+    {
+      weeklySchedule: { mon: { working: true, from: "10:00", to: "12:00" } },
+      explicitWeeklyDays: ["mon"],
+      defaultSchedule: { startTime: "13:00", endTime: "18:00" },
+    },
+    {
+      weeklySchedule: { mon: { working: true, from: "10:00", to: "12:00" } },
+      defaultSchedule: { startTime: "13:00", endTime: "18:00" },
+    },
+  ]) {
+    const result = getAvailability([], {
+      schedulesBySalonId: new Map([["salon-a", schedule]]),
+    });
+    assert.equal(result.firstAvailableSlot.time, "10:00");
+  }
+});
+
+test("an explicitly closed weekday remains unavailable", () => {
+  const result = getAvailability([], {
+    schedulesBySalonId: new Map([
+      [
+        "salon-a",
+        {
+          weeklySchedule: { mon: { working: false } },
+          explicitWeeklyDays: ["mon"],
+          defaultSchedule: { startTime: "13:00", endTime: "18:00" },
+        },
+      ],
+    ]),
+  });
+
+  assert.equal(result.firstAvailableSlot, null);
+  assert.equal(result.reason, "no-availability-today");
+});
+
 test("date override beats weekly card availability schedule", () => {
   const result = getAvailability([], {
     schedulesBySalonId: new Map([

@@ -218,6 +218,16 @@ export const sanitizeWeeklySchedule = (weeklySchedule) => {
   return sanitized;
 };
 
+export const sanitizeExplicitWeeklyDays = (explicitWeeklyDays) => {
+  if (!Array.isArray(explicitWeeklyDays)) {
+    throw new Error("explicitWeeklyDays must be an array");
+  }
+
+  return Array.from(
+    new Set(explicitWeeklyDays.filter((dayKey) => dayKeys.includes(dayKey)))
+  );
+};
+
 const isAllDaysOffShape = (weeklySchedule = {}) =>
   dayKeys.every((dayKey) => {
     const daySchedule = weeklySchedule?.[dayKey] || {};
@@ -270,9 +280,19 @@ export const normalizeScheduleForAvailability = (schedule) => {
 
   if (!hasWeeklyScheduleChanged && !hasDateFieldsChanged) return schedule;
 
+  const serializedSchedule =
+    typeof schedule.toObject === "function" ? schedule.toObject() : schedule;
+  const hasExplicitWeeklyDays = Object.hasOwn(
+    serializedSchedule,
+    "explicitWeeklyDays"
+  );
+
   return {
     dateSchedules: cleanedScheduleDates.dateSchedules,
     defaultSchedule: schedule.defaultSchedule,
+    ...(hasExplicitWeeklyDays
+      ? { explicitWeeklyDays: schedule.explicitWeeklyDays }
+      : {}),
     nonWorkingDays: cleanedScheduleDates.nonWorkingDays,
     scheduleOverrides: cleanedScheduleDates.scheduleOverrides,
     weeklySchedule,

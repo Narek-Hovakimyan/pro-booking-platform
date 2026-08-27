@@ -5,6 +5,7 @@ import { getFriendlyApiError, isBarberUnavailableError } from "@/shared/api/erro
 import initialSchedule, {
   defaultPersonalSchedule,
   getDayScheduleFromDefaultSchedule,
+  isWeeklyDayExplicit,
 } from "@/shared/data/schedule";
 import {
   formatArmeniaDateLabel,
@@ -99,6 +100,7 @@ export function useSalonBookingAvailability({
         setBarberScheduleEntry({
           weeklySchedule:
             scheduleResponse.data?.weeklySchedule || initialSchedule,
+          explicitWeeklyDays: scheduleResponse.data?.explicitWeeklyDays,
           dateSchedules: scheduleResponse.data?.dateSchedules || {},
           scheduleOverrides: scheduleResponse.data?.scheduleOverrides || {},
           defaultSchedule:
@@ -176,17 +178,22 @@ export function useSalonBookingAvailability({
       ? barberWeeklySchedule[selectedDateDayKey]
       : null;
     const explicitWeeklyDayOff = getExplicitWeeklyDayOff(weeklyDaySchedule);
+    const explicitWeeklyDay = isWeeklyDayExplicit(
+      barberScheduleEntry,
+      selectedDateDayKey
+    );
 
-    if (explicitWeeklyDayOff) {
+    if (explicitWeeklyDay && explicitWeeklyDayOff) {
       return explicitWeeklyDayOff;
     }
 
-    return getMeaningfulWeeklyDay(weeklyDaySchedule)
+    return explicitWeeklyDay && getMeaningfulWeeklyDay(weeklyDaySchedule)
       ? weeklyDaySchedule
       : getDayScheduleFromDefaultSchedule(barberDefaultSchedule);
   }, [
     barberDefaultSchedule,
     barberWeeklySchedule,
+    barberScheduleEntry,
     selectedDateDayKey,
     selectedOverride,
   ]);

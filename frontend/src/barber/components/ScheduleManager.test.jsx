@@ -375,6 +375,39 @@ describe("ScheduleManager", () => {
     );
   });
 
+  it("lets legacy schedules opt into default weekday inheritance", async () => {
+    mockSingleSalonScheduleLoad(
+      baseSchedule({
+        defaultSchedule: {
+          startTime: "13:00",
+          endTime: "18:00",
+          hasBreak: false,
+          breakStart: "",
+          breakEnd: "",
+        },
+      })
+    );
+    mocks.apiPut.mockImplementation((url, body) =>
+      Promise.resolve({ data: body })
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("Aurora Salon")).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Use default hours for weekdays",
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.apiPut).toHaveBeenCalledWith(
+        "/schedules/barber-1/salon-a",
+        expect.objectContaining({ explicitWeeklyDays: [] })
+      )
+    );
+  });
+
   it("keeps draft changes isolated when the salon changes", async () => {
     mocks.apiGet.mockImplementation((url) => {
       if (url === "/salons/me/status") {
@@ -617,6 +650,24 @@ describe("ScheduleManager", () => {
 
     expect(screen.getByText("Open by default")).toBeInTheDocument();
     expect(screen.getAllByText("09:00 to 18:00").length).toBeGreaterThan(0);
+  });
+
+  it("shows generated weekday values as inherited default hours", () => {
+    render(
+      <ScheduleWeeklyHours
+        defaultSchedule={{
+          working: true,
+          startTime: "13:00",
+          endTime: "18:00",
+          hasBreak: false,
+        }}
+        weeklySchedule={baseSchedule().weeklySchedule}
+        explicitWeeklyDays={[]}
+      />
+    );
+
+    expect(screen.getAllByText("13:00 to 18:00")).toHaveLength(8);
+    expect(screen.queryByText("09:00 to 18:00")).not.toBeInTheDocument();
   });
 
   it("propagates services diagnostics into the schedule view", async () => {

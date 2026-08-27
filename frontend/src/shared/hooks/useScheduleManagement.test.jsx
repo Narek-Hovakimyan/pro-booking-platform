@@ -236,4 +236,79 @@ describe("useScheduleManagement", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(setDataError).toHaveBeenLastCalledWith("");
   });
+
+  it("marks only an edited inherited weekday explicit", async () => {
+    const result = baseSchedule();
+    result.explicitWeeklyDays = ["mon"];
+    mocks.put.mockResolvedValueOnce(response(result));
+    const { ref } = renderHookHarness({
+      barberSchedule: {},
+      barberExplicitWeeklyDays: [],
+    });
+
+    await act(async () => {
+      await ref.current.updateSchedule("mon", "from", "13:00");
+    });
+
+    expect(mocks.put.mock.calls[0][1]).toMatchObject({
+      explicitWeeklyDays: ["mon"],
+      weeklySchedule: {
+        mon: {
+          working: true,
+          from: "13:00",
+          to: "18:00",
+          breakFrom: "",
+          breakTo: "",
+        },
+      },
+    });
+  });
+
+  it("replaces generated inherited hours with the effective default before editing", async () => {
+    const result = baseSchedule();
+    result.weeklySchedule.mon = {
+      working: true,
+      from: "14:00",
+      to: "18:00",
+      breakFrom: "12:00",
+      breakTo: "12:30",
+    };
+    result.explicitWeeklyDays = ["mon"];
+    mocks.put.mockResolvedValueOnce(response(result));
+    const { ref } = renderHookHarness({
+      barberExplicitWeeklyDays: [],
+      barberDefaultSchedule: {
+        startTime: "13:00",
+        endTime: "18:00",
+        hasBreak: false,
+        breakStart: "",
+        breakEnd: "",
+      },
+    });
+
+    await act(async () => {
+      await ref.current.updateSchedule("mon", "from", "14:00");
+    });
+
+    expect(mocks.put.mock.calls[0][1].weeklySchedule.mon).toEqual({
+      working: true,
+      from: "14:00",
+      to: "18:00",
+      breakFrom: "",
+      breakTo: "",
+    });
+  });
+
+  it("can explicitly reset legacy weekdays to default inheritance", async () => {
+    const result = baseSchedule();
+    result.explicitWeeklyDays = [];
+    mocks.put.mockResolvedValueOnce(response(result));
+    const { ref } = renderHookHarness();
+
+    await act(async () => {
+      await ref.current.resetWeeklyScheduleToDefault();
+    });
+
+    expect(mocks.put.mock.calls[0][1].explicitWeeklyDays).toEqual([]);
+  });
 });

@@ -642,6 +642,75 @@ test("saving salon schedule persists defaultSchedule and GET returns it", async 
   assert.deepEqual(getResponse.body.defaultSchedule, selectedDefaultSchedule);
 });
 
+test("saving explicit weekday provenance supports opt-in default inheritance", async () => {
+  const res = createResponse();
+  let savedUpdate = null;
+
+  mockSchedulePermissionDependencies();
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    savedUpdate = payload;
+    return {
+      ...payload,
+      toObject() {
+        return this;
+      },
+    };
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
+      body: createScheduleBody({
+        weeklySchedule: workingSchedule,
+        explicitWeeklyDays: [],
+        defaultSchedule: {
+          startTime: "13:00",
+          endTime: "18:00",
+          hasBreak: false,
+          breakStart: "",
+          breakEnd: "",
+        },
+      }),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(savedUpdate.explicitWeeklyDays, []);
+  assert.deepEqual(res.body.weeklySchedule, {});
+});
+
+test("legacy schedule saves preserve all populated weekdays as explicit", async () => {
+  const res = createResponse();
+  let savedUpdate = null;
+
+  mockSchedulePermissionDependencies();
+  Schedule.findOneAndUpdate = async (query, payload) => {
+    savedUpdate = payload;
+    return { ...payload, toObject() { return this; } };
+  };
+
+  await upsertScheduleByBarberAndSalon(
+    {
+      user: { _id: barberId, role: "barber" },
+      params: { barberId, salonId: salonAId },
+      body: createScheduleBody({ weeklySchedule: workingSchedule }),
+    },
+    res
+  );
+
+  assert.deepEqual(savedUpdate.explicitWeeklyDays.sort(), [
+    "fri",
+    "mon",
+    "sat",
+    "sun",
+    "thu",
+    "tue",
+    "wed",
+  ]);
+});
+
 test("saving explicit Sunday day off does not require hours", async () => {
   const res = createResponse();
   let savedWeeklySchedule = null;

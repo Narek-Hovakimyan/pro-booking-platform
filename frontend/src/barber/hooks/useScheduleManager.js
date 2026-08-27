@@ -408,14 +408,14 @@ export default function useScheduleManager({
   const resetDraftToDefault = () => {
     setValidationState({ dateKey: selectedDateKey, message: "" });
     setSaveSuccess("");
-    setDraftOverride(
-      getResetDateOverrideDraft({
-        selectedDateKey,
-        defaultDaySchedule,
-      })
-    );
+    setDraftOverride(getResetDateOverrideDraft({ selectedDateKey, defaultDaySchedule }));
   };
 
+  const useDefaultHoursForWeekdays = async () => {
+    if (!currentUserId || !activeSalonId || isPerSalonLoading || saveRequestRef.current > 0) return;
+    if (!window.confirm("Use default hours for every weekday?")) return;
+    await savePerSalonSchedule({ explicitWeeklyDays: [] });
+  };
   const openDrawer = useCallback(() => {
     setIsDrawerOpen(true);
   }, []);
@@ -495,5 +495,6 @@ export default function useScheduleManager({
     toggleBreakTime,
     updateDraft,
     updateTimeDraft,
+    useDefaultHoursForWeekdays,
   };
 }

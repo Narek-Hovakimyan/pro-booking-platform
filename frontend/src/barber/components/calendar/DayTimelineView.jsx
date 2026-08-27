@@ -26,11 +26,17 @@ function EventBlock({ item, selected, onClick }) {
 export default function DayTimelineView({ dateKey, isNonWorkingDay, bookings = [], isLoading, selectedDaySchedule, onAccept, onReject, onComplete, onNoShow, onLateCancel, onCreateSlot, pendingBookingIds = new Set() }) {
   const [selected, setSelected] = useState(null);
   const [slotError, setSlotError] = useState("");
-  const range = useMemo(() => getVisibleTimeRange({ schedules: selectedDaySchedule?.from ? [selectedDaySchedule] : [], bookings }), [bookings, selectedDaySchedule]);
+  const range = useMemo(() => getVisibleTimeRange({ schedules: selectedDaySchedule?.from ? [selectedDaySchedule] : [], bookings, exactBoundaries: true }), [bookings, selectedDaySchedule]);
   const isToday = dateKey === getArmeniaDateKey();
   const [now, setNow] = useState(() => new Date());
   const bookedSlots = useMemo(() => computeOverlapColumns(bookings, range.start), [bookings, range.start]);
   const totalHeight = range.hours * HOUR_HEIGHT_PX;
+  const timelineMarks = useMemo(() => {
+    const marks = [];
+    for (let minutes = range.start; minutes < range.end; minutes += 60) marks.push(minutes);
+    if (marks.at(-1) !== range.end) marks.push(range.end);
+    return marks;
+  }, [range.end, range.start]);
   const breakOverlay = useMemo(() => {
     const [from, to] = [selectedDaySchedule?.breakFrom, selectedDaySchedule?.breakTo];
     if (!from || !to) return null;
@@ -61,10 +67,10 @@ export default function DayTimelineView({ dateKey, isNonWorkingDay, bookings = [
     {slotError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{slotError}</p>}
     {onCreateSlot && <button type="button" className="sr-only rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-900 focus:not-sr-only" onClick={createFirstKeyboardSlot} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); createFirstKeyboardSlot(); } }}>Add booking at the first available time</button>}
     <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm"><div className="overflow-x-auto"><div className="flex min-w-[520px]">
-      <div className="w-16 shrink-0 border-r border-neutral-200 bg-neutral-50/50"><div className="relative" style={{ height: `${totalHeight}px` }}>{Array.from({ length: range.hours + 1 }, (_, index) => <div key={index} className="absolute left-0 right-0 flex justify-end pr-2.5 text-xs text-neutral-400" style={{ top: `${index * HOUR_HEIGHT_PX}px` }}><span className="-mt-2">{minutesToTime(range.start + index * 60)}</span></div>)}</div></div>
+      <div className="w-16 shrink-0 border-r border-neutral-200 bg-neutral-50/50"><div className="relative" style={{ height: `${totalHeight}px` }}>{timelineMarks.map((minutes, index) => <div key={minutes} data-testid={`time-label-${minutesToTime(minutes)}`} className="absolute left-0 right-0 flex justify-end pr-2.5 text-xs text-neutral-400" style={{ top: `${minutesToPixels(minutes - range.start)}px`, transform: index === 0 ? "none" : index === timelineMarks.length - 1 ? "translateY(-100%)" : "translateY(-50%)" }}><span>{minutesToTime(minutes)}</span></div>)}</div></div>
       <div className="relative min-w-0 flex-1 bg-white"><div className="relative" style={{ height: `${totalHeight}px` }} onClick={(event) => { if (!onCreateSlot || event.target.closest("button")) return; createSlot(range.start + (event.clientY - event.currentTarget.getBoundingClientRect().top) / (HOUR_HEIGHT_PX / 60)); }}>
-        {Array.from({ length: range.hours + 1 }, (_, index) => <div key={`hour-${index}`} className="absolute inset-x-0 border-t border-neutral-100" style={{ top: `${index * HOUR_HEIGHT_PX}px` }} />)}
-        {Array.from({ length: range.hours }, (_, index) => <div key={`half-${index}`} className="absolute inset-x-0 border-t border-dashed border-neutral-50" style={{ top: `${(index + 0.5) * HOUR_HEIGHT_PX}px` }} />)}
+        {timelineMarks.map((minutes) => <div key={`hour-${minutes}`} className="absolute inset-x-0 border-t border-neutral-100" style={{ top: `${minutesToPixels(minutes - range.start)}px` }} />)}
+        {timelineMarks.slice(0, -1).map((minutes, index) => <div key={`half-${minutes}`} className="absolute inset-x-0 border-t border-dashed border-neutral-50" style={{ top: `${minutesToPixels(minutes + (timelineMarks[index + 1] - minutes) / 2 - range.start)}px` }} />)}
         {currentTimePx !== null && <div className="pointer-events-none absolute inset-x-0 z-30 border-t-[2.5px] border-red-500" style={{ top: `${currentTimePx}px` }} />}
         {breakOverlay && <div className="pointer-events-none absolute inset-x-0 z-10 flex items-center justify-center border-y border-sky-200 bg-sky-100/60" style={{ top: `${breakOverlay.top}px`, height: `${Math.max(32, breakOverlay.height)}px` }}><span className="text-[11px] font-semibold text-sky-700">Break</span></div>}
         {!bookings.length && <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-sm text-neutral-500">No bookings scheduled</div>}

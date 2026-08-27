@@ -6,8 +6,8 @@ import {
 } from "./bookingDateTime.js";
 import {
   blockingBookingStatuses,
-  getDayScheduleFromDefaultSchedule,
   isMeaningfulWeeklyDay,
+  isWeeklyDayExplicit,
   getScheduleForDate,
   normalizeBookingStatus,
 } from "./bookingUtils.js";
@@ -57,7 +57,8 @@ export const getSalonIdForAvailability = (salonEntry) => {
 };
 
 const getSalonHoursForDate = (salonEntry, salonSchedule, fallbackSchedule, dateKey) => {
-  const availabilitySalonSchedule = normalizeScheduleForAvailability(salonSchedule) || {};
+  const normalizedSalonSchedule = normalizeScheduleForAvailability(salonSchedule);
+  const availabilitySalonSchedule = normalizedSalonSchedule || {};
   const availabilityFallbackSchedule =
     normalizeScheduleForAvailability(fallbackSchedule) || {};
   const mergedSchedule = {
@@ -72,6 +73,12 @@ const getSalonHoursForDate = (salonEntry, salonSchedule, fallbackSchedule, dateK
       ...(salonEntry?.scheduleOverrides || {}),
     },
   };
+  const provenanceSchedule = normalizedSalonSchedule
+    ? availabilitySalonSchedule
+    : availabilityFallbackSchedule;
+  if (Object.hasOwn(provenanceSchedule, "explicitWeeklyDays")) {
+    mergedSchedule.explicitWeeklyDays = provenanceSchedule.explicitWeeklyDays;
+  }
   const mergedDefaultSchedule = {
     ...(availabilityFallbackSchedule?.defaultSchedule || {}),
     ...(availabilitySalonSchedule?.defaultSchedule || {}),
@@ -165,21 +172,20 @@ const getContextHoursForDate = (schedule, dateKey) => {
     return null;
   }
 
-  const weeklyDay = normalizedSchedule.weeklySchedule?.[dayKey];
-  if (weeklyDay?.working === false) {
-    return null;
-  }
-
-  if (isMeaningfulWeeklyDay(weeklyDay)) {
-    return getHoursFromDaySchedule(weeklyDay);
-  }
-
-  if (!hasMeaningfulDefaultSchedule(normalizedSchedule.defaultSchedule)) {
+  if (
+    !isWeeklyDayExplicit(normalizedSchedule, dayKey) &&
+    !hasMeaningfulDefaultSchedule(normalizedSchedule.defaultSchedule)
+  ) {
     return null;
   }
 
   return getHoursFromDaySchedule(
-    getDayScheduleFromDefaultSchedule(normalizedSchedule.defaultSchedule)
+    getScheduleForDate(
+      normalizedSchedule,
+      dateKey,
+      dayKey,
+      normalizedSchedule.defaultSchedule
+    )
   );
 };
 
@@ -195,8 +201,10 @@ const hasExactScheduleSource = (schedule) => {
     return true;
   }
 
-  return Object.values(normalizedSchedule.weeklySchedule || {}).some(
-    (day) => day?.working === false || isMeaningfulWeeklyDay(day)
+  return Object.entries(normalizedSchedule.weeklySchedule || {}).some(
+    ([dayKey, day]) =>
+      isWeeklyDayExplicit(normalizedSchedule, dayKey) &&
+      (day?.working === false || isMeaningfulWeeklyDay(day))
   ) || hasMeaningfulDefaultSchedule(normalizedSchedule.defaultSchedule);
 };
 

@@ -6,6 +6,7 @@ import { Button } from "@/shared/components/ui/button";
 import initialSchedule, {
   defaultPersonalSchedule,
   getDayScheduleFromDefaultSchedule,
+  isWeeklyDayExplicit,
 } from "@/shared/data/schedule";
 import {
   fetchBarberBookings,
@@ -54,6 +55,7 @@ function canRestoreFocus(element) {
 
 const createInitialRescheduleSchedule = (barber) => ({
   weeklySchedule: initialSchedule,
+  explicitWeeklyDays: [],
   dateSchedules: {},
   scheduleOverrides: {},
   defaultSchedule: barber?.defaultSchedule || defaultPersonalSchedule,
@@ -118,6 +120,10 @@ export default function RescheduleBooking({ booking, onClose }) {
   const selectedOverride = barberScheduleOverrides[selectedDate];
   const weeklyDaySchedule = barberWeeklySchedule[selectedDayKey];
   const explicitWeeklyDayOff = getExplicitWeeklyDayOff(weeklyDaySchedule);
+  const explicitWeeklyDay = isWeeklyDayExplicit(
+    rescheduleSchedule,
+    selectedDayKey
+  );
   const selectedDaySchedule = selectedOverride
     ? {
         working: Boolean(selectedOverride.isWorking),
@@ -126,9 +132,9 @@ export default function RescheduleBooking({ booking, onClose }) {
         breakFrom: selectedOverride.breakStart || "",
         breakTo: selectedOverride.breakEnd || "",
       }
-    : explicitWeeklyDayOff
+    : explicitWeeklyDay && explicitWeeklyDayOff
       ? explicitWeeklyDayOff
-      : isMeaningfulWeeklyDay(weeklyDaySchedule)
+      : explicitWeeklyDay && isMeaningfulWeeklyDay(weeklyDaySchedule)
       ? weeklyDaySchedule
       : getDayScheduleFromDefaultSchedule(barberDefaultSchedule);
   const isBarberNotWorking =
@@ -220,6 +226,7 @@ export default function RescheduleBooking({ booking, onClose }) {
         if (isMounted) {
           setRescheduleSchedule({
             weeklySchedule: scheduleResponse.data?.weeklySchedule || initialSchedule,
+            explicitWeeklyDays: scheduleResponse.data?.explicitWeeklyDays,
             dateSchedules: scheduleResponse.data?.dateSchedules || {},
             scheduleOverrides: scheduleResponse.data?.scheduleOverrides || {},
             defaultSchedule:

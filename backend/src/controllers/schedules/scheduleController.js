@@ -23,6 +23,7 @@ import {
   sanitizeDefaultSchedule,
   sanitizeScheduleOverrides,
   serializeDefaultSchedule,
+  sanitizeExplicitWeeklyDays,
   sanitizeWeeklySchedule,
 } from "../../utils/scheduleUtils.js";
 import { sendControllerError } from "../../utils/controllerError.js";
@@ -78,10 +79,23 @@ const canEditSalonSchedule = async ({ barberId, salonId, user }) => {
   };
 };
 
-const getCleanedScheduleFields = (schedule = {}) => ({
-  ...cleanPastScheduleDates(schedule),
-  weeklySchedule: normalizeAutoClosedWeeklySchedule(schedule?.weeklySchedule),
-});
+const getCleanedScheduleFields = (schedule = {}) => {
+  const normalizedWeeklySchedule = normalizeAutoClosedWeeklySchedule(
+    schedule?.weeklySchedule
+  );
+  const weeklySchedule = Array.isArray(schedule?.explicitWeeklyDays)
+    ? Object.fromEntries(
+        Object.entries(normalizedWeeklySchedule).filter(([dayKey]) =>
+          schedule.explicitWeeklyDays.includes(dayKey)
+        )
+      )
+    : normalizedWeeklySchedule;
+
+  return {
+    ...cleanPastScheduleDates(schedule),
+    weeklySchedule,
+  };
+};
 
 export const getScheduleByBarber = async (req, res) => {
   try {
@@ -166,6 +180,7 @@ export const upsertScheduleByBarberAndSalon = async (req, res) => {
     const { barberId, salonId } = req.params;
     const {
       weeklySchedule,
+      explicitWeeklyDays,
       dateSchedules = {},
       scheduleOverrides = {},
       nonWorkingDays = [],
@@ -196,6 +211,10 @@ export const upsertScheduleByBarberAndSalon = async (req, res) => {
     const sanitizedWeeklySchedule = normalizeAutoClosedWeeklySchedule(
       markExplicitAllDaysOffWeeklySchedule(sanitizeWeeklySchedule(weeklySchedule))
     );
+    const sanitizedExplicitWeeklyDays =
+      explicitWeeklyDays === undefined
+        ? sanitizeExplicitWeeklyDays(Object.keys(sanitizedWeeklySchedule))
+        : sanitizeExplicitWeeklyDays(explicitWeeklyDays);
     const sanitizedDateSchedules = sanitizeDateSchedules(dateSchedules);
     const sanitizedScheduleOverrides =
       sanitizeScheduleOverrides(scheduleOverrides);
@@ -221,6 +240,8 @@ export const upsertScheduleByBarberAndSalon = async (req, res) => {
       scheduleOverrides: sanitizedScheduleOverrides,
       nonWorkingDays: Array.from(nextNonWorkingDays).sort(),
     };
+
+    scheduleUpdate.explicitWeeklyDays = sanitizedExplicitWeeklyDays;
 
     if (sanitizedDefaultSchedule) {
       scheduleUpdate.defaultSchedule = sanitizedDefaultSchedule;
@@ -253,6 +274,7 @@ export const upsertScheduleByBarberAndSalon = async (req, res) => {
 
     return res.json({
       ...schedule.toObject(),
+      ...getCleanedScheduleFields(schedule),
       defaultSchedule,
     });
   } catch (error) {

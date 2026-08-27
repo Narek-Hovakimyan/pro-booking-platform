@@ -9,6 +9,7 @@ import RejectBookingModal from "@/barber/components/RejectBookingModal";
 import ManualBookingModal from "@/barber/components/bookings/ManualBookingModal";
 import DayTimelineView from "@/barber/components/calendar/DayTimelineView";
 import useBarberBookings from "@/barber/hooks/useBarberBookings";
+import { getUnambiguousSalonId } from "@/shared/hooks/useBarberData";
 import { getSocket } from "@/shared/lib/socket";
 import {
   fetchBarberBookings,
@@ -39,6 +40,7 @@ export default function BarberCalendarDayPage() {
   const schedule = useSelector((state) => state.schedule);
   const services = useSelector((state) => state.services);
   const scheduleEntry = schedule[currentUserId];
+  const calendarSalonId = getUnambiguousSalonId(currentUser);
 
   // Validate the date parameter
   const isValidDate = isArmeniaDateKey(routeDate);
@@ -48,6 +50,7 @@ export default function BarberCalendarDayPage() {
     selectedDate: routeDate || todayKey,
     setSelectedDate: (dateKey) => navigate(`/admin/calendar/day/${dateKey}`),
     manageLifecycle: false,
+    salonContextId: calendarSalonId,
   });
 
   const barberBookings = useMemo(

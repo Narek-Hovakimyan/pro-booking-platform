@@ -84,6 +84,9 @@ export default function ScheduleManager({
             <DefaultScheduleSection
               defaultSchedule={manager.currentDefaultSchedule}
               weeklySchedule={manager.effectiveSchedule.weeklySchedule}
+              explicitWeeklyDays={manager.effectiveSchedule.explicitWeeklyDays}
+              isSaving={manager.isSaving}
+              onUseDefaultHours={manager.useDefaultHoursForWeekdays}
             />
 
             <SalonScheduleSection

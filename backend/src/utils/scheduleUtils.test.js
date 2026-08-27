@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 
+import Schedule from "../models/Schedule.js";
+import { getScheduleForDate } from "./bookingUtils.js";
 import {
   cleanCurrentAndFutureDateKeys,
   explicitAllDaysOffMarker,
@@ -22,6 +24,42 @@ const oldAutoClosedWeeklySchedule = {
   fri: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
   sat: { working: false, from: "", to: "", breakFrom: "", breakTo: "" },
 };
+
+const generatedMonday = {
+  working: true,
+  from: "09:00",
+  to: "18:00",
+  breakFrom: "",
+  breakTo: "",
+};
+
+const eveningDefaultSchedule = {
+  startTime: "18:00",
+  endTime: "20:00",
+  hasBreak: false,
+  breakStart: "",
+  breakEnd: "",
+};
+
+const hydrateSchedule = (fields = {}) =>
+  Schedule.hydrate({
+    _id: "507f1f77bcf86cd799439011",
+    barberId: "507f1f77bcf86cd799439012",
+    weeklySchedule: { mon: generatedMonday },
+    dateSchedules: {
+      "2020-01-01": {
+        working: false,
+        from: "",
+        to: "",
+        breakFrom: "",
+        breakTo: "",
+      },
+    },
+    scheduleOverrides: {},
+    nonWorkingDays: [],
+    defaultSchedule: eveningDefaultSchedule,
+    ...fields,
+  });
 
 test("sanitizeWeeklySchedule keeps missing weekly days absent", () => {
   assert.deepEqual(sanitizeWeeklySchedule({}), {});
@@ -150,6 +188,94 @@ test("normalizeScheduleForAvailability removes past date-specific closed days", 
   } finally {
     mock.timers.reset();
   }
+});
+
+test("availability normalization preserves empty provenance from hydrated schedules", () => {
+  const normalized = normalizeScheduleForAvailability(
+    hydrateSchedule({ explicitWeeklyDays: [] })
+  );
+
+  assert.deepEqual(normalized.explicitWeeklyDays, []);
+  assert.deepEqual(
+    getScheduleForDate(
+      normalized,
+      "2026-05-25",
+      "mon",
+      normalized.defaultSchedule
+    ),
+    {
+      working: true,
+      from: "18:00",
+      to: "20:00",
+      breakFrom: "",
+      breakTo: "",
+    }
+  );
+});
+
+test("availability normalization keeps hydrated explicit weekday customization", () => {
+  const customMonday = {
+    working: true,
+    from: "10:00",
+    to: "16:00",
+    breakFrom: "",
+    breakTo: "",
+  };
+  const normalized = normalizeScheduleForAvailability(
+    hydrateSchedule({
+      weeklySchedule: { mon: customMonday },
+      explicitWeeklyDays: ["mon"],
+    })
+  );
+
+  assert.deepEqual(normalized.explicitWeeklyDays, ["mon"]);
+  assert.deepEqual(
+    getScheduleForDate(
+      normalized,
+      "2026-05-25",
+      "mon",
+      normalized.defaultSchedule
+    ),
+    customMonday
+  );
+});
+
+test("availability normalization keeps hydrated legacy weekdays conservative", () => {
+  const normalized = normalizeScheduleForAvailability(hydrateSchedule());
+
+  assert.equal(Object.hasOwn(normalized, "explicitWeeklyDays"), false);
+  assert.deepEqual(
+    getScheduleForDate(
+      normalized,
+      "2026-05-25",
+      "mon",
+      normalized.defaultSchedule
+    ),
+    generatedMonday
+  );
+});
+
+test("availability normalization preserves plain-object provenance behavior", () => {
+  const schedule = {
+    weeklySchedule: { mon: generatedMonday },
+    explicitWeeklyDays: [],
+    dateSchedules: {
+      "2020-01-01": {
+        working: false,
+        from: "",
+        to: "",
+        breakFrom: "",
+        breakTo: "",
+      },
+    },
+    scheduleOverrides: {},
+    nonWorkingDays: [],
+    defaultSchedule: eveningDefaultSchedule,
+  };
+  const normalized = normalizeScheduleForAvailability(schedule);
+
+  assert.deepEqual(normalized.explicitWeeklyDays, []);
+  assert.deepEqual(normalized.weeklySchedule, schedule.weeklySchedule);
 });
 
 test("sanitizeWeeklySchedule preserves explicit weekly day off", () => {

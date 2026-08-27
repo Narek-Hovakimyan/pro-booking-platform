@@ -17,9 +17,20 @@ const normalizeScheduleState = (
   nonWorkingDays = [],
   dateSchedules = {},
   scheduleOverrides = {},
-  defaultSchedule = defaultPersonalSchedule
+  defaultSchedule = defaultPersonalSchedule,
+  explicitWeeklyDays
 ) => ({
-  weeklySchedule: weeklySchedule || createSchedule(),
+  weeklySchedule: Array.isArray(explicitWeeklyDays)
+    ? Object.fromEntries(
+        Object.entries(weeklySchedule || {}).filter(([dayKey]) =>
+          explicitWeeklyDays.includes(dayKey)
+        )
+      )
+    : weeklySchedule || createSchedule(),
+  explicitWeeklyDays:
+    explicitWeeklyDays === undefined && weeklySchedule == null
+      ? []
+      : explicitWeeklyDays,
   dateSchedules: dateSchedules || {},
   scheduleOverrides: scheduleOverrides || {},
   defaultSchedule: defaultSchedule || defaultPersonalSchedule,
@@ -38,6 +49,7 @@ const scheduleSlice = createSlice({
         dateSchedules = {},
         scheduleOverrides = {},
         defaultSchedule = defaultPersonalSchedule,
+        explicitWeeklyDays,
       } = action.payload;
 
       state[barberId] = normalizeScheduleState(
@@ -45,7 +57,8 @@ const scheduleSlice = createSlice({
         nonWorkingDays,
         dateSchedules,
         scheduleOverrides,
-        defaultSchedule
+        defaultSchedule,
+        explicitWeeklyDays
       );
     },
     updateScheduleField: (state, action) => {

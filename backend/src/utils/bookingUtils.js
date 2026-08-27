@@ -114,6 +114,11 @@ export const isMeaningfulWeeklyDay = (daySchedule) =>
   timeToMinutes(daySchedule.from) !== null &&
   timeToMinutes(daySchedule.to) !== null;
 
+export const isWeeklyDayExplicit = (schedule, dayKey) =>
+  Array.isArray(schedule?.explicitWeeklyDays)
+    ? schedule.explicitWeeklyDays.includes(dayKey)
+    : Object.hasOwn(schedule?.weeklySchedule || {}, dayKey);
+
 const getExplicitWeeklyDayOff = (daySchedule) =>
   daySchedule?.working === false
     ? {
@@ -139,13 +144,14 @@ export const getScheduleForDate = (schedule, dateKey, dayKey, defaultSchedule) =
   }
 
   const weeklyDaySchedule = schedule?.weeklySchedule?.[dayKey];
+  const explicitWeeklyDay = isWeeklyDayExplicit(schedule, dayKey);
   const explicitWeeklyDayOff = getExplicitWeeklyDayOff(weeklyDaySchedule);
 
-  if (explicitWeeklyDayOff) {
+  if (explicitWeeklyDay && explicitWeeklyDayOff) {
     return explicitWeeklyDayOff;
   }
 
-  if (isMeaningfulWeeklyDay(weeklyDaySchedule)) {
+  if (explicitWeeklyDay && isMeaningfulWeeklyDay(weeklyDaySchedule)) {
     return weeklyDaySchedule;
   }
 

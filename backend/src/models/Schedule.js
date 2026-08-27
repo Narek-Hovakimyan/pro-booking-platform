@@ -17,6 +17,10 @@ const scheduleSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    explicitWeeklyDays: {
+      type: [String],
+      default: undefined,
+    },
     dateSchedules: {
       type: mongoose.Schema.Types.Mixed,
       default: {},

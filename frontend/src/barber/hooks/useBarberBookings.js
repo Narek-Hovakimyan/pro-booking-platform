@@ -20,7 +20,74 @@ const getPrimarySalonId = (entry) => {
   return entry.id || entry._id || "";
 };
 
-export default function useBarberBookings({ services = [], selectedDate, setSelectedDate, manageLifecycle = true }) {
+const isApprovedSalonContext = (entry) => {
+  const status = entry?.status || entry?.salon?.status;
+  const relationshipStatus =
+    entry?.relationshipStatus || entry?.salon?.relationshipStatus;
+  if (relationshipStatus && relationshipStatus !== "accepted") return false;
+  return status === "approved" || (!status && relationshipStatus === "accepted");
+};
+
+export const resolveManualBookingSalonContext = ({
+  currentUser,
+  salonContextId,
+}) => {
+  const allSalonEntries = Array.isArray(currentUser?.salons)
+    ? currentUser.salons
+    : [];
+  const approvedSalons = allSalonEntries.filter(
+    (entry) => isApprovedSalonContext(entry) && getPrimarySalonId(entry)
+  );
+  const legacySalonId =
+    currentUser?.salonStatus === "approved"
+      ? getPrimarySalonId(currentUser)
+      : "";
+  const canonicalEntryForLegacySalon = allSalonEntries.some(
+    (entry) =>
+      legacySalonId &&
+      String(getPrimarySalonId(entry)) === String(legacySalonId)
+  );
+  const validLegacySalonId = canonicalEntryForLegacySalon
+    ? ""
+    : legacySalonId;
+
+  if (salonContextId) {
+    const matchingSalon = approvedSalons.find(
+      (entry) => String(getPrimarySalonId(entry)) === String(salonContextId)
+    );
+    if (matchingSalon) {
+      return {
+        salonId: String(getPrimarySalonId(matchingSalon)),
+        isAmbiguous: false,
+      };
+    }
+    if (validLegacySalonId && String(validLegacySalonId) === String(salonContextId)) {
+      return { salonId: String(validLegacySalonId), isAmbiguous: false };
+    }
+    return { salonId: "", isAmbiguous: true };
+  }
+
+  const primarySalons = approvedSalons.filter((entry) => entry.isPrimary === true);
+  if (primarySalons.length === 1) {
+    return {
+      salonId: String(getPrimarySalonId(primarySalons[0])),
+      isAmbiguous: false,
+    };
+  }
+  if (approvedSalons.length === 1) {
+    return {
+      salonId: String(getPrimarySalonId(approvedSalons[0])),
+      isAmbiguous: false,
+    };
+  }
+  if (approvedSalons.length === 0 && validLegacySalonId) {
+    return { salonId: String(validLegacySalonId), isAmbiguous: false };
+  }
+
+  return { salonId: "", isAmbiguous: approvedSalons.length > 1 };
+};
+
+export default function useBarberBookings({ services = [], selectedDate, setSelectedDate, manageLifecycle = true, salonContextId = null }) {
   const dispatch = useDispatch();
   const { currentUser } = useSelector((state) => state.auth);
   const notifications = useSelector((state) => state.notifications);
@@ -38,8 +105,10 @@ export default function useBarberBookings({ services = [], selectedDate, setSele
   const [highlightedBookingIds, setHighlightedBookingIds] = useState(() => new Set());
   const previousBookingIdsRef = useRef(null);
   const highlightTimeoutsRef = useRef(new Map());
-  const approvedSalons = currentUser?.salons?.filter((salon) => salon.status === "approved") || [];
-  const primarySalon = approvedSalons.find((salon) => salon.isPrimary) || approvedSalons[0] || null;
+  const manualBookingSalonContext = resolveManualBookingSalonContext({
+    currentUser,
+    salonContextId,
+  });
   const activeServices = services.filter((service) => String(service.barberId) === String(currentUserId) && service.active);
 
   const clearHighlightTimeout = (bookingId) => {
@@ -146,9 +215,14 @@ export default function useBarberBookings({ services = [], selectedDate, setSele
     if (!clientName) return setActionError("Client name is required");
     if (!manualBooking.serviceId || !bookingDate || !manualBooking.time) return setActionError("Service, date, and time are required");
     if (!parsedDate) return setActionError("Date must be YYYY-MM-DD");
+    if (manualBookingSalonContext.isAmbiguous) {
+      return setActionError(
+        "Choose a salon context in the calendar before creating a booking."
+      );
+    }
     setIsAddingBooking(true);
     try {
-      const salonId = getPrimarySalonId(primarySalon) || undefined;
+      const salonId = manualBookingSalonContext.salonId || undefined;
       const { data } = await api.post("/bookings", { barberId: currentUserId, serviceId: manualBooking.serviceId, bookingDate, dayKey: getDayKeyFromDate(parsedDate), time: manualBooking.time, clientName, clientPhone, phone: clientPhone, createdBy: "barber", salonId });
       dispatch(addBooking(data)); await fetchBookings({ silent: true }); setSelectedDate(bookingDate); setIsAddModalOpen(false); setManualBooking(getInitialManualBooking(bookingDate)); setSuccessMessage("Booking added successfully");
     } catch (error) { setActionError(error.response?.data?.message || "Could not add booking. Please try again."); }

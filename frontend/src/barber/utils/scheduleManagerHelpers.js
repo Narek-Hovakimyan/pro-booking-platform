@@ -146,14 +146,21 @@ export const getScheduleSaveRequestPayload = ({
   scheduleOverrides,
   nonWorkingDays,
   currentDefaultSchedule,
-}) => ({
-  barberId: currentUserId,
-  weeklySchedule: effectiveSchedule.weeklySchedule || {},
-  dateSchedules: effectiveSchedule.dateSchedules || {},
-  scheduleOverrides: updates.scheduleOverrides || scheduleOverrides,
-  nonWorkingDays: updates.nonWorkingDays || nonWorkingDays,
-  defaultSchedule: updates.defaultSchedule || currentDefaultSchedule,
-});
+}) => {
+  const explicitWeeklyDays = Object.hasOwn(updates, "explicitWeeklyDays")
+    ? updates.explicitWeeklyDays
+    : effectiveSchedule.explicitWeeklyDays;
+
+  return {
+    barberId: currentUserId,
+    weeklySchedule: effectiveSchedule.weeklySchedule || {},
+    ...(Array.isArray(explicitWeeklyDays) ? { explicitWeeklyDays } : {}),
+    dateSchedules: effectiveSchedule.dateSchedules || {},
+    scheduleOverrides: updates.scheduleOverrides || scheduleOverrides,
+    nonWorkingDays: updates.nonWorkingDays || nonWorkingDays,
+    defaultSchedule: updates.defaultSchedule || currentDefaultSchedule,
+  };
+};
 
 export const getSelectedDateScheduleSavePlan = ({
   activeDraft,

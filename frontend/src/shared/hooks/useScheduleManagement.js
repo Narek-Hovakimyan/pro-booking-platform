@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import api from "../api/axios";
 import { getFriendlyApiError } from "../api/errors";
+import { getDayScheduleFromDefaultSchedule } from "../data/schedule";
 import { setSchedule } from "../../store/slices/scheduleSlice";
 import { getDayKeyFromDate, parseDateKey } from "../utils/dates";
 
@@ -23,18 +24,17 @@ const copyEntries = (value) =>
     )
   );
 
-const copySchedule = ({
-  weeklySchedule,
-  dateSchedules,
-  scheduleOverrides,
-  defaultSchedule,
-  nonWorkingDays,
-}) => ({
-  weeklySchedule: copyEntries(weeklySchedule),
-  dateSchedules: copyEntries(dateSchedules),
-  scheduleOverrides: copyEntries(scheduleOverrides),
-  defaultSchedule: copyObject(defaultSchedule),
-  nonWorkingDays: Array.isArray(nonWorkingDays) ? [...nonWorkingDays] : [],
+const copySchedule = (schedule = {}) => ({
+  weeklySchedule: copyEntries(schedule.weeklySchedule),
+  explicitWeeklyDays: Array.isArray(schedule.explicitWeeklyDays)
+    ? [...schedule.explicitWeeklyDays]
+    : undefined,
+  dateSchedules: copyEntries(schedule.dateSchedules),
+  scheduleOverrides: copyEntries(schedule.scheduleOverrides),
+  defaultSchedule: copyObject(schedule.defaultSchedule),
+  nonWorkingDays: Array.isArray(schedule.nonWorkingDays)
+    ? [...schedule.nonWorkingDays]
+    : [],
 });
 
 const toResponseSchedule = (data, fallback) => {
@@ -44,6 +44,7 @@ const toResponseSchedule = (data, fallback) => {
 
   return copySchedule({
     weeklySchedule: data.weeklySchedule,
+    explicitWeeklyDays: data.explicitWeeklyDays,
     dateSchedules: data.dateSchedules || fallback.dateSchedules,
     scheduleOverrides: data.scheduleOverrides || fallback.scheduleOverrides,
     defaultSchedule: data.defaultSchedule || fallback.defaultSchedule,
@@ -54,6 +55,9 @@ const toResponseSchedule = (data, fallback) => {
 const toPayload = (barberId, schedule) => ({
   barberId,
   weeklySchedule: schedule.weeklySchedule,
+  ...(Array.isArray(schedule.explicitWeeklyDays)
+    ? { explicitWeeklyDays: schedule.explicitWeeklyDays }
+    : {}),
   dateSchedules: schedule.dateSchedules,
   scheduleOverrides: schedule.scheduleOverrides,
   nonWorkingDays: schedule.nonWorkingDays,
@@ -63,6 +67,7 @@ export function useScheduleManagement({
   currentUserId,
   dispatch,
   barberSchedule,
+  barberExplicitWeeklyDays,
   barberDateSchedules,
   barberScheduleOverrides,
   barberDefaultSchedule,
@@ -81,6 +86,7 @@ export function useScheduleManagement({
     () =>
       copySchedule({
         weeklySchedule: barberSchedule,
+        explicitWeeklyDays: barberExplicitWeeklyDays,
         dateSchedules: barberDateSchedules,
         scheduleOverrides: barberScheduleOverrides,
         defaultSchedule: barberDefaultSchedule,
@@ -91,6 +97,7 @@ export function useScheduleManagement({
       barberDefaultSchedule,
       barberNonWorkingDays,
       barberSchedule,
+      barberExplicitWeeklyDays,
       barberScheduleOverrides,
     ]
   );
@@ -107,6 +114,7 @@ export function useScheduleManagement({
     barberDefaultSchedule,
     barberNonWorkingDays,
     barberSchedule,
+    barberExplicitWeeklyDays,
     barberScheduleOverrides,
     incomingSchedule,
   ]);
@@ -143,6 +151,7 @@ export function useScheduleManagement({
         setSchedule({
           barberId,
           weeklySchedule: schedule.weeklySchedule,
+          explicitWeeklyDays: schedule.explicitWeeklyDays,
           dateSchedules: schedule.dateSchedules,
           scheduleOverrides: schedule.scheduleOverrides,
           defaultSchedule: schedule.defaultSchedule,
@@ -271,10 +280,31 @@ export function useScheduleManagement({
             [field]: value,
           };
         } else {
+          const hasExplicitProvenance = Array.isArray(
+            schedule.explicitWeeklyDays
+          );
+          const isExplicitDay = hasExplicitProvenance
+            ? schedule.explicitWeeklyDays.includes(scheduleKey)
+            : Object.hasOwn(schedule.weeklySchedule, scheduleKey);
+          const effectiveDaySchedule = isExplicitDay
+            ? schedule.weeklySchedule[scheduleKey]
+            : getDayScheduleFromDefaultSchedule(schedule.defaultSchedule);
+
           schedule.weeklySchedule[scheduleKey] = {
-            ...schedule.weeklySchedule[scheduleKey],
+            ...effectiveDaySchedule,
             [field]: value,
           };
+          const legacyExplicitDays = Object.keys(schedule.weeklySchedule).filter(
+            (dayKey) => dayKey !== scheduleKey
+          );
+          schedule.explicitWeeklyDays = Array.from(
+            new Set([
+              ...(Array.isArray(schedule.explicitWeeklyDays)
+                ? schedule.explicitWeeklyDays
+                : legacyExplicitDays),
+              scheduleKey,
+            ])
+          );
         }
         return schedule;
       }, "Could not save schedule. Please try again.");
@@ -315,9 +345,19 @@ export function useScheduleManagement({
     [enqueueMutation]
   );
 
+  const resetWeeklyScheduleToDefault = useCallback(
+    () =>
+      enqueueMutation((schedule) => {
+        schedule.explicitWeeklyDays = [];
+        return schedule;
+      }, "Could not reset weekly hours. Please try again."),
+    [enqueueMutation]
+  );
+
   return {
     updateSchedule,
     updateNonWorkingDay,
+    resetWeeklyScheduleToDefault,
     updateScheduleOverride,
   };
 }
