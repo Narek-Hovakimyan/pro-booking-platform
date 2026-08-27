@@ -629,8 +629,8 @@ describe("ClientBooking split boundaries", () => {
     expect(source).not.toMatch(/<Button|<Card|<ServiceStep|<ClientDetailsStep|<BookingConfirmationModal|<WaitlistForm/);
   });
 
-  it("uses the confirmation timeout when BookingPage refreshes services", () => {
-    const source = readFileSync("src/client/pages/BookingPage.jsx", "utf8");
+  it("uses the confirmation timeout when booking page data refreshes services", () => {
+    const source = readFileSync("src/client/hooks/useBookingPageData.js", "utf8");
 
     expect(source).toContain(
       "const servicesResponse = await api.get(servicesUrl, {\n        timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,\n      });"
