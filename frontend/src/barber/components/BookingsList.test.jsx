@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -332,7 +332,6 @@ describe("BookingsList manual booking salon context", () => {
 
   it("keeps the dashboard analytics input intact while its booking pane is active-only", async () => {
     const bookingDate = getNext7Days()[0].value;
-    await import("./BookingsList");
     renderWithProviders(
       <AdminPanel
         bookings={[
@@ -351,8 +350,12 @@ describe("BookingsList manual booking salon context", () => {
       }
     );
 
-    await waitFor(() => expect(screen.getByText("Dashboard analytics")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByTestId("bookings-view")).toHaveTextContent("active"));
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+
+    expect(screen.getByText("Dashboard analytics")).toBeInTheDocument();
+    expect(screen.getByTestId("bookings-view")).toHaveTextContent("active");
     expect(screen.getByTestId("booking-group-pending")).toHaveTextContent("1");
     expect(screen.queryByTestId("booking-group-completed")).not.toBeInTheDocument();
   });
