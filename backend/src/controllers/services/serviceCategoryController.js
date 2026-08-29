@@ -1,7 +1,10 @@
 import mongoose from "mongoose";
 
 import Salon from "../../models/Salon.js";
-import ServiceCategory from "../../models/ServiceCategory.js";
+import ServiceCategory, {
+  formatServiceCategoryName,
+  normalizeServiceCategoryName,
+} from "../../models/ServiceCategory.js";
 import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../../models/Service.js";
 import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { sendControllerError } from "../../utils/controllerError.js";
@@ -30,8 +33,8 @@ const buildSystemCategories = () =>
  */
 const SYSTEM_KEYS_AND_LABELS = [
   ...new Set([
-    ...SERVICE_CATEGORIES.map((k) => k.toLowerCase()),
-    ...SERVICE_CATEGORY_LABELS.map((l) => l.trim().toLowerCase()),
+    ...SERVICE_CATEGORIES.map(normalizeServiceCategoryName),
+    ...SERVICE_CATEGORY_LABELS.map(normalizeServiceCategoryName),
   ]),
 ];
 
@@ -68,27 +71,51 @@ const canManageOwner = async (user, ownerType, ownerId) => {
  * Reject names that collide with system keys or labels (case-insensitive).
  */
 const validateCustomName = (name) => {
-  const trimmed = (name || "").trim();
+  const formatted = formatServiceCategoryName(name);
 
-  if (!trimmed) {
+  if (!formatted) {
     return { error: "Category name is required", code: 400 };
   }
 
-  if (trimmed.length > 100) {
+  if (formatted.length > 100) {
     return { error: "Category name must be 100 characters or fewer", code: 400 };
   }
 
-  const lower = trimmed.toLowerCase();
+  const normalizedName = normalizeServiceCategoryName(formatted);
 
-  if (SYSTEM_KEYS_AND_LABELS.includes(lower)) {
+  if (SYSTEM_KEYS_AND_LABELS.includes(normalizedName)) {
     return {
-      error: `'${trimmed}' conflicts with a system category`,
+      error: `'${formatted}' conflicts with a system category`,
       code: 400,
     };
   }
 
-  return { error: null, name: trimmed };
+  return { error: null, name: formatted, normalizedName };
 };
+
+const normalizedNamePattern = (name) =>
+  `^${formatServiceCategoryName(name)
+    .split(" ")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+")}$`;
+
+const findActiveNameCollision = ({ ownerType, ownerId, normalizedName, excludeId }) =>
+  ServiceCategory.findOne({
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    source: "custom",
+    ownerType,
+    ownerId,
+    active: true,
+    $or: [
+      { normalizedName },
+      {
+        name: {
+          $regex: normalizedNamePattern(normalizedName),
+          $options: "i",
+        },
+      },
+    ],
+  });
 
 /**
  * Require barber role. Sends 403 and returns false if not.
@@ -225,12 +252,10 @@ export const createServiceCategory = async (req, res) => {
     }
 
     /* ── Check duplicate name (active only, case-insensitive) ── */
-    const existingActive = await ServiceCategory.findOne({
-      source: "custom",
+    const existingActive = await findActiveNameCollision({
       ownerType,
       ownerId,
-      active: true,
-      name: { $regex: `^${trimmedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+      normalizedName: nameResult.normalizedName,
     });
 
     if (existingActive) {
@@ -257,6 +282,7 @@ export const createServiceCategory = async (req, res) => {
     /* ── Create (ignore client-provided sortOrder) ── */
     const category = await ServiceCategory.create({
       name: trimmedName,
+      normalizedName: nameResult.normalizedName,
       source: "custom",
       ownerType,
       ownerId,
@@ -317,21 +343,25 @@ export const updateServiceCategory = async (req, res) => {
 
     const updates = {};
     const { name, sortOrder, active } = req.body;
+    const isReactivating = active !== undefined && Boolean(active) && !category.active;
+    let nameResult;
 
     if (name !== undefined) {
-      const nameResult = validateCustomName(name);
+      nameResult = validateCustomName(name);
       if (nameResult.error) {
         return res.status(nameResult.code).json({ message: nameResult.error });
       }
+      updates.name = nameResult.name;
+      updates.normalizedName = nameResult.normalizedName;
+    }
 
-      /* Check duplicate on other active custom names for same owner */
-      const duplicate = await ServiceCategory.findOne({
-        _id: { $ne: category._id },
-        source: "custom",
+    if (name !== undefined || isReactivating) {
+      const duplicate = await findActiveNameCollision({
         ownerType: category.ownerType,
         ownerId: category.ownerId,
-        active: true,
-        name: { $regex: `^${nameResult.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+        normalizedName:
+          nameResult?.normalizedName || normalizeServiceCategoryName(category.name),
+        excludeId: category._id,
       });
 
       if (duplicate) {
@@ -339,8 +369,6 @@ export const updateServiceCategory = async (req, res) => {
           message: "A custom category with this name already exists",
         });
       }
-
-      updates.name = nameResult.name;
     }
 
     if (sortOrder !== undefined) {

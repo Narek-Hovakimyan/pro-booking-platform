@@ -589,6 +589,26 @@ test("create validates required fields", async () => {
   }
 });
 
+test("create rejects non-string category names", async () => {
+  for (const name of [42, {}, [], null, true]) {
+    const res = createResponse();
+    let createCalled = false;
+    ServiceCategory.create = async () => {
+      createCalled = true;
+      return {};
+    };
+
+    await createServiceCategory(
+      { user: barberA, body: { name, ownerType: "barber", ownerId: barberA._id } },
+      res
+    );
+
+    assert.equal(res.statusCode, 400, `Expected 400 for: ${JSON.stringify(name)}`);
+    assert.equal(res.body.message, "Category name is required");
+    assert.equal(createCalled, false);
+  }
+});
+
 test("duplicate active category name returns 409 (case-insensitive)", async () => {
   const res = createResponse();
   let createCalled = false;
@@ -613,6 +633,126 @@ test("duplicate active category name returns 409 (case-insensitive)", async () =
 
   assert.equal(res.statusCode, 409);
   assert.equal(createCalled, false);
+});
+
+test("create maps a duplicate-key race to the stable category-name conflict", async () => {
+  const res = createResponse();
+  const duplicateKeyError = new Error("E11000 duplicate key error collection: categories");
+  duplicateKeyError.code = 11000;
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  ServiceCategory.create = async () => {
+    throw duplicateKeyError;
+  };
+
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Luxury Treatment", ownerType: "barber", ownerId: barberA._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "A custom category with this name already exists");
+  assert.equal(res.body.message.includes("E11000"), false);
+});
+
+test("different owners can create categories with the same normalized name", async () => {
+  const firstRes = createResponse();
+  const secondRes = createResponse();
+  const createdPayloads = [];
+  ServiceCategory.create = async (payload) => {
+    createdPayloads.push(payload);
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Luxury Treatment", ownerType: "barber", ownerId: barberA._id },
+    },
+    firstRes
+  );
+
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  await createServiceCategory(
+    {
+      user: barberB,
+      body: { name: "  luxury   treatment  ", ownerType: "barber", ownerId: barberB._id },
+    },
+    secondRes
+  );
+
+  assert.equal(firstRes.statusCode, 201);
+  assert.equal(secondRes.statusCode, 201);
+  assert.equal(createdPayloads[0].normalizedName, createdPayloads[1].normalizedName);
+  assert.notEqual(String(createdPayloads[0].ownerId), String(createdPayloads[1].ownerId));
+});
+
+test("create rejects custom-name duplicates that differ only by internal whitespace", async () => {
+  const res = createResponse();
+  ServiceCategory.findOne = async () => makeDoc({ name: "Luxury   Treatment" });
+
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Luxury Treatment", ownerType: "barber", ownerId: barberA._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+});
+
+test("create canonicalizes the display and normalized category names", async () => {
+  const res = createResponse();
+  let createdPayload;
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  ServiceCategory.create = async (payload) => {
+    createdPayload = payload;
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "  Luxury   Treatment  ", ownerType: "barber", ownerId: barberA._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdPayload.name, "Luxury Treatment");
+  assert.equal(createdPayload.normalizedName, "luxury treatment");
+});
+
+test("schema declares a unique active normalized-name index per owner", () => {
+  const index = ServiceCategory.schema.indexes().find(([fields]) =>
+    fields.ownerType === 1 && fields.ownerId === 1 && fields.normalizedName === 1
+  );
+
+  assert.equal(index?.[1].unique, true);
+  assert.deepEqual(index?.[1].partialFilterExpression, {
+    active: true,
+    source: "custom",
+    normalizedName: { $type: "string", $ne: "" },
+  });
+});
+
+test("schema normalizes custom-category names before persistence", async () => {
+  const category = new ServiceCategory({
+    name: "  Luxury   Treatment  ",
+    source: "custom",
+    ownerType: "barber",
+    ownerId: barberA._id,
+    createdBy: barberA._id,
+  });
+
+  await category.validate();
+
+  assert.equal(category.name, "Luxury Treatment");
+  assert.equal(category.normalizedName, "luxury treatment");
 });
 
 /* ── sortOrder auto-increment ──────────────────────────── */
@@ -758,6 +898,124 @@ test("can soft-disable custom category", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(doc.active, false);
+});
+
+test("rename rejects non-string category names", async () => {
+  for (const name of [42, {}, [], null, true]) {
+    const res = createResponse();
+    const doc = makeDoc({ name: "Existing Category" });
+    let saveCalled = false;
+    doc.save = async function save() {
+      saveCalled = true;
+      return this;
+    };
+    ServiceCategory.findById = async () => doc;
+
+    await updateServiceCategory(
+      { user: barberA, params: { id: doc._id }, body: { name } },
+      res
+    );
+
+    assert.equal(res.statusCode, 400, `Expected 400 for: ${JSON.stringify(name)}`);
+    assert.equal(res.body.message, "Category name is required");
+    assert.equal(doc.name, "Existing Category");
+    assert.equal(saveCalled, false);
+  }
+});
+
+test("rename rejects a case-only normalized-name collision", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ name: "Luxury Treatment" });
+  let saveCalled = false;
+  doc.save = async function save() {
+    saveCalled = true;
+    return this;
+  };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => makeDoc({ name: "BRIDAL" });
+
+  await updateServiceCategory(
+    {
+      user: barberA,
+      params: { id: doc._id },
+      body: { name: "bridal" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(doc.name, "Luxury Treatment");
+  assert.equal(saveCalled, false);
+});
+
+test("rename maps a duplicate-key race to the stable category-name conflict", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ name: "Existing Category" });
+  const duplicateKeyError = new Error("E11000 duplicate key error collection: categories");
+  duplicateKeyError.code = 11000;
+  doc.save = async () => {
+    throw duplicateKeyError;
+  };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => null;
+
+  await updateServiceCategory(
+    {
+      user: barberA,
+      params: { id: doc._id },
+      body: { name: "Luxury Treatment" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "A custom category with this name already exists");
+  assert.equal(res.body.message.includes("E11000"), false);
+});
+
+test("reactivation rejects a normalized-name collision", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ name: "Luxury   Treatment", active: false });
+  let saveCalled = false;
+  doc.save = async function save() {
+    saveCalled = true;
+    return this;
+  };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => makeDoc({ name: "luxury treatment" });
+
+  await updateServiceCategory(
+    {
+      user: barberA,
+      params: { id: doc._id },
+      body: { active: true },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(doc.active, false);
+  assert.equal(saveCalled, false);
+});
+
+test("rename stores the canonical display and normalized names", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ name: "Old Name" });
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => null;
+
+  await updateServiceCategory(
+    {
+      user: barberA,
+      params: { id: doc._id },
+      body: { name: "  Luxury   Treatment  " },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(doc.name, "Luxury Treatment");
+  assert.equal(doc.normalizedName, "luxury treatment");
 });
 
 test("cannot update system category via API", async () => {

@@ -1,5 +1,11 @@
 import mongoose from "mongoose";
 
+export const formatServiceCategoryName = (name) =>
+  typeof name === "string" ? name.trim().replace(/\s+/g, " ") : "";
+
+export const normalizeServiceCategoryName = (name) =>
+  formatServiceCategoryName(name).toLowerCase();
+
 /**
  * ServiceCategory — stores both system-controlled and owner-scoped custom categories.
  *
@@ -14,6 +20,12 @@ const serviceCategorySchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+    },
+    /* Canonical custom-category name used for owner-scoped uniqueness. */
+    normalizedName: {
+      type: String,
+      trim: true,
+      default: "",
     },
     /* Stable key for system categories (e.g. "haircut", "nails").
        Empty for custom categories — they are identified by _id. */
@@ -55,12 +67,18 @@ const serviceCategorySchema = new mongoose.Schema(
 
 /* ── Indexes ────────────────────────────────────────────── */
 
-// Unique active custom-category name per owner
+// Unique active custom-category name per owner. Legacy rows without a
+// normalizedName remain readable and are protected by controller checks until
+// they are next saved.
 serviceCategorySchema.index(
-  { ownerType: 1, ownerId: 1, name: 1 },
+  { ownerType: 1, ownerId: 1, normalizedName: 1 },
   {
     unique: true,
-    partialFilterExpression: { active: true, source: "custom" },
+    partialFilterExpression: {
+      active: true,
+      source: "custom",
+      normalizedName: { $type: "string", $ne: "" },
+    },
   }
 );
 
@@ -83,6 +101,13 @@ serviceCategorySchema.index({ source: 1, active: 1, sortOrder: 1 });
 
 // Fast lookup by owner (barber / salon)
 serviceCategorySchema.index({ ownerType: 1, ownerId: 1, active: 1, sortOrder: 1 });
+
+serviceCategorySchema.pre("validate", function normalizeCustomCategoryName() {
+  if (this.source === "custom") {
+    this.name = formatServiceCategoryName(this.name);
+    this.normalizedName = normalizeServiceCategoryName(this.name);
+  }
+});
 
 const ServiceCategory = mongoose.model("ServiceCategory", serviceCategorySchema);
 
