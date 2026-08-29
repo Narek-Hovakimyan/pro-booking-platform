@@ -69,6 +69,11 @@ const createBookingTransactionRequiredResponse = () => ({
   },
 });
 
+const isPublicBookingPricingValidationError = (error) => {
+  const status = Number(error?.statusCode ?? error?.status);
+  return Number.isInteger(status) && status >= 400 && status < 500;
+};
+
 export const createBookingService = async ({
   body,
   user,
@@ -234,17 +239,26 @@ export const createBookingService = async ({
 
   const lockKey = getBookingCreationLockKey({ barberId, bookingDate });
   const createResult = await withBookingCreationLock(lockKey, async () => {
-    const latestSlotValidation = await validateBookingSlot({
-      barberId,
-      salonId: bookingReadiness.salonId,
-      barber: bookingReadiness.barber,
-      schedule: bookingReadiness.schedule,
-      requireResolvedSchedule: true,
-      bookingDate,
-      dayKey,
-      time,
-      duration: bookingDuration,
-    });
+    let latestSlotValidation;
+    try {
+      latestSlotValidation = await validateBookingSlot({
+        barberId,
+        salonId: bookingReadiness.salonId,
+        barber: bookingReadiness.barber,
+        schedule: bookingReadiness.schedule,
+        requireResolvedSchedule: true,
+        bookingDate,
+        dayKey,
+        time,
+        duration: bookingDuration,
+      });
+    } catch (error) {
+      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
+        media: stagedReferenceMedia,
+        error,
+      }).catch(() => {});
+      throw error;
+    }
 
     if (latestSlotValidation.message) {
       await bookingCreateHooks.compensateBookingReferenceMediaFailure({
@@ -265,6 +279,10 @@ export const createBookingService = async ({
         }).catch(() => {});
         return createBookingTransactionRequiredResponse();
       }
+      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
+        media: stagedReferenceMedia,
+        error,
+      }).catch(() => {});
       throw error;
     }
 
@@ -302,7 +320,9 @@ export const createBookingService = async ({
             session,
           });
         } catch (pricingError) {
-          pricingError.bookingPricingError = true;
+          if (isPublicBookingPricingValidationError(pricingError)) {
+            pricingError.bookingPricingError = true;
+          }
           throw pricingError;
         }
         voucherClaim = pricing.voucherClaim;
@@ -311,15 +331,11 @@ export const createBookingService = async ({
         const effectivePrice = pricing.finalPrice;
 
         // ── Deposit calculation ──
-        // Gracefully fall back to no deposit if BarberProfile query fails (e.g. test isolation)
+        // A missing profile means no deposit policy; a query failure must abort creation.
         let depositSettings = { enabled: false };
-        try {
-          const barberProfile = await BarberProfile.findOne({ barberId }).lean();
-          if (barberProfile?.depositSettings) {
-            depositSettings = barberProfile.depositSettings;
-          }
-        } catch {
-          // BarberProfile not available — deposit not required
+        const barberProfile = await BarberProfile.findOne({ barberId }).lean();
+        if (barberProfile?.depositSettings) {
+          depositSettings = barberProfile.depositSettings;
         }
         const { depositRequired, depositAmount } = calculateDeposit(
           depositSettings,
@@ -449,18 +465,25 @@ export const createBookingService = async ({
   }
 
   const { booking, payment } = createResult;
-  const notificationClientName = await getClientName(booking, user);
-
   if (!isManualBooking) {
-    await createNotification({
-      userId: barberId,
-      type: "booking_created",
-      message: formatBookedMessage(notificationClientName, booking),
-      data: getBookingNotificationData(booking),
-    });
+    try {
+      const notificationClientName = await getClientName(booking, user);
+      await createNotification({
+        userId: barberId,
+        type: "booking_created",
+        message: formatBookedMessage(notificationClientName, booking),
+        data: getBookingNotificationData(booking),
+      });
+    } catch {
+      // Booking persistence has already committed; notification delivery is best-effort.
+    }
   }
 
-  emitBookingUpdated(booking, "created");
+  try {
+    emitBookingUpdated(booking, "created");
+  } catch {
+    // Booking persistence has already committed; realtime delivery is best-effort.
+  }
 
   return { status: 201, booking, payment };
 };

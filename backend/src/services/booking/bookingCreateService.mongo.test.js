@@ -42,8 +42,8 @@ const setup = async () => {
   await Subscription.create({ ownerType: "barber", ownerId: barber._id, ownerRefModel: "User", payerId: barber._id, planId: plan._id, status: "active", pricePerSeat: 1, totalPrice: 1, currentPeriodStart: new Date(), currentPeriodEnd: new Date("2027-01-01") });
   return { barber, client, service };
 };
-const createBooking = ({ barber, client, service }) => createBookingService({
-  body: { barberId: barber._id, clientId: client._id, serviceId: service._id, bookingDate: "2026-12-07", dayKey: "mon", time: "10:00" },
+const createBooking = ({ barber, client, service, time = "10:00" }) => createBookingService({
+  body: { barberId: barber._id, clientId: client._id, serviceId: service._id, bookingDate: "2026-12-07", dayKey: "mon", time },
   user: client, referenceImages: [], cleanupReferenceImagesOnError: () => {},
 });
 afterEach(async () => { if (mongoose.connection.readyState) await mongoose.disconnect().catch(() => {}); });
@@ -67,4 +67,19 @@ test("real production booking cannot commit after the deletion fence wins", { sk
   assert.equal(await Booking.countDocuments({ clientId: fixture.client._id }), 0);
   assert.equal(await BookingSlotHold.countDocuments({ barberId: fixture.barber._id }), 0);
   assert.equal(await Notification.countDocuments({ userId: fixture.barber._id }), 0);
+});
+
+test("real Mongo overlapping creates commit one booking and one set of holds", { skip: !enabled }, async () => {
+  await connect();
+  const fixture = await setup();
+  const otherClient = await user("client");
+
+  const results = await Promise.all([
+    createBooking(fixture),
+    createBooking({ ...fixture, client: otherClient, time: "10:15" }),
+  ]);
+
+  assert.deepEqual(results.map(({ status }) => status).sort(), [400, 201]);
+  assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
+  assert.equal(await BookingSlotHold.countDocuments({ barberId: fixture.barber._id }), 30);
 });

@@ -3343,3 +3343,202 @@ test("createBooking with disabled deposit keeps old no-deposit behavior", async 
   assert.equal(res.body.paymentStatus, undefined);
   assert.equal(res.body.paymentProvider, undefined);
 });
+
+test("deposit profile lookup failure aborts booking creation instead of disabling deposits", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  BarberProfile.findOne = () => ({
+    lean: async () => {
+      throw new Error("deposit profile database unavailable");
+    },
+  });
+  Notification.create = async () => {
+    assert.fail("Notification must not be created when the transaction aborts");
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create booking");
+  assert.equal(createdBookings.length, 0);
+});
+
+test("pricing infrastructure failures return a generic booking error", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Voucher.find = async () => {
+    throw new Error("database credentials must stay private");
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        voucherCode: "SAVE10",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.message, "Could not create booking");
+  assert.equal(JSON.stringify(res.body).includes("database credentials"), false);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("public pricing validation errors keep their existing client message", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Voucher.find = async () => {
+    const error = new Error("Voucher is no longer available");
+    error.statusCode = 400;
+    throw error;
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+        voucherCode: "SAVE10",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Voucher is no longer available");
+  assert.equal(createdBookings.length, 0);
+});
+
+test("post-commit notification failure still returns the created booking", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Notification.create = async () => {
+    throw new Error("notification store unavailable");
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(String(res.body._id), String(createdBookings[0]._id));
+});
+
+test("post-commit realtime failure still returns the created booking", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  __bookingSideEffectsTestHooks.setGetIO(() => ({
+    to: () => ({
+      emit() {
+        throw new Error("socket unavailable");
+      },
+    }),
+  }));
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+});
+
+test("unexpected revalidation failure compensates staged reference media", async () => {
+  const createdBookings = [];
+  let compensation = null;
+  let slotChecks = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const findSlotHold = BookingSlotHold.findOne;
+  BookingSlotHold.findOne = (...args) => {
+    slotChecks += 1;
+    if (slotChecks === 2) {
+      throw new Error("slot lookup unavailable");
+    }
+    return findSlotHold(...args);
+  };
+  __bookingCreateServiceTestHooks.compensateBookingReferenceMediaFailure = async (args) => {
+    compensation = args;
+  };
+
+  const res = createResponse();
+  await createBooking(
+    {
+      user: client,
+      files: [{ filename: "revalidation-failure.jpg" }],
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(createdBookings.length, 0);
+  assert.equal(compensation?.media.length, 1);
+  assert.equal(compensation?.error.message, "slot lookup unavailable");
+});
