@@ -65,30 +65,38 @@ const sanitizeTags = (tags) => {
   return { value: nextTags };
 };
 
-export const validateServicePayload = (body, { partial = false } = {}) => {
+export const validateServicePayload = (
+  body,
+  { partial = false, existing = null } = {}
+) => {
   const source = body || {};
+  const validationSource = partial && existing
+    ? { ...existing, ...source }
+    : source;
   const next = {};
 
   if (!partial || source.name !== undefined) {
-    if (typeof source.name !== "string" || !source.name.trim()) {
+    const name = validationSource.name;
+    if (typeof name !== "string" || !name.trim()) {
       return { error: "Service name is required" };
     }
-    next.name = source.name.trim();
+    next.name = name.trim();
   }
 
   // Price: required for single services; optional for packages using sum mode
   if (!partial || source.price !== undefined) {
     const isSumPrice =
-      source.type === "package" && source.packagePriceMode === "sum";
+      validationSource.type === "package" && validationSource.packagePriceMode === "sum";
 
     if (source.price === undefined && isSumPrice) {
       // Price will be auto-calculated later — skip validation
     } else {
-      if (isBlankNumberInput(source.price)) {
+      const price = source.price !== undefined ? source.price : validationSource.price;
+      if (isBlankNumberInput(price)) {
         return { error: "Price must be a non-negative number" };
       }
 
-      const parsedPrice = Number(source.price);
+      const parsedPrice = Number(price);
       if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
         return { error: "Price must be a non-negative number" };
       }
@@ -99,16 +107,17 @@ export const validateServicePayload = (body, { partial = false } = {}) => {
   // Duration: required for single services; optional for packages using sum mode
   if (!partial || source.duration !== undefined) {
     const isSumDuration =
-      source.type === "package" && source.packageDurationMode === "sum";
+      validationSource.type === "package" && validationSource.packageDurationMode === "sum";
 
     if (source.duration === undefined && isSumDuration) {
       // Duration will be auto-calculated later — skip validation
     } else {
-      if (isBlankNumberInput(source.duration)) {
+      const duration = source.duration !== undefined ? source.duration : validationSource.duration;
+      if (isBlankNumberInput(duration)) {
         return { error: "Duration must be a positive number" };
       }
 
-      const parsedDuration = Number(source.duration);
+      const parsedDuration = Number(duration);
       if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
         return { error: "Duration must be a positive number" };
       }
@@ -121,7 +130,7 @@ export const validateServicePayload = (body, { partial = false } = {}) => {
   }
 
   if (!partial || source.category !== undefined) {
-    const category = String(source.category || "other").trim();
+    const category = String(validationSource.category || "other").trim();
 
     if (!SERVICE_CATEGORIES.includes(category)) {
       return { error: "Invalid service category" };
@@ -146,8 +155,19 @@ export const validateServicePayload = (body, { partial = false } = {}) => {
 
   // ── Discount fields ──
   if (!partial || source.discountType !== undefined || source.discountValue !== undefined) {
-    const discountType = source.discountType !== undefined ? source.discountType : "none";
-    const discountValue = source.discountValue !== undefined ? Number(source.discountValue) : 0;
+    const parsedDiscountValue = source.discountValue !== undefined
+      ? Number(source.discountValue)
+      : undefined;
+    const discountType = source.discountType !== undefined
+      ? source.discountType
+      : (parsedDiscountValue === 0
+        ? "none"
+        : (existing?.discountType || "none"));
+    const discountValue = parsedDiscountValue !== undefined
+      ? parsedDiscountValue
+      : (source.discountType === "none"
+        ? 0
+        : Number(existing?.discountValue ?? 0));
 
     if (!["none", "percent", "fixed"].includes(discountType)) {
       return { error: "discountType must be 'none', 'percent', or 'fixed'" };
@@ -166,7 +186,9 @@ export const validateServicePayload = (body, { partial = false } = {}) => {
         return { error: "discountValue must be greater than 0 for fixed discount" };
       }
       // Validate against price — resolved price may come from body or will be validated later
-      const priceForValidation = next.price !== undefined ? next.price : source.price;
+      const priceForValidation = next.price !== undefined
+        ? next.price
+        : (source.price !== undefined ? source.price : existing?.price);
       if (priceForValidation !== undefined && Number(priceForValidation) >= 0) {
         if (discountValue > Number(priceForValidation)) {
           return { error: "discountValue cannot exceed the service price for fixed discount" };

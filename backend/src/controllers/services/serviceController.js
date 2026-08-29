@@ -35,12 +35,12 @@ const validateAndResolveIncludedServices = async (includedServiceIds, barberId, 
     return { error: "includedServiceIds must be an array" };
   }
 
-  if (includedServiceIds.length < 2) {
-    return { error: "Package must include at least 2 services" };
-  }
-
   // Deduplicate
   const uniqueIds = [...new Set(includedServiceIds.map((id) => String(id)))];
+
+  if (uniqueIds.length < 2) {
+    return { error: "Package must include at least 2 services" };
+  }
 
   // Validate ObjectIds
   for (const id of uniqueIds) {
@@ -78,6 +78,27 @@ const validateAndResolveIncludedServices = async (includedServiceIds, barberId, 
     value: includedServices.map((s) => s._id),
     services: includedServices,
   };
+};
+
+const getServiceValidationSource = (service) => {
+  const source = typeof service?.toObject === "function"
+    ? service.toObject()
+    : { ...service };
+
+  return {
+    category: "other",
+    discountType: "none",
+    discountValue: 0,
+    type: "single",
+    packagePriceMode: "manual",
+    packageDurationMode: "manual",
+    ...source,
+  };
+};
+
+const validateResolvedServicePayload = (value) => {
+  const { error } = validateServicePayload(value);
+  return error ? { error } : null;
 };
 
 const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
@@ -190,21 +211,24 @@ export const createService = async (req, res) => {
 
       value.includedServiceIds = includedResult.value;
 
+      const packagePriceMode = req.body.packagePriceMode || "manual";
+      const packageDurationMode = req.body.packageDurationMode || "manual";
+
       // Resolve price mode
       if (hasOwnBodyField(req.body, "packagePriceMode")) {
         if (!["manual", "sum"].includes(req.body.packagePriceMode)) {
           return res.status(400).json({ message: "packagePriceMode must be 'manual' or 'sum'" });
         }
-        value.packagePriceMode = req.body.packagePriceMode;
       }
+      value.packagePriceMode = packagePriceMode;
 
       // Resolve duration mode
       if (hasOwnBodyField(req.body, "packageDurationMode")) {
         if (!["manual", "sum"].includes(req.body.packageDurationMode)) {
           return res.status(400).json({ message: "packageDurationMode must be 'manual' or 'sum'" });
         }
-        value.packageDurationMode = req.body.packageDurationMode;
       }
+      value.packageDurationMode = packageDurationMode;
 
       // Auto-calculate price if sum mode
       if (value.packagePriceMode === "sum") {
@@ -239,6 +263,11 @@ export const createService = async (req, res) => {
       value.customCategoryId = customCategoryResult.value;
     }
 
+    const validationError = validateResolvedServicePayload(value);
+    if (validationError) {
+      return res.status(400).json({ message: validationError.error });
+    }
+
     const service = await Service.create({
       ...value,
       barberId: req.user._id,
@@ -268,7 +297,11 @@ export const updateService = async (req, res) => {
       return res.status(403).json({ message: "Not authorized to edit this service" });
     }
 
-    const { value, error } = validateServicePayload(req.body, { partial: true });
+    const existingValidationSource = getServiceValidationSource(service);
+    const { value, error } = validateServicePayload(req.body, {
+      partial: true,
+      existing: existingValidationSource,
+    });
     if (error) {
       return res.status(400).json({ message: error });
     }
@@ -289,9 +322,16 @@ export const updateService = async (req, res) => {
     }
 
     // ── Package handling on update ──
-    const resolvedType = value.type || service.type;
+    const resolvedType = value.type || service.type || "single";
 
     if (resolvedType === "package") {
+      const isPackageTransition = service.type !== "package";
+      if (isPackageTransition && !hasOwnBodyField(req.body, "includedServiceIds")) {
+        return res.status(400).json({
+          message: "includedServiceIds must be an array",
+        });
+      }
+
       // If includedServiceIds provided, validate them
       if (hasOwnBodyField(req.body, "includedServiceIds")) {
         const includedResult = await validateAndResolveIncludedServices(
@@ -349,6 +389,18 @@ export const updateService = async (req, res) => {
       value.includedServiceIds = [];
       value.packagePriceMode = "manual";
       value.packageDurationMode = "manual";
+    }
+
+    const finalValidationSource = {
+      ...existingValidationSource,
+      ...value,
+      type: resolvedType,
+      packagePriceMode: value.packagePriceMode || service.packagePriceMode || "manual",
+      packageDurationMode: value.packageDurationMode || service.packageDurationMode || "manual",
+    };
+    const validationError = validateResolvedServicePayload(finalValidationSource);
+    if (validationError) {
+      return res.status(400).json({ message: validationError.error });
     }
 
     Object.assign(service, value);

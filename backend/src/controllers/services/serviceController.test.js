@@ -1130,6 +1130,38 @@ test("remove discount by setting discountType to none", async () => {
   assert.equal(res.body.discountValue, 0);
 });
 
+test("partial zero discount update keeps the legacy clear behavior", async () => {
+  const service = {
+    _id: "service-clear-discount",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    discountType: "percent",
+    discountValue: 20,
+    save: async function save() {
+      return this;
+    },
+  };
+
+  Service.findById = async () => service;
+
+  const res = createResponse();
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { discountValue: 0 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.discountType, "none");
+  assert.equal(res.body.discountValue, 0);
+});
+
 // ─── Package tests ───
 
 
@@ -1492,6 +1524,154 @@ test("duplicate includedServiceIds handled safely (deduplicated)", async () => {
 
   assert.equal(res.statusCode, 201);
   assert.equal(createdDoc.includedServiceIds.length, 2);
+});
+
+test("duplicate copies of one service cannot satisfy package minimum", async () => {
+  Service.create = async () => {
+    throw new Error("should not be called");
+  };
+  Service.find = async () => [haircutService];
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Duplicate Only Package",
+        type: "package",
+        price: 5000,
+        duration: 30,
+        includedServiceIds: [String(haircutService._id), String(haircutService._id)],
+        packagePriceMode: "manual",
+        packageDurationMode: "manual",
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("at least 2"));
+});
+
+test("single to package update requires included services", async () => {
+  const service = {
+    ...haircutService,
+    _id: new mongoose.Types.ObjectId("aaaaaaaaaaaaaaaaaaaaaaab"),
+    save: async function save() {
+      throw new Error("should not be called");
+    },
+  };
+  Service.findById = async () => service;
+
+  const res = createResponse();
+  await updateService(
+    {
+      user: barberA,
+      params: { id: String(service._id) },
+      body: { type: "package", price: 7000, duration: 45 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("includedServiceIds"));
+});
+
+test("sum package rejects a fixed discount above its calculated price", async () => {
+  Service.create = async () => {
+    throw new Error("should not be called");
+  };
+  Service.find = makeFindForCreate();
+
+  const res = createResponse();
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Over-discounted Sum Package",
+        type: "package",
+        duration: 50,
+        includedServiceIds: [String(haircutService._id), String(beardService._id)],
+        packagePriceMode: "sum",
+        packageDurationMode: "manual",
+        discountType: "fixed",
+        discountValue: 9000,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("cannot exceed"));
+});
+
+test("partial price updates cannot leave a fixed discount above price", async () => {
+  const service = {
+    ...haircutService,
+    _id: new mongoose.Types.ObjectId("aaaaaaaaaaaaaaaaaaaaaaac"),
+    price: 5000,
+    discountType: "fixed",
+    discountValue: 1000,
+    save: async function save() {
+      throw new Error("should not be called");
+    },
+  };
+  Service.findById = async () => service;
+
+  const res = createResponse();
+  await updateService(
+    {
+      user: barberA,
+      params: { id: String(service._id) },
+      body: { price: 500 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("cannot exceed"));
+});
+
+test("partial package updates revalidate fixed discount after sum calculation", async () => {
+  const service = {
+    ...haircutService,
+    _id: new mongoose.Types.ObjectId("aaaaaaaaaaaaaaaaaaaaaaad"),
+    name: "Existing Sum Package",
+    type: "package",
+    price: 10000,
+    duration: 50,
+    includedServiceIds: [haircutService._id, beardService._id],
+    packagePriceMode: "sum",
+    packageDurationMode: "sum",
+    discountType: "none",
+    discountValue: 0,
+    save: async function save() {
+      throw new Error("should not be called");
+    },
+  };
+  Service.findById = async () => service;
+  Service.find = async (query) => {
+    if (query._id && query._id.$in) {
+      const ids = query._id.$in.map(String);
+      return allBarberASingleServices.filter((candidate) =>
+        ids.includes(String(candidate._id))
+      );
+    }
+    return [];
+  };
+
+  const res = createResponse();
+  await updateService(
+    {
+      user: barberA,
+      params: { id: String(service._id) },
+      body: { discountType: "fixed", discountValue: 9000 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.ok(res.body.message.includes("cannot exceed"));
 });
 
 test("packagePriceMode sum calculates price", async () => {
