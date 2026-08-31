@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import mongoose from "mongoose";
 
@@ -19,13 +19,16 @@ const originalServiceMethods = {
   create: Service.create,
   find: Service.find,
   findById: Service.findById,
+  findOneAndUpdate: Service.findOneAndUpdate,
 };
 const originalServiceCategoryMethods = {
   findById: ServiceCategory.findById,
+  updateOne: ServiceCategory.updateOne,
 };
 const originalSalonMethods = {
   findById: Salon.findById,
 };
+const originalStartSession = mongoose.startSession;
 
 const barberA = { _id: "barber-a", role: "barber" };
 const barberB = { _id: "barber-b", role: "barber" };
@@ -37,9 +40,21 @@ afterEach(() => {
   Service.create = originalServiceMethods.create;
   Service.find = originalServiceMethods.find;
   Service.findById = originalServiceMethods.findById;
+  Service.findOneAndUpdate = originalServiceMethods.findOneAndUpdate;
   ServiceCategory.findById = originalServiceCategoryMethods.findById;
+  ServiceCategory.updateOne = originalServiceCategoryMethods.updateOne;
   Salon.findById = originalSalonMethods.findById;
+  mongoose.startSession = originalStartSession;
   __serviceControllerTestHooks.resetBarberHasPaidAccess();
+});
+
+beforeEach(() => {
+  mongoose.startSession = async () => ({
+    withTransaction: async (callback) => callback(),
+    endSession: async () => {},
+  });
+  ServiceCategory.updateOne = async () => ({ matchedCount: 1 });
+  Service.findOneAndUpdate = async (_query, update) => ({ ...update.$set });
 });
 
 const createResponse = () => ({
@@ -125,6 +140,35 @@ test("barber can create service with valid barber-owned customCategoryId", async
   assert.equal(res.statusCode, 201);
   assert.equal(String(createdPayload.customCategoryId), String(customCategoryId));
   assert.equal(createdPayload.category, "other");
+});
+
+test("custom-category assignment fails closed when its transactional category lock loses a deactivate/delete race", async () => {
+  const res = createResponse();
+  let createCalled = false;
+
+  ServiceCategory.findById = async () => makeCustomCategory();
+  ServiceCategory.updateOne = async () => ({ matchedCount: 0 });
+  Service.create = async () => {
+    createCalled = true;
+  };
+
+  await createService(
+    {
+      user: barberA,
+      body: {
+        name: "Custom Cut",
+        price: 5000,
+        duration: 30,
+        category: "other",
+        customCategoryId,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid custom category");
+  assert.equal(createCalled, false);
 });
 
 test("barber can create service with valid salon-owned customCategoryId when salon admin", async () => {
@@ -538,6 +582,152 @@ test("barber cannot update service to another owner's customCategoryId", async (
   assert.equal(res.statusCode, 403);
 });
 
+test("barber can preserve their existing inactive custom category while editing", async () => {
+  const res = createResponse();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    customCategoryId,
+    save: async function save() { return this; },
+  };
+  Service.findById = async () => service;
+  ServiceCategory.findById = async () => makeCustomCategory({ active: false });
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { name: "Updated Cut", customCategoryId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.name, "Updated Cut");
+  assert.equal(String(res.body.customCategoryId), String(customCategoryId));
+});
+
+test("unrelated updates retain an existing inactive custom category reference", async () => {
+  const res = createResponse();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: false,
+    customCategoryId,
+    save: async function save() { return this; },
+  };
+  Service.findById = async () => service;
+  ServiceCategory.findById = async () => {
+    throw new Error("category should not be revalidated when unchanged");
+  };
+
+  await updateService(
+    { user: barberA, params: { id: service._id }, body: { name: "Updated Cut" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(String(res.body.customCategoryId), String(customCategoryId));
+});
+
+test("barber cannot assign a different inactive custom category", async () => {
+  const res = createResponse();
+  const existingCategoryId = new mongoose.Types.ObjectId();
+  const inactiveCategoryId = new mongoose.Types.ObjectId();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    customCategoryId: existingCategoryId,
+    save: async () => { throw new Error("save should not be called"); },
+  };
+  Service.findById = async () => service;
+  ServiceCategory.findById = async () => makeCustomCategory({
+    _id: inactiveCategoryId,
+    active: false,
+  });
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { customCategoryId: inactiveCategoryId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid custom category");
+});
+
+test("barber cannot preserve an existing inactive foreign custom category", async () => {
+  const res = createResponse();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    customCategoryId,
+    save: async () => { throw new Error("save should not be called"); },
+  };
+  Service.findById = async () => service;
+  ServiceCategory.findById = async () => makeCustomCategory({
+    active: false,
+    ownerId: barberB._id,
+  });
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { customCategoryId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+});
+
+test("legacy missing custom category fails closed when explicitly preserved", async () => {
+  const res = createResponse();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    customCategoryId,
+    save: async () => { throw new Error("save should not be called"); },
+  };
+  Service.findById = async () => service;
+  ServiceCategory.findById = async () => null;
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { customCategoryId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Invalid custom category");
+});
+
 test("update validates service fields when provided", async () => {
   const invalidBodies = [
     { name: " " },
@@ -771,6 +961,57 @@ test("owner barber getServicesByBarber can see active and inactive services", as
   assert.deepEqual(res.body, services);
 });
 
+test("owner receives an inactive referenced custom category for safe editing", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
+  const res = createResponse();
+  let capturedPopulate;
+  const inactiveCategory = {
+    _id: customCategoryId,
+    name: "Archived Color",
+    active: false,
+  };
+  Service.find = () => ({
+    populate(opts) {
+      capturedPopulate = opts;
+      return [{ _id: "service-a", barberId: barberA._id, customCategoryId: inactiveCategory }];
+    },
+  });
+
+  await getServicesByBarber(
+    { params: { barberId: barberA._id }, user: barberA },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body[0].customCategoryId.active, false);
+  assert.equal(capturedPopulate.match, undefined);
+  assert.equal(capturedPopulate.select.includes("active"), true);
+});
+
+test("owner receives a fail-closed placeholder for a missing legacy custom category", async () => {
+  __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
+  const res = createResponse();
+  let capturedPopulate;
+  Service.find = () => ({
+    populate(opts) {
+      capturedPopulate = opts;
+      return [];
+    },
+  });
+
+  await getServicesByBarber(
+    { params: { barberId: barberA._id }, user: barberA },
+    res
+  );
+
+  assert.deepEqual(capturedPopulate.transform(null, customCategoryId), {
+    _id: customCategoryId,
+    name: "Unavailable custom category",
+    active: false,
+    missing: true,
+  });
+});
+
 test("GET services by barber returns populated customCategoryId when service has one", async () => {
   __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
@@ -849,7 +1090,7 @@ test("GET services by barber returns null customCategoryId for system-category s
   assert.equal(res.body[0].customCategoryId, null);
 });
 
-test("GET services by barber with inactive customCategoryId returns null (active match)", async () => {
+test("public GET hides inactive custom-category details", async () => {
   __serviceControllerTestHooks.setBarberHasPaidAccess(async () => true);
   const res = createResponse();
 

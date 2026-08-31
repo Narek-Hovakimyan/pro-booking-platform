@@ -1,15 +1,17 @@
 import mongoose from "mongoose";
 
-import Salon from "../../models/Salon.js";
 import Service from "../../models/Service.js";
-import ServiceCategory from "../../models/ServiceCategory.js";
-import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import { barberHasBookingPaidAccessForSalon as _barberHasPaidAccess } from "../../services/subscription/subscriptionPaidAccessQueries.js";
 import {
   calculateServiceDiscountedPrice,
   validateServicePayload,
 } from "../../services/serviceValidation.js";
+import {
+  persistServiceWithCategoryReference,
+  ServiceCategoryReferenceIntegrityError,
+  validateCustomCategoryForBarber,
+} from "../../services/serviceCategoryReferenceIntegrity.js";
 
 export { calculateServiceDiscountedPrice } from "../../services/serviceValidation.js";
 
@@ -101,49 +103,6 @@ const validateResolvedServicePayload = (value) => {
   return error ? { error } : null;
 };
 
-const validateCustomCategoryForBarber = async (customCategoryId, barberId) => {
-  if (customCategoryId === null || customCategoryId === "") {
-    return { value: null };
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(customCategoryId)) {
-    return { error: "Invalid custom category", code: 400 };
-  }
-
-  const category = await ServiceCategory.findById(customCategoryId);
-
-  if (!category || !category.active) {
-    return { error: "Invalid custom category", code: 400 };
-  }
-
-  if (category.source !== "custom") {
-    return {
-      error: "customCategoryId must reference a custom category",
-      code: 400,
-    };
-  }
-
-  if (category.ownerType === "barber") {
-    if (String(category.ownerId) !== String(barberId)) {
-      return { error: "Not authorized to use this custom category", code: 403 };
-    }
-
-    return { value: category._id };
-  }
-
-  if (category.ownerType === "salon") {
-    const salon = await Salon.findById(category.ownerId);
-
-    if (!salon || !canManageSalonRequest(salon, barberId)) {
-      return { error: "Not authorized to use this custom category", code: 403 };
-    }
-
-    return { value: category._id };
-  }
-
-  return { error: "Invalid custom category", code: 400 };
-};
-
 export const getServicesByBarber = async (req, res) => {
   try {
     // Phase 11: Hide unpaid/expired barbers from public endpoint
@@ -164,12 +123,28 @@ export const getServicesByBarber = async (req, res) => {
       ? { barberId: req.params.barberId }
       : { barberId: req.params.barberId, active: true };
 
-    const services = await Service.find(query)
-      .populate({
-        path: "customCategoryId",
-        match: { active: true },
-        select: "_id name ownerType ownerId sortOrder",
-      });
+    const categoryPopulate = {
+      path: "customCategoryId",
+      select: isOwnerBarber
+        ? "_id name ownerType ownerId sortOrder active"
+        : "_id name ownerType ownerId sortOrder",
+    };
+    if (isOwnerBarber) {
+      categoryPopulate.transform = (category, id) => {
+        if (category || !id) return category;
+        return {
+          _id: id,
+          name: "Unavailable custom category",
+          active: false,
+          missing: true,
+        };
+      };
+    }
+    if (!isOwnerBarber) {
+      categoryPopulate.match = { active: true };
+    }
+
+    const services = await Service.find(query).populate(categoryPopulate);
     return res.json(services);
   } catch (error) {
     return sendControllerError(res, error, "Could not fetch services");
@@ -268,13 +243,27 @@ export const createService = async (req, res) => {
       return res.status(400).json({ message: validationError.error });
     }
 
-    const service = await Service.create({
+    const createPayload = {
       ...value,
       barberId: req.user._id,
-    });
+    };
+    const service = hasOwnBodyField(req.body, "customCategoryId") && value.customCategoryId
+      ? await persistServiceWithCategoryReference({
+          customCategoryId: value.customCategoryId,
+          barberId: req.user._id,
+          persist: ({ session, customCategoryId }) =>
+            Service.create(
+              { ...createPayload, customCategoryId },
+              { session }
+            ),
+        })
+      : await Service.create(createPayload);
 
     return res.status(201).json(service);
   } catch (error) {
+    if (error instanceof ServiceCategoryReferenceIntegrityError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     return res.status(400).json({
       message: error.message || "Could not create service",
     });
@@ -309,7 +298,12 @@ export const updateService = async (req, res) => {
     if (hasOwnBodyField(req.body, "customCategoryId")) {
       const customCategoryResult = await validateCustomCategoryForBarber(
         req.body.customCategoryId,
-        req.user._id
+        req.user._id,
+        {
+          allowExistingInactive:
+            service.customCategoryId != null &&
+            String(req.body.customCategoryId) === String(service.customCategoryId),
+        }
       );
 
       if (customCategoryResult.error) {
@@ -403,12 +397,30 @@ export const updateService = async (req, res) => {
       return res.status(400).json({ message: validationError.error });
     }
 
-    Object.assign(service, value);
+    const preservesExistingInactiveCategory =
+      hasOwnBodyField(req.body, "customCategoryId") &&
+      service.customCategoryId != null &&
+      String(req.body.customCategoryId) === String(service.customCategoryId);
 
-    const updatedService = await service.save();
+    const updatedService = hasOwnBodyField(req.body, "customCategoryId") && value.customCategoryId
+      ? await persistServiceWithCategoryReference({
+          customCategoryId: value.customCategoryId,
+          barberId: req.user._id,
+          allowExistingInactive: preservesExistingInactiveCategory,
+          persist: ({ session, customCategoryId }) =>
+            Service.findOneAndUpdate(
+              { _id: service._id, barberId: req.user._id },
+              { $set: { ...value, customCategoryId } },
+              { new: true, runValidators: true, session }
+            ),
+        })
+      : (Object.assign(service, value), await service.save());
 
     return res.json(updatedService);
   } catch (error) {
+    if (error instanceof ServiceCategoryReferenceIntegrityError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     return res.status(400).json({
       message: error.message || "Could not update service",
     });

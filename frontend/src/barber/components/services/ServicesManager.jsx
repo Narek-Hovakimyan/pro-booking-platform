@@ -66,6 +66,9 @@ export default function ServicesManager({
   const [modalError, setModalError] = useState("");
 
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const retainsMissingCustomCategory =
+    form.currentCustomCategory?.missing &&
+    String(form.currentCustomCategory.id) === String(form.customCategoryId);
 
   const isPackageSumPrice =
     form.type === "package" && form.packagePriceMode === "sum";
@@ -123,6 +126,15 @@ export default function ServicesManager({
       packageDurationMode: service.packageDurationMode || "manual",
       categoryType: hasCustomCategory ? "custom" : "system",
       customCategoryId: customCategoryIdStr,
+      currentCustomCategory:
+        hasCustomCategory && typeof customCategoryIdVal === "object"
+          ? {
+              id: customCategoryIdStr,
+              name: customCategoryIdVal.name || "Custom category",
+              active: customCategoryIdVal.active,
+              missing: Boolean(customCategoryIdVal.missing),
+            }
+          : null,
       discountType: service.discountType || "none",
       discountValue: String(service.discountValue ?? 0),
     });
@@ -307,7 +319,11 @@ export default function ServicesManager({
       </ServiceManagerHeader>
 
       <ServiceFormModal showModal={showModal} editingService={editingService} isSaving={isSaving} modalError={modalError}
-        saveDisabled={isSaving || (form.categoryType === "custom" && !form.customCategoryId)}
+        saveDisabled={
+          isSaving ||
+          (form.categoryType === "custom" && !form.customCategoryId) ||
+          retainsMissingCustomCategory
+        }
         onClose={closeModal} onSave={handleSave}>
         <ServiceBasicDetailsForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} />
         <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">

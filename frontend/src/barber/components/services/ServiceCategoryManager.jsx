@@ -29,6 +29,11 @@ export default function ServiceCategoryManager({
     () => allCategories.filter((c) => c.source === "custom"),
     [allCategories]
   );
+  const currentInactiveCategory =
+    form?.currentCustomCategory?.active === false &&
+    String(form.currentCustomCategory.id) === String(customCategoryId)
+      ? form.currentCustomCategory
+      : null;
 
   /* ── Load categories on mount ── */
   useEffect(() => {
@@ -147,7 +152,21 @@ export default function ServiceCategoryManager({
                 {cat.name}
               </option>
             ))}
+            {currentInactiveCategory && !customCategories.some(
+              (cat) => String(cat._id || cat.id) === String(currentInactiveCategory.id)
+            ) && (
+              <option value={currentInactiveCategory.id} disabled>
+                {currentInactiveCategory.name} (Inactive)
+              </option>
+            )}
           </select>
+        )}
+        {currentInactiveCategory && (
+          <p className="text-xs font-normal text-amber-700">
+            {currentInactiveCategory.missing
+              ? "This category is unavailable. Select an active category to replace it before saving."
+              : "This category is inactive and retained for this service. Select an active category to replace it."}
+          </p>
         )}
         {!categoriesLoading && !categoriesError && (
           <button

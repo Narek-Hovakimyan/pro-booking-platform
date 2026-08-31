@@ -18,8 +18,12 @@ const originalFind = ServiceCategory.find;
 const originalFindOne = ServiceCategory.findOne;
 const originalCreate = ServiceCategory.create;
 const originalFindById = ServiceCategory.findById;
+const originalUpdateOne = ServiceCategory.updateOne;
+const originalFindOneAndUpdate = ServiceCategory.findOneAndUpdate;
+const originalDeleteOne = ServiceCategory.deleteOne;
 const originalCountDocuments = Service.countDocuments;
 const originalSalonFindById = Salon.findById;
+const originalStartSession = mongoose.startSession;
 
 const barberA = { _id: new mongoose.Types.ObjectId(), role: "barber" };
 const barberB = { _id: new mongoose.Types.ObjectId(), role: "barber" };
@@ -42,8 +46,22 @@ afterEach(() => {
   ServiceCategory.findOne = originalFindOne;
   ServiceCategory.create = originalCreate;
   ServiceCategory.findById = originalFindById;
+  ServiceCategory.updateOne = originalUpdateOne;
+  ServiceCategory.findOneAndUpdate = originalFindOneAndUpdate;
+  ServiceCategory.deleteOne = originalDeleteOne;
   Service.countDocuments = originalCountDocuments;
   Salon.findById = originalSalonFindById;
+  mongoose.startSession = originalStartSession;
+});
+
+beforeEach(() => {
+  mongoose.startSession = async () => ({
+    withTransaction: async (callback) => callback(),
+    endSession: async () => {},
+  });
+  ServiceCategory.updateOne = async () => ({ matchedCount: 1 });
+  ServiceCategory.findOneAndUpdate = async (_query, update) => ({ active: false, ...update.$set });
+  ServiceCategory.deleteOne = async () => ({ deletedCount: 1 });
 });
 
 /* ── Helpers ────────────────────────────────────────────── */
@@ -884,8 +902,20 @@ test("barber can update their own custom category name", async () => {
 test("can soft-disable custom category", async () => {
   const res = createResponse();
   const doc = makeDoc({ active: true });
+  let lockQuery;
+  let updateQuery;
+  let updateValue;
 
   ServiceCategory.findById = async () => doc;
+  ServiceCategory.updateOne = async (query) => {
+    lockQuery = query;
+    return { matchedCount: 1 };
+  };
+  ServiceCategory.findOneAndUpdate = async (query, update) => {
+    updateQuery = query;
+    updateValue = update;
+    return { ...doc, ...update.$set };
+  };
 
   await updateServiceCategory(
     {
@@ -897,7 +927,32 @@ test("can soft-disable custom category", async () => {
   );
 
   assert.equal(res.statusCode, 200);
-  assert.equal(doc.active, false);
+  assert.deepEqual(lockQuery, { _id: doc._id, source: "custom" });
+  assert.deepEqual(updateQuery, { _id: doc._id, source: "custom" });
+  assert.deepEqual(updateValue, { $set: { active: false } });
+  assert.equal(res.body.active, false);
+});
+
+test("deactivation fails closed when the transactional category lock loses an assignment race", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ active: true });
+  let persisted = false;
+
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.updateOne = async () => ({ matchedCount: 0 });
+  ServiceCategory.findOneAndUpdate = async () => {
+    persisted = true;
+    return null;
+  };
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { active: false } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Category not found");
+  assert.equal(persisted, false);
 });
 
 test("rename rejects non-string category names", async () => {
@@ -1119,42 +1174,14 @@ test("update with no valid fields returns 400", async () => {
 
 test("hard-deletes custom category when no services reference it", async () => {
   const res = createResponse();
-  let deleteCalled = false;
-  const doc = makeDoc({
-    deleteOne: async () => { deleteCalled = true; },
-  });
+  let deleteQuery;
+  const doc = makeDoc();
 
   ServiceCategory.findById = async () => doc;
   Service.countDocuments = async () => 0;
-
-  await deleteServiceCategory(
-    {
-      user: barberA,
-      params: { id: doc._id },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(deleteCalled, true);
-});
-
-test("soft-deletes custom category when services reference it", async () => {
-  const res = createResponse();
-  let saved = false;
-  let countQuery;
-  const doc = makeDoc({
-    active: true,
-    save: async function () {
-      saved = true;
-      return this;
-    },
-  });
-
-  ServiceCategory.findById = async () => doc;
-  Service.countDocuments = async (query) => {
-    countQuery = query;
-    return 2;
+  ServiceCategory.deleteOne = async (query) => {
+    deleteQuery = query;
+    return { deletedCount: 1 };
   };
 
   await deleteServiceCategory(
@@ -1166,10 +1193,85 @@ test("soft-deletes custom category when services reference it", async () => {
   );
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(countQuery, { customCategoryId: doc._id, active: true });
-  assert.equal(doc.active, false);
-  assert.equal(saved, true);
+  assert.deepEqual(deleteQuery, { _id: doc._id, source: "custom" });
+});
+
+test("delete fails closed when its transactional category lock loses an assignment race", async () => {
+  const res = createResponse();
+  let deleteCalled = false;
+  const doc = makeDoc({
+    deleteOne: async () => { deleteCalled = true; },
+  });
+
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.updateOne = async () => ({ matchedCount: 0 });
+  Service.countDocuments = async () => 0;
+
+  await deleteServiceCategory(
+    { user: barberA, params: { id: doc._id } },
+    res
+  );
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, "Category not found");
+  assert.equal(deleteCalled, false);
+});
+
+test("soft-deletes custom category when services reference it", async () => {
+  const res = createResponse();
+  let countQuery;
+  let updateQuery;
+  let updateValue;
+  const doc = makeDoc({ active: true });
+
+  ServiceCategory.findById = async () => doc;
+  Service.countDocuments = async (query) => {
+    countQuery = query;
+    return 2;
+  };
+  ServiceCategory.findOneAndUpdate = async (query, update) => {
+    updateQuery = query;
+    updateValue = update;
+    return { ...doc, ...update.$set };
+  };
+
+  await deleteServiceCategory(
+    {
+      user: barberA,
+      params: { id: doc._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(countQuery, { customCategoryId: doc._id });
+  assert.deepEqual(updateQuery, { _id: doc._id, source: "custom" });
+  assert.deepEqual(updateValue, { $set: { active: false } });
+  assert.equal(res.body.category.active, false);
   assert.equal(res.body.softDeleted, true);
+});
+
+test("soft-deletes custom category when only inactive services reference it", async () => {
+  const res = createResponse();
+  let deleteCalled = false;
+  const doc = makeDoc();
+  ServiceCategory.findById = async () => doc;
+  Service.countDocuments = async () => 1;
+  ServiceCategory.findOneAndUpdate = async (_query, update) => ({ ...doc, ...update.$set });
+  ServiceCategory.deleteOne = async () => {
+    deleteCalled = true;
+    return { deletedCount: 1 };
+  };
+
+  await deleteServiceCategory(
+    { user: barberA, params: { id: doc._id } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.softDeleted, true);
+  assert.equal(res.body.category.active, false);
+  assert.equal(deleteCalled, false);
 });
 
 test("cannot delete system category", async () => {
@@ -1300,16 +1402,16 @@ test("salon member cannot delete salon custom category", async () => {
 
 test("salon owner can delete salon custom category", async () => {
   const res = createResponse();
-  let deleteCalled = false;
-  const doc = makeDoc({
-    ownerType: "salon",
-    ownerId: salonId,
-    deleteOne: async () => { deleteCalled = true; },
-  });
+  let deleteQuery;
+  const doc = makeDoc({ ownerType: "salon", ownerId: salonId });
 
   Salon.findById = async () => salonDoc;
   ServiceCategory.findById = async () => doc;
   Service.countDocuments = async () => 0;
+  ServiceCategory.deleteOne = async (query) => {
+    deleteQuery = query;
+    return { deletedCount: 1 };
+  };
 
   await deleteServiceCategory(
     {
@@ -1320,5 +1422,5 @@ test("salon owner can delete salon custom category", async () => {
   );
 
   assert.equal(res.statusCode, 200);
-  assert.equal(deleteCalled, true);
+  assert.deepEqual(deleteQuery, { _id: doc._id, source: "custom" });
 });

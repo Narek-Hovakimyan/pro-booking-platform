@@ -5,9 +5,14 @@ import ServiceCategory, {
   formatServiceCategoryName,
   normalizeServiceCategoryName,
 } from "../../models/ServiceCategory.js";
-import Service, { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../../models/Service.js";
+import { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../../models/Service.js";
 import { canManageSalonRequest } from "../../utils/salonPermissions.js";
 import { sendControllerError } from "../../utils/controllerError.js";
+import {
+  deleteCategoryWithReferenceIntegrity,
+  ServiceCategoryReferenceIntegrityError,
+  updateCategoryWithReferenceIntegrity,
+} from "../../services/serviceCategoryReferenceIntegrity.js";
 
 /* ── Helpers ────────────────────────────────────────────── */
 
@@ -383,11 +388,15 @@ export const updateServiceCategory = async (req, res) => {
       return res.status(400).json({ message: "No valid fields to update" });
     }
 
-    Object.assign(category, updates);
-    const updated = await category.save();
+    const updated = updates.active === false
+      ? await updateCategoryWithReferenceIntegrity({ categoryId: category._id, updates })
+      : (Object.assign(category, updates), await category.save());
 
     return res.json(updated);
   } catch (error) {
+    if (error instanceof ServiceCategoryReferenceIntegrityError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     if (error.code === 11000) {
       return res
         .status(409)
@@ -439,29 +448,25 @@ export const deleteServiceCategory = async (req, res) => {
       });
     }
 
-    /* Keep referenced custom categories available for existing services. */
-    const servicesUsing = await Service.countDocuments({
-      customCategoryId: category._id,
-      active: true,
+    const deletion = await deleteCategoryWithReferenceIntegrity({
+      categoryId: category._id,
     });
 
-    if (servicesUsing > 0) {
+    if (deletion.softDeleted) {
       /* Soft-disable: keep the record so service references stay valid */
-      category.active = false;
-      await category.save();
-
       return res.json({
         message: "Category disabled — some services still reference it",
-        category,
+        category: deletion.category,
         softDeleted: true,
       });
     }
 
     /* No services reference it — safe to hard-delete */
-    await category.deleteOne();
-
     return res.json({ message: "Category deleted" });
   } catch (error) {
+    if (error instanceof ServiceCategoryReferenceIntegrityError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     return sendControllerError(res, error, "Could not delete service category");
   }
 };
