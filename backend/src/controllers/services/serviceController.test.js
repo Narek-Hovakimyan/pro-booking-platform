@@ -19,7 +19,9 @@ const originalServiceMethods = {
   create: Service.create,
   find: Service.find,
   findById: Service.findById,
+  findOne: Service.findOne,
   findOneAndUpdate: Service.findOneAndUpdate,
+  exists: Service.exists,
 };
 const originalServiceCategoryMethods = {
   findById: ServiceCategory.findById,
@@ -40,7 +42,9 @@ afterEach(() => {
   Service.create = originalServiceMethods.create;
   Service.find = originalServiceMethods.find;
   Service.findById = originalServiceMethods.findById;
+  Service.findOne = originalServiceMethods.findOne;
   Service.findOneAndUpdate = originalServiceMethods.findOneAndUpdate;
+  Service.exists = originalServiceMethods.exists;
   ServiceCategory.findById = originalServiceCategoryMethods.findById;
   ServiceCategory.updateOne = originalServiceCategoryMethods.updateOne;
   Salon.findById = originalSalonMethods.findById;
@@ -2164,4 +2168,135 @@ test("booking from package works and snapshots package name/duration/price", asy
 
   // Restore
   Service.findOne = originalFindOne;
+});
+
+test("partial package update rejects a legacy inactive member", async () => {
+  const packageService = {
+    ...haircutService,
+    _id: new mongoose.Types.ObjectId(),
+    type: "package",
+    includedServiceIds: [haircutService._id, beardService._id],
+    packagePriceMode: "sum",
+    packageDurationMode: "sum",
+    save: async function save() { return this; },
+  };
+  Service.findById = async () => packageService;
+  Service.find = async () => [haircutService, { ...beardService, active: false }];
+  const res = createResponse();
+
+  await updateService(
+    { user: barberA, params: { id: String(packageService._id) }, body: { name: "Renamed package" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /inactive/);
+});
+
+test("active package references block child deactivation and deletion owner-scoped", async () => {
+  let existsQuery;
+  const child = { ...haircutService, save: async function save() { throw new Error("should not save"); } };
+  Service.findById = async () => child;
+  Service.exists = async (query) => {
+    existsQuery = query;
+    return { _id: new mongoose.Types.ObjectId() };
+  };
+  const updateRes = createResponse();
+
+  await updateService(
+    { user: barberA, params: { id: String(child._id) }, body: { active: false } },
+    updateRes
+  );
+  assert.equal(updateRes.statusCode, 409);
+  assert.equal(existsQuery.barberId, barberA._id);
+  assert.equal(existsQuery.type, "package");
+
+  const deleteRes = createResponse();
+  await deleteService(
+    { user: barberA, params: { id: String(child._id) } },
+    deleteRes
+  );
+  assert.equal(deleteRes.statusCode, 409);
+});
+
+test("active package references block single-to-package conversion", async () => {
+  const child = { ...haircutService, save: async function save() { throw new Error("should not save"); } };
+  const secondMember = { ...stylingService, _id: new mongoose.Types.ObjectId("666666666666666666666666") };
+  Service.findById = async () => child;
+  Service.find = async () => [beardService, secondMember];
+  Service.exists = async () => ({ _id: new mongoose.Types.ObjectId() });
+  const res = createResponse();
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: String(child._id) },
+      body: {
+        type: "package",
+        includedServiceIds: [String(beardService._id), String(secondMember._id)],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "Service is used by an active package");
+});
+
+test("package partial updates reject missing or foreign legacy members with an owner-scoped lookup", async () => {
+  const packageService = {
+    ...haircutService,
+    _id: new mongoose.Types.ObjectId(),
+    type: "package",
+    includedServiceIds: [haircutService._id, barberBHaircut._id],
+    save: async function save() { return this; },
+  };
+  let query;
+  Service.findById = async () => packageService;
+  Service.find = async (nextQuery) => {
+    query = nextQuery;
+    return [haircutService];
+  };
+  const res = createResponse();
+
+  await updateService(
+    { user: barberA, params: { id: String(packageService._id) }, body: { name: "Legacy package" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /not found or belong to another barber/);
+  assert.equal(query.barberId, barberA._id);
+});
+
+test("transactional child lifecycle guard rechecks a concurrently-created package", async () => {
+  const originalReadyState = mongoose.connection.readyState;
+  const child = { ...haircutService, save: async function save() { throw new Error("should not save"); } };
+  let referenceChecks = 0;
+  try {
+    mongoose.connection.readyState = 1;
+    mongoose.startSession = async () => ({
+      withTransaction: async (callback) => callback({}),
+      endSession: async () => {},
+    });
+    Service.findById = async () => child;
+    Service.findOne = () => ({ session: async () => child });
+    Service.exists = () => {
+      referenceChecks += 1;
+      if (referenceChecks === 1) return null;
+      return { session: async () => ({ _id: new mongoose.Types.ObjectId() }) };
+    };
+    const res = createResponse();
+
+    await updateService(
+      { user: barberA, params: { id: String(child._id) }, body: { active: false } },
+      res
+    );
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.body.message, "Service is used by an active package");
+    assert.equal(referenceChecks, 2);
+  } finally {
+    mongoose.connection.readyState = originalReadyState;
+  }
 });

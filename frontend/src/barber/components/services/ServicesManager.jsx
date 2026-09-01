@@ -100,6 +100,13 @@ export default function ServicesManager({
       service.type !== "package" &&
       (!editingService || String(service.id) !== String(editingService.id))
   );
+  const getUnavailablePackageMembers = (includedServiceIds = []) =>
+    includedServiceIds.filter((id) => !services.some(
+      (service) => String(service.id) === String(id) && service.active && service.type === "single"
+    ));
+  const unavailablePackageMembers = form.type === "package"
+    ? getUnavailablePackageMembers(form.includedServiceIds)
+    : [];
   const activeServices = services.filter((service) => service.active);
   const inactiveServices = services.filter((service) => !service.active);
 
@@ -203,6 +210,10 @@ export default function ServicesManager({
       setModalError("Please select an active custom category.");
       return;
     }
+    if (unavailablePackageMembers.length) {
+      setModalError("Replace unavailable package services before saving.");
+      return;
+    }
     if (!["none", "percent", "fixed"].includes(discountType)) {
       setModalError("Please choose a valid discount type.");
       return;
@@ -302,12 +313,20 @@ export default function ServicesManager({
                   <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">{activeServices.length}</span>
                 </div>
                 <div className={`grid gap-3 ${fullPage ? "xl:grid-cols-2" : ""}`}>
-                  {activeServices.map((service) => (
-                    <ServiceCard key={service.id} service={service} customCategories={customCategories} isSaving={isSaving} deleteConfirmId={deleteConfirmId}
-                      onEdit={() => openEditModal(service)} onToggleActive={() => handleToggleActive(service)}
-                      onDeleteConfirm={() => setDeleteConfirmId(service.id)} onDeleteCancel={() => setDeleteConfirmId(null)}
-                      onDeleteConfirmExecute={() => handleDelete(service.id)} />
-                  ))}
+                  {activeServices.map((service) => {
+                    const unavailableMembers = getUnavailablePackageMembers(service.includedServiceIds);
+                    return (
+                      <div key={service.id} className="space-y-2">
+                        <ServiceCard service={service} customCategories={customCategories} isSaving={isSaving} deleteConfirmId={deleteConfirmId}
+                          onEdit={() => openEditModal(service)} onToggleActive={() => handleToggleActive(service)}
+                          onDeleteConfirm={() => setDeleteConfirmId(service.id)} onDeleteCancel={() => setDeleteConfirmId(null)}
+                          onDeleteConfirmExecute={() => handleDelete(service.id)} />
+                        {service.type === "package" && unavailableMembers.length > 0 && (
+                          <p className="text-xs font-medium text-amber-700">Unavailable package member{unavailableMembers.length === 1 ? "" : "s"}: {unavailableMembers.join(", ")}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -318,12 +337,20 @@ export default function ServicesManager({
                   <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 ring-1 ring-neutral-200">{inactiveServices.length}</span>
                 </div>
                 <div className={`grid gap-3 ${fullPage ? "xl:grid-cols-2" : ""}`}>
-                  {inactiveServices.map((service) => (
-                    <ServiceCard key={service.id} service={service} customCategories={customCategories} isSaving={isSaving} deleteConfirmId={deleteConfirmId}
-                      onEdit={() => openEditModal(service)} onToggleActive={() => handleToggleActive(service)}
-                      onDeleteConfirm={() => setDeleteConfirmId(service.id)} onDeleteCancel={() => setDeleteConfirmId(null)}
-                      onDeleteConfirmExecute={() => handleDelete(service.id)} />
-                  ))}
+                  {inactiveServices.map((service) => {
+                    const unavailableMembers = getUnavailablePackageMembers(service.includedServiceIds);
+                    return (
+                      <div key={service.id} className="space-y-2">
+                        <ServiceCard service={service} customCategories={customCategories} isSaving={isSaving} deleteConfirmId={deleteConfirmId}
+                          onEdit={() => openEditModal(service)} onToggleActive={() => handleToggleActive(service)}
+                          onDeleteConfirm={() => setDeleteConfirmId(service.id)} onDeleteCancel={() => setDeleteConfirmId(null)}
+                          onDeleteConfirmExecute={() => handleDelete(service.id)} />
+                        {service.type === "package" && unavailableMembers.length > 0 && (
+                          <p className="text-xs font-medium text-amber-700">Unavailable package member{unavailableMembers.length === 1 ? "" : "s"}: {unavailableMembers.join(", ")}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -336,7 +363,8 @@ export default function ServicesManager({
           isSaving ||
           (form.categoryType === "custom" && !form.customCategoryId) ||
           retainsMissingCustomCategory ||
-          (form.categoryType === "custom" && !canUseSelectedCustomCategory)
+          (form.categoryType === "custom" && !canUseSelectedCustomCategory) ||
+          unavailablePackageMembers.length > 0
         }
         onClose={closeModal} onSave={handleSave}>
         <ServiceBasicDetailsForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} />
@@ -346,11 +374,25 @@ export default function ServicesManager({
             <p className="mt-1 text-xs text-neutral-500">These values are saved exactly as entered or as package sum mode defines them.</p>
           </div>
           {form.type === "package" ? (
-            <ServicePackagePricingForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving}
-              availablePackageServices={availablePackageServices} formatPrice={formatPrice}
-              isPackageSumPrice={isPackageSumPrice} isPackageSumDuration={isPackageSumDuration}
-              computedPackagePrice={computedPackagePrice}
-              computedPackageDuration={services.filter((s) => form.includedServiceIds.some((id) => String(id) === String(s.id))).reduce((sum, s) => sum + (s.duration || 0), 0)} />
+            <>
+              <ServicePackagePricingForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving}
+                availablePackageServices={availablePackageServices} formatPrice={formatPrice}
+                isPackageSumPrice={isPackageSumPrice} isPackageSumDuration={isPackageSumDuration}
+                computedPackagePrice={computedPackagePrice}
+                computedPackageDuration={services.filter((s) => form.includedServiceIds.some((id) => String(id) === String(s.id))).reduce((sum, s) => sum + (s.duration || 0), 0)} />
+              {unavailablePackageMembers.length > 0 && (
+                <div role="alert" className="space-y-2 text-sm text-amber-700">
+                  <p>Unavailable package member{unavailablePackageMembers.length === 1 ? "" : "s"}: {unavailablePackageMembers.join(", ")}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {unavailablePackageMembers.map((id) => (
+                      <button key={id} type="button" disabled={isSaving} className="rounded-lg border border-amber-300 px-2 py-1 text-xs font-semibold" onClick={() => handleFieldChange("includedServiceIds", form.includedServiceIds.filter((memberId) => String(memberId) !== String(id)))}>
+                        Remove unavailable service {id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <ServiceSinglePriceForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} />
           )}

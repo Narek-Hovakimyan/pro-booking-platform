@@ -1,6 +1,9 @@
-import mongoose from "mongoose";
-
-import Service from "../../models/Service.js";
+import Service, {
+  hasActivePackageReference,
+  touchServiceDependencies,
+  validateIncludedServices,
+  withServiceDependencyTransaction,
+} from "../../models/Service.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 import { barberHasBookingPaidAccessForSalon as _barberHasPaidAccess } from "../../services/subscription/subscriptionPaidAccessQueries.js";
 import {
@@ -32,55 +35,8 @@ const isBarber = (user) => user?.role === "barber";
 const hasOwnBodyField = (body, field) =>
   Object.prototype.hasOwnProperty.call(body || {}, field);
 
-const validateAndResolveIncludedServices = async (includedServiceIds, barberId, existingServiceId) => {
-  if (!Array.isArray(includedServiceIds)) {
-    return { error: "includedServiceIds must be an array" };
-  }
-
-  // Deduplicate
-  const uniqueIds = [...new Set(includedServiceIds.map((id) => String(id)))];
-
-  if (uniqueIds.length < 2) {
-    return { error: "Package must include at least 2 services" };
-  }
-
-  // Validate ObjectIds
-  for (const id of uniqueIds) {
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return { error: `Invalid included service ID: ${id}` };
-    }
-  }
-
-  // Check self-reference
-  if (existingServiceId && uniqueIds.includes(String(existingServiceId))) {
-    return { error: "Package cannot include itself" };
-  }
-
-  // Fetch all included services
-  const includedServices = await Service.find({
-    _id: { $in: uniqueIds },
-    barberId,
-  });
-
-  if (includedServices.length !== uniqueIds.length) {
-    return { error: "Some included services not found or belong to another barber" };
-  }
-
-  // Verify all are active and type single
-  for (const svc of includedServices) {
-    if (!svc.active) {
-      return { error: `Included service "${svc.name}" is inactive` };
-    }
-    if (svc.type !== "single") {
-      return { error: `Included service "${svc.name}" is a package; packages cannot include packages` };
-    }
-  }
-
-  return {
-    value: includedServices.map((s) => s._id),
-    services: includedServices,
-  };
-};
+const queryWithSession = (query, session) =>
+  session && typeof query?.session === "function" ? query.session(session) : query;
 
 const getServiceValidationSource = (service) => {
   const source = typeof service?.toObject === "function"
@@ -101,6 +57,90 @@ const getServiceValidationSource = (service) => {
 const validateResolvedServicePayload = (value) => {
   const { error } = validateServicePayload(value);
   return error ? { error } : null;
+};
+
+const dependencyError = (statusCode, message) =>
+  Object.assign(new Error(message), { statusCode });
+
+const resolveServiceUpdate = async ({
+  service,
+  body,
+  barberId,
+  session = null,
+  customCategoryAssignment,
+}) => {
+  const existingValidationSource = getServiceValidationSource(service);
+  const { value, error } = validateServicePayload(body, {
+    partial: true,
+    existing: existingValidationSource,
+  });
+  if (error) return { error, statusCode: 400 };
+  if (customCategoryAssignment.hasField) {
+    value.customCategoryId = customCategoryAssignment.value;
+  }
+
+  const resolvedType = value.type || service.type || "single";
+  let includedResult;
+  if (resolvedType === "package") {
+    if (service.type !== "package" && !hasOwnBodyField(body, "includedServiceIds")) {
+      return { error: "includedServiceIds must be an array", statusCode: 400 };
+    }
+    includedResult = await validateIncludedServices(
+      hasOwnBodyField(body, "includedServiceIds")
+        ? body.includedServiceIds
+        : service.includedServiceIds || [],
+      barberId,
+      service._id,
+      session
+    );
+    if (includedResult.error) return { error: includedResult.error, statusCode: 400 };
+    if (hasOwnBodyField(body, "includedServiceIds")) {
+      value.includedServiceIds = includedResult.value;
+    }
+    if (hasOwnBodyField(body, "packagePriceMode")) {
+      if (!['manual', 'sum'].includes(body.packagePriceMode)) {
+        return { error: "packagePriceMode must be 'manual' or 'sum'", statusCode: 400 };
+      }
+      value.packagePriceMode = body.packagePriceMode;
+    }
+    if (hasOwnBodyField(body, "packageDurationMode")) {
+      if (!['manual', 'sum'].includes(body.packageDurationMode)) {
+        return { error: "packageDurationMode must be 'manual' or 'sum'", statusCode: 400 };
+      }
+      value.packageDurationMode = body.packageDurationMode;
+    }
+    const priceMode = value.packagePriceMode || service.packagePriceMode || "manual";
+    const durationMode = value.packageDurationMode || service.packageDurationMode || "manual";
+    if (priceMode === "sum") {
+      value.price = includedResult.services.reduce((sum, item) => sum + (item.price || 0), 0);
+    }
+    if (durationMode === "sum") {
+      value.duration = includedResult.services.reduce((sum, item) => sum + (item.duration || 0), 0);
+    }
+  }
+
+  if (value.type === "single" && service.type !== "single") {
+    value.includedServiceIds = [];
+    value.packagePriceMode = "manual";
+    value.packageDurationMode = "manual";
+  }
+
+  const invalidatesPackageMembers =
+    service.type === "single" &&
+    (value.active === false || resolvedType === "package");
+  if (invalidatesPackageMembers && await hasActivePackageReference(service._id, barberId, session)) {
+    return { error: "Service is used by an active package", statusCode: 409 };
+  }
+
+  const validationError = validateResolvedServicePayload({
+    ...existingValidationSource,
+    ...value,
+    type: resolvedType,
+    packagePriceMode: value.packagePriceMode || service.packagePriceMode || "manual",
+    packageDurationMode: value.packageDurationMode || service.packageDurationMode || "manual",
+  });
+  if (validationError) return { error: validationError.error, statusCode: 400 };
+  return { value, resolvedType, includedResult, invalidatesPackageMembers };
 };
 
 export const getServicesByBarber = async (req, res) => {
@@ -174,7 +214,7 @@ export const createService = async (req, res) => {
 
     if (resolvedType === "package") {
       // Validate and resolve included services
-      const includedResult = await validateAndResolveIncludedServices(
+      const includedResult = await validateIncludedServices(
         req.body.includedServiceIds,
         req.user._id,
         null
@@ -207,14 +247,12 @@ export const createService = async (req, res) => {
 
       // Auto-calculate price if sum mode
       if (value.packagePriceMode === "sum") {
-        const includedServices = await Service.find({ _id: { $in: value.includedServiceIds } });
-        value.price = includedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+        value.price = includedResult.services.reduce((sum, s) => sum + (s.price || 0), 0);
       }
 
       // Auto-calculate duration if sum mode
       if (value.packageDurationMode === "sum") {
-        const includedServices = await Service.find({ _id: { $in: value.includedServiceIds } });
-        value.duration = includedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+        value.duration = includedResult.services.reduce((sum, s) => sum + (s.duration || 0), 0);
       }
     } else {
       // Single service — clear package fields
@@ -243,11 +281,47 @@ export const createService = async (req, res) => {
       return res.status(400).json({ message: validationError.error });
     }
 
-    const createPayload = {
-      ...value,
-      barberId: req.user._id,
-    };
-    const service = hasOwnBodyField(req.body, "customCategoryId") && value.customCategoryId
+    const createPayload = { ...value, barberId: req.user._id };
+    const hasCustomCategory = hasOwnBodyField(req.body, "customCategoryId") && value.customCategoryId;
+    const immutableCreateValue = { ...value, includedServiceIds: [...value.includedServiceIds] };
+    const createPackage = async (session) => {
+          const attempt = { ...immutableCreateValue, includedServiceIds: [...immutableCreateValue.includedServiceIds] };
+          const includedResult = await validateIncludedServices(
+            req.body.includedServiceIds,
+            req.user._id,
+            null,
+            session
+          );
+          if (includedResult.error) {
+            const dependencyError = new Error(includedResult.error);
+            dependencyError.statusCode = 400;
+            throw dependencyError;
+          }
+          attempt.includedServiceIds = includedResult.value;
+          if (attempt.packagePriceMode === "sum") {
+            attempt.price = includedResult.services.reduce((sum, item) => sum + (item.price || 0), 0);
+          }
+          if (attempt.packageDurationMode === "sum") {
+            attempt.duration = includedResult.services.reduce((sum, item) => sum + (item.duration || 0), 0);
+          }
+          const dependencyValidationError = validateResolvedServicePayload(attempt);
+          if (dependencyValidationError) {
+            const error = new Error(dependencyValidationError.error);
+            error.statusCode = 400;
+            throw error;
+          }
+          await touchServiceDependencies(includedResult.services, req.user._id, session);
+          return Service.create({ ...createPayload, ...attempt }, { session });
+        };
+    const service = resolvedType === "package"
+      ? hasCustomCategory
+        ? await persistServiceWithCategoryReference({
+            customCategoryId: value.customCategoryId,
+            barberId: req.user._id,
+            persist: ({ session }) => createPackage(session),
+          })
+        : await withServiceDependencyTransaction(createPackage)
+      : hasCustomCategory
       ? await persistServiceWithCategoryReference({
           customCategoryId: value.customCategoryId,
           barberId: req.user._id,
@@ -264,7 +338,7 @@ export const createService = async (req, res) => {
     if (error instanceof ServiceCategoryReferenceIntegrityError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    return res.status(400).json({
+    return res.status(error.statusCode || 400).json({
       message: error.message || "Could not create service",
     });
   }
@@ -286,15 +360,10 @@ export const updateService = async (req, res) => {
       return res.status(403).json({ message: "Not authorized to edit this service" });
     }
 
-    const existingValidationSource = getServiceValidationSource(service);
-    const { value, error } = validateServicePayload(req.body, {
-      partial: true,
-      existing: existingValidationSource,
-    });
-    if (error) {
-      return res.status(400).json({ message: error });
-    }
-
+    const customCategoryAssignment = {
+      hasField: hasOwnBodyField(req.body, "customCategoryId"),
+      value: undefined,
+    };
     if (hasOwnBodyField(req.body, "customCategoryId")) {
       const customCategoryResult = await validateCustomCategoryForBarber(
         req.body.customCategoryId,
@@ -312,89 +381,17 @@ export const updateService = async (req, res) => {
           .json({ message: customCategoryResult.error });
       }
 
-      value.customCategoryId = customCategoryResult.value;
+      customCategoryAssignment.value = customCategoryResult.value;
     }
 
-    // ── Package handling on update ──
-    const resolvedType = value.type || service.type || "single";
-
-    if (resolvedType === "package") {
-      const isPackageTransition = service.type !== "package";
-      if (isPackageTransition && !hasOwnBodyField(req.body, "includedServiceIds")) {
-        return res.status(400).json({
-          message: "includedServiceIds must be an array",
-        });
-      }
-
-      // If includedServiceIds provided, validate them
-      if (hasOwnBodyField(req.body, "includedServiceIds")) {
-        const includedResult = await validateAndResolveIncludedServices(
-          req.body.includedServiceIds,
-          req.user._id,
-          service._id
-        );
-
-        if (includedResult.error) {
-          return res.status(400).json({ message: includedResult.error });
-        }
-
-        value.includedServiceIds = includedResult.value;
-      }
-
-      // Resolve price mode
-      if (hasOwnBodyField(req.body, "packagePriceMode")) {
-        if (!["manual", "sum"].includes(req.body.packagePriceMode)) {
-          return res.status(400).json({ message: "packagePriceMode must be 'manual' or 'sum'" });
-        }
-        value.packagePriceMode = req.body.packagePriceMode;
-      }
-
-      // Resolve duration mode
-      if (hasOwnBodyField(req.body, "packageDurationMode")) {
-        if (!["manual", "sum"].includes(req.body.packageDurationMode)) {
-          return res.status(400).json({ message: "packageDurationMode must be 'manual' or 'sum'" });
-        }
-        value.packageDurationMode = req.body.packageDurationMode;
-      }
-
-      // Auto-calculate price if sum mode
-      const effectivePackagePriceMode = value.packagePriceMode || service.packagePriceMode || "manual";
-      if (effectivePackagePriceMode === "sum") {
-        const ids = value.includedServiceIds || service.includedServiceIds || [];
-        if (ids.length > 0) {
-          const includedServices = await Service.find({ _id: { $in: ids } });
-          value.price = includedServices.reduce((sum, s) => sum + (s.price || 0), 0);
-        }
-      }
-
-      // Auto-calculate duration if sum mode
-      const effectivePackageDurationMode = value.packageDurationMode || service.packageDurationMode || "manual";
-      if (effectivePackageDurationMode === "sum") {
-        const ids = value.includedServiceIds || service.includedServiceIds || [];
-        if (ids.length > 0) {
-          const includedServices = await Service.find({ _id: { $in: ids } });
-          value.duration = includedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
-        }
-      }
-    }
-
-    // If switching to single, clear package fields
-    if (value.type === "single" && service.type !== "single") {
-      value.includedServiceIds = [];
-      value.packagePriceMode = "manual";
-      value.packageDurationMode = "manual";
-    }
-
-    const finalValidationSource = {
-      ...existingValidationSource,
-      ...value,
-      type: resolvedType,
-      packagePriceMode: value.packagePriceMode || service.packagePriceMode || "manual",
-      packageDurationMode: value.packageDurationMode || service.packageDurationMode || "manual",
-    };
-    const validationError = validateResolvedServicePayload(finalValidationSource);
-    if (validationError) {
-      return res.status(400).json({ message: validationError.error });
+    const preview = await resolveServiceUpdate({
+      service,
+      body: req.body,
+      barberId: req.user._id,
+      customCategoryAssignment,
+    });
+    if (preview.error) {
+      return res.status(preview.statusCode).json({ message: preview.error });
     }
 
     const preservesExistingInactiveCategory =
@@ -402,26 +399,45 @@ export const updateService = async (req, res) => {
       service.customCategoryId != null &&
       String(req.body.customCategoryId) === String(service.customCategoryId);
 
-    const updatedService = hasOwnBodyField(req.body, "customCategoryId") && value.customCategoryId
+    const hasCustomCategory = customCategoryAssignment.hasField && customCategoryAssignment.value;
+    const saveDependencyUpdate = async (session, categoryAssignment = customCategoryAssignment) => {
+      const target = session?.inTransaction?.()
+        ? await queryWithSession(Service.findOne({ _id: req.params.id, barberId: req.user._id }), session)
+        : service;
+      if (!target) throw dependencyError(404, "Service not found");
+      const attempt = await resolveServiceUpdate({
+        service: target,
+        body: req.body,
+        barberId: req.user._id,
+        session,
+        customCategoryAssignment: categoryAssignment,
+      });
+      if (attempt.error) throw dependencyError(attempt.statusCode, attempt.error);
+      if (attempt.resolvedType === "package") {
+        await touchServiceDependencies(attempt.includedResult.services, req.user._id, session);
+      }
+      Object.assign(target, attempt.value);
+      return target.save({ session });
+    };
+    const persistCustomCategoryService = ({ session, customCategoryId }) => {
+      const assignment = { hasField: true, value: customCategoryId };
+      return saveDependencyUpdate(session, assignment);
+    };
+    const updatedService = hasCustomCategory
       ? await persistServiceWithCategoryReference({
-          customCategoryId: value.customCategoryId,
+          customCategoryId: customCategoryAssignment.value,
           barberId: req.user._id,
           allowExistingInactive: preservesExistingInactiveCategory,
-          persist: ({ session, customCategoryId }) =>
-            Service.findOneAndUpdate(
-              { _id: service._id, barberId: req.user._id },
-              { $set: { ...value, customCategoryId } },
-              { new: true, runValidators: true, session }
-            ),
+          persist: persistCustomCategoryService,
         })
-      : (Object.assign(service, value), await service.save());
+      : await withServiceDependencyTransaction(saveDependencyUpdate);
 
     return res.json(updatedService);
   } catch (error) {
     if (error instanceof ServiceCategoryReferenceIntegrityError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    return res.status(400).json({
+    return res.status(error.statusCode || 400).json({
       message: error.message || "Could not update service",
     });
   }
@@ -443,7 +459,23 @@ export const deleteService = async (req, res) => {
       return res.status(403).json({ message: "Not authorized to delete this service" });
     }
 
-    await service.deleteOne();
+    const deleteWithDependencyGuard = async (session) => {
+      const current = session
+        ? await queryWithSession(Service.findOne({ _id: service._id, barberId: req.user._id }), session)
+        : service;
+      if (!current) {
+        const error = new Error("Service not found");
+        error.statusCode = 404;
+        throw error;
+      }
+      if (current.type === "single" && await hasActivePackageReference(current._id, req.user._id, session)) {
+        const error = new Error("Service is used by an active package");
+        error.statusCode = 409;
+        throw error;
+      }
+      return current.deleteOne({ session });
+    };
+    await withServiceDependencyTransaction(deleteWithDependencyGuard);
 
     return res.json({ message: "Service deleted" });
   } catch (error) {

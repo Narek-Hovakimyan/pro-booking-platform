@@ -81,4 +81,32 @@ describe("ServicesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add service" }));
     expect(addService).not.toHaveBeenCalled();
   });
+
+  test("marks legacy unavailable package members and blocks saving them", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const addService = vi.fn();
+    render(
+      <ServicesManager
+        services={[
+          { id: "active-member", name: "Cut", price: 4000, duration: 30, active: true, type: "single", category: "haircut" },
+          { id: "inactive-member", name: "Legacy beard", price: 3000, duration: 20, active: false, type: "single", category: "beard" },
+          {
+            id: "legacy-package", name: "Legacy package", price: 7000, duration: 50,
+            active: true, type: "package", category: "other",
+            includedServiceIds: ["active-member", "inactive-member"],
+          },
+        ]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getAllByTitle("Edit")[1]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unavailable package member: inactive-member");
+    expect(screen.getByRole("button", { name: "Save service" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save service" }));
+    expect(addService).not.toHaveBeenCalled();
+  });
 });
