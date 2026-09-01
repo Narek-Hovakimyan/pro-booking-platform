@@ -35,3 +35,21 @@ export async function createServiceCategory(name, ownerId) {
   });
   return data;
 }
+
+export async function updateServiceCategory(categoryId, updates) {
+  const { data } = await api.put(`/service-categories/${categoryId}`, updates);
+  return data;
+}
+
+export function renameServiceCategory(categoryId, name) {
+  return updateServiceCategory(categoryId, { name });
+}
+
+export function setServiceCategoryActive(categoryId, active) {
+  return updateServiceCategory(categoryId, { active });
+}
+
+export async function deleteServiceCategory(categoryId) {
+  const { data } = await api.delete(`/service-categories/${categoryId}`);
+  return data;
+}

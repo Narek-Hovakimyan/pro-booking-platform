@@ -69,6 +69,15 @@ export default function ServicesManager({
   const retainsMissingCustomCategory =
     form.currentCustomCategory?.missing &&
     String(form.currentCustomCategory.id) === String(form.customCategoryId);
+  const retainsExistingCustomReference =
+    Boolean(editingService) &&
+    !form.currentCustomCategory?.missing &&
+    String(form.currentCustomCategory?.id) === String(form.customCategoryId);
+  const selectedCustomCategoryIsActive = customCategories.some(
+    (category) => String(category._id || category.id) === String(form.customCategoryId)
+  );
+  const canUseSelectedCustomCategory =
+    selectedCustomCategoryIsActive || retainsExistingCustomReference;
 
   const isPackageSumPrice =
     form.type === "package" && form.packagePriceMode === "sum";
@@ -188,6 +197,10 @@ export default function ServicesManager({
     }
     if (form.categoryType === "custom" && !form.customCategoryId) {
       setModalError("Please select a custom category or add a new one.");
+      return;
+    }
+    if (form.categoryType === "custom" && !canUseSelectedCustomCategory) {
+      setModalError("Please select an active custom category.");
       return;
     }
     if (!["none", "percent", "fixed"].includes(discountType)) {
@@ -322,7 +335,8 @@ export default function ServicesManager({
         saveDisabled={
           isSaving ||
           (form.categoryType === "custom" && !form.customCategoryId) ||
-          retainsMissingCustomCategory
+          retainsMissingCustomCategory ||
+          (form.categoryType === "custom" && !canUseSelectedCustomCategory)
         }
         onClose={closeModal} onSave={handleSave}>
         <ServiceBasicDetailsForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} />

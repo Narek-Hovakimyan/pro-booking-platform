@@ -1,9 +1,10 @@
-import { describe, expect, test, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import ServicesManager from "./ServicesManager";
 
 const fetchServiceCategories = vi.fn();
+const setServiceCategoryActive = vi.fn();
 
 vi.mock("react-redux", () => ({
   useSelector: (selector) => selector({ auth: { currentUser: { id: "barber-1" } } }),
@@ -12,7 +13,10 @@ vi.mock("react-redux", () => ({
 vi.mock("@/shared/api/serviceCategories", () => ({
   fetchServiceCategories: (...args) => fetchServiceCategories(...args),
   createServiceCategory: vi.fn(),
+  setServiceCategoryActive: (...args) => setServiceCategoryActive(...args),
 }));
+
+afterEach(() => vi.resetAllMocks());
 
 describe("ServicesManager", () => {
   test("editing retains an owner-visible inactive custom category", async () => {
@@ -43,5 +47,38 @@ describe("ServicesManager", () => {
 
     expect(await screen.findByText("Archived Color (Inactive)")).toBeInTheDocument();
     expect(screen.getByText(/retained for this service/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save service" })).not.toBeDisabled();
+  });
+
+  test("clears a deactivated new-service category and blocks submission", async () => {
+    const activeCategory = { id: "active-category", name: "Active Category", source: "custom", active: true };
+    fetchServiceCategories
+      .mockResolvedValueOnce([activeCategory])
+      .mockResolvedValueOnce([activeCategory])
+      .mockResolvedValueOnce([]);
+    setServiceCategoryActive.mockResolvedValue({ ...activeCategory, active: false });
+    const addService = vi.fn();
+
+    render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom category" }));
+    const categorySelect = (await screen.findByRole("option", { name: "Active Category" })).parentElement;
+    fireEvent.change(categorySelect, { target: { value: activeCategory.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate selected category" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+
+    await waitFor(() => expect(setServiceCategoryActive).toHaveBeenCalledWith(activeCategory.id, false));
+    await waitFor(() => expect(categorySelect).toHaveValue(""));
+    expect(screen.getByRole("button", { name: "Add service" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+    expect(addService).not.toHaveBeenCalled();
   });
 });
