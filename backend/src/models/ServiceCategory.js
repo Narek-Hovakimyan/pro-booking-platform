@@ -6,6 +6,11 @@ export const formatServiceCategoryName = (name) =>
 export const normalizeServiceCategoryName = (name) =>
   formatServiceCategoryName(name).toLowerCase();
 
+export const isValidServiceCategorySortOrder = (value) =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= 0;
+
 /**
  * ServiceCategory — stores both system-controlled and owner-scoped custom categories.
  *
@@ -60,9 +65,34 @@ const serviceCategorySchema = new mongoose.Schema(
     sortOrder: {
       type: Number,
       default: 0,
+      set: (value) => {
+        if (!isValidServiceCategorySortOrder(value)) {
+          throw new mongoose.Error.CastError("Number", value, "sortOrder");
+        }
+        return value;
+      },
+      validate: {
+        validator: isValidServiceCategorySortOrder,
+        message: "sortOrder must be a finite, non-negative integer",
+      },
+    },
+    /* Marks rows allocated under the collision-safe ordering index. Legacy
+       rows intentionally omit this field so their historical ties remain readable. */
+    sortOrderReserved: {
+      type: Boolean,
+      default: false,
+      select: false,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (_doc, value) => {
+        delete value.sortOrderReserved;
+        return value;
+      },
+    },
+  }
 );
 
 /* ── Indexes ────────────────────────────────────────────── */
@@ -78,6 +108,20 @@ serviceCategorySchema.index(
       active: true,
       source: "custom",
       normalizedName: { $type: "string", $ne: "" },
+    },
+  }
+);
+
+// New allocations reserve an owner-scoped position in the database. The
+// partial filter keeps pre-existing legacy duplicate positions indexable.
+serviceCategorySchema.index(
+  { ownerType: 1, ownerId: 1, sortOrder: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      source: "custom",
+      active: true,
+      sortOrderReserved: true,
     },
   }
 );

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Salon from "../../models/Salon.js";
 import ServiceCategory, {
   formatServiceCategoryName,
+  isValidServiceCategorySortOrder,
   normalizeServiceCategoryName,
 } from "../../models/ServiceCategory.js";
 import { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from "../../models/Service.js";
@@ -43,11 +44,32 @@ const SYSTEM_KEYS_AND_LABELS = [
   ]),
 ];
 
-/**
- * Validate ownerType value.
- */
-const isValidOwnerType = (ownerType) =>
-  ownerType === "barber" || ownerType === "salon";
+const isValidOwnerType = (ownerType) => ownerType === "barber" || ownerType === "salon";
+
+const SORT_ORDER_RETRIES = 8;
+const isSortOrderCollision = (error) =>
+  error?.code === 11000 && (error.keyPattern?.sortOrder || error.keyValue?.sortOrder !== undefined ||
+    String(error.message || "").includes("ownerType_1_ownerId_1_sortOrder_1"));
+
+const nextAutomaticSortOrder = async (ownerType, ownerId) => {
+  const lastCategory = await ServiceCategory.findOne({ source: "custom", ownerType, ownerId, active: true, sortOrder: { $gte: 0, $lt: Number.MAX_SAFE_INTEGER } }).sort({ sortOrder: -1 }).select("sortOrder").lean();
+  const next = lastCategory ? Math.floor(lastCategory.sortOrder) + 1 : 0;
+  if (!isValidServiceCategorySortOrder(next)) {
+    throw Object.assign(new Error("Category ordering limit reached"), { statusCode: 409 });
+  }
+  return next;
+};
+
+const createAtNextSortOrder = async (payload) => {
+  for (let attempt = 0; attempt < SORT_ORDER_RETRIES; attempt += 1) {
+    const sortOrder = await nextAutomaticSortOrder(payload.ownerType, payload.ownerId);
+    try {
+      return await ServiceCategory.create({ ...payload, sortOrder, sortOrderReserved: true });
+    } catch (error) {
+      if (!isSortOrderCollision(error) || attempt === SORT_ORDER_RETRIES - 1) throw error;
+    }
+  }
+};
 
 /**
  * Is the authenticated user allowed to act on behalf of the given owner?
@@ -122,6 +144,8 @@ const findActiveNameCollision = ({ ownerType, ownerId, normalizedName, excludeId
     ],
   });
 
+const findActiveSortOrderCollision = (category, sortOrder) => ServiceCategory.findOne({ _id: { $ne: category._id }, source: "custom", ownerType: category.ownerType, ownerId: category.ownerId, active: true, sortOrder });
+
 /**
  * Require barber role. Sends 403 and returns false if not.
  */
@@ -194,7 +218,7 @@ export const listServiceCategories = async (req, res) => {
       ownerId,
       active: true,
     })
-      .sort({ sortOrder: 1, createdAt: -1 })
+      .sort({ sortOrder: 1, createdAt: -1, _id: 1 })
       .lean();
 
     return res.json([
@@ -269,35 +293,21 @@ export const createServiceCategory = async (req, res) => {
       });
     }
 
-    /* ── Determine next sortOrder for this owner scope ── */
-    const lastCategory = await ServiceCategory.findOne({
-      source: "custom",
-      ownerType,
-      ownerId,
-      active: true,
-    })
-      .sort({ sortOrder: -1 })
-      .select("sortOrder")
-      .lean();
-
-    const nextSortOrder = lastCategory
-      ? Number(lastCategory.sortOrder || 0) + 1
-      : 0;
-
-    /* ── Create (ignore client-provided sortOrder) ── */
-    const category = await ServiceCategory.create({
+    const category = await createAtNextSortOrder({
       name: trimmedName,
       normalizedName: nameResult.normalizedName,
       source: "custom",
       ownerType,
       ownerId,
       createdBy: req.user._id,
-      sortOrder: nextSortOrder,
     });
 
     return res.status(201).json(category);
   } catch (error) {
     /* Handle duplicate name error from unique index (fallback) */
+    if (isSortOrderCollision(error)) {
+      return res.status(409).json({ message: "Could not allocate a unique category order" });
+    }
     if (error.code === 11000) {
       return res
         .status(409)
@@ -349,6 +359,7 @@ export const updateServiceCategory = async (req, res) => {
     const updates = {};
     const { name, sortOrder, active } = req.body;
     const isReactivating = active !== undefined && Boolean(active) && !category.active;
+    const willBeActive = active === undefined ? category.active : Boolean(active);
     let nameResult;
 
     if (name !== undefined) {
@@ -377,7 +388,20 @@ export const updateServiceCategory = async (req, res) => {
     }
 
     if (sortOrder !== undefined) {
-      updates.sortOrder = Number(sortOrder) || 0;
+      if (!isValidServiceCategorySortOrder(sortOrder)) {
+        return res.status(400).json({ message: "sortOrder must be a finite, non-negative integer" });
+      }
+      updates.sortOrder = sortOrder;
+    }
+
+    if (willBeActive && (sortOrder !== undefined || isReactivating)) {
+      const occupied = await findActiveSortOrderCollision(category, sortOrder ?? category.sortOrder);
+
+      if (occupied) {
+        return res.status(409).json({ message: "Category sortOrder already exists" });
+      }
+
+      updates.sortOrderReserved = true;
     }
 
     if (active !== undefined) {
@@ -396,6 +420,9 @@ export const updateServiceCategory = async (req, res) => {
   } catch (error) {
     if (error instanceof ServiceCategoryReferenceIntegrityError) {
       return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (isSortOrderCollision(error)) {
+      return res.status(409).json({ message: "Category sortOrder already exists" });
     }
     if (error.code === 11000) {
       return res

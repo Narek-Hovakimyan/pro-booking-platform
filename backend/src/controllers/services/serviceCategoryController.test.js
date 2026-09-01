@@ -203,6 +203,22 @@ test("authenticated barber can list own custom categories", async () => {
   assert.equal(customEntry.name, "My Custom");
 });
 
+test("owner-scoped list uses _id to deterministically break legacy order ties", async () => {
+  const res = createResponse();
+  let sort;
+  ServiceCategory.find = () => ({
+    sort(value) { sort = value; return this; },
+    async lean() { return []; },
+  });
+
+  await listServiceCategories(
+    { query: { ownerType: "barber", ownerId: barberA._id }, user: barberA },
+    res
+  );
+
+  assert.deepEqual(sort, { sortOrder: 1, createdAt: -1, _id: 1 });
+});
+
 /* SALON owner/admin can list salon custom categories */
 test("salon owner can list salon custom categories", async () => {
   const res = createResponse();
@@ -758,6 +774,20 @@ test("schema declares a unique active normalized-name index per owner", () => {
   });
 });
 
+test("schema reserves active custom sortOrder positions without indexing legacy, inactive, or system rows", () => {
+  const index = ServiceCategory.schema.indexes().find(([fields]) =>
+    fields.ownerType === 1 && fields.ownerId === 1 && fields.sortOrder === 1
+  );
+
+  assert.ok(index);
+  assert.equal(index[1].unique, true);
+  assert.deepEqual(index[1].partialFilterExpression, {
+    source: "custom",
+    active: true,
+    sortOrderReserved: true,
+  });
+});
+
 test("schema normalizes custom-category names before persistence", async () => {
   const category = new ServiceCategory({
     name: "  Luxury   Treatment  ",
@@ -771,6 +801,21 @@ test("schema normalizes custom-category names before persistence", async () => {
 
   assert.equal(category.name, "Luxury Treatment");
   assert.equal(category.normalizedName, "luxury treatment");
+});
+
+test("schema rejects invalid sortOrder values without casting strings", async () => {
+  for (const sortOrder of ["1", -1, 1.5, Infinity, NaN]) {
+    const category = new ServiceCategory({
+      name: "Valid Name",
+      source: "custom",
+      ownerType: "barber",
+      ownerId: barberA._id,
+      createdBy: barberA._id,
+      sortOrder,
+    });
+
+    await assert.rejects(category.validate(), /sortOrder/);
+  }
 });
 
 /* ── sortOrder auto-increment ──────────────────────────── */
@@ -876,9 +921,105 @@ test("client-provided sortOrder on create does not override server auto value", 
   assert.equal(createdPayload.sortOrder, 0, "client-provided sortOrder is ignored");
 });
 
+test("omitted sortOrder continues automatic owner-scoped ordering", async () => {
+  const res = createResponse();
+  let payload;
+  ServiceCategory.findOne = (() => {
+    let calls = 0;
+    return () => (++calls === 1 ? null : makeChainableSortQuery({ sortOrder: 4 }));
+  })();
+  ServiceCategory.create = async (value) => {
+    payload = value;
+    return { _id: new mongoose.Types.ObjectId(), ...value };
+  };
+
+  await createServiceCategory(
+    { user: barberA, body: { name: "Automatic", ownerType: "barber", ownerId: barberA._id } },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(payload.sortOrder, 5);
+  assert.equal(payload.sortOrderReserved, true);
+});
+
+test("automatic allocation ignores inactive positions that are outside the active ordering index", async () => {
+  const res = createResponse();
+  let allocationQuery;
+  let calls = 0;
+  ServiceCategory.findOne = (query) => {
+    calls += 1;
+    if (calls === 1) return null;
+    allocationQuery = query;
+    return makeChainableSortQuery({ sortOrder: 2 });
+  };
+  ServiceCategory.create = async (payload) => ({ _id: new mongoose.Types.ObjectId(), ...payload });
+
+  await createServiceCategory(
+    { user: barberA, body: { name: "After Inactive", ownerType: "barber", ownerId: barberA._id } },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.sortOrder, 3);
+  assert.equal(allocationQuery.active, true);
+});
+
+test("concurrent automatic allocations retry a database sortOrder collision with the next position", async () => {
+  const res = createResponse();
+  let createCalls = 0;
+  let queryCalls = 0;
+  ServiceCategory.findOne = () => {
+    queryCalls += 1;
+    if (queryCalls === 1) return null;
+    return makeChainableSortQuery({ sortOrder: queryCalls === 2 ? 0 : 1 });
+  };
+  ServiceCategory.create = async (payload) => {
+    createCalls += 1;
+    if (createCalls === 1) {
+      const error = new Error("E11000 ownerType_1_ownerId_1_sortOrder_1");
+      error.code = 11000;
+      error.keyPattern = { ownerType: 1, ownerId: 1, sortOrder: 1 };
+      throw error;
+    }
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  await createServiceCategory(
+    { user: barberA, body: { name: "Concurrent", ownerType: "barber", ownerId: barberA._id } },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createCalls, 2);
+  assert.equal(res.body.sortOrder, 2);
+});
+
+test("the same automatic position is allowed for different owners", async () => {
+  const payloads = [];
+  let calls = 0;
+  ServiceCategory.findOne = () => (++calls % 2 === 1 ? null : chainableNull);
+  ServiceCategory.create = async (payload) => {
+    payloads.push(payload);
+    return { _id: new mongoose.Types.ObjectId(), ...payload };
+  };
+
+  for (const user of [barberA, barberB]) {
+    await createServiceCategory(
+      { user, body: { name: `Owner ${user._id}`, ownerType: "barber", ownerId: user._id } },
+      createResponse()
+    );
+  }
+
+  assert.deepEqual(payloads.map(({ ownerId, sortOrder }) => [String(ownerId), sortOrder]), [
+    [String(barberA._id), 0],
+    [String(barberB._id), 0],
+  ]);
+});
+
 /* ── updateServiceCategory ──────────────────────────────── */
 
-test("barber can update their own custom category name", async () => {
+test("barber can update a legacy category name and reserve its explicit sortOrder", async () => {
   const res = createResponse();
   const doc = makeDoc({ name: "Old Name" });
 
@@ -897,6 +1038,148 @@ test("barber can update their own custom category name", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(doc.name, "New Name");
   assert.equal(doc.sortOrder, 1);
+  assert.equal(doc.sortOrderReserved, true);
+});
+
+test("update rejects invalid explicit sortOrder values without coercion", async () => {
+  for (const sortOrder of ["1", -1, 1.5, Infinity, NaN]) {
+    const res = createResponse();
+    const doc = makeDoc({ sortOrder: 7 });
+    let saveCalled = false;
+    doc.save = async () => { saveCalled = true; return doc; };
+    ServiceCategory.findById = async () => doc;
+
+    await updateServiceCategory(
+      { user: barberA, params: { id: doc._id }, body: { sortOrder } },
+      res
+    );
+
+    assert.equal(res.statusCode, 400, `Expected 400 for ${String(sortOrder)}`);
+    assert.equal(doc.sortOrder, 7);
+    assert.equal(saveCalled, false);
+  }
+});
+
+test("legacy explicit reorder rejects an occupied active legacy position", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ sortOrder: 1 });
+  let saveCalled = false;
+  doc.save = async () => { saveCalled = true; return doc; };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => makeDoc({ sortOrder: 3 });
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { sortOrder: 3 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "Category sortOrder already exists");
+  assert.equal(saveCalled, false);
+});
+
+test("sortOrder occupancy checks stay owner-scoped", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ sortOrder: 1 });
+  let query;
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = (value) => { query = value; return null; };
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { sortOrder: 3 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(String(query.ownerId), String(barberA._id));
+  assert.equal(query.ownerType, "barber");
+  assert.equal(query.active, true);
+});
+
+test("concurrent explicit sortOrder collision returns a stable conflict instead of E11000", async () => {
+  const res = createResponse();
+  const doc = makeDoc();
+  const error = new Error("E11000 ownerType_1_ownerId_1_sortOrder_1");
+  error.code = 11000;
+  error.keyPattern = { ownerType: 1, ownerId: 1, sortOrder: 1 };
+  doc.save = async () => { throw error; };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => null;
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { sortOrder: 3 } },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "Category sortOrder already exists");
+  assert.equal(res.body.message.includes("E11000"), false);
+});
+
+test("reactivation with an occupied sortOrder returns a stable conflict", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ active: false });
+  const error = new Error("E11000 ownerType_1_ownerId_1_sortOrder_1");
+  error.code = 11000;
+  error.keyPattern = { ownerType: 1, ownerId: 1, sortOrder: 1 };
+  doc.save = async () => { throw error; };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => null;
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { active: true } },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "Category sortOrder already exists");
+  assert.equal(res.body.message.includes("E11000"), false);
+});
+
+test("legacy reactivation reserves a free owner-scoped sortOrder without affecting another owner", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ active: false, sortOrder: 3, sortOrderReserved: false });
+  const otherOwnerCategory = makeDoc({ ownerId: barberB._id, sortOrder: 3, active: true });
+  const queries = [];
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async (query) => {
+    queries.push(query);
+    return null;
+  };
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { active: true } },
+    res
+  );
+
+  const sortOrderQuery = queries.find((query) => "sortOrder" in query);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body, doc);
+  assert.equal(doc.active, true);
+  assert.equal(doc.sortOrder, 3);
+  assert.equal(doc.sortOrderReserved, true);
+  assert.equal(String(sortOrderQuery.ownerId), String(barberA._id));
+  assert.equal(otherOwnerCategory.active, true);
+  assert.equal(otherOwnerCategory.sortOrder, 3);
+});
+
+test("legacy reactivation rejects an occupied active legacy position before saving", async () => {
+  const res = createResponse();
+  const doc = makeDoc({ active: false, sortOrder: 3 });
+  let calls = 0;
+  let saveCalled = false;
+  doc.save = async () => { saveCalled = true; return doc; };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => (++calls === 1 ? null : makeDoc({ sortOrder: 3 }));
+
+  await updateServiceCategory(
+    { user: barberA, params: { id: doc._id }, body: { active: true } },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "Category sortOrder already exists");
+  assert.equal(saveCalled, false);
 });
 
 test("can soft-disable custom category", async () => {
