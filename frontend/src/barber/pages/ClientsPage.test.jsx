@@ -11,6 +11,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ClientsPage from "./ClientsPage";
+import { filterClients } from "./clientFilters";
 import api from "@/shared/api/axios";
 import { formatDateLabel, parseDateKey } from "@/shared/utils/dates";
 
@@ -302,46 +303,65 @@ describe("ClientsPage", () => {
     expect(screen.getByText("12,000 AMD")).toBeInTheDocument();
     expect(screen.queryByText(/դրամ/u)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 31, 12));
 
-    fireEvent.change(screen.getByLabelText("Search by name or phone"), {
-      target: { value: "Alice" },
-    });
-    fireEvent.change(screen.getByLabelText("Visit type"), {
-      target: { value: "returning" },
-    });
-    fireEvent.change(screen.getByLabelText("Upcoming booking"), {
-      target: { value: "has-upcoming" },
-    });
-    fireEvent.change(screen.getByLabelText("Last visit"), {
-      target: { value: "last-30" },
-    });
-    fireEvent.change(screen.getByLabelText("Min total spent"), {
-      target: { value: "4000" },
-    });
-    fireEvent.change(screen.getByLabelText("Max total spent"), {
-      target: { value: "6000" },
-    });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /filters/i }));
 
-    expect(await screen.findByRole("button", { name: "Search: Alice" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Returning clients" })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Has upcoming booking" })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Last 30 days" })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Min spent: 4,000 AMD" })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Max spent: 6,000 AMD" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("Alice Adams")).toBeInTheDocument();
-    expect(screen.queryByText("Bob Brown")).not.toBeInTheDocument();
-    expect(screen.queryByText(/դրամ/u)).not.toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("Search by name or phone"), {
+        target: { value: "Alice" },
+      });
+      fireEvent.change(screen.getByLabelText("Visit type"), {
+        target: { value: "returning" },
+      });
+      fireEvent.change(screen.getByLabelText("Upcoming booking"), {
+        target: { value: "has-upcoming" },
+      });
+      fireEvent.change(screen.getByLabelText("Last visit"), {
+        target: { value: "last-30" },
+      });
+      fireEvent.change(screen.getByLabelText("Min total spent"), {
+        target: { value: "4000" },
+      });
+      fireEvent.change(screen.getByLabelText("Max total spent"), {
+        target: { value: "6000" },
+      });
+
+      expect(screen.getByRole("button", { name: "Search: Alice" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Returning clients" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Has upcoming booking" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Last 30 days" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Min spent: 4,000 AMD" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Max spent: 6,000 AMD" })
+      ).toBeInTheDocument();
+      expect(screen.getByText("Alice Adams")).toBeInTheDocument();
+      expect(screen.queryByText("Bob Brown")).not.toBeInTheDocument();
+      expect(screen.queryByText(/դրամ/u)).not.toBeInTheDocument();
+
+      const last30Filters = {
+        searchQuery: "",
+        visitType: "",
+        upcomingFilter: "",
+        lastVisitFilter: "last-30",
+        totalSpentRange: { min: "", max: "" },
+      };
+      expect(filterClients([clientsResponse[0]], last30Filters)).toHaveLength(1);
+
+      vi.setSystemTime(new Date(2026, 8, 1, 12));
+      expect(filterClients([clientsResponse[0]], last30Filters)).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders readable booking dates, preserves time and service, and keeps None for missing bookings", async () => {
