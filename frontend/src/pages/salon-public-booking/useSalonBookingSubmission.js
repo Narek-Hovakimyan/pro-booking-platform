@@ -27,6 +27,9 @@ export function useSalonBookingSubmission({
   const [bookingPayment, setBookingPayment] = useState(null);
   const discoveryRequestIdRef = useRef(0);
   const validationRequestIdRef = useRef(0);
+  const submissionRequestIdRef = useRef(0);
+  const submissionInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
   const selectedBarberId = selectedBarber?.id || selectedBarber?._id;
   const selectedServiceId = selectedService?.id || selectedService?._id;
   const promotionContextKey = [salonId, selectedBarberId, selectedServiceId]
@@ -34,10 +37,49 @@ export function useSalonBookingSubmission({
     .join(":");
   const currentPromotionContextKeyRef = useRef(promotionContextKey);
   const previousPromotionContextKeyRef = useRef(promotionContextKey);
+  const submissionContextKey = [
+    salonId,
+    selectedBarberId,
+    selectedServiceId,
+    selectedDate,
+    selectedDateDayKey,
+    validSelectedTime,
+  ]
+    .map((value) => String(value || ""))
+    .join(":");
+  const currentSubmissionContextKeyRef = useRef(submissionContextKey);
+  const previousSubmissionContextKeyRef = useRef(submissionContextKey);
 
   useLayoutEffect(() => {
     currentPromotionContextKeyRef.current = promotionContextKey;
   }, [promotionContextKey]);
+
+  useLayoutEffect(() => {
+    currentSubmissionContextKeyRef.current = submissionContextKey;
+
+    if (previousSubmissionContextKeyRef.current !== submissionContextKey) {
+      submissionRequestIdRef.current += 1;
+      submissionInFlightRef.current = false;
+      setIsSaving(false);
+      setSubmitError("");
+      setBookingSuccess(false);
+      setBookingPayment(null);
+    }
+
+    previousSubmissionContextKeyRef.current = submissionContextKey;
+  }, [submissionContextKey]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      discoveryRequestIdRef.current += 1;
+      validationRequestIdRef.current += 1;
+      submissionRequestIdRef.current += 1;
+      submissionInFlightRef.current = false;
+    };
+  }, []);
 
   const resetPromoState = useCallback(() => {
     validationRequestIdRef.current += 1;
@@ -69,13 +111,21 @@ export function useSalonBookingSubmission({
     api
       .get(`/vouchers/public/salon/${salonId}?${params}`)
       .then(({ data }) => {
-        if (requestId === discoveryRequestIdRef.current) {
+        if (
+          mountedRef.current &&
+          requestId === discoveryRequestIdRef.current &&
+          promotionContextKey === currentPromotionContextKeyRef.current
+        ) {
           setPublicPromotions(Array.isArray(data) ? data : []);
           setPublicPromotionContextKey(promotionContextKey);
         }
       })
       .catch(() => {
-        if (requestId === discoveryRequestIdRef.current) {
+        if (
+          mountedRef.current &&
+          requestId === discoveryRequestIdRef.current &&
+          promotionContextKey === currentPromotionContextKeyRef.current
+        ) {
           setPublicPromotions([]);
           setPublicPromotionContextKey(promotionContextKey);
         }
@@ -84,9 +134,12 @@ export function useSalonBookingSubmission({
   }, [promotionContextKey, salonId, selectedBarberId, selectedServiceId]);
 
   const resetBookingFlow = () => {
+    submissionRequestIdRef.current += 1;
+    submissionInFlightRef.current = false;
     setBookingSuccess(false);
     setBookingPayment(null);
     setSubmitError("");
+    setIsSaving(false);
   };
 
   const handleApplyPromo = async (submittedCode = promoCode) => {
@@ -107,6 +160,7 @@ export function useSalonBookingSubmission({
       });
 
       if (
+        !mountedRef.current ||
         requestId !== validationRequestIdRef.current ||
         validationContextKey !== currentPromotionContextKeyRef.current
       ) {
@@ -122,6 +176,7 @@ export function useSalonBookingSubmission({
       }
     } catch (err) {
       if (
+        !mountedRef.current ||
         requestId !== validationRequestIdRef.current ||
         validationContextKey !== currentPromotionContextKeyRef.current
       ) {
@@ -135,6 +190,7 @@ export function useSalonBookingSubmission({
       });
     } finally {
       if (
+        mountedRef.current &&
         requestId === validationRequestIdRef.current &&
         validationContextKey === currentPromotionContextKeyRef.current
       ) {
@@ -149,6 +205,7 @@ export function useSalonBookingSubmission({
 
   const submitBooking = async () => {
     if (
+      submissionInFlightRef.current ||
       isSaving ||
       !currentUser ||
       !selectedBarber ||
@@ -160,6 +217,14 @@ export function useSalonBookingSubmission({
       return;
     }
 
+    const requestId = ++submissionRequestIdRef.current;
+    const submissionContextKeyAtStart = submissionContextKey;
+    const isCurrentSubmission = () =>
+      mountedRef.current &&
+      requestId === submissionRequestIdRef.current &&
+      submissionContextKeyAtStart === currentSubmissionContextKeyRef.current;
+
+    submissionInFlightRef.current = true;
     setIsSaving(true);
     setSubmitError("");
 
@@ -190,10 +255,18 @@ export function useSalonBookingSubmission({
 
       const createdBooking = await createBooking(bookingPayload);
 
+      if (!isCurrentSubmission()) {
+        return null;
+      }
+
       setBookingPayment(createdBooking?.payment || createdBooking?.depositPayment || null);
       setBookingSuccess(true);
       return createdBooking;
     } catch (requestError) {
+      if (!isCurrentSubmission()) {
+        return null;
+      }
+
       setSubmitError(
         getFriendlyApiError(
           requestError,
@@ -202,7 +275,10 @@ export function useSalonBookingSubmission({
       );
       return null;
     } finally {
-      setIsSaving(false);
+      if (isCurrentSubmission()) {
+        submissionInFlightRef.current = false;
+        setIsSaving(false);
+      }
     }
   };
 

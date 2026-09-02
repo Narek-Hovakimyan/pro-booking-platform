@@ -87,6 +87,7 @@ function AvailabilityHarness({
 }
 
 function SubmissionHarness({
+  salonId = "salon-1",
   currentUser,
   selectedBarber,
   selectedService,
@@ -96,7 +97,7 @@ function SubmissionHarness({
   client = { name: "Jamie Client", phone: "+37477123456", note: "private note" },
 }) {
   const state = useSalonBookingSubmission({
-    salonId: "salon-1",
+    salonId,
     currentUser,
     selectedBarber,
     selectedService,
@@ -110,6 +111,8 @@ function SubmissionHarness({
       <div>
         <div data-testid="success">{String(state.bookingSuccess)}</div>
         <div data-testid="payment">{state.bookingPayment ? "set" : "unset"}</div>
+        <div data-testid="saving">{String(state.isSaving)}</div>
+        <div data-testid="submit-error">{state.submitError}</div>
         <div data-testid="promo">{state.promoCode}</div>
         <div data-testid="validated-promo">{state.validatedPromo?.promotion?.code || ""}</div>
         <div data-testid="promo-discount">{state.validatedPromo?.discountAmount || 0}</div>
@@ -125,6 +128,15 @@ function SubmissionHarness({
       <button disabled={state.isSaving} onClick={state.submitBooking} type="button">
         submit
       </button>
+      <button
+        onClick={() => {
+          void state.submitBooking();
+          void state.submitBooking();
+        }}
+        type="button"
+      >
+        submit-twice
+      </button>
       <button onClick={state.resetBookingFlow} type="button">
         reset-flow
       </button>
@@ -133,6 +145,15 @@ function SubmissionHarness({
       </button>
     </div>
   );
+}
+
+function buildSubmissionProps(overrides = {}) {
+  return {
+    currentUser: { id: "client-1", role: "client", name: "Jamie Client" },
+    selectedBarber: { id: "barber-1", name: "Ava" },
+    selectedService: { id: "svc-1", name: "Cut", price: 12000, duration: 30 },
+    ...overrides,
+  };
 }
 
 afterEach(() => {
@@ -521,6 +542,140 @@ describe("SalonPublicBookingPage split hooks", () => {
     expect(screen.getByTestId("success")).toHaveTextContent("false");
     expect(screen.getByTestId("payment")).toHaveTextContent("unset");
     expect(screen.getByTestId("promo")).toHaveTextContent("SAVE10");
+  });
+
+  it("blocks same-turn submission calls before saving state commits", async () => {
+    const pending = deferred();
+    const createBookingMock = vi.fn(() => pending.promise);
+    useBooking.mockReturnValue({ createBooking: createBookingMock });
+
+    renderWithProviders(<SubmissionHarness {...buildSubmissionProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "submit-twice" }));
+
+    expect(createBookingMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("saving")).toHaveTextContent("true");
+
+    await act(async () => {
+      pending.resolve({ payment: { paymentStatus: "pending" } });
+      await pending.promise;
+    });
+
+    expect(screen.getByTestId("success")).toHaveTextContent("true");
+    expect(screen.getByTestId("payment")).toHaveTextContent("set");
+  });
+
+  it.each([
+    ["salon", { salonId: "salon-2" }],
+    ["barber", { selectedBarber: { id: "barber-2", name: "Bea" } }],
+    ["service", { selectedService: { id: "svc-2", name: "Color", price: 14000, duration: 45 } }],
+    ["date", { selectedDate: "2026-08-11", selectedDateDayKey: "tue" }],
+    ["time", { validSelectedTime: "11:00" }],
+  ])("ignores a pending booking success after the %s changes", async (_label, contextChange) => {
+    const pending = deferred();
+    const createBookingMock = vi.fn(() => pending.promise);
+    useBooking.mockReturnValue({ createBooking: createBookingMock });
+    const initialProps = buildSubmissionProps();
+
+    const { rerender } = renderWithProviders(<SubmissionHarness {...initialProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+    expect(createBookingMock).toHaveBeenCalledTimes(1);
+
+    rerender(<SubmissionHarness {...initialProps} {...contextChange} />);
+    expect(screen.getByTestId("saving")).toHaveTextContent("false");
+
+    await act(async () => {
+      pending.resolve({ payment: { paymentStatus: "pending" } });
+      await pending.promise;
+    });
+
+    expect(screen.getByTestId("success")).toHaveTextContent("false");
+    expect(screen.getByTestId("payment")).toHaveTextContent("unset");
+    expect(screen.getByTestId("submit-error")).toHaveTextContent("");
+  });
+
+  it("ignores a pending booking error after the context changes", async () => {
+    const pending = deferred();
+    const createBookingMock = vi.fn(() => pending.promise);
+    useBooking.mockReturnValue({ createBooking: createBookingMock });
+    const initialProps = buildSubmissionProps();
+
+    const { rerender } = renderWithProviders(<SubmissionHarness {...initialProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+    rerender(
+      <SubmissionHarness
+        {...initialProps}
+        selectedService={{ id: "svc-2", name: "Color", price: 14000, duration: 45 }}
+      />
+    );
+
+    await act(async () => {
+      pending.reject({ response: { data: { message: "Slot no longer available" } } });
+      try {
+        await pending.promise;
+      } catch {
+        // The submission handles the request error.
+      }
+    });
+
+    expect(screen.getByTestId("saving")).toHaveTextContent("false");
+    expect(screen.getByTestId("submit-error")).toHaveTextContent("");
+  });
+
+  it("invalidates a pending booking when the flow resets", async () => {
+    const pending = deferred();
+    useBooking.mockReturnValue({ createBooking: vi.fn(() => pending.promise) });
+
+    renderWithProviders(<SubmissionHarness {...buildSubmissionProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "reset-flow" }));
+
+    await act(async () => {
+      pending.resolve({ payment: { paymentStatus: "pending" } });
+      await pending.promise;
+    });
+
+    expect(screen.getByTestId("success")).toHaveTextContent("false");
+    expect(screen.getByTestId("payment")).toHaveTextContent("unset");
+    expect(screen.getByTestId("saving")).toHaveTextContent("false");
+  });
+
+  it("drops pending booking and promo updates after unmount", async () => {
+    const bookingRequest = deferred();
+    const discoveryRequest = deferred();
+    const promoRequest = deferred();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    useBooking.mockReturnValue({ createBooking: vi.fn(() => bookingRequest.promise) });
+    api.get.mockReturnValue(discoveryRequest.promise);
+    api.post.mockReturnValue(promoRequest.promise);
+
+    const { unmount } = renderWithProviders(<SubmissionHarness {...buildSubmissionProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "seed-promo" }));
+    fireEvent.click(screen.getByRole("button", { name: "apply-promo" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+
+    try {
+      unmount();
+
+      await act(async () => {
+        bookingRequest.resolve({ payment: { paymentStatus: "pending" } });
+        discoveryRequest.resolve({ data: [{ code: "STALE" }] });
+        promoRequest.resolve({
+          data: { valid: true, promotion: { code: "SAVE10", title: "Save Ten" }, discountAmount: 10 },
+        });
+        await Promise.all([bookingRequest.promise, discoveryRequest.promise, promoRequest.promise]);
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("preserves the auth redirect on login and register links", () => {
