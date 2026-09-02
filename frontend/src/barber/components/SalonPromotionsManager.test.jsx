@@ -361,11 +361,18 @@ describe("SalonPromotionsManager", () => {
     );
     expect(screen.getByText("Title is required.")).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Title"), "Spring Special");
-    await user.type(screen.getByLabelText("Description (optional)"), "Seasonal offer");
-    await user.selectOptions(screen.getByLabelText("Discount Type"), "percentage");
-    await user.clear(screen.getByLabelText("Percentage"));
-    await user.type(screen.getByLabelText("Percentage"), "150");
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Spring Special" },
+    });
+    fireEvent.change(screen.getByLabelText("Description (optional)"), {
+      target: { value: "Seasonal offer" },
+    });
+    fireEvent.change(screen.getByLabelText("Discount Type"), {
+      target: { value: "percentage" },
+    });
+    fireEvent.change(screen.getByLabelText("Percentage"), {
+      target: { value: "150" },
+    });
     await user.click(
       within(screen.getByRole("dialog", { name: "Create Promotion" })).getByRole("button", {
         name: "Create Promotion",
@@ -373,15 +380,23 @@ describe("SalonPromotionsManager", () => {
     );
     expect(screen.getByText("Percentage discount cannot exceed 100%.")).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText("Percentage"));
-    await user.type(screen.getByLabelText("Percentage"), "20");
-    await user.type(screen.getByLabelText("Code (leave empty to auto-generate)"), "spring25");
-    await user.type(screen.getByLabelText("Start Date"), "2026-08-10");
-    await user.type(screen.getByLabelText("End Date"), "2026-08-20");
-    await user.clear(screen.getByLabelText("Max Uses"));
-    await user.type(screen.getByLabelText("Max Uses"), "5");
-    await user.click(screen.getByLabelText("Haircut"));
-    await user.click(screen.getByLabelText("Alex Barber"));
+    fireEvent.change(screen.getByLabelText("Percentage"), {
+      target: { value: "20" },
+    });
+    fireEvent.change(screen.getByLabelText("Code (leave empty to auto-generate)"), {
+      target: { value: "spring25" },
+    });
+    fireEvent.change(screen.getByLabelText("Start Date"), {
+      target: { value: "2026-08-10" },
+    });
+    fireEvent.change(screen.getByLabelText("End Date"), {
+      target: { value: "2026-08-20" },
+    });
+    fireEvent.change(screen.getByLabelText("Max Uses"), {
+      target: { value: "5" },
+    });
+    fireEvent.click(screen.getByLabelText("Haircut"));
+    fireEvent.click(screen.getByLabelText("Alex Barber"));
     await user.click(
       within(screen.getByRole("dialog", { name: "Create Promotion" })).getByRole("button", {
         name: "Create Promotion",
@@ -408,8 +423,9 @@ describe("SalonPromotionsManager", () => {
     expect(screen.queryByRole("dialog", { name: "Create Promotion" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Edit promotion Summer Special" }));
-    await user.clear(screen.getByLabelText("Percentage"));
-    await user.type(screen.getByLabelText("Percentage"), "25");
+    fireEvent.change(screen.getByLabelText("Percentage"), {
+      target: { value: "25" },
+    });
     await user.click(
       within(screen.getByRole("dialog", { name: "Edit Promotion" })).getByRole("button", {
         name: "Update Promotion",
