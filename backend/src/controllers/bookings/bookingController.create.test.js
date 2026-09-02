@@ -45,6 +45,7 @@ import {
 } from "./bookingController.testUtils.js";
 
 const originalConsoleError = console.error;
+const originalServiceFind = Service.find;
 const originalPaymentProvider = process.env.PAYMENT_PROVIDER;
 const originalFindByIdAndDelete = Booking.findByIdAndDelete;
 const originalStageBookingReferenceMedia =
@@ -113,6 +114,7 @@ afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
+  Service.find = originalServiceFind;
   Subscription.findOne = originalMethods.subscriptionFindOne;
   SubscriptionPaymentAttempt.create = originalMethods.subscriptionPaymentAttemptCreate;
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
@@ -433,7 +435,7 @@ test("createBooking resolves only the exact salon schedule", async () => {
   );
 
   assert.equal(res.statusCode, 201);
-  assert.deepEqual(queries, [{ barberId, salonId }]);
+  assert.deepEqual(queries, [{ barberId, salonId }, { barberId, salonId }]);
 });
 
 test("slot validation exact mode uses default schedule fallback within the resolved salon schedule", async () => {
@@ -1624,6 +1626,10 @@ test("booking from package service snapshots package name/duration/price on crea
     if (String(query._id) === String(packageServiceId)) return packageService;
     return null;
   };
+  Service.find = async () => [
+    { _id: serviceId, barberId, active: true, type: "single", price: 100, duration: 45 },
+    { _id: "64b000000000000000000098", barberId, active: true, type: "single", price: 100, duration: 45 },
+  ];
 
   const res = createResponse();
 
@@ -1649,6 +1655,333 @@ test("booking from package service snapshots package name/duration/price on crea
   assert.equal(res.body.duration, packageService.duration);
   assert.equal(res.body.price, packageService.price);
   assert.equal(createdBookings.length, 1);
+});
+
+test("booking rejects a package with stale effective members", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async () => ({
+    _id: serviceId, barberId, name: "Stale package", active: true, type: "package",
+    includedServiceIds: ["64b000000000000000000098", "64b000000000000000000099"],
+  });
+  Service.find = async () => [
+    { _id: "64b000000000000000000098", barberId, active: true, type: "single", price: 100, duration: 30 },
+  ];
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "Service is not available for this barber" });
+  assert.equal(createdBookings.length, 0);
+});
+
+test("booking snapshots package state revalidated inside the create transaction", async () => {
+  const createdBookings = [];
+  let memberLookup = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async () => ({
+    _id: serviceId, barberId, name: "Changing package", active: true, type: "package",
+    includedServiceIds: ["64b000000000000000000098", "64b000000000000000000099"],
+    packagePriceMode: "sum", packageDurationMode: "sum",
+  });
+  Service.find = async () => {
+    memberLookup += 1;
+    const price = memberLookup === 1 ? 50 : 125;
+    const duration = memberLookup === 1 ? 20 : 35;
+    return [
+      { _id: "64b000000000000000000098", barberId, active: true, type: "single", price, duration },
+      { _id: "64b000000000000000000099", barberId, active: true, type: "single", price, duration },
+    ];
+  };
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(memberLookup, 2);
+  assert.equal(res.body.price, 250);
+  assert.equal(res.body.duration, 70);
+});
+
+test("booking fails closed when a service deactivates after preflight readiness", async () => {
+  const createdBookings = [];
+  let serviceLookups = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async () => {
+    serviceLookups += 1;
+    return serviceLookups === 1
+      ? { _id: serviceId, barberId, name: "Cut", active: true, type: "single", price: 100, duration: 30 }
+      : null;
+  };
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Service is not available for this barber");
+  assert.equal(createdBookings.length, 0);
+});
+
+test("booking fails closed when salon membership changes after preflight readiness", async () => {
+  const createdBookings = [];
+  let readinessLookups = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  User.findById = () => ({
+    select: async (projection) => {
+      if (!projection.includes("salon salonStatus")) return { name: "Barber" };
+      readinessLookups += 1;
+      return readinessLookups === 1 ? barberWithSalon : { ...barberWithSalon, salons: [] };
+    },
+  });
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    code: "BARBER_UNAVAILABLE",
+    message: "This specialist is not currently accepting bookings.",
+  });
+  assert.equal(createdBookings.length, 0);
+});
+
+test("direct booking revalidates session-bound profile readiness before persistence", async () => {
+  const createdBookings = [];
+  const sessions = [];
+  let profileReads = 0;
+  const session = createTransactionSession();
+  const independentBarber = {
+    ...barber,
+    specialistOnboarding: {
+      version: 1,
+      status: "completed",
+      currentStep: "review",
+      workplace: "independent",
+      completedAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+  };
+  mockSuccessfulCreateDependencies(createdBookings, independentBarber);
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  Subscription.findOne = async () => ({ _id: "individual-sub", status: "active" });
+  BarberProfile.findOne = () => ({
+    session(candidate) {
+      sessions.push(candidate);
+      return this;
+    },
+    select() {
+      profileReads += 1;
+      return { lean: async () => ({ barberId, address: profileReads === 1 ? "1 Main St" : "" }) };
+    },
+  });
+  Schedule.findOne = async () => validSchedule();
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(sessions, [session]);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("booking fails closed when session-bound individual paid access is lost", async () => {
+  const createdBookings = [];
+  const sessions = [];
+  let subscriptionReads = 0;
+  const session = createTransactionSession();
+  const independentBarber = {
+    ...barber,
+    specialistOnboarding: {
+      version: 1, status: "completed", currentStep: "review", workplace: "independent",
+      completedAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+  };
+  mockSuccessfulCreateDependencies(createdBookings, independentBarber);
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  BarberProfile.findOne = () => ({
+    select: () => ({ lean: async () => ({ barberId, address: "1 Main St" }) }),
+    lean: async () => ({}),
+  });
+  Schedule.findOne = async () => validSchedule();
+  Subscription.findOne = () => {
+    subscriptionReads += 1;
+    const value = subscriptionReads === 1 ? { _id: "individual-sub", status: "active" } : null;
+    return {
+      session(candidate) {
+        sessions.push(candidate);
+        return Promise.resolve(value);
+      },
+      then(resolve, reject) {
+        return Promise.resolve(value).then(resolve, reject);
+      },
+    };
+  };
+  SubscriptionSeat.find = () => ({
+    session() { return this; },
+    populate: () => ({ lean: async () => [] }),
+  });
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(sessions, [session]);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("booking fails closed when a session-bound seat parent subscription loses access", async () => {
+  const createdBookings = [];
+  const sessions = [];
+  const membershipSessions = [];
+  let seatReads = 0;
+  const session = createTransactionSession();
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  Subscription.findOne = async () => null;
+  User.findById = () => {
+    let querySession = null;
+    return {
+      session(candidate) {
+        querySession = candidate;
+        return this;
+      },
+      select(fields) {
+        if (fields === "salon salonStatus salons role" && querySession) {
+          membershipSessions.push(querySession);
+        }
+        return Promise.resolve(barberWithSalon);
+      },
+    };
+  };
+  SubscriptionSeat.find = () => ({
+    session(candidate) {
+      sessions.push(candidate);
+      return this;
+    },
+    populate: () => ({
+      lean: async () => {
+        seatReads += 1;
+        return [{
+          _id: "seat-1",
+          barberId,
+          salonId,
+          status: "active",
+          subscriptionId: { _id: "parent-sub", ownerId: salonId, status: seatReads === 1 ? "active" : "expired" },
+        }];
+      },
+    }),
+  });
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(sessions, [session]);
+  assert.deepEqual(membershipSessions, [session]);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("transaction retries revalidate current service state before the committed booking", async () => {
+  const createdBookings = [];
+  let serviceLookups = 0;
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({
+    createdBookings,
+    withTransaction: async (callback) => {
+      await callback();
+      return callback();
+    },
+  });
+  Service.findOne = async () => {
+    serviceLookups += 1;
+    const price = [100, 150, 200][serviceLookups - 1];
+    return { _id: serviceId, barberId, name: "Retry Cut", active: true, type: "single", price, duration: 30 };
+  };
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(serviceLookups, 3);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(createdBookings[0].price, 200);
+});
+
+test("transaction retries revalidate session-bound paid access before committing", async () => {
+  const createdBookings = [];
+  const sessions = [];
+  let subscriptionReads = 0;
+  const independentBarber = {
+    ...barber,
+    specialistOnboarding: {
+      version: 1, status: "completed", currentStep: "review", workplace: "independent",
+      completedAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+  };
+  mockSuccessfulCreateDependencies(createdBookings, independentBarber);
+  BarberProfile.findOne = () => ({
+    select: () => ({ lean: async () => ({ barberId, address: "1 Main St" }) }),
+    lean: async () => ({}),
+  });
+  Schedule.findOne = async () => validSchedule();
+  const session = installTransactionalBookingCreate({
+    createdBookings,
+    withTransaction: async (callback) => {
+      await callback();
+      return callback();
+    },
+  });
+  Subscription.findOne = () => {
+    subscriptionReads += 1;
+    const value = subscriptionReads < 3 ? { _id: "individual-sub", status: "active" } : null;
+    return {
+      session(candidate) {
+        sessions.push(candidate);
+        return Promise.resolve(value);
+      },
+      then(resolve, reject) {
+        return Promise.resolve(value).then(resolve, reject);
+      },
+    };
+  };
+  SubscriptionSeat.find = () => ({
+    session() { return this; },
+    populate: () => ({ lean: async () => [] }),
+  });
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(sessions, [session, session]);
+  assert.equal(createdBookings.length, 0);
 });
 
 // ── Plain object and FormData validation ─────────────────────────
@@ -3247,6 +3580,40 @@ test("createBooking with enabled deposit stores pending deposit fields", async (
   assert.equal(res.body.providerPaymentId, undefined);
   assert.equal(res.body.providerTransactionId, undefined);
   assert.equal(res.body.rawWebhookPayload, undefined);
+});
+
+test("createBooking reads deposit settings through the active transaction session", async () => {
+  const createdBookings = [];
+  const sessions = [];
+  const session = createTransactionSession();
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  __bookingCreateServiceTestHooks.startSession = async () => session;
+  BarberProfile.findOne = () => ({
+    session(candidate) {
+      sessions.push(candidate);
+      return this;
+    },
+    lean: async () => ({
+      depositSettings: {
+        enabled: true,
+        mode: "fixed",
+        value: 25,
+        minimumBookingPrice: null,
+        noShowPolicyText: "Session-bound deposit policy",
+      },
+    }),
+  });
+
+  const res = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(sessions, [session]);
+  assert.equal(createdBookings[0].depositAmount, 25);
+  assert.equal(createdBookings[0].depositPolicyText, "Session-bound deposit policy");
 });
 
 test("createBooking with disabled payment provider leaves required deposit pending without payment attempt", async () => {

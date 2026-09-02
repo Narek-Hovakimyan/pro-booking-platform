@@ -1,5 +1,6 @@
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import mongoose from "mongoose";
 import {
   PAID_SUBSCRIPTION_STATUSES,
   subscriptionHasPaidAccess,
@@ -17,13 +18,21 @@ import {
   getRelationshipType,
 } from "../salon/salonRelationshipService.js";
 
-export const barberHasPaidAccess = async (barberId) => {
-  // Check individual subscription
-  const individualSub = await Subscription.findOne({
+const withSession = (query, session) =>
+  session && typeof query?.session === "function" ? query.session(session) : query;
+
+const findIndividualSubscription = (barberId, session = null) => withSession(
+  Subscription.findOne({
     ownerType: "barber",
     ownerId: barberId,
     status: { $in: PAID_SUBSCRIPTION_STATUSES },
-  });
+  }),
+  session
+);
+
+export const barberHasPaidAccess = async (barberId, session = null) => {
+  // Check individual subscription
+  const individualSub = await findIndividualSubscription(barberId, session);
 
   if (subscriptionHasPaidAccess(individualSub, new Date(), {
     statusAlreadyFiltered: true,
@@ -32,10 +41,10 @@ export const barberHasPaidAccess = async (barberId) => {
   }
 
   // Check salon seat coverage
-  const activeSeat = await SubscriptionSeat.findOne({
+  const activeSeat = await withSession(SubscriptionSeat.findOne({
     barberId,
     status: "active",
-  }).populate("subscriptionId");
+  }), session).populate("subscriptionId");
 
   if (!activeSeat || !activeSeat.subscriptionId) {
     return false;
@@ -46,18 +55,14 @@ export const barberHasPaidAccess = async (barberId) => {
   }
 
   const seatSalonId = getSeatSalonId(activeSeat);
-  const barber = await fetchBarberMembership(barberId);
+  const barber = await fetchBarberMembership(barberId, session);
 
   return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
 
-export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
+export const barberHasPaidAccessForSalon = async (barberId, salonId = null, session = null) => {
   // Individual barber subscriptions preserve existing global access behavior.
-  const individualSub = await Subscription.findOne({
-    ownerType: "barber",
-    ownerId: barberId,
-    status: { $in: PAID_SUBSCRIPTION_STATUSES },
-  });
+  const individualSub = await findIndividualSubscription(barberId, session);
 
   if (subscriptionHasPaidAccess(individualSub, new Date(), {
     statusAlreadyFiltered: true,
@@ -65,7 +70,7 @@ export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
     return true;
   }
 
-  const activeSeats = await getActiveSeatsForBarber(barberId);
+  const activeSeats = await getActiveSeatsForBarber(barberId, session);
   const matchingSeat = (activeSeats || []).find(
     (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
   );
@@ -75,17 +80,17 @@ export const barberHasPaidAccessForSalon = async (barberId, salonId = null) => {
   }
 
   const seatSalonId = getSeatSalonId(matchingSeat);
-  const barber = await fetchBarberMembership(barberId);
+  const barber = await fetchBarberMembership(barberId, session);
 
   return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
 
-export const barberHasPaidSeatAccessForSalon = async (barberId, salonId) => {
+export const barberHasPaidSeatAccessForSalon = async (barberId, salonId, session = null) => {
   if (!salonId) {
-    return barberHasPaidAccess(barberId);
+    return barberHasPaidAccess(barberId, session);
   }
 
-  const activeSeats = await getActiveSeatsForBarber(barberId);
+  const activeSeats = await getActiveSeatsForBarber(barberId, session);
   const matchingSeat = (activeSeats || []).find(
     (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
   );
@@ -95,7 +100,7 @@ export const barberHasPaidSeatAccessForSalon = async (barberId, salonId) => {
   }
 
   const seatSalonId = getSeatSalonId(matchingSeat);
-  const barber = await fetchBarberMembership(barberId);
+  const barber = await fetchBarberMembership(barberId, session);
 
   return isAcceptedSalonStaffMember(barber, seatSalonId);
 };
@@ -135,32 +140,71 @@ const getSalonBookingRelationship = (barber, salonId) => {
     : null;
 };
 
-export const barberHasBookingPaidAccessForSalon = async (barberId, salonId = null) => {
-  const individualSub = await Subscription.findOne({
-    ownerType: "barber",
-    ownerId: barberId,
-    status: { $in: PAID_SUBSCRIPTION_STATUSES },
-  });
+const resolveSeatBookingPaidAccess = async ({ barberId, salonId, session, barber = null }) => {
+  const activeSeats = await getActiveSeatsForBarber(barberId, session);
+  const matchingSeat = (activeSeats || []).find(
+    (seat) => seatHasActiveParentSubscription(seat) && seatMatchesSalon(seat, salonId)
+  );
+  if (!matchingSeat) return { allowed: false };
+
+  const membership = barber || await fetchBarberMembership(barberId, session);
+  return isAcceptedSalonStaffMember(membership, getSeatSalonId(matchingSeat))
+    ? { allowed: true, membership, seat: matchingSeat, parentSubscription: matchingSeat.subscriptionId }
+    : { allowed: false };
+};
+
+export const resolveBookingPaidAccessForSalon = async (
+  barberId,
+  salonId = null,
+  session = null
+) => {
+  const individualSub = await findIndividualSubscription(barberId, session);
   const hasIndividualAccess = subscriptionHasPaidAccess(individualSub, new Date(), {
     statusAlreadyFiltered: true,
   });
 
   if (!salonId) {
-    return hasIndividualAccess || barberHasPaidAccessForSalon(barberId);
+    if (hasIndividualAccess) return { allowed: true, individualSub };
+    return resolveSeatBookingPaidAccess({ barberId, salonId: null, session });
   }
 
-  const barber = await fetchBarberMembership(barberId);
+  const barber = await fetchBarberMembership(barberId, session);
   const relationship = getSalonBookingRelationship(barber, salonId);
 
   if (relationship === "chair_renter") {
-    return hasIndividualAccess;
+    return hasIndividualAccess ? { allowed: true, individualSub, membership: barber } : { allowed: false };
   }
 
   if (relationship !== "staff") {
-    return false;
+    return { allowed: false };
   }
 
-  return barberHasPaidSeatAccessForSalon(barberId, salonId);
+  return resolveSeatBookingPaidAccess({ barberId, salonId, session, barber });
+};
+
+export const barberHasBookingPaidAccessForSalon = async (barberId, salonId = null, session = null) => {
+  const access = await resolveBookingPaidAccessForSalon(barberId, salonId, session);
+  return access.allowed;
+};
+
+const touchById = async (Model, document, session) => {
+  if (!document?._id) return true;
+  const result = await Model.updateOne(
+    { _id: document._id },
+    { $currentDate: { updatedAt: true } },
+    { session }
+  );
+  return result.matchedCount === 1;
+};
+
+export const touchBookingPaidAccess = async ({ access, session } = {}) => {
+  if (!session || mongoose.connection.readyState !== 1) return true;
+  const results = await Promise.all([
+    touchById(Subscription, access?.individualSub, session),
+    touchById(SubscriptionSeat, access?.seat, session),
+    touchById(Subscription, access?.parentSubscription, session),
+  ]);
+  return results.every(Boolean);
 };
 
 export const getBookingPaidAccessByBarberIdsForSalon = async (barberIds, salonId) => {

@@ -4,9 +4,7 @@ import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
 import { calculateDeposit } from "../../controllers/bookings/depositSettingsController.js";
 import { createNotification } from "../../controllers/notifications/notificationController.js";
-import {
-  barberHasBookingPaidAccessForSalon,
-} from "../subscription/subscriptionPaidAccessQueries.js";
+import { barberHasBookingPaidAccessForSalon, resolveBookingPaidAccessForSalon, touchBookingPaidAccess } from "../subscription/subscriptionPaidAccessQueries.js";
 import {
   buildBookingPricing,
 } from "./bookingPricingService.js";
@@ -32,6 +30,7 @@ import {
 import {
   normalizeScopedBookingReadinessIds,
   resolveScopedBookingReadiness,
+  touchScopedBookingReadiness,
 } from "./bookingReadinessService.js";
 import {
   activateBookingReferenceMedia,
@@ -73,6 +72,10 @@ const isPublicBookingPricingValidationError = (error) => {
   const status = Number(error?.statusCode ?? error?.status);
   return Number.isInteger(status) && status >= 400 && status < 500;
 };
+
+const bookingReadinessError = (result) => Object.assign(
+  new Error(result?.body?.message || "This specialist is not currently accepting bookings."), { bookingReadiness: result }
+);
 
 export const createBookingService = async ({
   body,
@@ -239,37 +242,6 @@ export const createBookingService = async ({
 
   const lockKey = getBookingCreationLockKey({ barberId, bookingDate });
   const createResult = await withBookingCreationLock(lockKey, async () => {
-    let latestSlotValidation;
-    try {
-      latestSlotValidation = await validateBookingSlot({
-        barberId,
-        salonId: bookingReadiness.salonId,
-        barber: bookingReadiness.barber,
-        schedule: bookingReadiness.schedule,
-        requireResolvedSchedule: true,
-        bookingDate,
-        dayKey,
-        time,
-        duration: bookingDuration,
-      });
-    } catch (error) {
-      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
-        media: stagedReferenceMedia,
-        error,
-      }).catch(() => {});
-      throw error;
-    }
-
-    if (latestSlotValidation.message) {
-      await bookingCreateHooks.compensateBookingReferenceMediaFailure({
-        media: stagedReferenceMedia,
-      }).catch(() => {});
-      return {
-        status: 400,
-        body: { message: latestSlotValidation.message },
-      };
-    }
-
     try {
       await assertBookingSlotProtectionReady();
     } catch (error) {
@@ -301,18 +273,54 @@ export const createBookingService = async ({
       const createInsideMutation = async () => {
         transactionEntered = true;
         await guardBookingMutation({ barberId, clientId, isManualBooking, session });
+        const paidAccess = await resolveBookingPaidAccessForSalon(barberId, salonId, session);
+        if (!paidAccess.allowed) throw bookingReadinessError({
+          status: 403, body: { code: "BARBER_UNAVAILABLE", message: "This specialist is not currently accepting bookings." },
+        });
+        const currentReadiness = await resolveScopedBookingReadiness({
+          barberId,
+          salonId,
+          serviceId,
+          session,
+        });
+        if (currentReadiness.body) throw bookingReadinessError(currentReadiness);
+        if (!(await touchBookingPaidAccess({ access: paidAccess, session }))) throw bookingReadinessError({
+          status: 403, body: { code: "BARBER_UNAVAILABLE", message: "This specialist is not currently accepting bookings." },
+        });
+        if (!(await touchScopedBookingReadiness({ readiness: currentReadiness, session }))) throw bookingReadinessError({
+          status: 403, body: { code: "BARBER_UNAVAILABLE", message: "This specialist is not currently accepting bookings." },
+        });
+        const currentService = currentReadiness.service;
+        const currentDuration = Number(currentService.duration);
+        const currentSlotValidation = await validateBookingSlot({
+          barberId,
+          salonId: currentReadiness.salonId,
+          barber: currentReadiness.barber,
+          schedule: currentReadiness.schedule,
+          requireResolvedSchedule: true,
+          bookingDate,
+          dayKey,
+          time,
+          duration: currentDuration,
+        });
+        if (currentSlotValidation.message) {
+          throw bookingReadinessError({
+            status: 400,
+            body: { message: currentSlotValidation.message },
+          });
+        }
         // ── Voucher claim ──
         const rawVoucherCode =
           body.promotionCode || body.voucherCode || body.voucher_code;
         let pricing;
         try {
           pricing = await buildBookingPricing({
-            barber: bookingReadiness.barber,
+            barber: currentReadiness.barber,
             barberId,
             clientId: isManualBooking ? null : clientId,
-            service,
+            service: currentService,
             serviceId,
-            salonId: bookingReadiness.salonId,
+            salonId: currentReadiness.salonId,
             voucherCode: rawVoucherCode,
             claimVoucher: Boolean(rawVoucherCode),
             claimLoyaltyReward: true,
@@ -333,7 +341,8 @@ export const createBookingService = async ({
         // ── Deposit calculation ──
         // A missing profile means no deposit policy; a query failure must abort creation.
         let depositSettings = { enabled: false };
-        const barberProfile = await BarberProfile.findOne({ barberId }).lean();
+        const depositProfileQuery = BarberProfile.findOne({ barberId });
+        const barberProfile = await (session && typeof depositProfileQuery?.session === "function" ? depositProfileQuery.session(session) : depositProfileQuery).lean();
         if (barberProfile?.depositSettings) {
           depositSettings = barberProfile.depositSettings;
         }
@@ -358,12 +367,12 @@ export const createBookingService = async ({
           isManualBooking,
           note: body.note,
           referenceImages,
-          salonId: bookingReadiness.salonId,
+          salonId: currentReadiness.salonId,
           bookingDate,
           time,
-          dayKey: latestSlotValidation.effectiveDayKey,
-          serviceName: service.name,
-          duration: bookingDuration,
+          dayKey: currentSlotValidation.effectiveDayKey,
+          serviceName: currentService.name,
+          duration: currentDuration,
           price: effectivePrice,
           status,
           consultation,
@@ -387,7 +396,7 @@ export const createBookingService = async ({
           barberId,
           bookingDate,
           time,
-          duration: bookingDuration,
+          duration: currentDuration,
           session,
         });
         booking = await createBookingRecord({ Booking, payload, session });
@@ -416,6 +425,7 @@ export const createBookingService = async ({
           body: { message: createErr.message || "Could not promote booking reference media" },
         };
       }
+      if (createErr?.bookingReadiness) return createErr.bookingReadiness;
       if (createErr?.bookingPricingError) {
         return {
           status: 400,

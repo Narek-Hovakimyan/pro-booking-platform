@@ -38,6 +38,7 @@ const originalVoucherMethods = {
 };
 const originalLoyaltyClaim =
   __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward;
+const originalServiceFind = Service.find;
 const mockLoyaltyClaim = async ({
   bookingId,
   barberId,
@@ -82,6 +83,7 @@ afterEach(() => {
   Salon.findById = originalMethods.salonFindById;
   Schedule.findOne = originalMethods.scheduleFindOne;
   Service.findOne = originalMethods.serviceFindOne;
+  Service.find = originalServiceFind;
   Subscription.findOne = originalMethods.subscriptionFindOne;
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   User.findById = originalMethods.userFindById;
@@ -323,11 +325,16 @@ test("createBooking with discounted package service uses discountedPrice as book
     barberId,
     name: "Package Cut + Beard",
     type: "package",
+    includedServiceIds: ["64b000000000000000000098", "64b000000000000000000099"],
     duration: 60,
     price: 150,
     discountType: "fixed",
     discountValue: 40,
   });
+  Service.find = async () => [
+    { _id: "64b000000000000000000098", barberId, active: true, type: "single", price: 75, duration: 30 },
+    { _id: "64b000000000000000000099", barberId, active: true, type: "single", price: 75, duration: 30 },
+  ];
 
   const res = createResponse();
   await createBooking(
@@ -348,6 +355,57 @@ test("createBooking with discounted package service uses discountedPrice as book
 
   assert.equal(res.statusCode, 201);
   assert.equal(createdBookings[0].price, 110);
+});
+
+test("quote and create reject stale package members with the same public response", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async () => ({
+    _id: serviceId, barberId, name: "Stale package", active: true, type: "package",
+    includedServiceIds: ["64b000000000000000000098", "64b000000000000000000099"],
+  });
+  Service.find = async () => [
+    { _id: "64b000000000000000000098", barberId, active: true, type: "single", price: 100, duration: 30 },
+  ];
+  const quoteRes = createResponse();
+  await quoteBookingPrice({ user: client, body: { barberId, serviceId, salonId } }, quoteRes);
+  const createRes = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, createRes);
+
+  assert.deepEqual(quoteRes.body, { message: "Service is not available for this barber" });
+  assert.equal(quoteRes.statusCode, 400);
+  assert.deepEqual(createRes.body, quoteRes.body);
+  assert.equal(createdBookings.length, 0);
+});
+
+test("quote and create derive sum-package pricing from validated current members", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  Service.findOne = async () => ({
+    _id: serviceId, barberId, name: "Current package", active: true, type: "package",
+    includedServiceIds: ["64b000000000000000000098", "64b000000000000000000099"],
+    packagePriceMode: "sum", packageDurationMode: "sum", price: 1, duration: 1,
+  });
+  Service.find = async () => [
+    { _id: "64b000000000000000000098", barberId, active: true, type: "single", price: 90, duration: 25 },
+    { _id: "64b000000000000000000099", barberId, active: true, type: "single", price: 110, duration: 35 },
+  ];
+  const quoteRes = createResponse();
+  await quoteBookingPrice({ user: client, body: { barberId, serviceId, salonId } }, quoteRes);
+  const createRes = createResponse();
+  await createBooking({
+    user: client,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, createRes);
+
+  assert.equal(quoteRes.statusCode, 200);
+  assert.equal(quoteRes.body.originalPrice, 200);
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(createdBookings[0].price, 200);
+  assert.equal(createdBookings[0].duration, 60);
 });
 
 test("contract: quote service discount fields match create persisted pricing fields", async () => {

@@ -9,11 +9,14 @@ import {
   SUBSCRIPTION_SEAT_BARBER_FIELDS,
 } from "./subscriptionHelpers.js";
 
+const withSession = (query, session) =>
+  session && typeof query?.session === "function" ? query.session(session) : query;
+
 /**
  * Fetch a barber's salon membership info.
  */
-export const fetchBarberMembership = async (barberId) => {
-  const query = User.findById(barberId);
+export const fetchBarberMembership = async (barberId, session = null) => {
+  const query = withSession(User.findById(barberId), session);
   if (query && typeof query.select === "function") {
     return resolveQuery(query.select("salon salonStatus salons role"));
   }
@@ -24,8 +27,8 @@ export const fetchBarberMembership = async (barberId) => {
 /**
  * Fetch membership info for multiple barbers.
  */
-export const fetchBarberMemberships = async (barberIds) => {
-  const query = User.find({ _id: { $in: getIdsForQuery(barberIds) } });
+export const fetchBarberMemberships = async (barberIds, session = null) => {
+  const query = withSession(User.find({ _id: { $in: getIdsForQuery(barberIds) } }), session);
   if (query && typeof query.select === "function") {
     return resolveQuery(query.select("_id salon salonStatus salons role"));
   }
@@ -110,11 +113,11 @@ export const countActiveAcceptedStaffSeats = async ({ subscriptionId, salonId })
 /**
  * Get active subscription seats for a barber.
  */
-export const getActiveSeatsForBarber = async (barberId) => {
-  const query = SubscriptionSeat.find({
+export const getActiveSeatsForBarber = async (barberId, session = null) => {
+  const query = withSession(SubscriptionSeat.find({
     barberId,
     status: "active",
-  });
+  }), session);
   const populated =
     query && typeof query.populate === "function"
       ? query.populate("subscriptionId")

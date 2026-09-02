@@ -428,6 +428,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  updatedAt: {
+    type: Date,
+    default: null,
+    select: false,
+  },
 });
 // Pre-save: enforce profession/barberType consistency
 // - non-barber profession → clear barberType, keep specialty unisex
