@@ -8,6 +8,7 @@ import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import ClientBooking from "./ClientBooking";
 import ClientBookingStepContent from "@/client/components/booking/ClientBookingStepContent";
+import { useClientBookingSubmission } from "@/client/hooks/useClientBookingSubmission";
 import api from "@/shared/api/axios";
 import { useBooking } from "@/shared/hooks/useBooking";
 import { CLIENT_BOOKING_REQUEST_TIMEOUT_MS } from "@/client/hooks/useClientBookingConfirmation";
@@ -397,6 +398,127 @@ function RetryableBookingHarness({ onRefreshServices }) {
   );
 }
 
+function SubmissionConcurrencyHarness({ createBooking, onResetBookingFlow }) {
+  const [context, setContext] = useState({
+    client: { name: "Jamie Client", phone: "+37477123456", note: CLIENT_NOTE },
+    currentUser: { id: CLIENT_ID, role: "client" },
+    selectedBarberId: BARBER_ID,
+    selectedBookingSalonId: EXPLICIT_SALON_ID,
+    selectedDate: BOOKING_DATE,
+    selectedDateDayKey: DAY_KEY,
+    selectedService: baseService,
+    selectedServiceEntityId: SERVICE_ID,
+    selectedTime: BOOKING_TIME,
+    voucherCode: "",
+  });
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const updateContext = (updates) => {
+    setContext((current) => ({ ...current, ...updates }));
+  };
+  const { submitBooking } = useClientBookingSubmission({
+    ...context,
+    consent: null,
+    consultation: null,
+    createBooking,
+    isSaving,
+    isSelectedTimeValid: true,
+    onResetBookingFlow,
+    referenceFiles: [],
+    setError,
+    setIsSaving,
+  });
+
+  return (
+    <section aria-label="submission concurrency harness">
+      <p data-testid="submission-loading">{isSaving ? "saving" : "idle"}</p>
+      {error ? <p role="alert">{error}</p> : null}
+      <button onClick={submitBooking} type="button">Submit booking</button>
+      <button
+        onClick={() => updateContext({ selectedBarberId: "64b64cfa12ab34cd56ef7001" })}
+        type="button"
+      >
+        Change barber context
+      </button>
+      <button
+        onClick={() => updateContext({ selectedBookingSalonId: PRIMARY_SALON_ID })}
+        type="button"
+      >
+        Change salon context
+      </button>
+      <button
+        onClick={() => updateContext({
+          selectedService: { ...baseService, _id: "64b64cfa12ab34cd56ef7002", name: "Colour" },
+          selectedServiceEntityId: "64b64cfa12ab34cd56ef7002",
+        })}
+        type="button"
+      >
+        Change service context
+      </button>
+      <button
+        onClick={() => updateContext({ selectedDate: "2026-07-28" })}
+        type="button"
+      >
+        Change date context
+      </button>
+      <button
+        onClick={() => updateContext({ selectedDateDayKey: "tue" })}
+        type="button"
+      >
+        Change day key context
+      </button>
+      <button
+        onClick={() => updateContext({ selectedTime: "11:00" })}
+        type="button"
+      >
+        Change time context
+      </button>
+      <button
+        onClick={() => updateContext({ voucherCode: "SAVE10" })}
+        type="button"
+      >
+        Change voucher context
+      </button>
+      <button
+        onClick={() => updateContext({
+          client: { name: "Updated Client", phone: "+37477123457", note: "Updated" },
+        })}
+        type="button"
+      >
+        Change client context
+      </button>
+      <button
+        onClick={() => updateContext({ currentUser: { id: "64b64cfa12ab34cd56ef7003", role: "client" } })}
+        type="button"
+      >
+        Change current client context
+      </button>
+      <button
+        onClick={() => updateContext({
+          selectedService: null,
+          selectedServiceEntityId: "",
+          selectedTime: "",
+        })}
+        type="button"
+      >
+        Reset booking context
+      </button>
+    </section>
+  );
+}
+
+function renderSubmissionConcurrencyHarness(props) {
+  return renderBooking(
+    <Routes>
+      <Route
+        path="/book"
+        element={<SubmissionConcurrencyHarness {...props} />}
+      />
+      <Route path="/success" element={<div>Success marker</div>} />
+    </Routes>
+  );
+}
+
 async function completeFlow(props) {
   const user = userEvent.setup();
   const { createBookingMock } = setupStrictMocks();
@@ -690,6 +812,121 @@ describe("ClientBooking split boundaries", () => {
 });
 
 describe("ClientBooking booking flow", () => {
+  it.each([
+    ["barber", "Change barber context"],
+    ["salon", "Change salon context"],
+    ["service", "Change service context"],
+    ["date", "Change date context"],
+    ["day key", "Change day key context"],
+    ["time", "Change time context"],
+    ["voucher", "Change voucher context"],
+    ["client", "Change client context"],
+    ["signed-in client", "Change current client context"],
+    ["booking reset", "Reset booking context"],
+  ])("does not settle a pending booking after %s context changes", async (_label, controlName) => {
+    const user = userEvent.setup();
+    const pendingBooking = createDeferred();
+    const createBookingMock = vi.fn(() => pendingBooking.promise);
+    const onResetBookingFlow = vi.fn();
+
+    renderSubmissionConcurrencyHarness({ createBooking: createBookingMock, onResetBookingFlow });
+
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    expect(createBookingMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("submission-loading")).toHaveTextContent("saving");
+
+    await user.click(screen.getByRole("button", { name: controlName }));
+    expect(screen.getByTestId("submission-loading")).toHaveTextContent("idle");
+
+    await act(async () => {
+      pendingBooking.resolve({ ...createdBooking, payment: { clientSecret: "stale-payment" } });
+      await Promise.resolve();
+    });
+
+    expect(onResetBookingFlow).not.toHaveBeenCalled();
+    expect(screen.queryByText("Success marker")).not.toBeInTheDocument();
+    expect(screen.getByTestId("submission-loading")).toHaveTextContent("idle");
+  });
+
+  it("does not show a stale booking failure after a context change", async () => {
+    const user = userEvent.setup();
+    const pendingBooking = createDeferred();
+    const createBookingMock = vi.fn(() => pendingBooking.promise);
+    const onResetBookingFlow = vi.fn();
+
+    renderSubmissionConcurrencyHarness({ createBooking: createBookingMock, onResetBookingFlow });
+
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    await user.click(screen.getByRole("button", { name: "Change voucher context" }));
+
+    await act(async () => {
+      pendingBooking.reject(Object.assign(new Error("Stale booking failed"), {
+        response: { data: { message: "Stale booking failed" } },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(onResetBookingFlow).not.toHaveBeenCalled();
+    expect(screen.getByTestId("submission-loading")).toHaveTextContent("idle");
+  });
+
+  it("keeps a newer submission's loading and lock ownership after an older context is invalidated", async () => {
+    const user = userEvent.setup();
+    const firstBooking = createDeferred();
+    const secondBooking = createDeferred();
+    const createBookingMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstBooking.promise)
+      .mockImplementationOnce(() => secondBooking.promise);
+    const onResetBookingFlow = vi.fn();
+
+    renderSubmissionConcurrencyHarness({ createBooking: createBookingMock, onResetBookingFlow });
+
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    await user.click(screen.getByRole("button", { name: "Change time context" }));
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    expect(createBookingMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("submission-loading")).toHaveTextContent("saving");
+
+    await act(async () => {
+      firstBooking.resolve(createdBooking);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("submission-loading")).toHaveTextContent("saving");
+    expect(onResetBookingFlow).not.toHaveBeenCalled();
+
+    await act(async () => {
+      secondBooking.resolve(createdBooking);
+      await Promise.resolve();
+    });
+
+    expect(onResetBookingFlow).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Success marker")).toBeVisible();
+  });
+
+  it("retains same-turn duplicate protection and settles a current booking", async () => {
+    const pendingBooking = createDeferred();
+    const createBookingMock = vi.fn(() => pendingBooking.promise);
+    const onResetBookingFlow = vi.fn();
+
+    renderSubmissionConcurrencyHarness({ createBooking: createBookingMock, onResetBookingFlow });
+
+    const submitButton = screen.getByRole("button", { name: "Submit booking" });
+    fireEvent.click(submitButton);
+    fireEvent.click(submitButton);
+    expect(createBookingMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingBooking.resolve(createdBooking);
+      await Promise.resolve();
+    });
+
+    expect(onResetBookingFlow).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Success marker")).toBeVisible();
+  });
+
   it("keeps confirmation active through StrictMode and blocks stale updates after unmount", async () => {
     const user = userEvent.setup();
     const pendingQuote = createDeferred();
