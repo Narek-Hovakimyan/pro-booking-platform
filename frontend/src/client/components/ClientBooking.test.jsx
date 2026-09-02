@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes } from "react-router-dom";
@@ -8,6 +8,7 @@ import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/renderWithProviders";
 import ClientBooking from "./ClientBooking";
 import ClientBookingStepContent from "@/client/components/booking/ClientBookingStepContent";
+import { useClientBookingConfirmation } from "@/client/hooks/useClientBookingConfirmation";
 import { useClientBookingSubmission } from "@/client/hooks/useClientBookingSubmission";
 import api from "@/shared/api/axios";
 import { useBooking } from "@/shared/hooks/useBooking";
@@ -507,6 +508,121 @@ function SubmissionConcurrencyHarness({ createBooking, onResetBookingFlow }) {
   );
 }
 
+function ConfirmationConcurrencyHarness({ onRefreshServices }) {
+  const [context, setContext] = useState({
+    barberId: BARBER_ID,
+    client: { name: "Jamie Client", phone: "+37477123456", note: CLIENT_NOTE },
+    currentUser: { id: CLIENT_ID, role: "client" },
+    selectedBookingSalonId: EXPLICIT_SALON_ID,
+    selectedDate: BOOKING_DATE,
+    selectedDateDayKey: DAY_KEY,
+    selectedService: baseService,
+    selectedServiceEntityId: SERVICE_ID,
+    selectedTime: BOOKING_TIME,
+    voucherCode: "",
+  });
+  const [error, setError] = useState("");
+  const [step, setStep] = useState(4);
+  const confirmation = useClientBookingConfirmation({
+    ...context,
+    barberId: context.barberId,
+    isSaving: false,
+    isSelectedTimeValid: true,
+    onRefreshServices,
+    selectedBarberId: context.barberId,
+    setError,
+    setSelectedTime: (selectedTime) => setContext((current) => ({ ...current, selectedTime })),
+    setStep,
+  });
+  const updateContext = (updates) => {
+    setContext((current) => ({ ...current, ...updates }));
+  };
+
+  return (
+    <section aria-label="confirmation concurrency harness">
+      <p data-testid="confirmation-loading">
+        {confirmation.isPreparingConfirmation || confirmation.isQuoteLoading ? "loading" : "idle"}
+      </p>
+      <p data-testid="confirmation-step">{step}</p>
+      {confirmation.showConfirmation ? <p data-testid="confirmation-modal">open</p> : null}
+      {confirmation.bookingQuote ? <p data-testid="confirmation-quote">{confirmation.bookingQuote.finalPrice}</p> : null}
+      {error ? <p role="alert">{error}</p> : null}
+      <button onClick={confirmation.openConfirmation} type="button">Open confirmation</button>
+      <button onClick={confirmation.clearBookingQuote} type="button">Clear confirmation quote</button>
+      <button onClick={confirmation.resetConfirmationFlow} type="button">Reset confirmation</button>
+      <button
+        onClick={() => updateContext({ barberId: "64b64cfa12ab34cd56ef7001" })}
+        type="button"
+      >
+        Change confirmation barber
+      </button>
+      <button
+        onClick={() => updateContext({ selectedBookingSalonId: PRIMARY_SALON_ID })}
+        type="button"
+      >
+        Change confirmation salon
+      </button>
+      <button
+        onClick={() => updateContext({
+          selectedService: { ...baseService, _id: "64b64cfa12ab34cd56ef7002", name: "Colour" },
+          selectedServiceEntityId: "64b64cfa12ab34cd56ef7002",
+        })}
+        type="button"
+      >
+        Change confirmation service
+      </button>
+      <button
+        onClick={() => updateContext({ selectedDate: "2026-07-28" })}
+        type="button"
+      >
+        Change confirmation date
+      </button>
+      <button
+        onClick={() => updateContext({ selectedDateDayKey: "tue" })}
+        type="button"
+      >
+        Change confirmation day key
+      </button>
+      <button
+        onClick={() => updateContext({ selectedTime: "11:00" })}
+        type="button"
+      >
+        Change confirmation time
+      </button>
+      <button
+        onClick={() => updateContext({ voucherCode: "SAVE10" })}
+        type="button"
+      >
+        Change confirmation voucher
+      </button>
+      <button
+        onClick={() => updateContext({
+          client: { name: "Updated Client", phone: "+37477123457", note: "Updated" },
+        })}
+        type="button"
+      >
+        Change confirmation client details
+      </button>
+      <button
+        onClick={() => updateContext({ currentUser: { id: "64b64cfa12ab34cd56ef7003", role: "client" } })}
+        type="button"
+      >
+        Change confirmation signed-in client
+      </button>
+      <button
+        onClick={() => updateContext({
+          selectedService: null,
+          selectedServiceEntityId: "",
+          selectedTime: "",
+        })}
+        type="button"
+      >
+        Reset confirmation context
+      </button>
+    </section>
+  );
+}
+
 function renderSubmissionConcurrencyHarness(props) {
   return renderBooking(
     <Routes>
@@ -812,6 +928,153 @@ describe("ClientBooking split boundaries", () => {
 });
 
 describe("ClientBooking booking flow", () => {
+  it.each([
+    ["barber", "Change confirmation barber"],
+    ["salon", "Change confirmation salon"],
+    ["service", "Change confirmation service"],
+    ["date", "Change confirmation date"],
+    ["day key", "Change confirmation day key"],
+    ["time", "Change confirmation time"],
+    ["voucher", "Change confirmation voucher"],
+    ["client details", "Change confirmation client details"],
+    ["signed-in client", "Change confirmation signed-in client"],
+    ["booking reset", "Reset confirmation context"],
+  ])("does not settle a stale quote after %s context changes", async (_label, controlName) => {
+    const pendingQuote = createDeferred();
+    const onRefreshServices = vi.fn().mockResolvedValue([baseService]);
+    api.post.mockReturnValue(pendingQuote.promise);
+
+    render(<ConfirmationConcurrencyHarness onRefreshServices={onRefreshServices} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open confirmation" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("confirmation-modal")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: controlName }));
+    expect(screen.queryByTestId("confirmation-modal")).not.toBeInTheDocument();
+    expect(screen.getByTestId("confirmation-loading")).toHaveTextContent("idle");
+
+    await act(async () => {
+      pendingQuote.resolve({ data: { ...quoteResponse, finalPrice: 99000 } });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId("confirmation-quote")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByTestId("confirmation-loading")).toHaveTextContent("idle");
+  });
+
+  it("does not open or quote after stale service refresh resolves", async () => {
+    const pendingRefresh = createDeferred();
+    const onRefreshServices = vi.fn(() => pendingRefresh.promise);
+
+    render(<ConfirmationConcurrencyHarness onRefreshServices={onRefreshServices} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open confirmation" }));
+    expect(onRefreshServices).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Change confirmation service" }));
+
+    await act(async () => {
+      pendingRefresh.resolve([baseService]);
+      await Promise.resolve();
+    });
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("confirmation-modal")).not.toBeInTheDocument();
+    expect(screen.getByTestId("confirmation-loading")).toHaveTextContent("idle");
+  });
+
+  it("does not show a stale quote failure after a context change", async () => {
+    const pendingQuote = createDeferred();
+    api.post.mockReturnValue(pendingQuote.promise);
+
+    render(
+      <ConfirmationConcurrencyHarness
+        onRefreshServices={vi.fn().mockResolvedValue([baseService])}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open confirmation" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Change confirmation voucher" }));
+
+    await act(async () => {
+      pendingQuote.reject(Object.assign(new Error("Stale quote failed"), {
+        response: { data: { message: "Stale quote failed" } },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByTestId("confirmation-loading")).toHaveTextContent("idle");
+  });
+
+  it.each([
+    ["clear", "Clear confirmation quote"],
+    ["reset", "Reset confirmation"],
+  ])("invalidates a pending quote when confirmation is %s", async (_label, controlName) => {
+    const pendingQuote = createDeferred();
+    api.post.mockReturnValue(pendingQuote.promise);
+
+    render(
+      <ConfirmationConcurrencyHarness
+        onRefreshServices={vi.fn().mockResolvedValue([baseService])}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open confirmation" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: controlName }));
+
+    await act(async () => {
+      pendingQuote.resolve({ data: { ...quoteResponse, finalPrice: 99000 } });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId("confirmation-quote")).not.toBeInTheDocument();
+    expect(screen.getByTestId("confirmation-loading")).toHaveTextContent("idle");
+  });
+
+  it("blocks same-turn confirmation opens before loading commits", () => {
+    const pendingRefresh = createDeferred();
+    const onRefreshServices = vi.fn(() => pendingRefresh.promise);
+
+    render(<ConfirmationConcurrencyHarness onRefreshServices={onRefreshServices} />);
+
+    const openButton = screen.getByRole("button", { name: "Open confirmation" });
+    fireEvent.click(openButton);
+    fireEvent.click(openButton);
+
+    expect(onRefreshServices).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps current quote success and error behavior", async () => {
+    const quoteFailure = Object.assign(new Error("Quote unavailable"), {
+      response: { data: { message: "Quote unavailable" } },
+    });
+    api.post
+      .mockResolvedValueOnce({ data: quoteResponse })
+      .mockRejectedValueOnce(quoteFailure);
+
+    const { rerender } = render(
+      <ConfirmationConcurrencyHarness
+        onRefreshServices={vi.fn().mockResolvedValue([baseService])}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open confirmation" }));
+    expect(await screen.findByTestId("confirmation-quote")).toHaveTextContent("12000");
+
+    rerender(
+      <ConfirmationConcurrencyHarness
+        onRefreshServices={vi.fn().mockResolvedValue([baseService])}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clear confirmation quote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open confirmation" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Quote unavailable");
+  });
+
   it.each([
     ["barber", "Change barber context"],
     ["salon", "Change salon context"],

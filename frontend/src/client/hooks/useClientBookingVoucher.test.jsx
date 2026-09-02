@@ -21,7 +21,12 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function VoucherHarness({ barberId = "barber-1", salonId = "salon-1", serviceId = "service-1" }) {
+function VoucherHarness({
+  barberId = "barber-1",
+  clearBookingQuote = noop,
+  salonId = "salon-1",
+  serviceId = "service-1",
+}) {
   const [voucherCode, setVoucherCode] = useState("");
   const voucher = useClientBookingVoucher({
     selectedBarberId: barberId,
@@ -29,7 +34,7 @@ function VoucherHarness({ barberId = "barber-1", salonId = "salon-1", serviceId 
     selectedServiceEntityId: serviceId,
     voucherCode,
     setVoucherCode,
-    clearBookingQuote: noop,
+    clearBookingQuote,
     setQuoteError: noop,
   });
 
@@ -38,6 +43,8 @@ function VoucherHarness({ barberId = "barber-1", salonId = "salon-1", serviceId 
       <div data-testid="code">{voucherCode}</div>
       <div data-testid="preview">{voucher.voucherPreview?.code || ""}</div>
       <div data-testid="discount">{voucher.discountPreview}</div>
+      <div data-testid="loading">{voucher.voucherLoading ? "loading" : "idle"}</div>
+      <div data-testid="public-vouchers">{voucher.publicVouchers.map((voucher) => voucher.code).join(",")}</div>
       <button onClick={() => voucher.applyVoucher("FIRST")} type="button">apply-first</button>
       <button onClick={() => voucher.applyVoucher("SECOND")} type="button">apply-second</button>
     </div>
@@ -115,5 +122,43 @@ describe("useClientBookingVoucher validation races", () => {
     await waitFor(() => expect(screen.getByTestId("preview")).toHaveTextContent("FIRST"));
     expect(screen.getByTestId("code")).toHaveTextContent("FIRST");
     expect(screen.getByTestId("discount")).toHaveTextContent("15");
+  });
+
+  it("does not settle voucher discovery after unmount", async () => {
+    const pending = deferred();
+    api.get.mockReturnValue(pending.promise);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = render(<VoucherHarness />);
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    unmount();
+
+    await act(async () => {
+      pending.resolve({ data: [{ code: "LATE" }] });
+      await Promise.resolve();
+    });
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("does not settle voucher validation or external quote clearing after unmount", async () => {
+    const pending = deferred();
+    const clearBookingQuote = vi.fn();
+    api.post.mockReturnValue(pending.promise);
+    const { unmount } = render(<VoucherHarness clearBookingQuote={clearBookingQuote} />);
+    clearBookingQuote.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "apply-first" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("loading")).toHaveTextContent("loading");
+    unmount();
+
+    await act(async () => {
+      pending.resolve(validVoucher("FIRST"));
+      await Promise.resolve();
+    });
+
+    expect(clearBookingQuote).not.toHaveBeenCalled();
   });
 });

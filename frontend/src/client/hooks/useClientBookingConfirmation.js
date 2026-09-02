@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import api from "@/shared/api/axios";
 import { buildClientBookingQuotePayload } from "@/client/utils/clientBookingPayload";
@@ -18,6 +18,40 @@ const getBookingRequestErrorMessage = (requestError) => {
     "Could not refresh service price. Please try again."
   );
 };
+
+const getConfirmationContextKey = ({
+  barberId,
+  client,
+  currentUser,
+  selectedBarberId,
+  selectedBookingSalonId,
+  selectedDate,
+  selectedDateDayKey,
+  selectedService,
+  selectedServiceEntityId,
+  selectedTime,
+  isSelectedTimeValid,
+  voucherCode,
+}) => JSON.stringify({
+  barberId: barberId || "",
+  clientId: currentUser?.id || currentUser?._id || "",
+  clientRole: currentUser?.role || "",
+  clientName: client?.name || "",
+  clientNote: client?.note || "",
+  clientPhone: client?.phone || "",
+  dayKey: selectedDateDayKey || "",
+  salonId: selectedBookingSalonId || "",
+  selectedBarberId: selectedBarberId || "",
+  serviceId: selectedServiceEntityId || "",
+  serviceActive: selectedService?.active,
+  serviceDuration: selectedService?.duration || "",
+  serviceName: selectedService?.name || "",
+  servicePrice: selectedService?.price || "",
+  time: selectedTime || "",
+  timeIsValid: Boolean(isSelectedTimeValid),
+  voucherCode: voucherCode || "",
+  bookingDate: selectedDate || "",
+});
 
 export function useClientBookingConfirmation({
   barberId,
@@ -45,39 +79,77 @@ export function useClientBookingConfirmation({
   const [isQuoteLoading, setIsQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState("");
   const mountedRef = useRef(true);
+  const contextGenerationRef = useRef(0);
+  const openLockRef = useRef(false);
   const requestIdRef = useRef(0);
+  const confirmationContextKey = getConfirmationContextKey({
+    barberId,
+    client,
+    currentUser,
+    selectedBarberId,
+    selectedBookingSalonId,
+    selectedDate,
+    selectedDateDayKey,
+    selectedService,
+    selectedServiceEntityId,
+    selectedTime,
+    isSelectedTimeValid,
+    voucherCode,
+  });
+  const currentContextKeyRef = useRef(confirmationContextKey);
+
+  const clearQuoteState = useCallback(() => {
+    setBookingQuote(null);
+    setQuoteError("");
+  }, []);
+
+  const invalidateConfirmationRequest = useCallback((shouldClearLoading = true) => {
+    requestIdRef.current += 1;
+    openLockRef.current = false;
+    if (shouldClearLoading) {
+      setIsPreparingConfirmation(false);
+      setIsQuoteLoading(false);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (currentContextKeyRef.current === confirmationContextKey) return;
+
+    currentContextKeyRef.current = confirmationContextKey;
+    contextGenerationRef.current += 1;
+    invalidateConfirmationRequest();
+    setShowConfirmation(false);
+    setConfirmationService(null);
+    clearQuoteState();
+    setError("");
+  }, [
+    clearQuoteState,
+    confirmationContextKey,
+    invalidateConfirmationRequest,
+    setError,
+  ]);
 
   useEffect(() => {
     mountedRef.current = true;
 
     return () => {
       mountedRef.current = false;
+      contextGenerationRef.current += 1;
+      invalidateConfirmationRequest(false);
     };
-  }, []);
-
-  useEffect(() => {
-    const resetId = window.setTimeout(() => {
-      setShowConfirmation(false);
-      setError("");
-    }, 0);
-
-    return () => window.clearTimeout(resetId);
-  }, [barberId, setError]);
+  }, [invalidateConfirmationRequest]);
 
   const resetConfirmationFlow = useCallback(() => {
-    requestIdRef.current += 1;
+    invalidateConfirmationRequest();
     setShowConfirmation(false);
     setConfirmationService(null);
-    setBookingQuote(null);
-    setIsPreparingConfirmation(false);
-    setIsQuoteLoading(false);
-    setQuoteError("");
-  }, []);
+    clearQuoteState();
+  }, [clearQuoteState, invalidateConfirmationRequest]);
 
   const clearBookingQuote = useCallback(() => {
-    setBookingQuote(null);
-    setQuoteError("");
-  }, []);
+    invalidateConfirmationRequest();
+    clearQuoteState();
+  }, [clearQuoteState, invalidateConfirmationRequest]);
 
   const canPrepareConfirmation = Boolean(
     selectedBarberId &&
@@ -133,7 +205,7 @@ export function useClientBookingConfirmation({
   );
 
   const openConfirmation = useCallback(async () => {
-    if (isPreparingConfirmation) return;
+    if (isPreparingConfirmation || openLockRef.current) return;
 
     if (!selectedTime || !isSelectedTimeValid) {
       setError("Please select a time first.");
@@ -145,6 +217,14 @@ export function useClientBookingConfirmation({
     if (!canPrepareConfirmation) return;
 
     const requestId = ++requestIdRef.current;
+    const requestContextGeneration = contextGenerationRef.current;
+    const isCurrentRequest = () => (
+      mountedRef.current &&
+      requestId === requestIdRef.current &&
+      requestContextGeneration === contextGenerationRef.current &&
+      currentContextKeyRef.current === confirmationContextKey
+    );
+    openLockRef.current = true;
     setIsPreparingConfirmation(true);
     setError("");
 
@@ -152,7 +232,7 @@ export function useClientBookingConfirmation({
       const latestServices = await onRefreshServices?.({
         timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
       });
-      if (!mountedRef.current || requestId !== requestIdRef.current) {
+      if (!isCurrentRequest()) {
         return;
       }
 
@@ -181,7 +261,7 @@ export function useClientBookingConfirmation({
       }
 
       setConfirmationService(latestSelectedService);
-      clearBookingQuote();
+      clearQuoteState();
       setShowConfirmation(true);
       setIsQuoteLoading(true);
 
@@ -199,13 +279,13 @@ export function useClientBookingConfirmation({
         { timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS }
       );
 
-      if (!mountedRef.current || requestId !== requestIdRef.current) {
+      if (!isCurrentRequest()) {
         return;
       }
 
       setBookingQuote(quote);
     } catch (requestError) {
-      if (!mountedRef.current || requestId !== requestIdRef.current) {
+      if (!isCurrentRequest()) {
         return;
       }
 
@@ -213,14 +293,16 @@ export function useClientBookingConfirmation({
       setQuoteError(message);
       setError(message);
     } finally {
-      if (mountedRef.current && requestId === requestIdRef.current) {
+      if (isCurrentRequest()) {
+        openLockRef.current = false;
         setIsPreparingConfirmation(false);
         setIsQuoteLoading(false);
       }
     }
   }, [
     canPrepareConfirmation,
-    clearBookingQuote,
+    clearQuoteState,
+    confirmationContextKey,
     isPreparingConfirmation,
     isSelectedTimeValid,
     onRefreshServices,

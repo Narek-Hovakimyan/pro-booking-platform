@@ -20,11 +20,22 @@ export function useClientBookingVoucher({
   const [voucherLoading, setVoucherLoading] = useState(false);
   const discoveryRequestIdRef = useRef(0);
   const validationRequestIdRef = useRef(0);
+  const mountedRef = useRef(true);
   const voucherContextKey = [selectedBarberId, selectedSalonId, selectedServiceEntityId]
     .map((value) => String(value || ""))
     .join(":");
   const currentVoucherContextKeyRef = useRef(voucherContextKey);
   const previousVoucherContextKeyRef = useRef(voucherContextKey);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      discoveryRequestIdRef.current += 1;
+      validationRequestIdRef.current += 1;
+    };
+  }, []);
 
   useLayoutEffect(() => {
     currentVoucherContextKeyRef.current = voucherContextKey;
@@ -45,12 +56,12 @@ export function useClientBookingVoucher({
     api
       .get(`/vouchers/public/barber/${selectedBarberId}?${params}`)
       .then(({ data }) => {
-        if (requestId !== discoveryRequestIdRef.current) return;
+        if (!mountedRef.current || requestId !== discoveryRequestIdRef.current) return;
         setPublicVouchers(Array.isArray(data) ? data : []);
         setPublicVoucherContextKey(voucherContextKey);
       })
       .catch(() => {
-        if (requestId !== discoveryRequestIdRef.current) return;
+        if (!mountedRef.current || requestId !== discoveryRequestIdRef.current) return;
         setPublicVouchers([]);
         setPublicVoucherContextKey(voucherContextKey);
       });
@@ -93,6 +104,7 @@ export function useClientBookingVoucher({
         );
 
         if (
+          !mountedRef.current ||
           requestId !== validationRequestIdRef.current ||
           validationContextKey !== currentVoucherContextKeyRef.current
         ) {
@@ -108,6 +120,7 @@ export function useClientBookingVoucher({
         }
       } catch (err) {
         if (
+          !mountedRef.current ||
           requestId !== validationRequestIdRef.current ||
           validationContextKey !== currentVoucherContextKeyRef.current
         ) {
@@ -122,6 +135,7 @@ export function useClientBookingVoucher({
         );
       } finally {
         if (
+          mountedRef.current &&
           requestId === validationRequestIdRef.current &&
           validationContextKey === currentVoucherContextKeyRef.current
         ) {
