@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDispatch } from "react-redux";
 
 import api from "@/shared/api/axios";
@@ -25,33 +25,128 @@ export default function useBookingPageData({
   const [isBarberLoading, setIsBarberLoading] = useState(false);
   const [isScheduleBlocked, setIsScheduleBlocked] = useState(false);
   const [error, setError] = useState("");
+  const mountedRef = useRef(false);
+  const servicesRequestIdRef = useRef(0);
+  const servicesContextKey = `${barberId || ""}:${activeSelectedSalonId || ""}`;
+  const servicesContextRef = useRef(servicesContextKey);
+  const servicesUrl = activeSelectedSalonId
+    ? `/services/${barberId}?salonId=${activeSelectedSalonId}`
+    : `/services/${barberId}`;
 
-  const refreshServices = useCallback(async () => {
-    setIsServicesLoading(true);
-    setError("");
+  useLayoutEffect(() => {
+    if (servicesContextRef.current === servicesContextKey) return;
+
+    servicesContextRef.current = servicesContextKey;
+    servicesRequestIdRef.current += 1;
+  }, [servicesContextKey]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      servicesRequestIdRef.current += 1;
+    };
+  }, []);
+
+  const beginServicesRequest = useCallback(() => {
+    const requestId = ++servicesRequestIdRef.current;
+    const requestContextKey = servicesContextKey;
+    const isCurrentRequest = () =>
+      mountedRef.current &&
+      servicesRequestIdRef.current === requestId &&
+      servicesContextRef.current === requestContextKey;
+
+    if (isCurrentRequest()) {
+      setIsServicesLoading(true);
+      setError("");
+    }
+
+    return isCurrentRequest;
+  }, [servicesContextKey]);
+
+  const applyServicesResponse = useCallback((isCurrentRequest, servicesResponse) => {
+    if (!isCurrentRequest()) return servicesResponse.data;
+
+    dispatch(setServices({ barberId, services: servicesResponse.data }));
+    return servicesResponse.data;
+  }, [barberId, dispatch]);
+
+  const handleServicesFailure = useCallback(({
+    clearSelectionOnFailure = false,
+    isCurrentRequest,
+    requestError,
+    timeout,
+  }) => {
+    const message = isBarberUnavailableError(requestError)
+      ? getFriendlyApiError(requestError)
+      : requestError.response?.data?.message ||
+        (timeout && (requestError?.code === "ECONNABORTED" || requestError?.code === "ETIMEDOUT")
+          ? "Service refresh timed out. Please try again."
+          : "Could not load services. Please try again.");
+    if (isCurrentRequest()) {
+      setError(message);
+      if (clearSelectionOnFailure) {
+        setSelectedServiceId(null);
+        setSelectedTime("");
+      }
+    }
+    throw new Error(message, { cause: requestError });
+  }, [setSelectedServiceId, setSelectedTime]);
+
+  const finishServicesRequest = useCallback((isCurrentRequest) => {
+    if (isCurrentRequest()) setIsServicesLoading(false);
+  }, []);
+
+  const loadServices = useCallback(async ({
+    clearSelectionOnFailure = false,
+  } = {}) => {
+    const isCurrentRequest = beginServicesRequest();
 
     try {
-      const servicesUrl = activeSelectedSalonId
-        ? `/services/${barberId}?salonId=${activeSelectedSalonId}`
-        : `/services/${barberId}`;
+      const servicesResponse = await api.get(servicesUrl);
+      return applyServicesResponse(isCurrentRequest, servicesResponse);
+    } catch (requestError) {
+      return handleServicesFailure({
+        clearSelectionOnFailure,
+        isCurrentRequest,
+        requestError,
+      });
+    } finally {
+      finishServicesRequest(isCurrentRequest);
+    }
+  }, [
+    applyServicesResponse,
+    beginServicesRequest,
+    finishServicesRequest,
+    handleServicesFailure,
+    servicesUrl,
+  ]);
+
+  const refreshServices = useCallback(async () => {
+    const isCurrentRequest = beginServicesRequest();
+
+    try {
       const servicesResponse = await api.get(servicesUrl, {
         timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
       });
-      dispatch(setServices({ barberId, services: servicesResponse.data }));
-      return servicesResponse.data;
+      return applyServicesResponse(isCurrentRequest, servicesResponse);
     } catch (requestError) {
-      const message = isBarberUnavailableError(requestError)
-        ? getFriendlyApiError(requestError)
-        : requestError.response?.data?.message ||
-          (requestError?.code === "ECONNABORTED" || requestError?.code === "ETIMEDOUT"
-            ? "Service refresh timed out. Please try again."
-            : "Could not load services. Please try again.");
-      setError(message);
-      throw new Error(message, { cause: requestError });
+      return handleServicesFailure({
+        isCurrentRequest,
+        requestError,
+        timeout: CLIENT_BOOKING_REQUEST_TIMEOUT_MS,
+      });
     } finally {
-      setIsServicesLoading(false);
+      finishServicesRequest(isCurrentRequest);
     }
-  }, [activeSelectedSalonId, barberId, dispatch, setError, setIsServicesLoading]);
+  }, [
+    applyServicesResponse,
+    beginServicesRequest,
+    finishServicesRequest,
+    handleServicesFailure,
+    servicesUrl,
+  ]);
 
   useEffect(() => {
     if (!needsEnrichedBarber) return undefined;
@@ -85,28 +180,13 @@ export default function useBookingPageData({
 
     async function fetchBookingData() {
       setIsLoading(true);
-      setIsServicesLoading(true);
       setIsScheduleBlocked(false);
       setError("");
 
       try {
-        const servicesUrl = activeSelectedSalonId
-          ? `/services/${barberId}?salonId=${activeSelectedSalonId}`
-          : `/services/${barberId}`;
-        const servicesResponse = await api.get(servicesUrl);
-        if (!isMounted) return;
-        dispatch(setServices({ barberId, services: servicesResponse.data }));
-      } catch (requestError) {
-        if (isMounted) {
-          const message = isBarberUnavailableError(requestError)
-            ? getFriendlyApiError(requestError)
-            : requestError.response?.data?.message || "Could not load services. Please try again.";
-          setError(message);
-          setSelectedServiceId(null);
-          setSelectedTime("");
-        }
-      } finally {
-        if (isMounted) setIsServicesLoading(false);
+        await loadServices({ clearSelectionOnFailure: true });
+      } catch {
+        // Service errors are handled by loadServices while this request is current.
       }
 
       try {
@@ -155,7 +235,16 @@ export default function useBookingPageData({
 
     fetchBookingData();
     return () => { isMounted = false; };
-  }, [barberId, dispatch, activeSelectedSalonId, setSelectedDate, setSelectedDayKey, setSelectedServiceId, setSelectedTime]);
+  }, [
+    activeSelectedSalonId,
+    barberId,
+    dispatch,
+    loadServices,
+    setSelectedDate,
+    setSelectedDayKey,
+    setSelectedServiceId,
+    setSelectedTime,
+  ]);
 
   return {
     error,

@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 import api from "@/shared/api/axios";
+import useBookingPageData from "@/client/hooks/useBookingPageData";
 import BookingPage from "./BookingPage";
 
 vi.mock("react-redux", () => ({
@@ -51,6 +52,50 @@ const renderPage = (state, props = {}) => {
   return bookingProps;
 };
 
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((outerResolve, outerReject) => {
+    resolve = outerResolve;
+    reject = outerReject;
+  });
+  return { promise, reject, resolve };
+};
+
+const createHookProps = (overrides = {}) => ({
+  activeSelectedSalonId: "salon-7",
+  barberId: "barber-1",
+  needsEnrichedBarber: false,
+  setSelectedDate: vi.fn(),
+  setSelectedDayKey: vi.fn(),
+  setSelectedServiceId: vi.fn(),
+  setSelectedTime: vi.fn(),
+  ...overrides,
+});
+
+const mockServiceRequests = (requests) => {
+  vi.mocked(api.get).mockImplementation((url) => {
+    if (url.startsWith("/services/")) {
+      const request = requests.shift();
+      if (!request) throw new Error("Unexpected service request");
+      return request.promise;
+    }
+    return Promise.resolve({ data: [] });
+  });
+};
+
+const dispatchedServices = () =>
+  mocks.dispatch.mock.calls
+    .map(([action]) => action?.payload?.services)
+    .filter(Boolean);
+
+const resolveInitialServices = async (request, services = []) => {
+  await act(async () => {
+    request.resolve({ data: services });
+    await request.promise;
+  });
+};
+
 describe("BookingPage route and reset behavior", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -87,5 +132,171 @@ describe("BookingPage route and reset behavior", () => {
     expect(props.setSelectedServiceId).toHaveBeenCalledWith(null);
     expect(props.setSelectedTime).toHaveBeenCalledWith("");
     expect(props.setClient).toHaveBeenCalledWith({ name: "", phone: "", note: "" });
+  });
+
+  it("keeps a newer manual service refresh when the initial request resolves late", async () => {
+    const initial = createDeferred();
+    const refresh = createDeferred();
+    mockServiceRequests([initial, refresh]);
+    const props = createHookProps();
+    const { result } = renderHook(() => useBookingPageData(props));
+
+    let refreshPromise;
+    act(() => {
+      refreshPromise = result.current.refreshServices();
+    });
+    await act(async () => {
+      refresh.resolve({ data: [{ id: "fresh-service" }] });
+      await refreshPromise;
+    });
+
+    await resolveInitialServices(initial, [{ id: "stale-service" }]);
+
+    expect(dispatchedServices()).toEqual([[{ id: "fresh-service" }]]);
+    expect(result.current.isServicesLoading).toBe(false);
+  });
+
+  it("keeps the newest manual refresh loading state and result", async () => {
+    const initial = createDeferred();
+    const firstRefresh = createDeferred();
+    const secondRefresh = createDeferred();
+    mockServiceRequests([initial, firstRefresh, secondRefresh]);
+    const props = createHookProps();
+    const { result } = renderHook(() => useBookingPageData(props));
+
+    let firstPromise;
+    let secondPromise;
+    act(() => {
+      firstPromise = result.current.refreshServices();
+      secondPromise = result.current.refreshServices();
+    });
+
+    await act(async () => {
+      firstRefresh.resolve({ data: [{ id: "older-refresh" }] });
+      await firstPromise;
+    });
+    expect(result.current.isServicesLoading).toBe(true);
+
+    await act(async () => {
+      secondRefresh.resolve({ data: [{ id: "newest-refresh" }] });
+      await secondPromise;
+    });
+    await resolveInitialServices(initial, [{ id: "stale-initial" }]);
+
+    expect(dispatchedServices()).toEqual([[{ id: "newest-refresh" }]]);
+    expect(result.current.isServicesLoading).toBe(false);
+  });
+
+  it("ignores a stale initial service failure after a newer successful refresh", async () => {
+    const initial = createDeferred();
+    const refresh = createDeferred();
+    mockServiceRequests([initial, refresh]);
+    const props = createHookProps();
+    const { result } = renderHook(() => useBookingPageData(props));
+
+    let refreshPromise;
+    act(() => {
+      refreshPromise = result.current.refreshServices();
+    });
+    await act(async () => {
+      refresh.resolve({ data: [{ id: "fresh-service" }] });
+      await refreshPromise;
+    });
+    await act(async () => {
+      initial.reject({ response: { data: { message: "Stale service failure" } } });
+      await initial.promise.catch(() => {});
+    });
+
+    expect(result.current.error).toBe("");
+    expect(props.setSelectedServiceId).not.toHaveBeenCalled();
+    expect(props.setSelectedTime).not.toHaveBeenCalled();
+    expect(dispatchedServices()).toEqual([[{ id: "fresh-service" }]]);
+  });
+
+  it("ignores an older manual refresh failure after a newer refresh succeeds", async () => {
+    const initial = createDeferred();
+    const firstRefresh = createDeferred();
+    const secondRefresh = createDeferred();
+    mockServiceRequests([initial, firstRefresh, secondRefresh]);
+    const props = createHookProps();
+    const { result } = renderHook(() => useBookingPageData(props));
+
+    await resolveInitialServices(initial);
+    mocks.dispatch.mockClear();
+
+    let firstPromise;
+    let secondPromise;
+    act(() => {
+      firstPromise = result.current.refreshServices().catch(() => {});
+      secondPromise = result.current.refreshServices();
+    });
+    await act(async () => {
+      secondRefresh.resolve({ data: [{ id: "newest-refresh" }] });
+      await secondPromise;
+    });
+    await act(async () => {
+      firstRefresh.reject({ response: { data: { message: "Stale refresh failure" } } });
+      await firstPromise;
+    });
+
+    expect(result.current.error).toBe("");
+    expect(dispatchedServices()).toEqual([[{ id: "newest-refresh" }]]);
+    expect(result.current.isServicesLoading).toBe(false);
+  });
+
+  it("invalidates a manual refresh when the barber or salon context changes", async () => {
+    const initial = createDeferred();
+    const staleRefresh = createDeferred();
+    const nextContext = createDeferred();
+    mockServiceRequests([initial, staleRefresh, nextContext]);
+    const props = createHookProps();
+    const { result, rerender } = renderHook(
+      ({ hookProps }) => useBookingPageData(hookProps),
+      { initialProps: { hookProps: props } }
+    );
+
+    let staleRefreshPromise;
+    act(() => {
+      staleRefreshPromise = result.current.refreshServices();
+    });
+    rerender({
+      hookProps: {
+        ...props,
+        activeSelectedSalonId: "salon-8",
+        barberId: "barber-2",
+      },
+    });
+
+    await resolveInitialServices(nextContext, [{ id: "new-context-service" }]);
+    await act(async () => {
+      staleRefresh.resolve({ data: [{ id: "stale-context-service" }] });
+      await staleRefreshPromise;
+    });
+    await resolveInitialServices(initial, [{ id: "stale-initial-service" }]);
+
+    expect(dispatchedServices()).toEqual([[{ id: "new-context-service" }]]);
+    expect(result.current.isServicesLoading).toBe(false);
+  });
+
+  it("does not update services after unmounting with a manual refresh pending", async () => {
+    const initial = createDeferred();
+    const refresh = createDeferred();
+    mockServiceRequests([initial, refresh]);
+    const props = createHookProps();
+    const { result, unmount } = renderHook(() => useBookingPageData(props));
+
+    let refreshPromise;
+    act(() => {
+      refreshPromise = result.current.refreshServices();
+    });
+    unmount();
+
+    await act(async () => {
+      refresh.resolve({ data: [{ id: "post-unmount-service" }] });
+      await refreshPromise;
+    });
+    await resolveInitialServices(initial, [{ id: "post-unmount-initial" }]);
+
+    expect(dispatchedServices()).toEqual([]);
   });
 });
