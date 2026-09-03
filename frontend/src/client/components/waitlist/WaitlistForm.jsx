@@ -32,21 +32,23 @@ export default function WaitlistForm({
   onClose,
   onSuccess,
 }) {
+  const contextKey = JSON.stringify([barberId, salonId, serviceId, date]);
   const [preferredStartTime, setPreferredStartTime] = useState("");
   const [preferredEndTime, setPreferredEndTime] = useState("");
   const [note, setNote] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [submittingContextKey, setSubmittingContextKey] = useState(null);
+  const [errorState, setErrorState] = useState({ contextKey: null, message: "" });
   const titleId = useId();
   const dialogRef = useRef(null);
   const lifecycleRef = useRef({ initialized: false, mounted: false, trigger: null });
   const latestOnCloseRef = useRef(onClose);
-  const isSubmittingRef = useRef(isSubmitting);
-
-  useEffect(() => {
-    latestOnCloseRef.current = onClose;
-    isSubmittingRef.current = isSubmitting;
-  }, [isSubmitting, onClose]);
+  const latestOnSuccessRef = useRef(onSuccess);
+  const isSubmittingRef = useRef(false);
+  const contextRef = useRef(contextKey);
+  const requestRef = useRef({ id: 0, contextKey: null });
+  const isSubmitting = submittingContextKey === contextKey;
+  const error =
+    errorState.contextKey === contextKey ? errorState.message : "";
 
   useLayoutEffect(() => {
     const lifecycle = lifecycleRef.current;
@@ -63,6 +65,8 @@ export default function WaitlistForm({
 
     return () => {
       lifecycle.mounted = false;
+      requestRef.current = { id: requestRef.current.id + 1, contextKey: null };
+      isSubmittingRef.current = false;
       queueMicrotask(() => {
         if (lifecycle.mounted || document.activeElement?.closest('[role="dialog"]')) {
           return;
@@ -72,6 +76,17 @@ export default function WaitlistForm({
       });
     };
   }, []);
+
+  useLayoutEffect(() => {
+    latestOnCloseRef.current = onClose;
+    latestOnSuccessRef.current = onSuccess;
+
+    if (contextRef.current !== contextKey) {
+      contextRef.current = contextKey;
+      requestRef.current = { id: requestRef.current.id + 1, contextKey: null };
+      isSubmittingRef.current = false;
+    }
+  }, [contextKey, onClose, onSuccess]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -86,10 +101,23 @@ export default function WaitlistForm({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmittingRef.current) return;
 
-    setIsSubmitting(true);
-    setError("");
+    const request = {
+      id: requestRef.current.id + 1,
+      contextKey,
+    };
+    requestRef.current = request;
+    isSubmittingRef.current = true;
+    setSubmittingContextKey(contextKey);
+    setErrorState({ contextKey, message: "" });
+
+    const ownsRequest = () =>
+      lifecycleRef.current.mounted &&
+      isSubmittingRef.current &&
+      requestRef.current.id === request.id &&
+      requestRef.current.contextKey === request.contextKey &&
+      contextRef.current === request.contextKey;
 
     try {
       const payload = {
@@ -105,15 +133,20 @@ export default function WaitlistForm({
 
       await api.post("/waitlist", payload);
 
-      onSuccess();
+      if (ownsRequest()) latestOnSuccessRef.current?.();
     } catch (requestError) {
+      if (!ownsRequest()) return;
       const message =
         requestError.response?.data?.message ||
         "Could not join waitlist. Please try again.";
 
-      setError(message);
+      setErrorState({ contextKey: request.contextKey, message });
     } finally {
-      setIsSubmitting(false);
+      if (ownsRequest()) {
+        isSubmittingRef.current = false;
+        requestRef.current = { id: request.id, contextKey: null };
+        setSubmittingContextKey(null);
+      }
     }
   };
 

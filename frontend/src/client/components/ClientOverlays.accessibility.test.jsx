@@ -264,6 +264,156 @@ describe("Client overlay accessibility", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
   });
 
+  it("synchronously locks duplicate waitlist submits and immediate dismissal", async () => {
+    const deferred = createDeferred();
+    const onClose = vi.fn();
+    const onSuccess = vi.fn();
+    api.post.mockClear();
+    api.post.mockReturnValue(deferred.promise);
+    render(<WaitlistHarness onClose={onClose} onSuccess={onSuccess} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open waitlist" }));
+    const dialog = screen.getByRole("dialog", { name: "Notify me when a time opens" });
+    const form = dialog.querySelector("form");
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(dialog.parentElement);
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    deferred.resolve({ data: {} });
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it("ignores stale waitlist success and clears loading after a context change", async () => {
+    const deferred = createDeferred();
+    const onSuccess = vi.fn();
+    const onClose = vi.fn();
+    api.post.mockClear();
+    api.post.mockReturnValue(deferred.promise);
+    const { rerender } = render(
+      <WaitlistForm
+        barberId="barber-1"
+        date="2099-08-01"
+        onClose={onClose}
+        onSuccess={onSuccess}
+        salonId="salon-1"
+        serviceId="service-1"
+      />
+    );
+
+    fireEvent.submit(
+      screen
+        .getByRole("button", { name: "Notify me when a time opens" })
+        .closest("form")
+    );
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+
+    rerender(
+      <WaitlistForm
+        barberId="barber-1"
+        date="2099-08-01"
+        onClose={onClose}
+        onSuccess={onSuccess}
+        salonId="salon-1"
+        serviceId="service-2"
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Notify me when a time opens" })
+    ).toBeEnabled();
+
+    deferred.resolve({ data: {} });
+    await Promise.resolve();
+
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("keeps a current waitlist request loading when a stale context request fails", async () => {
+    const staleRequest = createDeferred();
+    const currentRequest = createDeferred();
+    const onSuccess = vi.fn();
+    const onClose = vi.fn();
+    api.post.mockClear();
+    api.post
+      .mockReturnValueOnce(staleRequest.promise)
+      .mockReturnValueOnce(currentRequest.promise);
+    const { rerender } = render(
+      <WaitlistForm
+        barberId="barber-1"
+        date="2099-08-01"
+        onClose={onClose}
+        onSuccess={onSuccess}
+        salonId="salon-1"
+        serviceId="service-1"
+      />
+    );
+
+    fireEvent.submit(
+      screen
+        .getByRole("button", { name: "Notify me when a time opens" })
+        .closest("form")
+    );
+    rerender(
+      <WaitlistForm
+        barberId="barber-1"
+        date="2099-08-02"
+        onClose={onClose}
+        onSuccess={onSuccess}
+        salonId="salon-1"
+        serviceId="service-1"
+      />
+    );
+    fireEvent.submit(
+      screen
+        .getByRole("button", { name: "Notify me when a time opens" })
+        .closest("form")
+    );
+
+    staleRequest.reject({ response: { data: { message: "Stale failure" } } });
+    await Promise.resolve();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+
+    currentRequest.resolve({ data: {} });
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it("ignores pending waitlist completion after unmount", async () => {
+    const deferred = createDeferred();
+    const onSuccess = vi.fn();
+    api.post.mockClear();
+    api.post.mockReturnValue(deferred.promise);
+    const { unmount } = render(
+      <WaitlistForm
+        barberId="barber-1"
+        date="2099-08-01"
+        onClose={vi.fn()}
+        onSuccess={onSuccess}
+        salonId="salon-1"
+        serviceId="service-1"
+      />
+    );
+
+    fireEvent.submit(
+      screen
+        .getByRole("button", { name: "Notify me when a time opens" })
+        .closest("form")
+    );
+    unmount();
+
+    deferred.resolve({ data: {} });
+    await Promise.resolve();
+
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it("announces waitlist errors and clears stale alerts on reopen", async () => {
     const user = userEvent.setup();
     api.post
