@@ -9,6 +9,9 @@ import {
 import {
   fetchBarberMembership,
   fetchBarberMemberships,
+  findSeatForAcceptedSalonStaffMember,
+  getActiveSeatsForBarber,
+  getPaidActiveSeats,
   getSeatSalonId,
   isAcceptedSalonStaffMember,
   seatHasActiveParentSubscription,
@@ -179,15 +182,10 @@ export const getMySubscriptionAccess = async (user) => {
     plan
   );
 
-  const activeSeat = await SubscriptionSeat.findOne({
-    barberId,
-    status: "active",
-  })
-    .populate({
-      path: "subscriptionId",
-      populate: { path: "planId" },
-    })
-    .lean();
+  const activeSeats = await getActiveSeatsForBarber(barberId, null, {
+    populatePlan: true,
+    lean: true,
+  });
 
   let hasAccess = false;
   let salonSeatCoverage = null;
@@ -202,14 +200,15 @@ export const getMySubscriptionAccess = async (user) => {
     coveredBy = "individual";
   }
 
-  if (activeSeat && activeSeat.subscriptionId) {
-    const seatSalonId = getSeatSalonId(activeSeat);
+  const paidActiveSeats = getPaidActiveSeats(activeSeats);
+  if (paidActiveSeats.length > 0) {
     const barber = await fetchBarberMembership(barberId);
+    const activeSeat = findSeatForAcceptedSalonStaffMember(
+      paidActiveSeats,
+      barber
+    );
 
-    if (
-      subscriptionHasPaidAccess(activeSeat.subscriptionId) &&
-      isAcceptedSalonStaffMember(barber, seatSalonId)
-    ) {
+    if (activeSeat) {
       hasAccess = true;
       salonSeatCoverage = {
         ...activeSeat,

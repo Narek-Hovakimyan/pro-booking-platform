@@ -113,17 +113,29 @@ export const countActiveAcceptedStaffSeats = async ({ subscriptionId, salonId })
 /**
  * Get active subscription seats for a barber.
  */
-export const getActiveSeatsForBarber = async (barberId, session = null) => {
+export const getActiveSeatsForBarber = async (
+  barberId,
+  session = null,
+  { populatePlan = false, lean = false } = {}
+) => {
   const query = withSession(SubscriptionSeat.find({
     barberId,
     status: "active",
   }), session);
   const populated =
     query && typeof query.populate === "function"
-      ? query.populate("subscriptionId")
+      ? query.populate(
+        populatePlan
+          ? { path: "subscriptionId", populate: { path: "planId" } }
+          : "subscriptionId"
+      )
       : query;
 
-  return resolveQuery(populated);
+  return resolveQuery(
+    lean && populated && typeof populated.lean === "function"
+      ? populated.lean()
+      : populated
+  );
 };
 
 /**
@@ -137,3 +149,11 @@ export const seatHasActiveParentSubscription = (seat, now = new Date()) =>
  */
 export const seatMatchesSalon = (seat, salonId) =>
   !salonId || getSeatSalonId(seat) === getIdString(salonId);
+
+export const getPaidActiveSeats = (seats = []) =>
+  (seats || []).filter((seat) => seatHasActiveParentSubscription(seat));
+
+export const findSeatForAcceptedSalonStaffMember = (seats = [], barber) =>
+  (seats || []).find((seat) =>
+    isAcceptedSalonStaffMember(barber, getSeatSalonId(seat))
+  ) || null;

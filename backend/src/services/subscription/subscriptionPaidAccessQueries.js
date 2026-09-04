@@ -7,7 +7,9 @@ import {
 } from "./subscriptionHelpers.js";
 import {
   fetchBarberMembership,
+  findSeatForAcceptedSalonStaffMember,
   getActiveSeatsForBarber,
+  getPaidActiveSeats,
   getSeatSalonId,
   isAcceptedSalonStaffMember,
   seatHasActiveParentSubscription,
@@ -41,23 +43,15 @@ export const barberHasPaidAccess = async (barberId, session = null) => {
   }
 
   // Check salon seat coverage
-  const activeSeat = await withSession(SubscriptionSeat.findOne({
-    barberId,
-    status: "active",
-  }), session).populate("subscriptionId");
+  const activeSeats = await getActiveSeatsForBarber(barberId, session);
+  const paidActiveSeats = getPaidActiveSeats(activeSeats);
 
-  if (!activeSeat || !activeSeat.subscriptionId) {
+  if (paidActiveSeats.length === 0) {
     return false;
   }
 
-  if (!seatHasActiveParentSubscription(activeSeat)) {
-    return false;
-  }
-
-  const seatSalonId = getSeatSalonId(activeSeat);
   const barber = await fetchBarberMembership(barberId, session);
-
-  return isAcceptedSalonStaffMember(barber, seatSalonId);
+  return Boolean(findSeatForAcceptedSalonStaffMember(paidActiveSeats, barber));
 };
 
 export const barberHasPaidAccessForSalon = async (barberId, salonId = null, session = null) => {
