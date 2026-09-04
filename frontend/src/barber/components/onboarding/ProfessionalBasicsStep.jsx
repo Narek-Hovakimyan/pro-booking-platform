@@ -52,6 +52,30 @@ const normalizeProfile = (data, fallback) => ({
   salons: data?.salons || fallback.salons || [],
 });
 
+const hasText = (value) => typeof value === "string" && value.trim().length > 0;
+const requiresIndependentAddress = (workplace) =>
+  workplace === "independent" || workplace === "both";
+
+const getOnboardingValidationError = (profile, workplace, missing = []) => {
+  const fields = [];
+
+  if (!hasText(profile.city) || missing.includes("CITY_REQUIRED")) {
+    fields.push("City");
+  }
+  const addressRequired =
+    requiresIndependentAddress(workplace) ||
+    missing.includes("INDEPENDENT_ADDRESS_REQUIRED");
+  if (addressRequired && (!hasText(profile.address) || missing.includes("INDEPENDENT_ADDRESS_REQUIRED"))) {
+    fields.push("Address");
+  }
+
+  if (fields.length === 0) return "";
+  if (fields.length === 1) {
+    return `${fields[0]} is required. Enter your ${fields[0].toLowerCase()} before saving.`;
+  }
+  return "City and Address are required. Enter both before saving.";
+};
+
 export default function ProfessionalBasicsStep({
   mode = "basics",
   onStatusChange,
@@ -66,6 +90,7 @@ export default function ProfessionalBasicsStep({
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [workplace, setWorkplace] = useState(null);
 
   const isActive = useCallback(
     (token) => mountedRef.current && tokenRef.current === token,
@@ -80,9 +105,13 @@ export default function ProfessionalBasicsStep({
       setIsLoading(true);
       setError("");
       try {
-        const { data } = await api.get("/users/me");
+        const [{ data }, status] = await Promise.all([
+          api.get("/users/me"),
+          getMyBarberOnboarding(),
+        ]);
         if (!isActive(token)) return;
         setProfile((current) => normalizeProfile(data, current));
+        setWorkplace(status?.state?.workplace || null);
       } catch {
         if (isActive(token)) setError("Could not load profile. Please try again.");
       } finally {
@@ -108,6 +137,13 @@ export default function ProfessionalBasicsStep({
     event.preventDefault();
     if (!currentUserId || isSaving) return;
 
+    const validationError = getOnboardingValidationError(profile, workplace);
+    if (validationError) {
+      setSaved(false);
+      setError(validationError);
+      return;
+    }
+
     const token = ++tokenRef.current;
     setIsSaving(true);
     setSaved(false);
@@ -120,7 +156,6 @@ export default function ProfessionalBasicsStep({
 
       const nextProfile = normalizeProfile(data, profile);
       setProfile(nextProfile);
-      setSaved(true);
       // Dispatch only public-safe fields — strip private address
       const publicProfile = { ...nextProfile };
       delete publicProfile.address;
@@ -139,6 +174,14 @@ export default function ProfessionalBasicsStep({
 
       const status = await getMyBarberOnboarding();
       if (!isActive(token)) return;
+      const statusValidationError = getOnboardingValidationError(
+        nextProfile,
+        status?.state?.workplace || workplace,
+        Array.isArray(status?.missing) ? status.missing : []
+      );
+      setWorkplace(status?.state?.workplace || null);
+      setSaved(!statusValidationError);
+      setError(statusValidationError);
       onStatusChange?.(status);
     } catch {
       if (isActive(token)) setError("Could not save profile. Please try again.");
