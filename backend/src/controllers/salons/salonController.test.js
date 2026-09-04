@@ -198,6 +198,8 @@ test("createSalon lets an owner create a second salon without changing primary l
   assert.equal(user.salons[1].worksAsSpecialist, true);
   assert.equal(user.salons[0].relationshipType, "staff");
   assert.equal(user.salons[0].relationshipStatus, "accepted");
+  assert.equal(createdSalons[0].joinApplicationPolicy, "job_only");
+  assert.equal(createdSalons[1].joinApplicationPolicy, "job_only");
   assert.equal(String(user.salon), salonAId);
   assert.equal(user.salonStatus, "approved");
   assert.equal(new Set(user.salons.map((entry) => String(entry.salon))).size, 2);
@@ -766,6 +768,9 @@ test("listSalons search with regex metacharacters treats them as literal text", 
   SalonJoinRequest.find = () => ({ distinct: async () => [] });
   User.find = () => ({ select: async () => [] });
   BarberProfile.find = async () => [];
+  __salonControllerTestHooks.setGetPaidAccessByBarberIds(async () => new Map());
+  __salonControllerTestHooks.setGetPublicBarberReadinessByIds(async () => new Map());
+  __salonControllerTestHooks.setGetSalonReviewStats(async () => new Map());
 
   await listSalons(
     { query: { search: ".*+" } },
@@ -867,6 +872,45 @@ test("listSalons applies authenticated self-scoped excludeForBarber filtering", 
   ].sort());
 });
 
+test("join search exposes effective policy only for authenticated self-scoped requests", async () => {
+  const res = createResponse();
+  const legacySalon = { _id: salonAId, name: "Legacy Salon", city: "Yerevan" };
+  const policySalon = {
+    _id: salonBId,
+    name: "Job Only Salon",
+    city: "Yerevan",
+    joinApplicationPolicy: "job_only",
+  };
+
+  User.findById = async () => ({ _id: barberId, salons: [] });
+  Salon.find = (query) => {
+    if (query?.$or) return { distinct: async () => [] };
+    return { sort: async () => [legacySalon, policySalon] };
+  };
+  SalonJoinRequest.find = () => ({ distinct: async () => [] });
+  User.find = () => ({ select: async () => [] });
+  BarberProfile.find = async () => [];
+
+  __salonControllerTestHooks.setGetPaidAccessByBarberIds(async () => new Map());
+  __salonControllerTestHooks.setGetPublicBarberReadinessByIds(async () => new Map());
+  __salonControllerTestHooks.setGetSalonReviewStats(async () => new Map());
+
+  await listSalons({ query: {} }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal("joinApplicationPolicy" in res.body[0], false);
+
+  const joinRes = createResponse();
+  await listSalons(
+    { user: { _id: barberId, role: "barber" }, query: { excludeForBarber: barberId } },
+    joinRes
+  );
+  assert.equal(joinRes.statusCode, 200);
+  assert.deepEqual(
+    joinRes.body.map((salon) => salon.joinApplicationPolicy),
+    ["open", "job_only"]
+  );
+});
+
 test("listSalons keeps rejected and cancelled salons selectable", async () => {
   const res = createResponse();
   const approvedSalonId = "64b000000000000000000041";
@@ -943,6 +987,7 @@ test("listSalons keeps rejected and cancelled salons selectable", async () => {
     "id",
     "image",
     "imageUrl",
+    "joinApplicationPolicy",
     "latestReviews",
     "name",
     "phone",

@@ -32,6 +32,7 @@ import {
 import { getCalendar } from "../../controllers/schedules/salonCalendarController.js";
 import { getPublicSalonBooking } from "../../controllers/bookings/publicSalonBookingController.js";
 import { updateStaffDepositSettingsBySalonOwner } from "../../controllers/bookings/depositSettingsController.js";
+import { updateSalonJoinApplicationPolicy } from "../../controllers/salons/salonApplicationPolicyController.js";
 
 import { optionalAuth, protect } from "../../middleware/authMiddleware.js";
 import { promoValidationLimiter } from "../../middleware/rateLimitMiddleware.js";
@@ -63,6 +64,11 @@ router.patch("/:salonId/promotions/:promotionId", protect, updateSalonPromotion)
 
 router.post("/", protect, createSalon);
 router.patch("/leave", protect, leaveSalon);
+router.patch(
+  "/:salonId/join-application-policy",
+  protect,
+  updateSalonJoinApplicationPolicy
+);
 router.patch("/:salonId/remove-barber/:barberId", protect, removeBarberFromSalon);
 router.patch("/:salonId/promote-admin/:barberId", protect, promoteToAdmin);
 router.patch("/:salonId/demote-admin/:barberId", protect, demoteAdmin);

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { JOIN_APPLICATION_POLICIES } from "../utils/salonJoinApplicationPolicy.js";
 
 const salonSchema = new mongoose.Schema(
   {
@@ -36,6 +37,11 @@ const salonSchema = new mongoose.Schema(
       type: [mongoose.Schema.Types.ObjectId],
       ref: "User",
       default: [],
+    },
+    // Intentionally no default: legacy records missing this field remain `open`.
+    joinApplicationPolicy: {
+      type: String,
+      enum: JOIN_APPLICATION_POLICIES,
     },
   },
   { timestamps: true }

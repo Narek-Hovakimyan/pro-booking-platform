@@ -13,7 +13,11 @@ import {
   canManageSalonRequest,
   sameId,
 } from "../../utils/salonPermissions.js";
+import { canCreateDirectSalonJoinRequest } from "../../utils/salonJoinApplicationPolicy.js";
 
+const DIRECT_REQUEST_SOURCE = "direct";
+const MAX_PENDING_DIRECT_JOIN_REQUESTS = 3;
+const DIRECT_REAPPLY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 export class SalonJoinRequestLifecycleError extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -33,6 +37,39 @@ const hasApprovedMembership = (barber, salonId) =>
   findMatchingSalonEntries(barber, salonId).some(
     (entry) => entry?.status === "approved"
   );
+
+const isDirectRequest = (request) => request?.source !== "job";
+
+const pendingDirectRequestFilter = (barberId) => ({
+  barberId,
+  status: "pending",
+  $or: [
+    { source: DIRECT_REQUEST_SOURCE },
+    { source: { $exists: false } },
+    { source: null },
+  ],
+});
+
+const countPendingDirectRequests = (barberId, session) =>
+  sessionQuery(
+    SalonJoinRequest.countDocuments(pendingDirectRequestFilter(barberId)),
+    session
+  );
+
+const getDirectReapplyAvailableAt = (request) => {
+  const value = request?.directReapplyAvailableAt;
+  return value instanceof Date && !Number.isNaN(value.getTime()) ? value : null;
+};
+
+const assertDirectReapplyAllowed = (request, now = new Date()) => {
+  const availableAt = getDirectReapplyAvailableAt(request);
+  if (availableAt && availableAt > now) {
+    throw new SalonJoinRequestLifecycleError(
+      429,
+      "You can reapply to this salon after the cooldown period"
+    );
+  }
+};
 
 const clearPendingFields = (entry) => {
   entry.relationshipType = "staff";
@@ -205,6 +242,13 @@ export const requestSalonJoinLifecycle = async ({ salonId, barber }) => {
         };
       }
 
+      if (!canCreateDirectSalonJoinRequest(salon)) {
+        throw new SalonJoinRequestLifecycleError(
+          403,
+          "This salon is not accepting direct join requests"
+        );
+      }
+
       const closedRequest = acceptedRequest || await sessionQuery(
         SalonJoinRequest.findOne({
           salonId: salon._id,
@@ -216,18 +260,49 @@ export const requestSalonJoinLifecycle = async ({ salonId, barber }) => {
 
       let request;
 
+      if (closedRequest && !isDirectRequest(closedRequest)) {
+        throw new SalonJoinRequestLifecycleError(
+          409,
+          "This request must be reopened through its original application"
+        );
+      }
+
+      if (closedRequest) {
+        assertDirectReapplyAllowed(closedRequest);
+      }
+
+      const pendingDirectCount = await countPendingDirectRequests(barberId, session);
+      if (pendingDirectCount >= MAX_PENDING_DIRECT_JOIN_REQUESTS) {
+        throw new SalonJoinRequestLifecycleError(
+          429,
+          "You already have the maximum number of pending direct salon requests"
+        );
+      }
+
       if (closedRequest) {
         request = await sessionQuery(
           SalonJoinRequest.findOneAndUpdate(
             { _id: closedRequest._id, status: closedRequest.status },
-            { $set: { status: "pending" } },
+            {
+              $set: {
+                status: "pending",
+                source: DIRECT_REQUEST_SOURCE,
+                directReapplyAvailableAt: null,
+              },
+            },
             { new: true, session }
           ).populate("salonId"),
           session
         );
       } else {
         [request] = await SalonJoinRequest.create(
-          [{ salonId: salon._id, barberId, status: "pending" }],
+          [{
+            salonId: salon._id,
+            barberId,
+            status: "pending",
+            source: DIRECT_REQUEST_SOURCE,
+            directReapplyAvailableAt: null,
+          }],
           { session }
         );
         await populateRequest(request, session);
@@ -286,10 +361,18 @@ const cancelRequestInTransaction = async ({ request, barberId, session }) => {
     throw new SalonJoinRequestLifecycleError(400, "Only pending requests can be cancelled");
   }
 
+  const directReapplyAvailableAt = isDirectRequest(request)
+    ? new Date(Date.now() + DIRECT_REAPPLY_COOLDOWN_MS)
+    : null;
   const claimedRequest = await sessionQuery(
     SalonJoinRequest.findOneAndUpdate(
       { _id: request._id, barberId, status: "pending" },
-      { $set: { status: "cancelled" } },
+      {
+        $set: {
+          status: "cancelled",
+          ...(directReapplyAvailableAt ? { directReapplyAvailableAt } : {}),
+        },
+      },
       { new: true, session }
     ),
     session
@@ -367,10 +450,19 @@ export const decideSalonJoinRequestLifecycle = async ({
       throw new SalonJoinRequestLifecycleError(409, "Salon membership is already approved");
     }
 
+    const directReapplyAvailableAt =
+      status === "rejected" && isDirectRequest(request)
+        ? new Date(Date.now() + DIRECT_REAPPLY_COOLDOWN_MS)
+        : null;
     const claimedRequest = await sessionQuery(
       SalonJoinRequest.findOneAndUpdate(
         { _id: request._id, status: "pending" },
-        { $set: { status } },
+        {
+          $set: {
+            status,
+            ...(directReapplyAvailableAt ? { directReapplyAvailableAt } : {}),
+          },
+        },
         { new: true, session }
       ).populate("salonId").populate("barberId", barberFields),
       session

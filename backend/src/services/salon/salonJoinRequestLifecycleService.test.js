@@ -7,6 +7,7 @@ import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import User from "../../models/User.js";
 import {
   cancelSalonJoinRequestBySalonLifecycle,
+  cancelAcceptedSalonJoinRequests,
   cancelSalonJoinRequestLifecycle,
   decideSalonJoinRequestLifecycle,
   requestSalonJoinLifecycle,
@@ -18,6 +19,8 @@ const originalMethods = {
   requestFindById: SalonJoinRequest.findById,
   requestFindOne: SalonJoinRequest.findOne,
   requestFindOneAndUpdate: SalonJoinRequest.findOneAndUpdate,
+  requestCountDocuments: SalonJoinRequest.countDocuments,
+  requestUpdateMany: SalonJoinRequest.updateMany,
   requestCreate: SalonJoinRequest.create,
   userFindById: User.findById,
 };
@@ -78,7 +81,12 @@ class Query {
   }
 }
 
-const same = (left, right) => String(left) === String(right);
+const same = (left, right) =>
+  String(left?._id || left?.id || left || "") ===
+  String(right?._id || right?.id || right || "");
+
+const getRequestSourceForTest = (request) =>
+  request?.source === "job" ? "job" : "direct";
 
 const matches = (doc, query) =>
   Object.entries(query).every(([key, expected]) => {
@@ -117,9 +125,13 @@ const makeRequest = (overrides = {}) => ({
   barberId,
   status: "pending",
   updatedAt: new Date("2026-01-01T00:00:00Z"),
-  async populate() {
-    if (this.salonId === salonId) this.salonId = salons.get(salonId);
-    if (this.barberId === barberId) this.barberId = users.get(barberId);
+  async populate({ path } = {}) {
+    if (path === "salonId" && this.salonId === salonId) {
+      this.salonId = salons.get(salonId);
+    }
+    if (path === "barberId" && this.barberId === barberId) {
+      this.barberId = users.get(barberId);
+    }
     return this;
   },
   toObject() {
@@ -200,6 +212,15 @@ beforeEach(() => {
     requests.push(created);
     return [created];
   };
+  SalonJoinRequest.countDocuments = (query) =>
+    new Query(() =>
+      requests.filter((request) => {
+        if (!same(request.barberId, query.barberId) || request.status !== query.status) {
+          return false;
+        }
+        return getRequestSourceForTest(request) === "direct";
+      }).length
+    );
 });
 
 afterEach(() => {
@@ -208,6 +229,8 @@ afterEach(() => {
   SalonJoinRequest.findById = originalMethods.requestFindById;
   SalonJoinRequest.findOne = originalMethods.requestFindOne;
   SalonJoinRequest.findOneAndUpdate = originalMethods.requestFindOneAndUpdate;
+  SalonJoinRequest.countDocuments = originalMethods.requestCountDocuments;
+  SalonJoinRequest.updateMany = originalMethods.requestUpdateMany;
   SalonJoinRequest.create = originalMethods.requestCreate;
   User.findById = originalMethods.userFindById;
 });
@@ -241,6 +264,151 @@ test("duplicate pending request returns idempotently without notification", asyn
   assert.equal(result.request._id, requestId);
   assert.equal(result.notification, null);
   assert.equal(requests.length, 1);
+});
+
+test("legacy policy permits direct requests, while closed and job-only block new requests", async () => {
+  const legacy = await requestSalonJoinLifecycle({ salonId, barber: users.get(barberId) });
+  assert.equal(legacy.request.source, "direct");
+
+  for (const policy of ["closed", "job_only"]) {
+    const blockedSalonId = `64b1000000000000000000${policy === "closed" ? "12" : "13"}`;
+    salons.set(blockedSalonId, makeSalon({ _id: blockedSalonId, joinApplicationPolicy: policy }));
+    const beforeRequests = requests.length;
+    const beforeEntries = users.get(barberId).salons.length;
+
+    await assert.rejects(
+      () => requestSalonJoinLifecycle({ salonId: blockedSalonId, barber: users.get(barberId) }),
+      (error) => error.statusCode === 403
+    );
+    assert.equal(requests.length, beforeRequests);
+    assert.equal(users.get(barberId).salons.length, beforeEntries);
+  }
+});
+
+test("a pending request remains idempotent after its salon closes", async () => {
+  requests.push(makeRequest());
+  users.get(barberId).salons.push({ salon: salonId, status: "pending" });
+  salons.set(salonId, makeSalon({ joinApplicationPolicy: "closed" }));
+
+  const result = await requestSalonJoinLifecycle({ salonId, barber: users.get(barberId) });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.request.status, "pending");
+
+  const cancelled = await cancelSalonJoinRequestBySalonLifecycle({ salonId, barberId });
+  assert.equal(cancelled.request.status, "cancelled");
+});
+
+test("closed and job-only policies block reopening a direct request without changing it", async () => {
+  for (const policy of ["closed", "job_only"]) {
+    requests = [makeRequest({ status: "rejected" })];
+    salons.set(salonId, makeSalon({ joinApplicationPolicy: policy }));
+
+    await assert.rejects(
+      () => requestSalonJoinLifecycle({ salonId, barber: users.get(barberId) }),
+      (error) => error.statusCode === 403
+    );
+    assert.equal(requests[0].status, "rejected");
+  }
+});
+
+test("limits a barber to three pending direct requests without partial fourth-request mutation", async () => {
+  const salonIds = [
+    salonId,
+    "64b100000000000000000012",
+    "64b100000000000000000013",
+    "64b100000000000000000014",
+  ];
+  salonIds.forEach((id) => salons.set(id, makeSalon({ _id: id })));
+
+  for (const id of salonIds.slice(0, 3)) {
+    await requestSalonJoinLifecycle({ salonId: id, barber: users.get(barberId) });
+  }
+
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests.map((request) => String(request.barberId?._id || request.barberId)), [barberId, barberId, barberId]);
+  assert.equal(await SalonJoinRequest.countDocuments({ barberId, status: "pending" }), 3);
+
+  const beforeRequestCount = requests.length;
+  const beforeMembershipIds = users.get(barberId).salons.map((entry) => entry.salon);
+  await assert.rejects(
+    () => requestSalonJoinLifecycle({ salonId: salonIds[3], barber: users.get(barberId) }),
+    (error) => error.statusCode === 429
+  );
+
+  assert.equal(requests.length, beforeRequestCount);
+  assert.equal(requests.some((request) => same(request.salonId, salonIds[3])), false);
+  assert.deepEqual(users.get(barberId).salons.map((entry) => entry.salon), beforeMembershipIds);
+});
+
+test("legacy source-missing requests count toward the direct cap, but job requests do not", async () => {
+  const targetSalonId = "64b100000000000000000015";
+  salons.set(targetSalonId, makeSalon({ _id: targetSalonId }));
+  requests.push(
+    makeRequest({ salonId: "64b100000000000000000016", source: undefined }),
+    makeRequest({ salonId: "64b100000000000000000017", source: undefined }),
+    makeRequest({ salonId: "64b100000000000000000018", source: undefined })
+  );
+
+  await assert.rejects(
+    () => requestSalonJoinLifecycle({ salonId: targetSalonId, barber: users.get(barberId) }),
+    (error) => error.statusCode === 429
+  );
+
+  requests.pop();
+  requests.push(makeRequest({ salonId: "64b100000000000000000019", source: "job" }));
+  const result = await requestSalonJoinLifecycle({ salonId: targetSalonId, barber: users.get(barberId) });
+  assert.equal(result.statusCode, 201);
+});
+
+test("rejection and applicant cancellation set a direct seven-day reapply cooldown", async () => {
+  requests.push(makeRequest());
+  const rejected = await decideSalonJoinRequestLifecycle({
+    requestId,
+    status: "rejected",
+    actorId: ownerId,
+  });
+  assert.ok(rejected.request.directReapplyAvailableAt > new Date());
+
+  await assert.rejects(
+    () => requestSalonJoinLifecycle({ salonId, barber: users.get(barberId) }),
+    (error) => error.statusCode === 429
+  );
+
+  rejected.request.directReapplyAvailableAt = new Date(Date.now() - 1);
+  const reopened = await requestSalonJoinLifecycle({ salonId, barber: users.get(barberId) });
+  assert.equal(reopened.request.status, "pending");
+  assert.equal(reopened.request.directReapplyAvailableAt, null);
+
+  // Persisted request references are unpopulated when cancellation reads them.
+  reopened.request.barberId = barberId;
+  const cancelled = await cancelSalonJoinRequestLifecycle({ requestId, barberId });
+  assert.ok(cancelled.request.directReapplyAvailableAt > new Date());
+});
+
+test("accepted-request invalidation does not set a direct reapply cooldown", async () => {
+  let update;
+  SalonJoinRequest.updateMany = async (_query, nextUpdate) => {
+    update = nextUpdate;
+    return { modifiedCount: 1 };
+  };
+
+  await cancelAcceptedSalonJoinRequests({ salonId, barberId, session: {} });
+
+  assert.deepEqual(update, { $set: { status: "cancelled" } });
+});
+
+test("direct-request anti-spam fields stay out of existing serialized request shapes", () => {
+  const request = new SalonJoinRequest({
+    salonId,
+    barberId,
+    source: "direct",
+    directReapplyAvailableAt: new Date(),
+  });
+  const serialized = request.toObject();
+
+  assert.equal("source" in serialized, false);
+  assert.equal("directReapplyAvailableAt" in serialized, false);
 });
 
 test("rejected and cancelled requests reopen to pending with stale fields cleared", async () => {

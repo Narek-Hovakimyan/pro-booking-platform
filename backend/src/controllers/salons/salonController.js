@@ -29,6 +29,7 @@ import {
 } from "../../utils/salonHelpers.js";
 import { escapeRegex, normalizeSearch, sendControllerError } from "../../utils/controllerError.js";
 import { createSalonWithDeletionFence } from "../../services/salon/salonCreationMutationService.js";
+import { getEffectiveJoinApplicationPolicy } from "../../utils/salonJoinApplicationPolicy.js";
 
 // Test hooks — allows tests to override dependencies without a DI framework
 let getPaidAccessByBarberIdsForSalons = getPaidAccessByBarberIdsForSalon;
@@ -275,12 +276,19 @@ export const listSalons = async (req, res) => {
 
     return res.json(
       salons.map((salon) => {
-        return buildPublicSalonResponse({
+        const response = buildPublicSalonResponse({
           salon,
           reviewStats: reviewStatsBySalonId.get(String(salon._id)),
           barbers: barbersBySalonId.get(String(salon._id)) || [],
           profiles,
         });
+
+        return req.query.excludeForBarber
+          ? {
+              ...response,
+              joinApplicationPolicy: getEffectiveJoinApplicationPolicy(salon),
+            }
+          : response;
       })
     );
   } catch (error) {
@@ -394,6 +402,7 @@ export const createSalon = async (req, res) => {
       imageUrl: safeImageUrl,
       ownerId: req.user._id,
       admins: [],
+      joinApplicationPolicy: "job_only",
       },
       ownerWorksAsSpecialist,
       Salon,

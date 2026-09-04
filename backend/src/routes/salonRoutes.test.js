@@ -17,3 +17,13 @@ test("public salon list route uses optional auth before controller", () => {
     ["optionalAuth", "listSalons"]
   );
 });
+
+test("join application policy route is protected and distinct from public salon routes", () => {
+  const route = findRoute("/:salonId/join-application-policy", "patch");
+
+  assert.ok(route, "expected PATCH join application policy route");
+  assert.deepEqual(
+    route.stack.map((stackLayer) => stackLayer.name),
+    ["protect", "updateSalonJoinApplicationPolicy"]
+  );
+});
