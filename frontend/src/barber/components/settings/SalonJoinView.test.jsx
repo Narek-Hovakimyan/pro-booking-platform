@@ -402,4 +402,84 @@ describe("SalonJoinView", () => {
     expect(requestJoinSalon).not.toHaveBeenCalled();
     expect(cancelJoinRequestBySalon).not.toHaveBeenCalled();
   });
+
+  it("keeps direct requests available for open and legacy search results", async () => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "Legacy Studio")] });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Legacy");
+    fireEvent.click(screen.getByRole("option", { name: "Legacy Studio" }));
+
+    expect(screen.getByRole("button", { name: "Send request" })).toBeEnabled();
+  });
+
+  it.each([
+    ["job_only", "Job Studio", "This salon accepts applications through job posts."],
+    ["closed", "Closed Studio", "This salon is not currently accepting applications."],
+  ])("does not offer direct requests for %s salons", async (joinApplicationPolicy, name, guidance) => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, name, { joinApplicationPolicy })] });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor(name);
+    fireEvent.click(screen.getByRole("option", { name }));
+
+    expect(screen.queryByRole("button", { name: "Send request" })).not.toBeInTheDocument();
+    expect(screen.getByText(new RegExp(guidance))).toBeVisible();
+    expect(requestJoinSalon).not.toHaveBeenCalled();
+  });
+
+  it("keeps pending state cancellable even when a search result is job-only", async () => {
+    fetchMySalonStatus.mockResolvedValue(
+      states([{ salonId: SALON_A, status: "pending", salon: { name: "Pending Studio" } }])
+    );
+    fetchSalons.mockResolvedValue({
+      data: [salon(SALON_A, "Pending Studio", { joinApplicationPolicy: "job_only" })],
+    });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Pending");
+
+    expect(screen.getByText("Pending")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    expect(screen.queryByRole("option", { name: "Pending Studio" })).not.toBeInTheDocument();
+  });
+
+  it("clears the selected salon policy when a new query is typed", async () => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "Open Studio", { joinApplicationPolicy: "open" })] });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Open");
+    fireEvent.click(screen.getByRole("option", { name: "Open Studio" }));
+    expect(screen.getByRole("button", { name: "Send request" })).toBeEnabled();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Search salons" }), {
+      target: { value: "Other" },
+    });
+    expect(screen.getByRole("button", { name: "Send request" })).toBeDisabled();
+  });
+
+  it.each([
+    "This salon is not accepting direct join requests",
+    "You already have the maximum number of pending direct salon requests",
+    "You can reapply to this salon after the cooldown period",
+  ])("surfaces authoritative join failures without false success", async (message) => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "Open Studio", { joinApplicationPolicy: "open" })] });
+    requestJoinSalon.mockRejectedValue({ response: { data: { message } } });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Open");
+    fireEvent.click(screen.getByRole("option", { name: "Open Studio" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    });
+
+    expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByText("Join request sent.")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search salons" })).toHaveValue("Open Studio");
+  });
 });

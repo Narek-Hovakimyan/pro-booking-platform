@@ -36,3 +36,7 @@ export function decideJoinRequest(requestId, status) {
 export function leaveSalon(salonId) {
   return api.patch("/salons/leave", { salonId });
 }
+
+export function updateSalonJoinApplicationPolicy(salonId, joinApplicationPolicy) {
+  return api.patch(`/salons/${salonId}/join-application-policy`, { joinApplicationPolicy });
+}

@@ -41,6 +41,7 @@ function StatusBadge({ type }) {
 
 const SALON_ID_PATTERN = /^[a-f\d]{24}$/i;
 const SUPPORTED_STATUSES = new Set(["accepted", "pending", "rejected", "cancelled"]);
+const JOIN_APPLICATION_POLICIES = new Set(["closed", "job_only", "open"]);
 const SEARCH_DEBOUNCE_MS = 250;
 
 const isRecord = (value) => {
@@ -58,6 +59,9 @@ const normalizeSalonId = (value) => {
 const normalizeStatus = (value) => (
   typeof value === "string" && SUPPORTED_STATUSES.has(value) ? value : ""
 );
+
+const normalizeJoinApplicationPolicy = (value) =>
+  typeof value === "string" && JOIN_APPLICATION_POLICIES.has(value) ? value : "open";
 
 const getSalonId = (salon) => {
   if (!isRecord(salon)) return "";
@@ -146,6 +150,7 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searchResultsTerm, setSearchResultsTerm] = useState("");
   const [selectedSalonId, setSelectedSalonId] = useState("");
+  const [selectedSalonPolicy, setSelectedSalonPolicy] = useState("open");
   const [loading, setLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -264,9 +269,10 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
       afterRefresh?.();
       if (!isActionActive(actionToken)) return;
       setSuccess(successMessage);
-    } catch {
+    } catch (requestError) {
       if (isActionActive(actionToken)) {
-        setError(ERR_MAP[errorKey]);
+        const message = requestError?.response?.data?.message;
+        setError(typeof message === "string" && message.trim() ? message : ERR_MAP[errorKey]);
       }
     } finally {
       if (isActionActive(actionToken)) {
@@ -277,6 +283,7 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
   };
 
   const handleJoin = (salonId = selectedSalonId) => {
+    if (salonId === selectedSalonId && selectedSalonPolicy !== "open") return;
     const normalizedSalonId = normalizeSalonId(salonId);
     if (!normalizedSalonId) return;
     runAction({
@@ -285,6 +292,7 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
       successMessage: "Join request sent.",
       afterRefresh: () => {
         setSelectedSalonId("");
+        setSelectedSalonPolicy("open");
         setSearchTerm("");
       },
     });
@@ -318,6 +326,7 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
 
   const selectSalon = ({ salon, salonId }) => {
     setSelectedSalonId(salonId);
+    setSelectedSalonPolicy(normalizeJoinApplicationPolicy(salon.joinApplicationPolicy));
     setSearchTerm(salon.name || "");
     setActiveResultIndex(-1);
     setIsSearchOpen(false);
@@ -424,6 +433,7 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
                 const nextSearchTerm = event.target.value;
                 setSearchTerm(nextSearchTerm);
                 setSelectedSalonId("");
+                setSelectedSalonPolicy("open");
                 setActiveResultIndex(-1);
                 setIsSearchOpen(true);
                 setSearchLoading(Boolean(nextSearchTerm.trim()));
@@ -461,13 +471,21 @@ export default function SalonJoinView({ currentUserId, refreshRevision }) {
               </ul>
             )}
           </div>
-          <Button
-            className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600 sm:mt-7"
-            disabled={!selectedSalonId || actionLoading}
-            onClick={() => handleJoin()}
-          >
-            {actionLoading ? "Sending..." : "Send request"}
-          </Button>
+          {selectedSalonId && selectedSalonPolicy !== "open" ? (
+            <p className="self-end text-sm text-neutral-600">
+              {selectedSalonPolicy === "job_only"
+                ? "This salon accepts applications through job posts. Applying to a job does not automatically join the salon."
+                : "This salon is not currently accepting applications."}
+            </p>
+          ) : (
+            <Button
+              className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600 sm:mt-7"
+              disabled={!selectedSalonId || actionLoading}
+              onClick={() => handleJoin()}
+            >
+              {actionLoading ? "Sending..." : "Send request"}
+            </Button>
+          )}
         </div>
       </section>
     </div>

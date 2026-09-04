@@ -1,6 +1,7 @@
 import Salon from "../../models/Salon.js";
 import SalonJoinRequest from "../../models/SalonJoinRequest.js";
 import User from "../../models/User.js";
+import { getEffectiveJoinApplicationPolicy } from "../../utils/salonJoinApplicationPolicy.js";
 import { sameId } from "../../utils/salonPermissions.js";
 import { serializePublicSalon } from "../../utils/salonUtils.js";
 
@@ -20,6 +21,14 @@ const getRequestSalonId = (request) =>
 const toPublicSalon = (salon) => {
   if (!salon || typeof salon !== "object") return null;
   return serializePublicSalon(salon);
+};
+
+const toManagedSalon = (salon) => {
+  const publicSalon = toPublicSalon(salon);
+  return publicSalon && {
+    ...publicSalon,
+    joinApplicationPolicy: getEffectiveJoinApplicationPolicy(salon),
+  };
 };
 
 const serializeSalonState = ({ salonId, status, salon }) => ({
@@ -190,7 +199,7 @@ export const getSalonStatusForBarber = async (barberId) => {
     pendingEntries: enrichedPendingEntries,
     pendingRequest: primaryPendingRequest,
     salonStates,
-    ownedSalons: managedSalons.map(toPublicSalon),
-    managedSalons: managedSalons.map(toPublicSalon),
+    ownedSalons: managedSalons.map(toManagedSalon),
+    managedSalons: managedSalons.map(toManagedSalon),
   };
 };

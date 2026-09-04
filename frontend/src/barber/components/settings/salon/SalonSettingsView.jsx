@@ -5,6 +5,7 @@ import SalonPromotionsManager from "@/barber/components/SalonPromotionsManager";
 import SalonSettingsSection from "@/barber/components/settings/SalonSettingsSection";
 import JoinRequestDecisions from "@/barber/components/settings/JoinRequestDecisions";
 import SalonJoinView from "@/barber/components/settings/SalonJoinView";
+import SalonApplicationPolicySettings from "./SalonApplicationPolicySettings";
 
 export default function SalonSettingsView({
   allSalonEntries,
@@ -104,6 +105,9 @@ export default function SalonSettingsView({
           </p>
         )}
         <JoinRequestDecisions />
+        {managedSalons.length > 0 && (
+          <SalonApplicationPolicySettings salons={managedSalons} />
+        )}
         <SalonJoinView
           currentUserId={currentUserId}
           refreshRevision={salonStatus}

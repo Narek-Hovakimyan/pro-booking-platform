@@ -195,8 +195,56 @@ test("barber with approved salons gets same status shape", async () => {
     { salonId: salonAId, status: "accepted" },
     { salonId: salonBId, status: "accepted" },
   ]);
-  assert.deepEqual(status.ownedSalons, [publicSalon(managedSalon)]);
-  assert.deepEqual(status.managedSalons, [publicSalon(managedSalon)]);
+  const managedSalonResponse = {
+    ...publicSalon(managedSalon),
+    joinApplicationPolicy: "open",
+  };
+  assert.deepEqual(status.ownedSalons, [managedSalonResponse]);
+  assert.deepEqual(status.managedSalons, [managedSalonResponse]);
+});
+
+test("manager-only status fields expose effective join policy without changing public salon entries", async () => {
+  const managedClosedSalon = createSalon({
+    _id: "managed-closed",
+    ownerId: barberId,
+    joinApplicationPolicy: "closed",
+  });
+  const managedLegacySalon = createSalon({
+    _id: "managed-legacy",
+    admins: [barberId],
+  });
+  const managedJobOnlySalon = createSalon({
+    _id: "managed-job-only",
+    ownerId: barberId,
+    joinApplicationPolicy: "job_only",
+  });
+  const approvedSalon = createSalon({ _id: salonAId, joinApplicationPolicy: "job_only" });
+
+  User.findById = async () => ({
+    _id: barberId,
+    salonStatus: "approved",
+    salons: [{ salon: salonAId, status: "approved", isPrimary: true }],
+  });
+  createFindMock({
+    approvedSalons: [approvedSalon],
+    managedSalons: [managedClosedSalon, managedLegacySalon, managedJobOnlySalon],
+  });
+  SalonJoinRequest.find = () => createJoinRequestQuery();
+
+  const status = await getSalonStatusForBarber(barberId);
+
+  assert.deepEqual(
+    status.managedSalons.map(({ _id, joinApplicationPolicy }) => ({ _id, joinApplicationPolicy })),
+    [
+      { _id: "managed-closed", joinApplicationPolicy: "closed" },
+      { _id: "managed-legacy", joinApplicationPolicy: "open" },
+      { _id: "managed-job-only", joinApplicationPolicy: "job_only" },
+    ]
+  );
+  assert.deepEqual(status.ownedSalons, status.managedSalons);
+  assert.equal("joinApplicationPolicy" in status.salon, false);
+  assert.equal("joinApplicationPolicy" in status.salons[0], false);
+  assert.equal("joinApplicationPolicy" in status.salonStates[0].salon, false);
 });
 
 test("pending requests and pending salon entries are serialized the same way", async () => {
