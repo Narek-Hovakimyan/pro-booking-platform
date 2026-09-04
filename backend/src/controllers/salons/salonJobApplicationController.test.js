@@ -12,6 +12,7 @@ import Salon from "../../models/Salon.js";
 import SalonJobApplication from "../../models/SalonJobApplication.js";
 import SalonJobPost from "../../models/SalonJobPost.js";
 import Notification from "../../models/Notification.js";
+import { serializeApplication } from "../../utils/salonJobApplicationUtils.js";
 
 const ownerId = "64b000000000000000000001";
 const adminId = "64b000000000000000000002";
@@ -193,6 +194,28 @@ const createApplication = (overrides = {}) => ({
     return this;
   },
   ...overrides,
+});
+
+test("application serialization exposes the safe offer but not consent audit data", () => {
+  const serialized = serializeApplication(createApplication({
+    onboardingStatus: "confirmed",
+    onboardingOffer: {
+      salonId,
+      jobPostId: jobId,
+      role: "barber",
+      employmentType: "full-time",
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: true,
+      mappingVersion: 1,
+      offeredAt: new Date("2030-01-01"),
+    },
+    onboardingConsent: { mappingVersion: 1, consentedAt: new Date("2030-01-02") },
+  }));
+
+  assert.equal(serialized.onboardingStatus, "confirmed");
+  assert.equal(serialized.onboardingOffer.role, "barber");
+  assert.equal("onboardingConsent" in serialized, false);
 });
 
 /* ── applyToSalonJob ── */
@@ -899,6 +922,7 @@ const mockStatusUpdateDependencies = (app = createApplication()) => {
     return mockQuery(result);
   };
   Salon.findById = async () => createSalon();
+  SalonJobPost.findById = async () => createActiveJob({ employmentType: "full-time" });
 
   return app;
 };
@@ -1148,6 +1172,7 @@ test("owner can update to accepted", async () => {
     return mockQuery(mockPopulateApplication(raw));
   };
   Salon.findById = async () => createSalon();
+  SalonJobPost.findById = async () => createActiveJob({ employmentType: "full-time" });
   Notification.create = async (payload) => payload;
 
   await updateSalonJobApplicationStatus(
@@ -1161,6 +1186,112 @@ test("owner can update to accepted", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.status, "accepted");
+});
+
+test("first supported acceptance stores an immutable specialist onboarding offer", async () => {
+  const res = createResponse();
+  const app = createApplication();
+
+  SalonJobApplication.findById = (() => {
+    let calls = 0;
+    return () => mockQuery(calls++ === 0 ? app : mockPopulateApplication(app));
+  })();
+  Salon.findById = async () => createSalon();
+  SalonJobPost.findById = async () =>
+    createActiveJob({ role: "barber", employmentType: "rent-chair" });
+  Notification.create = async () => null;
+
+  await updateSalonJobApplicationStatus(
+    { user: { _id: ownerId, role: "barber" }, params: { applicationId }, body: { status: "accepted" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(app.onboardingStatus, "pending_consent");
+  assert.deepEqual(app.onboardingOffer.relationshipType, "chair_renter");
+  assert.equal(app.onboardingOffer.worksAsSpecialist, true);
+});
+
+test("receptionist acceptance records a non-specialist staff offer", async () => {
+  const res = createResponse();
+  const app = createApplication();
+
+  SalonJobApplication.findById = (() => {
+    let calls = 0;
+    return () => mockQuery(calls++ === 0 ? app : mockPopulateApplication(app));
+  })();
+  Salon.findById = async () => createSalon();
+  SalonJobPost.findById = async () =>
+    createActiveJob({ role: "receptionist", employmentType: "part-time" });
+  Notification.create = async () => null;
+
+  await updateSalonJobApplicationStatus(
+    { user: { _id: ownerId, role: "barber" }, params: { applicationId }, body: { status: "accepted" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(app.onboardingStatus, "pending_consent");
+  assert.equal(app.onboardingOffer.relationshipType, "staff");
+  assert.equal(app.onboardingOffer.worksAsSpecialist, false);
+});
+
+test("replayed accepted status does not rewrite an immutable onboarding offer", async () => {
+  const res = createResponse();
+  const originalOffer = {
+    salonId,
+    jobPostId: jobId,
+    role: "barber",
+    employmentType: "full-time",
+    relationshipType: "staff",
+    relationshipStatus: "accepted",
+    worksAsSpecialist: true,
+    mappingVersion: 1,
+    offeredAt: new Date("2030-01-01"),
+  };
+  const app = createApplication({
+    status: "accepted",
+    acceptedAt: new Date("2030-01-01"),
+    onboardingStatus: "pending_consent",
+    onboardingOffer: originalOffer,
+  });
+
+  SalonJobApplication.findById = (() => {
+    let calls = 0;
+    return () => mockQuery(calls++ === 0 ? app : mockPopulateApplication(app));
+  })();
+  Salon.findById = async () => createSalon();
+  SalonJobPost.findById = async () => createActiveJob({ role: "other" });
+
+  await updateSalonJobApplicationStatus(
+    { user: { _id: ownerId, role: "barber" }, params: { applicationId }, body: { status: "accepted" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(app.onboardingOffer, originalOffer);
+});
+
+test("unsupported accepted role is blocked without an onboarding offer", async () => {
+  const res = createResponse();
+  const app = createApplication();
+
+  SalonJobApplication.findById = (() => {
+    let calls = 0;
+    return () => mockQuery(calls++ === 0 ? app : mockPopulateApplication(app));
+  })();
+  Salon.findById = async () => createSalon();
+  SalonJobPost.findById = async () => createActiveJob({ role: "other", employmentType: "full-time" });
+  Notification.create = async () => null;
+
+  await updateSalonJobApplicationStatus(
+    { user: { _id: ownerId, role: "barber" }, params: { applicationId }, body: { status: "accepted" } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(app.onboardingStatus, "blocked");
+  assert.equal(app.onboardingOffer, undefined);
 });
 
 test("owner can update to rejected", async () => {

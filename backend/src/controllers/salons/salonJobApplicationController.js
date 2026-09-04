@@ -2,7 +2,10 @@ import Salon from "../../models/Salon.js";
 import SalonJobPost from "../../models/SalonJobPost.js";
 import SalonJobApplication from "../../models/SalonJobApplication.js";
 import { canUserManageSalon } from "../../services/salon/salonMembershipService.js";
-import { serializeApplication } from "../../utils/salonJobApplicationUtils.js";
+import {
+  buildJobOnboardingOffer,
+  serializeApplication,
+} from "../../utils/salonJobApplicationUtils.js";
 import { createNotification } from "../notifications/notificationController.js";
 import { sendControllerError } from "../../utils/controllerError.js";
 
@@ -326,6 +329,12 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
     }
 
     const previousStatus = application.status;
+    const isFirstAcceptance =
+      status === "accepted" &&
+      previousStatus !== "accepted" &&
+      !application.acceptedAt &&
+      !application.onboardingStatus &&
+      !application.onboardingOffer?.mappingVersion;
 
     application.status = status;
     application.statusUpdatedBy = getUserId(req.user);
@@ -336,6 +345,16 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
     if (status === "reviewed") application.reviewedAt = now;
     if (status === "accepted") application.acceptedAt = now;
     if (status === "rejected") application.rejectedAt = now;
+
+    // Hiring acceptance only records an immutable offer. Membership requires the
+    // applicant's separate, authenticated confirmation.
+    if (isFirstAcceptance) {
+      const job = await SalonJobPost.findById(application.jobId);
+      const offer = buildJobOnboardingOffer(job, now);
+
+      application.onboardingStatus = offer ? "pending_consent" : "blocked";
+      if (offer) application.onboardingOffer = offer;
+    }
 
     await application.save();
 

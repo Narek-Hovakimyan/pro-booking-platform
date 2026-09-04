@@ -5,6 +5,81 @@ export const APPLICATION_STATUSES = [
   "rejected",
 ];
 
+export const JOB_ONBOARDING_MAPPING_VERSION = 1;
+
+const specialistRoles = new Set([
+  "barber",
+  "hairdresser",
+  "nail-artist",
+  "makeup-artist",
+]);
+
+const staffEmploymentTypes = new Set([
+  "full-time",
+  "part-time",
+  "contract",
+  "commission",
+]);
+
+export const getJobOnboardingMapping = ({ role, employmentType } = {}) => {
+  if (specialistRoles.has(role) && staffEmploymentTypes.has(employmentType)) {
+    return {
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: true,
+    };
+  }
+
+  if (role === "receptionist" && staffEmploymentTypes.has(employmentType)) {
+    return {
+      relationshipType: "staff",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: false,
+    };
+  }
+
+  if (specialistRoles.has(role) && employmentType === "rent-chair") {
+    return {
+      relationshipType: "chair_renter",
+      relationshipStatus: "accepted",
+      worksAsSpecialist: true,
+    };
+  }
+
+  return null;
+};
+
+export const buildJobOnboardingOffer = (job, offeredAt = new Date()) => {
+  const mapping = getJobOnboardingMapping(job);
+  if (!mapping || !job?._id || !job?.salonId) return null;
+
+  return {
+    salonId: job.salonId,
+    jobPostId: job._id,
+    role: job.role,
+    employmentType: job.employmentType,
+    ...mapping,
+    mappingVersion: JOB_ONBOARDING_MAPPING_VERSION,
+    offeredAt,
+  };
+};
+
+const serializeOnboardingOffer = (offer) => {
+  if (!offer) return null;
+
+  return {
+    salonId: getId(offer.salonId),
+    jobPostId: getId(offer.jobPostId),
+    role: offer.role || "",
+    employmentType: offer.employmentType || "",
+    relationshipType: offer.relationshipType || "",
+    relationshipStatus: offer.relationshipStatus || "",
+    worksAsSpecialist: Boolean(offer.worksAsSpecialist),
+    mappingVersion: offer.mappingVersion,
+    offeredAt: offer.offeredAt || null,
+  };
+};
+
 const getId = (value) => {
   if (!value) return "";
   if (value._id) return String(value._id);
@@ -78,6 +153,8 @@ export const serializeApplication = (application) => {
     statusUpdatedBy: application.statusUpdatedBy
       ? getId(application.statusUpdatedBy)
       : null,
+    onboardingStatus: application.onboardingStatus || null,
+    onboardingOffer: serializeOnboardingOffer(application.onboardingOffer),
     createdAt: application.createdAt,
     updatedAt: application.updatedAt,
   };

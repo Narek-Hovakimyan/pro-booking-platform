@@ -1,5 +1,28 @@
 import mongoose from "mongoose";
 
+const onboardingOfferSchema = new mongoose.Schema(
+  {
+    salonId: { type: mongoose.Schema.Types.ObjectId, ref: "Salon" },
+    jobPostId: { type: mongoose.Schema.Types.ObjectId, ref: "SalonJobPost" },
+    role: { type: String },
+    employmentType: { type: String },
+    relationshipType: { type: String, enum: ["staff", "chair_renter"] },
+    relationshipStatus: { type: String, enum: ["accepted"] },
+    worksAsSpecialist: { type: Boolean },
+    mappingVersion: { type: Number, enum: [1] },
+    offeredAt: { type: Date },
+  },
+  { _id: false }
+);
+
+const onboardingConsentSchema = new mongoose.Schema(
+  {
+    mappingVersion: { type: Number, enum: [1] },
+    consentedAt: { type: Date },
+  },
+  { _id: false }
+);
+
 const salonJobApplicationSchema = new mongoose.Schema(
   {
     jobId: {
@@ -58,6 +81,15 @@ const salonJobApplicationSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    // Deliberately optional: historical accepted applications were not offers and
+    // must never become confirmable merely because a job post still exists.
+    onboardingStatus: {
+      type: String,
+      enum: ["pending_consent", "confirmed", "blocked"],
+      default: null,
+    },
+    onboardingOffer: { type: onboardingOfferSchema, default: undefined },
+    onboardingConsent: { type: onboardingConsentSchema, default: undefined },
   },
   { timestamps: true }
 );

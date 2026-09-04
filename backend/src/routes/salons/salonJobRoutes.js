@@ -14,6 +14,7 @@ import {
   listMySalonJobApplications,
   updateSalonJobApplicationStatus,
 } from "../../controllers/salons/salonJobApplicationController.js";
+import { confirmSalonJobOnboardingForApplicant } from "../../controllers/salons/salonJobOnboardingController.js";
 import { protect } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -26,6 +27,11 @@ router.get("/mine", protect, listMySalonJobs);
 router.get("/applications/my-submissions", protect, listMySalonJobApplications);
 router.get("/applications/managed", protect, listManagedSalonJobApplications);
 router.patch("/applications/:applicationId/status", protect, updateSalonJobApplicationStatus);
+router.post(
+  "/applications/:applicationId/onboarding/confirm",
+  protect,
+  confirmSalonJobOnboardingForApplicant
+);
 
 // Per-job application routes
 router.post("/:id/applications", protect, applyToSalonJob);
