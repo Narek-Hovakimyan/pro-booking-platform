@@ -9,8 +9,11 @@ export function fetchMySalonStatus() {
   return api.get("/salons/me/status");
 }
 
-export function fetchSalons(barberId) {
+export function fetchSalons(barberId, search = "") {
   const params = barberId ? { excludeForBarber: barberId } : {};
+  const term = typeof search === "string" ? search.trim() : "";
+
+  if (term) params.search = term;
   return api.get("/salons", { params });
 }
 

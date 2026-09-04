@@ -104,7 +104,10 @@ export default function SalonSettingsView({
           </p>
         )}
         <JoinRequestDecisions />
-        <SalonJoinView currentUserId={currentUserId} />
+        <SalonJoinView
+          currentUserId={currentUserId}
+          refreshRevision={salonStatus}
+        />
         <SalonSettingsSection
             allSalonEntries={allSalonEntries}
             availableSalons={availableSalons}

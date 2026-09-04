@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchMySalonStatus,
   fetchSalons,
@@ -41,6 +41,7 @@ function StatusBadge({ type }) {
 
 const SALON_ID_PATTERN = /^[a-f\d]{24}$/i;
 const SUPPORTED_STATUSES = new Set(["accepted", "pending", "rejected", "cancelled"]);
+const SEARCH_DEBOUNCE_MS = 250;
 
 const isRecord = (value) => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
@@ -139,93 +140,109 @@ function getAuthoritativeStates(status) {
   return states;
 }
 
-export default function SalonJoinView({ currentUserId }) {
+export default function SalonJoinView({ currentUserId, refreshRevision }) {
   const [status, setStatus] = useState(null);
-  const [salons, setSalons] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchResultsTerm, setSearchResultsTerm] = useState("");
   const [selectedSalonId, setSelectedSalonId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const loadTokenRef = useRef(0);
+  const [searchRevision, setSearchRevision] = useState(0);
+  const [activeResultIndex, setActiveResultIndex] = useState(-1);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const statusTokenRef = useRef(0);
+  const searchTokenRef = useRef(0);
   const actionTokenRef = useRef(0);
   const actionInFlightRef = useRef(false);
   const mountedRef = useRef(true);
 
-  const isLoadActive = (token) =>
-    mountedRef.current && loadTokenRef.current === token;
+  const isStatusActive = (token) =>
+    mountedRef.current && statusTokenRef.current === token;
+  const isSearchActive = (token) =>
+    mountedRef.current && searchTokenRef.current === token;
   const isActionActive = (token) =>
     mountedRef.current && actionTokenRef.current === token;
 
-  const loadSalonData = async ({ showLoading = false, actionToken = null } = {}) => {
-    loadTokenRef.current += 1;
-    const loadToken = loadTokenRef.current;
-
-    if (showLoading) {
-      setLoading(true);
-      setError("");
-    }
+  const refreshStatus = useCallback(async ({ actionToken = null } = {}) => {
+    statusTokenRef.current += 1;
+    const statusToken = statusTokenRef.current;
 
     try {
-      const [statusRes, salonsRes] = await Promise.all([
-        fetchMySalonStatus(),
-        currentUserId ? fetchSalons(currentUserId) : Promise.resolve({ data: [] }),
-      ]);
-
-      if (!isLoadActive(loadToken)) return false;
+      const statusRes = await fetchMySalonStatus();
+      if (!isStatusActive(statusToken)) return false;
       if (actionToken !== null && !isActionActive(actionToken)) return false;
       setStatus(statusRes.data || {});
-      setSalons(asArray(salonsRes.data));
+      setError("");
       return true;
     } catch {
-      if (!isLoadActive(loadToken)) return false;
+      if (!isStatusActive(statusToken)) return false;
       if (actionToken !== null && !isActionActive(actionToken)) return false;
       setError(ERR_MAP.load);
       return false;
     } finally {
-      if (showLoading && isLoadActive(loadToken)) {
+      if (isStatusActive(statusToken)) {
         setLoading(false);
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
-    loadTokenRef.current += 1;
-    const loadToken = loadTokenRef.current;
-
-    async function load() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const [statusRes, salonsRes] = await Promise.all([
-          fetchMySalonStatus(),
-          currentUserId ? fetchSalons(currentUserId) : Promise.resolve({ data: [] }),
-        ]);
-
-        if (!isLoadActive(loadToken)) return;
-        setStatus(statusRes.data || {});
-        setSalons(asArray(salonsRes.data));
-      } catch {
-        if (!isLoadActive(loadToken)) return;
-        setError(ERR_MAP.load);
-      } finally {
-        if (isLoadActive(loadToken)) {
-          setLoading(false);
-        }
-      }
-    }
-
-    load();
-
     return () => {
       mountedRef.current = false;
-      loadTokenRef.current += 1;
+      statusTokenRef.current += 1;
+      searchTokenRef.current += 1;
       actionTokenRef.current += 1;
       actionInFlightRef.current = false;
     };
-  }, [currentUserId]);
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void refreshStatus();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [currentUserId, refreshRevision, refreshStatus]);
+
+  useEffect(() => {
+    const term = searchTerm.trim();
+    searchTokenRef.current += 1;
+    const searchToken = searchTokenRef.current;
+
+    if (!term || !currentUserId) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(async () => {
+      if (!isSearchActive(searchToken)) return;
+      setSearchLoading(true);
+
+      try {
+        const response = await fetchSalons(currentUserId, term);
+        if (!isSearchActive(searchToken)) return;
+        setSearchResults(asArray(response.data));
+        setSearchResultsTerm(term);
+        setActiveResultIndex(-1);
+      } catch {
+        if (!isSearchActive(searchToken)) return;
+        setSearchResults([]);
+        setSearchResultsTerm(term);
+        setError(ERR_MAP.load);
+      } finally {
+        if (isSearchActive(searchToken)) setSearchLoading(false);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeout);
+      searchTokenRef.current += 1;
+    };
+  }, [currentUserId, refreshRevision, searchRevision, searchTerm]);
 
   const runAction = async ({ action, errorKey, successMessage, afterRefresh }) => {
     if (actionLoading || actionInFlightRef.current) return;
@@ -241,8 +258,9 @@ export default function SalonJoinView({ currentUserId }) {
     try {
       await action();
       if (!isActionActive(actionToken)) return;
-      const refreshed = await loadSalonData({ actionToken });
+      const refreshed = await refreshStatus({ actionToken });
       if (!refreshed || !isActionActive(actionToken)) return;
+      setSearchRevision((revision) => revision + 1);
       afterRefresh?.();
       if (!isActionActive(actionToken)) return;
       setSuccess(successMessage);
@@ -265,7 +283,10 @@ export default function SalonJoinView({ currentUserId }) {
       action: () => requestJoinSalon(normalizedSalonId),
       errorKey: "join",
       successMessage: "Join request sent.",
-      afterRefresh: () => setSelectedSalonId(""),
+      afterRefresh: () => {
+        setSelectedSalonId("");
+        setSearchTerm("");
+      },
     });
   };
 
@@ -285,10 +306,43 @@ export default function SalonJoinView({ currentUserId }) {
       .filter((entry) => entry.status === "accepted" || entry.status === "pending")
       .map((entry) => entry.salonId)
   );
-  const availableSalons = asArray(salons)
-    .filter(isRecord)
-    .map((salon) => ({ salon, salonId: getSalonId(salon) }))
-    .filter(({ salonId }) => salonId && !blockedSalonIds.has(salonId));
+  const normalizedSearchTerm = searchTerm.trim();
+  const hasSearchTerm = Boolean(normalizedSearchTerm);
+  const availableSalons = hasSearchTerm && searchResultsTerm === normalizedSearchTerm
+    ? asArray(searchResults)
+      .filter(isRecord)
+      .map((salon) => ({ salon, salonId: getSalonId(salon) }))
+      .filter(({ salonId }) => salonId && !blockedSalonIds.has(salonId))
+    : [];
+  const isSearching = hasSearchTerm && searchLoading;
+
+  const selectSalon = ({ salon, salonId }) => {
+    setSelectedSalonId(salonId);
+    setSearchTerm(salon.name || "");
+    setActiveResultIndex(-1);
+    setIsSearchOpen(false);
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "Escape") {
+      setActiveResultIndex(-1);
+      setIsSearchOpen(false);
+      return;
+    }
+
+    if (availableSalons.length === 0) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveResultIndex((index) => Math.min(index + 1, availableSalons.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveResultIndex((index) => Math.max(index - 1, 0));
+    } else if (event.key === "Enter" && activeResultIndex >= 0) {
+      event.preventDefault();
+      selectSalon(availableSalons[activeResultIndex]);
+    }
+  };
 
   if (loading && !status) {
     return <div className="p-4 text-sm text-neutral-500">Loading salon data...</div>;
@@ -340,44 +394,82 @@ export default function SalonJoinView({ currentUserId }) {
         </div>
       )}
 
-      {availableSalons.length > 0 && (
-        <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5" id="join-salon">
-          <div className="mb-4 flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-pink-50 text-pink-700">
-              <UserPlus className="h-5 w-5" />
-            </span>
-            <div>
-              <h3 className="text-lg font-bold text-neutral-950">Join existing salon</h3>
-              <p className="mt-1 text-sm leading-6 text-neutral-500">
-                Select a salon and send a request.
-              </p>
-            </div>
+      <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5" id="join-salon">
+        <div className="mb-4 flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-pink-50 text-pink-700">
+            <UserPlus className="h-5 w-5" />
+          </span>
+          <div>
+            <h3 className="text-lg font-bold text-neutral-950">Join existing salon</h3>
+            <p className="mt-1 text-sm leading-6 text-neutral-500">
+              Search for a salon and send a request.
+            </p>
           </div>
+        </div>
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-            <select
-              className="rounded-2xl border border-neutral-200 bg-white p-3 text-sm outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <div className="relative">
+            <label className="grid gap-2 text-sm font-semibold text-neutral-800" htmlFor="salon-search">
+              Search salons
+            </label>
+            <input
+              aria-activedescendant={activeResultIndex >= 0 ? `salon-search-result-${activeResultIndex}` : undefined}
+              aria-autocomplete="list"
+              aria-controls="salon-search-results"
+              aria-expanded={isSearchOpen && availableSalons.length > 0}
+              className="mt-2 w-full rounded-2xl border border-neutral-200 bg-white p-3 text-sm font-normal outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
               disabled={actionLoading}
-              value={selectedSalonId}
-              onChange={(event) => setSelectedSalonId(normalizeSalonId(event.target.value))}
-            >
-              <option value="">Select salon</option>
-              {availableSalons.map(({ salon, salonId }) => (
-                <option key={salonId} value={salonId}>
-                  {salon.name}
-                </option>
-              ))}
-            </select>
-            <Button
-              className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600"
-              disabled={!selectedSalonId || actionLoading}
-              onClick={() => handleJoin()}
-            >
-              {actionLoading ? "Sending..." : "Send request"}
-            </Button>
+              id="salon-search"
+              onChange={(event) => {
+                const nextSearchTerm = event.target.value;
+                setSearchTerm(nextSearchTerm);
+                setSelectedSalonId("");
+                setActiveResultIndex(-1);
+                setIsSearchOpen(true);
+                setSearchLoading(Boolean(nextSearchTerm.trim()));
+              }}
+              onFocus={() => setIsSearchOpen(true)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search by salon name or city"
+              role="combobox"
+              value={searchTerm}
+            />
+            {isSearching && <p className="mt-2 text-sm text-neutral-500">Searching salons...</p>}
+            {isSearchOpen && !isSearching && hasSearchTerm && availableSalons.length === 0 && (
+              <p className="mt-2 text-sm text-neutral-500">No salons found.</p>
+            )}
+            {isSearchOpen && availableSalons.length > 0 && (
+              <ul
+                className="absolute z-10 mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-1 shadow-lg"
+                id="salon-search-results"
+                role="listbox"
+              >
+                {availableSalons.map(({ salon, salonId }, index) => (
+                  <li
+                    aria-selected={selectedSalonId === salonId}
+                    className={`cursor-pointer rounded-xl px-3 py-2 text-sm ${index === activeResultIndex ? "bg-purple-50 text-purple-950" : "text-neutral-800 hover:bg-neutral-50"}`}
+                    id={`salon-search-result-${index}`}
+                    key={salonId}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectSalon({ salon, salonId })}
+                    role="option"
+                  >
+                    <span className="block font-semibold">{salon.name || "Salon"}</span>
+                    {salon.city && <span className="block text-xs text-neutral-500">{salon.city}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        </section>
-      )}
+          <Button
+            className="bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md hover:from-purple-700 hover:to-pink-600 sm:mt-7"
+            disabled={!selectedSalonId || actionLoading}
+            onClick={() => handleJoin()}
+          >
+            {actionLoading ? "Sending..." : "Send request"}
+          </Button>
+        </div>
+      </section>
     </div>
   );
 }

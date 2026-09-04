@@ -1,9 +1,12 @@
-import { screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { useCallback, useState } from "react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProviders } from "@/test/renderWithProviders";
+import BarberSettings from "@/barber/components/BarberSettings";
 import SalonJoinView from "./SalonJoinView";
+import api from "@/shared/api/axios";
+import useBarberSettingsData from "./hooks/useBarberSettingsData";
 import {
   cancelJoinRequestBySalon,
   fetchMySalonStatus,
@@ -18,209 +21,385 @@ vi.mock("@/shared/api/salonMembership", () => ({
   cancelJoinRequestBySalon: vi.fn(),
 }));
 
+vi.mock("@/shared/api/axios", () => ({ default: { patch: vi.fn() } }));
+vi.mock("@/barber/components/settings/hooks/useBarberSettingsData", () => ({ default: vi.fn() }));
+vi.mock("@/barber/hooks/useDefaultSalonScheduleSettings", () => ({
+  default: () => ({
+    salonSchedules: {},
+    savingSalonId: "",
+    savedSalonId: "",
+    errorSalonId: "",
+    salonScheduleErrors: {},
+    updateSalonSchedule: vi.fn(),
+    updateWeeklyDaySchedule: vi.fn(),
+    saveDefaultSchedule: vi.fn(),
+  }),
+}));
+
+vi.mock("@/barber/components/TeamSettingsSection", () => ({ default: () => null }));
+vi.mock("@/barber/components/SalonPromotionsManager", () => ({ default: () => null }));
+vi.mock("@/barber/components/settings/JoinRequestDecisions", () => ({ default: () => null }));
+
 const BARBER_ID = "64b64cfa12ab34cd56ef7890";
 const SALON_A = "64b64cfa12ab34cd56ef7891";
 const SALON_B = "64b64cfa12ab34cd56ef7892";
 const SALON_C = "64b64cfa12ab34cd56ef7893";
 const SALON_D = "64b64cfa12ab34cd56ef7894";
-const SALON_E = "64b64cfa12ab34cd56ef7895";
 
 const salon = (id, name, extra = {}) => ({ _id: id, name, ...extra });
+const states = (salonStates = []) => ({ data: { salonStates } });
 
-function renderSalonJoinView() {
-  return renderWithProviders(<SalonJoinView currentUserId={BARBER_ID} />);
+function createDeferred() {
+  let resolve;
+  return {
+    promise: new Promise((nextResolve) => {
+      resolve = nextResolve;
+    }),
+    resolve,
+  };
 }
 
+function renderSalonJoinView(props = {}) {
+  return renderWithProviders(
+    <SalonJoinView currentUserId={BARBER_ID} refreshRevision="initial" {...props} />
+  );
+}
+
+function useLeaveFlowSalonData() {
+  const [salonStatus, setSalonStatus] = useState({
+    salonStatus: "approved",
+    salons: [salon(SALON_A, "Former Studio", { ownerId: SALON_B })],
+  });
+  const refreshSalonData = useCallback(async () => {
+    setSalonStatus({ salonStatus: "none", salons: [] });
+  }, []);
+  const isMember = salonStatus.salonStatus === "approved";
+
+  return {
+    allSalonEntries: isMember
+      ? [{ salon: salon(SALON_A, "Former Studio", { ownerId: SALON_B }) }]
+      : [],
+    availableSalons: [],
+    clearSalonReadError: vi.fn(),
+    currentUserId: BARBER_ID,
+    eventCertificates: [],
+    managedSalons: [],
+    ownerRequests: [],
+    pendingEntries: [],
+    refreshSalonData,
+    salonAdmins: {},
+    salonDataLoaded: true,
+    salonDataLoading: false,
+    salonReadError: "",
+    salonStaffById: {},
+    salonStatus,
+    salons: [],
+  };
+}
+
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+async function searchFor(value) {
+  fireEvent.change(screen.getByRole("combobox", { name: "Search salons" }), {
+    target: { value },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(250);
+  });
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  fetchMySalonStatus.mockResolvedValue(states());
+  useBarberSettingsData.mockImplementation(useLeaveFlowSalonData);
+});
+
 afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 describe("SalonJoinView", () => {
-  it("keeps valid available salons selectable when status data is null", async () => {
-    fetchMySalonStatus.mockResolvedValue({ data: null });
-    fetchSalons.mockResolvedValue({
-      data: [salon(SALON_A, "North Studio"), salon(SALON_B, "South Studio")],
-    });
-
-    renderSalonJoinView();
-
-    const select = await screen.findByRole("combobox");
-    const options = within(select).getAllByRole("option").map((option) => option.textContent);
-
-    expect(options).toEqual(["Select salon", "North Studio", "South Studio"]);
-    expect(screen.getByRole("button", { name: "Send request" })).toBeDisabled();
-  });
-
-  it("ignores malformed status shapes without crashing", async () => {
-    fetchMySalonStatus.mockResolvedValue({
-      data: {
-        salonStates: [null, "pending", 7, { salonId: "bad", status: "pending" }, { salon: "x" }],
-        salons: "not-an-array",
-        pendingEntries: [null, "abc", 1, { salonId: "" }],
-        pendingRequest: ["bad"],
-      },
-    });
-    fetchSalons.mockResolvedValue({
-      data: [salon(SALON_A, "North Studio"), { _id: "bad", name: "Broken Studio" }],
-    });
-
-    renderSalonJoinView();
-
-    const select = await screen.findByRole("combobox");
-    expect(within(select).getByRole("option", { name: "North Studio" })).toBeInTheDocument();
-    expect(screen.queryByText("Broken Studio")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
-  });
-
-  it("treats valid salonStates as authoritative over compatibility arrays", async () => {
-    fetchMySalonStatus.mockResolvedValue({
-      data: {
-        salonStates: [
-          { salonId: SALON_A, status: "accepted", salon: { name: "Accepted Studio" } },
-          { salonId: SALON_B, status: "pending", salon: { name: "Pending Studio" } },
-          { salonId: SALON_C, status: "approved", salon: { name: "Ignored Approved" } },
-        ],
-        salons: [{ salonId: SALON_D, status: "approved", salon: { name: "Legacy Accepted" } }],
-        pendingEntries: [{ salonId: SALON_E, status: "pending", salon: { name: "Legacy Pending" } }],
-      },
-    });
-    fetchSalons.mockResolvedValue({ data: [salon(SALON_D, "Legacy Accepted"), salon(SALON_E, "Legacy Pending")] });
-
-    renderSalonJoinView();
-
-    expect(await screen.findByText("Accepted Studio")).toBeVisible();
-    expect(screen.getByText("Pending Studio")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Request again" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Ignored Approved")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
-  });
-
-  it("normalizes canonical salon IDs and ignores invalid salon records for actions", async () => {
-    fetchMySalonStatus.mockResolvedValue({ data: { salonStates: [] } });
-    fetchSalons.mockResolvedValue({
-      data: [
-        { _id: ` ${SALON_A} `, name: "Trim House" },
-        { _id: 42, name: "Number Salon" },
-        { _id: "short-id", name: "Short Salon" },
-        { _id: { value: SALON_B }, name: "Object Salon" },
-        { name: "Missing Id Salon" },
-      ],
-    });
-    requestJoinSalon.mockResolvedValue({ data: {} });
-    fetchMySalonStatus
-      .mockResolvedValueOnce({ data: { salonStates: [] } })
-      .mockResolvedValueOnce({ data: { salonStates: [{ salonId: SALON_A, status: "pending", salon: { name: "Trim House" } }] } });
-
-    renderSalonJoinView();
-
-    const user = userEvent.setup();
-    const select = await screen.findByRole("combobox");
-
-    expect(within(select).getAllByRole("option")).toHaveLength(2);
-    await user.selectOptions(select, SALON_A);
-    await user.click(screen.getByRole("button", { name: "Send request" }));
-
-    expect(requestJoinSalon).toHaveBeenCalledWith(SALON_A);
-    expect(requestJoinSalon).toHaveBeenCalledTimes(1);
-  });
-
-  it("uses compatibility mappings when authoritative salonStates is empty", async () => {
-    fetchMySalonStatus.mockResolvedValue({
-      data: {
-        salonStates: [],
-        salons: [
-          { salonId: SALON_A, status: "approved", salon: { name: "Legacy Accepted" } },
-          { salonId: SALON_B, status: "rejected", salon: { name: "Ignored Legacy Rejected" } },
-        ],
-        pendingEntries: [
-          { salonId: SALON_C, status: "pending", salon: { name: "Legacy Pending" } },
-          { salonId: SALON_D, status: "approved", salon: { name: "Ignored Pending Approved" } },
-        ],
-        pendingRequest: { salonId: SALON_E, status: "pending", salon: { name: "Single Pending" } },
-      },
-    });
-    fetchSalons.mockResolvedValue({ data: [] });
-
-    renderSalonJoinView();
-
-    expect(await screen.findByText("Legacy Accepted")).toBeVisible();
-    expect(screen.getByText("Legacy Pending")).toBeVisible();
-    expect(screen.getByText("Single Pending")).toBeVisible();
-    expect(screen.queryByText("Ignored Legacy Rejected")).not.toBeInTheDocument();
-    expect(screen.queryByText("Ignored Pending Approved")).not.toBeInTheDocument();
-  });
-
-  it("excludes accepted and pending salons from available options while allowing rejected and cancelled retry actions", async () => {
-    fetchMySalonStatus.mockResolvedValue({
-      data: {
-        salonStates: [
-          { salonId: SALON_A, status: "accepted", salon: { name: "Accepted Studio" } },
-          { salonId: SALON_B, status: "pending", salon: { name: "Pending Studio" } },
-          { salonId: SALON_C, status: "rejected", salon: { name: "Rejected Studio" } },
-          { salonId: SALON_D, status: "cancelled", salon: { name: "Cancelled Studio" } },
-          { salonId: SALON_C, status: "rejected", salon: { name: "Rejected Studio Duplicate" } },
-        ],
-      },
-    });
-    fetchSalons.mockResolvedValue({
-      data: [
-        salon(SALON_A, "Accepted Studio"),
-        salon(SALON_B, "Pending Studio"),
-        salon(SALON_C, "Rejected Studio"),
-        salon(SALON_D, "Cancelled Studio"),
-      ],
-    });
-
-    renderSalonJoinView();
-
-    const select = await screen.findByRole("combobox");
-    const options = within(select).getAllByRole("option").map((option) => option.textContent);
-
-    expect(options).toEqual(["Select salon", "Rejected Studio", "Cancelled Studio"]);
-    expect(screen.getAllByRole("button", { name: "Request again" })).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
-  });
-
-  it("keeps the first valid authoritative state when duplicate canonical salon IDs are present", async () => {
-    fetchMySalonStatus.mockResolvedValue({
-      data: {
-        salonStates: [
-          { salonId: SALON_C, status: "pending", salon: { name: "First Salon" } },
-          { salonId: ` ${SALON_C} `, status: "rejected", salon: { name: "Duplicate Salon" } },
-        ],
-      },
-    });
-    fetchSalons.mockResolvedValue({ data: [salon(SALON_C, "First Salon")] });
-
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    try {
-      renderSalonJoinView();
-
-      expect(await screen.findAllByText("First Salon")).toHaveLength(1);
-      expect(screen.queryByText("Duplicate Salon")).not.toBeInTheDocument();
-      expect(screen.getByText("Pending")).toBeVisible();
-      expect(screen.queryByText("Rejected")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
-      expect(screen.queryByRole("button", { name: "Request again" })).not.toBeInTheDocument();
-      expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-        expect.stringContaining("Encountered two children with the same key")
-      );
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
-  });
-
-  it("renders the bounded load error when salon data fails to load", async () => {
-    fetchMySalonStatus.mockRejectedValue(new Error("load failed"));
+  it("does not load salons before search and forwards a self-scoped search", async () => {
     fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "North Studio")] });
 
     renderSalonJoinView();
+    await flush();
 
-    expect(
-      await screen.findByText("Unable to load salon data. Please try again.")
-    ).toBeVisible();
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(fetchSalons).not.toHaveBeenCalled();
+    expect(screen.getByText("Search for a salon and send a request.")).toBeVisible();
+
+    await searchFor(" north ");
+
+    expect(fetchSalons).toHaveBeenCalledWith(BARBER_ID, "north");
+    expect(screen.getByRole("option", { name: "North Studio" })).toBeVisible();
+  });
+
+  it("cancels the previous debounce when the query changes", async () => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_B, "South Studio")] });
+
+    renderSalonJoinView();
+    await flush();
+    fireEvent.change(screen.getByRole("combobox", { name: "Search salons" }), {
+      target: { value: "North" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Search salons" }), {
+      target: { value: "South" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(fetchSalons).toHaveBeenCalledTimes(1);
+    expect(fetchSalons).toHaveBeenCalledWith(BARBER_ID, "South");
+  });
+
+  it("hides completed results immediately when the query changes", async () => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "North Studio")] });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("North");
+    expect(screen.getByRole("option", { name: "North Studio" })).toBeVisible();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Search salons" }), {
+      target: { value: "South" },
+    });
+
+    expect(screen.queryByRole("option", { name: "North Studio" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Searching salons...")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send request" })).toBeDisabled();
+  });
+
+  it("ignores an out-of-order search response", async () => {
+    const firstSearch = createDeferred();
+    const secondSearch = createDeferred();
+    fetchSalons
+      .mockReturnValueOnce(firstSearch.promise)
+      .mockReturnValueOnce(secondSearch.promise);
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("North");
+    await searchFor("South");
+
+    await act(async () => {
+      secondSearch.resolve({ data: [salon(SALON_B, "South Studio")] });
+      await secondSearch.promise;
+    });
+    expect(screen.getByRole("option", { name: "South Studio" })).toBeVisible();
+
+    await act(async () => {
+      firstSearch.resolve({ data: [salon(SALON_A, "North Studio")] });
+      await firstSearch.promise;
+    });
+    expect(screen.queryByRole("option", { name: "North Studio" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "South Studio" })).toBeVisible();
+  });
+
+  it("does not update after unmount when a search resolves late", async () => {
+    const search = createDeferred();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchSalons.mockReturnValue(search.promise);
+
+    const view = renderSalonJoinView();
+    await flush();
+    await searchFor("North");
+    view.unmount();
+
+    await act(async () => {
+      search.resolve({ data: [salon(SALON_A, "North Studio")] });
+      await search.promise;
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("collapses the combobox on Escape", async () => {
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "North Studio")] });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("North");
+
+    const input = screen.getByRole("combobox", { name: "Search salons" });
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("selects a searched salon with the keyboard and preserves its city", async () => {
+    fetchSalons.mockResolvedValue({
+      data: [salon(SALON_A, "North Studio", { city: "Yerevan" })],
+    });
+    requestJoinSalon.mockResolvedValue({ data: {} });
+    fetchMySalonStatus
+      .mockResolvedValueOnce(states())
+      .mockResolvedValueOnce(states([{ salonId: SALON_A, status: "pending", salon: { name: "North Studio" } }]));
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("North");
+
+    const input = screen.getByRole("combobox", { name: "Search salons" });
+    expect(screen.getByText("Yerevan")).toBeVisible();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("North Studio");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    });
+
+    expect(requestJoinSalon).toHaveBeenCalledWith(SALON_A);
+    expect(screen.getByText("Pending")).toBeVisible();
+  });
+
+  it("does not expose active approved or pending salons as joinable search results", async () => {
+    fetchMySalonStatus.mockResolvedValue(
+      states([
+        { salonId: SALON_A, status: "accepted", salon: { name: "Approved Studio" } },
+        { salonId: SALON_B, status: "pending", salon: { name: "Pending Studio" } },
+      ])
+    );
+    fetchSalons.mockResolvedValue({
+      data: [
+        salon(SALON_A, "Approved Studio"),
+        salon(SALON_B, "Pending Studio"),
+        salon(SALON_C, "Joinable Studio"),
+      ],
+    });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Studio");
+
+    expect(screen.queryByRole("option", { name: "Approved Studio" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Pending Studio" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Joinable Studio" })).toBeVisible();
+  });
+
+  it("refreshes a former salon after leave and re-requests it as pending", async () => {
+    fetchMySalonStatus
+      .mockResolvedValueOnce(states([{ salonId: SALON_A, status: "accepted", salon: { name: "Former Studio" } }]))
+      .mockResolvedValueOnce(states([{ salonId: SALON_A, status: "cancelled", salon: { name: "Former Studio" } }]))
+      .mockResolvedValueOnce(states([{ salonId: SALON_A, status: "pending", salon: { name: "Former Studio" } }]));
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "Former Studio", { city: "Yerevan" })] });
+    requestJoinSalon.mockResolvedValue({ data: {} });
+
+    const view = renderSalonJoinView({ refreshRevision: "before-leave" });
+    await flush();
+    expect(screen.getByText("Accepted")).toBeVisible();
+
+    view.rerender(<SalonJoinView currentUserId={BARBER_ID} refreshRevision="after-leave" />);
+    await flush();
+    await searchFor("Former");
+
+    fireEvent.click(screen.getByRole("option", { name: /Former Studio/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    });
+
+    expect(requestJoinSalon).toHaveBeenCalledWith(SALON_A);
+    expect(screen.getByText("Pending")).toBeVisible();
+  });
+
+  it("refreshes SalonJoinView after the actual leave action succeeds", async () => {
+    fetchMySalonStatus
+      .mockResolvedValueOnce(states([{ salonId: SALON_A, status: "accepted", salon: { name: "Former Studio" } }]))
+      .mockResolvedValueOnce(states([{ salonId: SALON_A, status: "cancelled", salon: { name: "Former Studio" } }]));
+    api.patch.mockResolvedValue({ data: { user: { salonStatus: "none" } } });
+
+    renderWithProviders(<BarberSettings settingsView="salon" />, {
+      preloadedState: { auth: { currentUser: { id: BARBER_ID }, token: "token", isAuthenticated: true } },
+    });
+    await flush();
+    expect(fetchMySalonStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    });
+    expect(screen.getByRole("dialog")).toBeVisible();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Leave salon" }));
+    });
+    await flush();
+
+    expect(api.patch).toHaveBeenCalledWith("/salons/leave", { salonId: SALON_A });
+    expect(fetchMySalonStatus).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Cancelled")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Leave" })).not.toBeInTheDocument();
+  });
+
+  it("does not refresh SalonJoinView when the actual leave action fails", async () => {
+    fetchMySalonStatus.mockResolvedValue(
+      states([{ salonId: SALON_A, status: "accepted", salon: { name: "Former Studio" } }])
+    );
+    api.patch.mockRejectedValue(new Error("leave failed"));
+
+    renderWithProviders(<BarberSettings settingsView="salon" />, {
+      preloadedState: { auth: { currentUser: { id: BARBER_ID }, token: "token", isAuthenticated: true } },
+    });
+    await flush();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Leave salon" }));
+    });
+    await flush();
+
+    expect(api.patch).toHaveBeenCalledWith("/salons/leave", { salonId: SALON_A });
+    expect(fetchMySalonStatus).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Could not update salon staff. Please try again.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Leave" })).toBeVisible();
+  });
+
+  it("keeps rejected and cancelled salons searchable and requestable", async () => {
+    fetchMySalonStatus.mockResolvedValue(
+      states([
+        { salonId: SALON_C, status: "rejected", salon: { name: "Rejected Studio" } },
+        { salonId: SALON_D, status: "cancelled", salon: { name: "Cancelled Studio" } },
+      ])
+    );
+    fetchSalons.mockResolvedValue({
+      data: [salon(SALON_C, "Rejected Studio"), salon(SALON_D, "Cancelled Studio")],
+    });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Studio");
+
+    expect(screen.getByRole("option", { name: "Rejected Studio" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Cancelled Studio" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Request again" })).toHaveLength(2);
+  });
+
+  it("does not submit a duplicate request for an active approved salon", async () => {
+    fetchMySalonStatus.mockResolvedValue(
+      states([{ salonId: SALON_A, status: "accepted", salon: { name: "Approved Studio" } }])
+    );
+    fetchSalons.mockResolvedValue({ data: [salon(SALON_A, "Approved Studio")] });
+
+    renderSalonJoinView();
+    await flush();
+    await searchFor("Approved");
+
+    expect(screen.getByText("No salons found.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send request" })).toBeDisabled();
+    expect(requestJoinSalon).not.toHaveBeenCalled();
     expect(cancelJoinRequestBySalon).not.toHaveBeenCalled();
   });
 });
