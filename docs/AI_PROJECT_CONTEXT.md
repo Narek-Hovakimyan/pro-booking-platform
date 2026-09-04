@@ -12,7 +12,7 @@ Main user types:
 - `barber`: the business-user role for specialists and salon managers. Despite the name, the app supports multiple professions through `profession` and `barberType`.
 - Salon owner/admin: still `role: "barber"` at the auth level, with salon-scoped management rights through `Salon.ownerId` or `Salon.admins`.
 - Salon staff/chair renter: a barber connected to a salon through `User.salons[]`, with `relationshipType` and `relationshipStatus`.
-- Platform admin: optional platform-level access through `User.platformRole === "admin"` or allowlist env vars; separate from `role`.
+- Platform superuser: optional platform-level access through `User.platformRole === "superuser"` or allowlist env vars; separate from `role`.
 
 Current development status:
 
@@ -129,7 +129,7 @@ Frontend (`frontend/package.json`):
 
 Environment variable names only:
 
-- Backend: `MONGO_URI`, `JWT_SECRET`, `PORT`, `NODE_ENV`, `CLIENT_URL`, `TRUST_PROXY`, `RATE_LIMIT_ENABLED`, `APP_PUBLIC_URL`, `EMAIL_PROVIDER`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_VERIFICATION_LOG_URL`, `RESEND_API_KEY`, `PAYMENT_PROVIDER`, `PAYMENT_WEBHOOK_SECRET`, `ALLOW_DEV_PAYMENT_CONFIRM`, `PLATFORM_ADMIN_EMAILS`, `PLATFORM_ADMIN_IDS`, `ENABLE_CLEANUP_NON_WORKING_DAYS_CRON`, `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON`, `ENABLE_EVENT_REMINDERS_CRON`.
+- Backend: `MONGO_URI`, `JWT_SECRET`, `PORT`, `NODE_ENV`, `CLIENT_URL`, `TRUST_PROXY`, `RATE_LIMIT_ENABLED`, `APP_PUBLIC_URL`, `AUTH_REFRESH_COOKIE_SAME_SITE`, `EMAIL_PROVIDER`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_VERIFICATION_LOG_URL`, `RESEND_API_KEY`, `PAYMENT_PROVIDER`, `PAYMENT_WEBHOOK_SECRET`, `PLATFORM_ADMIN_EMAILS`, `PLATFORM_ADMIN_IDS`, `ENABLE_CLEANUP_NON_WORKING_DAYS_CRON`, `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON`, `ENABLE_EVENT_REMINDERS_CRON`, `BOOKING_REMINDER_STALE_CLAIM_TIMEOUT_MS`, `EVENT_REMINDER_STALE_CLAIM_TIMEOUT_MS`.
 - Frontend: `VITE_API_URL`, `VITE_API_ORIGIN`, `VITE_SOCKET_URL`, `DEV`.
 
 Do not put real credentials, URLs, tokens, emails, or keys in docs.
@@ -139,7 +139,7 @@ Do not put real credentials, URLs, tokens, emails, or keys in docs.
 Application auth roles:
 
 - `User.role` is either `client` or `barber`.
-- Platform admin access is separate: `platformRole: "admin"` or configured allowlists in platform middleware.
+- Platform superuser access is separate: `platformRole: "superuser"` or configured allowlists in platform middleware.
 
 Salon access:
 
@@ -750,7 +750,7 @@ Payment attempts:
 
 - `SubscriptionPaymentAttempt` supports statuses `pending`, `requires_action`, `paid`, `failed`, `cancelled`, `refunded`, `expired`.
 - Payment attempt expiry default is 24 hours.
-- Manual/dev confirmation exists, with production restrictions.
+- Manual/dev confirmation is available only outside production; production runtime checks fail closed.
 - Platform admin can manually manage/confirm salon billing in platform billing routes.
 
 Exact salon subscription gate:

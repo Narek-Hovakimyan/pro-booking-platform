@@ -363,6 +363,7 @@ Default ports:
 | `TRUST_PROXY` | Set `true` only behind one trusted proxy/load balancer | `false` |
 | `MONGO_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/hairbook` |
 | `JWT_SECRET` | Secret key for signing JWT tokens | `your-long-random-secret` |
+| `AUTH_REFRESH_COOKIE_SAME_SITE` | Refresh-cookie SameSite policy; retain secure production cookie protections | `lax` (default) |
 | `CLIENT_URL` | Frontend origin(s) for CORS (comma-separated) | `http://localhost:5173` |
 | `APP_PUBLIC_URL` | Public URL of this backend | `https://api.example.com` |
 | `REDIS_URL` | Required in production: private Redis URL shared by rate limiting and Socket.IO | `rediss://user:password@redis.internal:6380/0` |
@@ -386,13 +387,15 @@ Default ports:
 | `EMAIL_REPLY_TO` | Reply-to address (optional) | |
 | `ENABLE_BOOKING_REMINDERS` | Opt in to automatic booking reminders | `false` |
 | `BOOKING_REMINDER_INTERVAL_MS` | Booking reminder scheduler interval | `60000` |
+| `BOOKING_REMINDER_STALE_CLAIM_TIMEOUT_MS` | Advanced stale-claim recovery timeout for reminder workers | `300000` |
 | `ENABLE_WAITLIST_EXPIRATION` | Opt in to automatic past-date waitlist expiration | `false` |
 | `WAITLIST_EXPIRATION_INTERVAL_MS` | Waitlist expiration scheduler interval | `3600000` |
 | `ENABLE_SUBSCRIPTION_EXPIRATION_CRON` | Opt in to subscription expiration scheduler | `false` |
 | `SUBSCRIPTION_EXPIRATION_INTERVAL_MS` | Subscription expiration check interval | `86400000` (24h) |
 | `ENABLE_CLEANUP_NON_WORKING_DAYS_CRON` | Nightly cleanup of past non-working days | `false` |
-| `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON` | Periodically expire past pending bookings | `false` |
+| `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON` | Expire past pending bookings; enabled unless exactly `false` | enabled |
 | `ENABLE_EVENT_REMINDERS_CRON` | Send reminders for upcoming events | `false` |
+| `EVENT_REMINDER_STALE_CLAIM_TIMEOUT_MS` | Advanced stale-claim recovery timeout for reminder workers | `300000` |
 | `EMAIL_VERIFICATION_LOG_URL` | Log verification links instead of sending email (dev only) | `false` |
 
 ### Frontend (`frontend/.env`)
@@ -466,13 +469,15 @@ cd frontend && npm run build
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
 
-4. **Cron/scheduler flags** — All schedulers are disabled by default. Enable only those you need:
+4. **Cron/scheduler flags** — Set production values explicitly. Pending-booking expiration runs by default when unset (or any value other than exact `false`); set `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON=false` only to disable it. Its existing startup catch-up runs before scheduled executions. The other schedulers below are opt-in:
    - `ENABLE_BOOKING_REMINDERS`
    - `ENABLE_WAITLIST_EXPIRATION`
    - `ENABLE_SUBSCRIPTION_EXPIRATION_CRON`
    - `ENABLE_CLEANUP_NON_WORKING_DAYS_CRON`
    - `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON`
    - `ENABLE_EVENT_REMINDERS_CRON`
+
+   `BOOKING_REMINDER_STALE_CLAIM_TIMEOUT_MS` and `EVENT_REMINDER_STALE_CLAIM_TIMEOUT_MS` default to `300000` ms. They are advanced multi-instance/failure-recovery controls: tune only when operationally necessary, and keep values consistent across workers.
 
 5. **Dev/manual subscription endpoints** — The following endpoints are **disabled in production** and return 403:
    - `POST /api/subscriptions/dev/grant`
@@ -613,7 +618,7 @@ Then serve `frontend/dist/` with any static file server, ensuring SPA fallback.
 - [ ] Frontend `npm run build` succeeds
 - [ ] `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_API_ORIGIN` set before frontend build
 - [ ] `CLIENT_URL`, `MONGO_URI`, `JWT_SECRET`, `NODE_ENV=production` set on backend runtime
-- [ ] Scheduler flags intentionally set (all `false` by default)
+- [ ] Scheduler flags explicitly configured; pending-booking expiration is enabled unless `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON` is exactly `false`
 - [ ] Web server configured for SPA fallback (`try_files $uri /index.html`)
 - [ ] `backend/uploads/` directory is accessible (or object storage configured)
 - [ ] `.env` files excluded from version control

@@ -10,6 +10,7 @@
 - [ ] `PORT` — set to desired port (e.g. `5000`)
 - [ ] `MONGO_URI` — valid MongoDB connection string
 - [ ] `JWT_SECRET` — strong random secret generated with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+- [ ] `AUTH_REFRESH_COOKIE_SAME_SITE` — default is `lax`; retain secure refresh-cookie protections
 - [ ] `CLIENT_URL` — production frontend origin(s), comma-separated
 - [ ] `APP_PUBLIC_URL` — public URL of the backend
 - [ ] `PAYMENT_PROVIDER=manual` or `disabled` — **never** `mock` or `test` in production
@@ -17,9 +18,9 @@
 - [ ] `RATE_LIMIT_*` — tune limits for production traffic patterns
 - [ ] `TRUST_PROXY=true` — only if behind a trusted reverse proxy (nginx, Render, Railway, etc.)
 - [ ] `EMAIL_VERIFICATION_LOG_URL=false` — disable in production
-- [ ] Scheduler flags — only enable those needed (all `false` by default)
+- [ ] Scheduler flags — set values explicitly. Pending-booking expiry runs unless `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON=false`; other scheduler flags are opt-in.
 
-### Scheduler flags (opt-in)
+### Scheduler flags
 
 | Flag | Purpose |
 |---|---|
@@ -29,6 +30,13 @@
 | `ENABLE_CLEANUP_NON_WORKING_DAYS_CRON` | Nightly cleanup of past non-working days |
 | `ENABLE_EXPIRE_PENDING_BOOKINGS_CRON` | Expire past pending bookings |
 | `ENABLE_EVENT_REMINDERS_CRON` | Event reminders |
+
+Advanced reminder recovery settings (default `300000` ms each):
+
+- `BOOKING_REMINDER_STALE_CLAIM_TIMEOUT_MS`
+- `EVENT_REMINDER_STALE_CLAIM_TIMEOUT_MS`
+
+These control stale-claim recovery timing for reminder workers after failures and in multi-instance deployments. Tune only when operationally necessary and keep values consistent across workers.
 
 ---
 
@@ -101,7 +109,7 @@
 
 ## 7. Cron / Schedulers
 
-- [ ] Only enabled schedulers are active (all `false` by default)
+- [ ] Pending-booking expiration is enabled unless explicitly set to `false`; other scheduler flags are enabled only when configured
 - [ ] Each scheduler runs on its configured interval
 - [ ] Scheduler logs are visible in application output at startup
 - [ ] Booking reminder scheduler does not send duplicate reminders
