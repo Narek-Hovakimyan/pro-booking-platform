@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import jwt from "jsonwebtoken";
 
+import User from "../models/User.js";
+import { googleAuth } from "../controllers/auth/authController.js";
+import { setGoogleAuthClientFactoryForTesting } from "../services/auth/googleAuthService.js";
+import { protect } from "./authMiddleware.js";
 import {
   isPlatformAdmin,
   isPlatformSuperuser,
@@ -9,9 +14,36 @@ import {
   resetAllowlistCache,
 } from "./platformMiddleware.js";
 
+const originalFindById = User.findById;
+const originalFindOne = User.findOne;
+const originalJwtSecret = process.env.JWT_SECRET;
+const originalGoogleClientId = process.env.GOOGLE_CLIENT_ID;
+const jwtSecret = "platform-session-security-test-secret";
+
+const selectable = (result) => ({ select: () => result });
+const makeResponse = () => ({
+  statusCode: 200,
+  body: undefined,
+  status(code) {
+    this.statusCode = code;
+    return this;
+  },
+  json(payload) {
+    this.body = payload;
+    return this;
+  },
+});
+
 afterEach(() => {
+  User.findById = originalFindById;
+  User.findOne = originalFindOne;
+  setGoogleAuthClientFactoryForTesting();
   delete process.env.PLATFORM_ADMIN_EMAILS;
   delete process.env.PLATFORM_ADMIN_IDS;
+  if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
+  else process.env.JWT_SECRET = originalJwtSecret;
+  if (originalGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+  else process.env.GOOGLE_CLIENT_ID = originalGoogleClientId;
   resetAllowlistCache();
 });
 
@@ -107,6 +139,84 @@ test("isPlatformAdmin returns false for unverified env allowlisted email", () =>
     platformRole: null,
   };
   assert.equal(isPlatformAdmin(user), false);
+});
+
+test("an existing unverified allowlisted account session stays platform-denied after rejected Google linking", async () => {
+  const attacker = {
+    _id: "64b000000000000000000034",
+    role: "client",
+    email: "allowlisted@example.com",
+    emailVerified: false,
+    emailVerifiedAt: null,
+    googleId: "",
+    authVersion: 0,
+    platformRole: null,
+  };
+  process.env.PLATFORM_ADMIN_EMAILS = attacker.email;
+  process.env.JWT_SECRET = jwtSecret;
+  process.env.GOOGLE_CLIENT_ID = "platform-security-google-client";
+  setGoogleAuthClientFactoryForTesting(() => ({
+    verifyIdToken: async ({ audience }) => {
+      assert.equal(audience, process.env.GOOGLE_CLIENT_ID);
+      return {
+        getPayload: () => ({
+          sub: "legitimate-google-subject",
+          email: attacker.email,
+          email_verified: true,
+        }),
+      };
+    },
+  }));
+  User.findOne = (filter) => {
+    if (filter.googleId) return selectable(null);
+    if (filter.email === attacker.email) return selectable(attacker);
+    return selectable(null);
+  };
+
+  const googleResponse = makeResponse();
+  await googleAuth({
+    body: {
+      credential: "verified-google-token",
+      canAccessPlatform: true,
+      emailVerified: true,
+      platformRole: "superuser",
+      _id: "64b000000000000000000099",
+    },
+  }, googleResponse);
+
+  assert.equal(googleResponse.statusCode, 409);
+  assert.equal(attacker.emailVerified, false);
+  assert.equal(attacker.emailVerifiedAt, null);
+  assert.equal(attacker.googleId, "");
+
+  const token = jwt.sign(
+    {
+      id: attacker._id,
+      av: attacker.authVersion,
+      canAccessPlatform: true,
+      platformRole: "superuser",
+      emailVerified: true,
+    },
+    jwtSecret,
+    { algorithm: "HS256" }
+  );
+  User.findById = (id) => {
+    assert.equal(id, attacker._id);
+    return selectable(attacker);
+  };
+  const request = { headers: { authorization: `Bearer ${token}` } };
+  const authResponse = makeResponse();
+  let authenticated = false;
+  await protect(request, authResponse, () => { authenticated = true; });
+
+  assert.equal(authenticated, true);
+  assert.equal(request.user, attacker);
+  assert.equal(isPlatformSuperuser(request.user), false);
+  const platformResponse = makeResponse();
+  let platformGranted = false;
+  requirePlatformSuperuser(request, platformResponse, () => { platformGranted = true; });
+  assert.equal(platformGranted, false);
+  assert.equal(platformResponse.statusCode, 403);
 });
 
 test("isPlatformAdmin returns false for non-allowlisted email", () => {

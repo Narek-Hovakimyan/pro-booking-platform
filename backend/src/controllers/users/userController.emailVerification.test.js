@@ -36,6 +36,7 @@ const originalUserMethods = {
   findByIdAndUpdate: User.findByIdAndUpdate,
   findByIdAndDelete: User.findByIdAndDelete,
   findOne: User.findOne,
+  findOneAndUpdate: User.findOneAndUpdate,
   create: User.create,
 };
 const originalBarberProfileMethods = {
@@ -95,6 +96,7 @@ afterEach(() => {
   User.findByIdAndUpdate = originalUserMethods.findByIdAndUpdate;
   User.findByIdAndDelete = originalUserMethods.findByIdAndDelete;
   User.findOne = originalUserMethods.findOne;
+  User.findOneAndUpdate = originalUserMethods.findOneAndUpdate;
   User.create = originalUserMethods.create;
   BarberProfile.findOne = originalBarberProfileMethods.findOne;
   BarberProfile.findOneAndUpdate = originalBarberProfileMethods.findOneAndUpdate;
@@ -1091,7 +1093,7 @@ test("sendEmailVerificationController – success returns message only and keeps
 
 // ── verifyEmailController – valid token ──────────────────────────────
 
-test("verifyEmailController – valid token verifies email and clears token hash/expires", async () => {
+test("verifyEmailController – valid token verifies its unchanged email and clears token hash/expires", async () => {
   const res = createResponse();
   const rawToken = "abcdef123456abcdef123456abcdef123456abcdef123456abcdef123456abcdef1234";
   const tokenHash = hashEmailVerificationToken(rawToken);
@@ -1099,27 +1101,29 @@ test("verifyEmailController – valid token verifies email and clears token hash
 
   const req = createRequest({ query: { token: rawToken } });
 
-  const user = {
-    ...createBaseUser({
-      email: "test@example.com",
-      emailVerified: false,
-      emailVerifiedAt: null,
-      emailVerificationTokenHash: tokenHash,
-      emailVerificationExpires: expires,
-      emailVerificationSentAt: new Date(),
-    }),
-    async save() {
-      this.emailVerified = true;
-      this.emailVerifiedAt = new Date();
-      this.emailVerificationTokenHash = "";
-      this.emailVerificationExpires = null;
-      return this;
-    },
-  };
+  const user = createBaseUser({
+    email: "test@example.com",
+    emailVerified: false,
+    emailVerifiedAt: null,
+    emailVerificationTokenHash: tokenHash,
+    emailVerificationExpires: expires,
+    emailVerificationSentAt: new Date(),
+  });
+  let completionFilter;
 
   User.findOne = () => ({
     select: async () => user,
   });
+  User.findOneAndUpdate = (filter, update, options) => {
+    completionFilter = filter;
+    assert.equal(options.returnDocument, "after");
+    assert.equal(options.runValidators, true);
+    assert.equal(filter.email, "test@example.com");
+    assert.equal(filter.emailVerified, false);
+    assert.equal(filter.emailVerificationTokenHash, tokenHash);
+    Object.assign(user, update.$set);
+    return Promise.resolve(user);
+  };
 
   await verifyEmailController(req, res);
 
@@ -1129,8 +1133,121 @@ test("verifyEmailController – valid token verifies email and clears token hash
   assert.equal(res.body.user.emailVerified, true);
   assert.equal(res.body.user.canAccessPlatform, false);
   assert.ok(res.body.user.emailVerifiedAt);
+  assert.equal(completionFilter._id, userId);
   // Token fields not exposed
   assert.equal(res.body.user.emailVerificationTokenHash, undefined);
+});
+
+test("verifyEmailController – old token cannot verify a concurrently changed email", async () => {
+  const res = createResponse();
+  const rawToken = "old-token-for-email-a";
+  const oldTokenHash = hashEmailVerificationToken(rawToken);
+  const current = createBaseUser({
+    email: "email-a@example.com",
+    emailVerificationTokenHash: oldTokenHash,
+    emailVerificationExpires: new Date(Date.now() + 3600000),
+  });
+  const lookupSnapshot = { ...current };
+  let completionFilter;
+
+  User.findOne = () => ({
+    select: async () => {
+      current.email = "allowlisted@example.com";
+      current.emailVerified = false;
+      current.emailVerifiedAt = null;
+      current.emailVerificationTokenHash = hashEmailVerificationToken("token-for-email-b");
+      current.emailVerificationExpires = new Date(Date.now() + 3600000);
+      return lookupSnapshot;
+    },
+  });
+  User.findOneAndUpdate = (filter) => {
+    completionFilter = filter;
+    const matchesOldAttempt =
+      String(filter._id) === String(current._id) &&
+      filter.email === current.email &&
+      filter.emailVerified === current.emailVerified &&
+      filter.emailVerificationTokenHash === current.emailVerificationTokenHash &&
+      current.emailVerificationExpires > new Date();
+    return Promise.resolve(matchesOldAttempt ? current : null);
+  };
+
+  await verifyEmailController(createRequest({ query: { token: rawToken } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { message: "Invalid or expired verification token" });
+  assert.equal(completionFilter.email, "email-a@example.com");
+  assert.equal(completionFilter.emailVerificationTokenHash, oldTokenHash);
+  assert.equal(current.email, "allowlisted@example.com");
+  assert.equal(current.emailVerified, false);
+  assert.equal(current.emailVerifiedAt, null);
+  assert.notEqual(current.emailVerificationTokenHash, oldTokenHash);
+});
+
+test("verifyEmailController – replaced verification token keeps newer state intact", async () => {
+  const res = createResponse();
+  const rawToken = "older-token";
+  const oldTokenHash = hashEmailVerificationToken(rawToken);
+  const replacementTokenHash = hashEmailVerificationToken("newer-token");
+  const current = createBaseUser({
+    email: "test@example.com",
+    emailVerificationTokenHash: oldTokenHash,
+    emailVerificationExpires: new Date(Date.now() + 3600000),
+  });
+  const lookupSnapshot = { ...current };
+
+  User.findOne = () => ({
+    select: async () => {
+      current.emailVerificationTokenHash = replacementTokenHash;
+      current.emailVerificationExpires = new Date(Date.now() + 3600000);
+      return lookupSnapshot;
+    },
+  });
+  User.findOneAndUpdate = (filter) => {
+    const matchesOldAttempt =
+      filter.email === current.email &&
+      filter.emailVerified === current.emailVerified &&
+      filter.emailVerificationTokenHash === current.emailVerificationTokenHash &&
+      current.emailVerificationExpires > new Date();
+    return Promise.resolve(matchesOldAttempt ? current : null);
+  };
+
+  await verifyEmailController(createRequest({ query: { token: rawToken } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(current.emailVerified, false);
+  assert.equal(current.emailVerificationTokenHash, replacementTokenHash);
+});
+
+test("verifyEmailController – already-verified state makes the stale CAS fail without overwriting verification fields", async () => {
+  const res = createResponse();
+  const rawToken = "stale-token-on-verified-account";
+  const tokenHash = hashEmailVerificationToken(rawToken);
+  const verifiedAt = new Date("2025-02-01T00:00:00.000Z");
+  const current = createBaseUser({
+    email: "test@example.com",
+    emailVerified: true,
+    emailVerifiedAt: verifiedAt,
+    emailVerificationTokenHash: tokenHash,
+    emailVerificationExpires: new Date(Date.now() + 3600000),
+  });
+  let completionFilter;
+
+  User.findOne = () => ({ select: async () => ({ ...current }) });
+  User.findOneAndUpdate = (filter) => {
+    completionFilter = filter;
+    const matchesCurrentState =
+      filter.emailVerified === current.emailVerified &&
+      filter.emailVerificationTokenHash === current.emailVerificationTokenHash;
+    return Promise.resolve(matchesCurrentState ? current : null);
+  };
+
+  await verifyEmailController(createRequest({ query: { token: rawToken } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(completionFilter.emailVerified, false);
+  assert.equal(current.emailVerified, true);
+  assert.equal(current.emailVerifiedAt, verifiedAt);
+  assert.equal(current.emailVerificationTokenHash, tokenHash);
 });
 
 // ── verifyEmailController – invalid token ────────────────────────────

@@ -318,13 +318,10 @@ export const googleAuth = async (req, res) => {
     }), "+googleId +authVersion");
 
     if (existingEmailUser) {
-      if (
-        existingEmailUser.googleId &&
-        existingEmailUser.googleId !== googlePayload.googleId
-      ) {
+      if (existingEmailUser.googleId && existingEmailUser.googleId !== googlePayload.googleId) {
         return res.status(409).json({ message: "Google account conflict" });
       }
-
+      if (existingEmailUser.emailVerified !== true) return res.status(409).json({ message: "Google account conflict" });
       if (applyGoogleLink(existingEmailUser, googlePayload)) {
         await existingEmailUser.save();
       }

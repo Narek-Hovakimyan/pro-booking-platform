@@ -261,16 +261,32 @@ export const verifyEmailController = async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired verification token" });
     }
 
-    user.emailVerified = true;
-    user.emailVerifiedAt = new Date();
-    user.emailVerificationTokenHash = "";
-    user.emailVerificationExpires = null;
-    // Keep emailVerificationSentAt as record of when last sent
-    await user.save();
+    const verifiedUser = await User.findOneAndUpdate(
+      {
+        _id: user._id,
+        email: user.email,
+        emailVerified: false,
+        emailVerificationTokenHash: tokenHash,
+        emailVerificationExpires: { $gt: new Date() },
+      },
+      {
+        $set: {
+          emailVerified: true,
+          emailVerifiedAt: new Date(),
+          emailVerificationTokenHash: "",
+          emailVerificationExpires: null,
+        },
+      },
+      { returnDocument: "after", runValidators: true }
+    );
+
+    if (!verifiedUser) {
+      return res.status(400).json({ message: "Invalid or expired verification token" });
+    }
 
     return res.json({
       message: "Email verified successfully",
-      user: serializeUserData(user),
+      user: serializeUserData(verifiedUser),
     });
   } catch (error) {
     return sendControllerError(res, error, "Verification failed");

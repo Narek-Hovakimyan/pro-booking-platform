@@ -307,6 +307,8 @@ test("googleAuth links existing verified email without changing role or phone", 
   const existingUser = createUser({
     _id: otherUserId,
     email: "google@example.com",
+    emailVerified: true,
+    emailVerifiedAt: new Date("2025-01-01"),
     googleId: "",
     role: "barber",
     phone: "+37400111222",
@@ -351,6 +353,41 @@ test("googleAuth links existing verified email without changing role or phone", 
     completedAt: null,
     needsOnboarding: false,
   });
+});
+
+test("googleAuth rejects an unverified local account with the verified Google email", async () => {
+  process.env.PLATFORM_ADMIN_EMAILS = "google@example.com";
+  mockGooglePayload(baseGooglePayload);
+  const existingUser = createUser({
+    email: "google@example.com",
+    emailVerified: false,
+    googleId: "",
+    platformRole: null,
+  });
+
+  User.findOne = (filter) => {
+    if (filter.googleId) return selectable(null);
+    if (filter.email === "google@example.com") return selectable(existingUser);
+    return selectable(null);
+  };
+
+  const res = createResponse();
+  await googleAuth({
+    body: {
+      credential: "valid-google-token",
+      platformRole: "superuser",
+      canAccessPlatform: true,
+      emailVerified: true,
+    },
+  }, res);
+
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, { message: "Google account conflict" });
+  assert.equal(issuedSessionCalls.length, 0);
+  assert.equal(existingUser.saved, false);
+  assert.equal(existingUser.googleId, "");
+  assert.equal(existingUser.emailVerified, false);
+  assert.equal(serializeAuthUser(existingUser).canAccessPlatform, false);
 });
 
 test("googleAuth rejects existing email linked to different googleId", async () => {
