@@ -4,44 +4,41 @@ import {
   ArrowRight,
   BriefcaseBusiness,
   Calendar,
+  CheckCircle2,
   Clock,
   MapPin,
   Scissors,
-  CheckCircle2,
   XCircle,
 } from "lucide-react";
 
-import { Card, CardContent } from "@/shared/components/ui/card";
-import { Button } from "@/shared/components/ui/button";
+import JobOnboardingConsentCard from "@/features/jobs/components/JobOnboardingConsentCard";
+import { fetchMyJobApplications } from "@/shared/api/salonJobs";
 import EmptyState from "@/shared/components/common/EmptyState";
-import api from "@/shared/api/axios";
+import { Button } from "@/shared/components/ui/button";
+import { Card, CardContent } from "@/shared/components/ui/card";
 
 const STATUS_CONFIG = {
   pending: {
     label: "Pending",
-    className:
-      "bg-amber-50 text-amber-700 border-amber-200",
+    className: "bg-amber-50 text-amber-700 border-amber-200",
     dotClass: "bg-amber-500",
     icon: Clock,
   },
   reviewed: {
     label: "Reviewed",
-    className:
-      "bg-blue-50 text-blue-700 border-blue-200",
+    className: "bg-blue-50 text-blue-700 border-blue-200",
     dotClass: "bg-blue-500",
     icon: CheckCircle2,
   },
   accepted: {
     label: "Accepted",
-    className:
-      "bg-green-50 text-green-700 border-green-200",
+    className: "bg-green-50 text-green-700 border-green-200",
     dotClass: "bg-green-500",
     icon: CheckCircle2,
   },
   rejected: {
     label: "Rejected",
-    className:
-      "bg-red-50 text-red-700 border-red-200",
+    className: "bg-red-50 text-red-700 border-red-200",
     dotClass: "bg-red-500",
     icon: XCircle,
   },
@@ -56,10 +53,13 @@ const ROLE_LABELS = {
   other: "Other",
 };
 
+const getApplicationId = (application) => application?.id || application?._id || "";
+
 function getRoleLabel(job) {
   if (job?.role === "other" && job?.customRole) {
     return `Other: ${job.customRole}`;
   }
+
   return ROLE_LABELS[job?.role] || job?.role || "Role not specified";
 }
 
@@ -69,6 +69,7 @@ function getSalonLocation(salon) {
 
 function formatDate(dateString) {
   if (!dateString) return "";
+
   try {
     return new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
@@ -94,14 +95,16 @@ export default function MyJobApplicationsPage() {
       setError("");
 
       try {
-        const { data } = await api.get("/salon-jobs/applications/my-submissions");
+        const { data } = await fetchMyJobApplications();
+
         if (isMounted) {
           setApplications(Array.isArray(data) ? data : []);
         }
       } catch (requestError) {
         if (isMounted) {
           setError(
-            requestError.response?.data?.message || "Could not load your applications."
+            requestError.response?.data?.message ||
+              "Could not load your applications."
           );
           setApplications([]);
         }
@@ -112,7 +115,8 @@ export default function MyJobApplicationsPage() {
       }
     }
 
-    fetchApplications();
+    void fetchApplications();
+
     return () => {
       isMounted = false;
     };
@@ -121,6 +125,19 @@ export default function MyJobApplicationsPage() {
   const handleBrowseJobs = useCallback(() => {
     navigate("/jobs");
   }, [navigate]);
+
+  const replaceApplication = useCallback((nextApplication) => {
+    const nextId = getApplicationId(nextApplication);
+    if (!nextId) return;
+
+    setApplications((currentApplications) =>
+      currentApplications.map((currentApplication) =>
+        getApplicationId(currentApplication) === nextId
+          ? nextApplication
+          : currentApplication
+      )
+    );
+  }, []);
 
   if (isLoading) {
     return (
@@ -189,7 +206,6 @@ export default function MyJobApplicationsPage() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      {/* Header */}
       <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <h1 className="text-2xl font-bold tracking-tight text-neutral-950 sm:text-3xl">
           My Applications
@@ -199,31 +215,29 @@ export default function MyJobApplicationsPage() {
         </p>
       </div>
 
-      {/* Application cards */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {applications.map((app) => {
-          const job = app?.job || {};
-          const salon = app?.salon || {};
+        {applications.map((application) => {
+          const job = application?.job || {};
+          const salon = application?.salon || {};
           const salonLocation = getSalonLocation(salon);
-          const statusKey = app?.status || "pending";
+          const statusKey = application?.status || "pending";
           const statusConfig = STATUS_CONFIG[statusKey] || STATUS_CONFIG.pending;
           const StatusIcon = statusConfig.icon;
           const decisionDate =
             statusKey === "accepted"
-              ? app.acceptedAt
+              ? application.acceptedAt
               : statusKey === "rejected"
-                ? app.rejectedAt
+                ? application.rejectedAt
                 : statusKey === "reviewed"
-                  ? app.reviewedAt
+                  ? application.reviewedAt
                   : null;
 
           return (
             <Card
               className="rounded-2xl transition-shadow hover:shadow-md sm:rounded-3xl"
-              key={app.id || app._id}
+              key={getApplicationId(application)}
             >
               <CardContent className="space-y-4 p-4 sm:p-6">
-                {/* Status badge */}
                 <div className="flex items-center justify-between gap-2">
                   <span
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${statusConfig.className}`}
@@ -233,64 +247,63 @@ export default function MyJobApplicationsPage() {
                   </span>
                   <span className="flex items-center gap-1 text-xs text-neutral-400">
                     <Calendar className="h-3 w-3" />
-                    {formatDate(app.createdAt)}
+                    {formatDate(application.createdAt)}
                   </span>
                 </div>
 
-                {/* Job title + role */}
                 <div>
                   <h2 className="text-xl font-bold text-neutral-950">
                     {job?.title || "Job"}
                   </h2>
                   <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
-                    <Scissors className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <Scissors aria-hidden="true" className="h-4 w-4 shrink-0" />
                     <span>{getRoleLabel(job)}</span>
                   </p>
                 </div>
 
-                {/* Salon info */}
                 <div className="space-y-1 rounded-2xl border border-neutral-200 p-3">
                   <p className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
-                    <BriefcaseBusiness className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <BriefcaseBusiness aria-hidden="true" className="h-4 w-4 shrink-0" />
                     <span>{salon?.name || "Salon"}</span>
                   </p>
                   {salonLocation && (
                     <p className="flex items-start gap-2 text-sm text-neutral-500">
-                      <MapPin className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      <MapPin aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
                       <span>{salonLocation}</span>
                     </p>
                   )}
                 </div>
 
-                {/* Message preview */}
-                {app?.message && (
-                  <p className="text-sm leading-6 text-neutral-600 line-clamp-2">
-                    {app.message}
+                {application?.message && (
+                  <p className="line-clamp-2 text-sm leading-6 text-neutral-600">
+                    {application.message}
                   </p>
                 )}
 
-                {/* Experience */}
-                {app?.experience && (
+                {application?.experience && (
                   <p className="text-sm text-neutral-500">
                     <span className="font-medium text-neutral-700">Experience:</span>{" "}
-                    {app.experience}
+                    {application.experience}
                   </p>
                 )}
 
-                {/* Decision timestamp */}
                 {decisionDate && (
                   <p className="flex items-center gap-1.5 text-xs text-neutral-400">
                     <Clock className="h-3 w-3" />
                     {statusConfig.label}: {formatDate(decisionDate)}
                   </p>
                 )}
+
+                <JobOnboardingConsentCard
+                  application={application}
+                  onApplicationConfirmed={replaceApplication}
+                />
               </CardContent>
             </Card>
           );
         })}
       </div>
 
-      {/* Browse more jobs */}
       <div className="flex justify-center">
         <Button onClick={handleBrowseJobs} type="button" variant="outline">
           Browse more jobs
