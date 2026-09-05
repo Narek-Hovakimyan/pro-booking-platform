@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import mongoose from "mongoose";
 
 import Salon from "../../models/Salon.js";
@@ -709,7 +709,7 @@ afterEach(() => {
   restoreOriginals();
 });
 
-const stubTransactionSession = () => {
+const stubTransactionSession = ({ onAbort } = {}) => {
   Object.defineProperty(mongoose.connection, "readyState", {
     configurable: true,
     value: 1,
@@ -717,13 +717,22 @@ const stubTransactionSession = () => {
 
   const session = {
     async withTransaction(callback) {
-      return callback();
+      try {
+        return await callback();
+      } catch (error) {
+        onAbort?.(error);
+        throw error;
+      }
     },
     async endSession() {},
   };
   mongoose.startSession = async () => session;
   return session;
 };
+
+beforeEach(() => {
+  stubTransactionSession();
+});
 
 test("platform billing seat eligibility uses worksAsSpecialist:false canonical membership over legacy approved", async () => {
   await assertPlatformSeatEligibility(
@@ -1722,6 +1731,37 @@ test("cancelSalonSubscription sets status to cancelled and creates audit log", a
   assert.ok(logEntry.newValue.cancelledAt);
 });
 
+test("cancelSalonSubscription audit failure cannot restore stale state over a concurrent commit", async () => {
+  const concurrentCancelledAt = new Date("2026-02-02T00:00:00.000Z");
+  const subscription = saveableDoc(subscriptionDoc);
+  let transactionStarted = false;
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => Promise.resolve(subscription));
+  mockMethod(PlatformAuditLog, "create", async () => {
+    // Simulate a legitimate later write becoming authoritative while A's audit fails.
+    subscription.status = "active";
+    subscription.cancelledAt = concurrentCancelledAt;
+    throw new Error("audit unavailable");
+  });
+  stubTransactionSession({
+    onAbort: () => { transactionStarted = true; },
+  });
+
+  await assert.rejects(
+    () => cancelSalonSubscription(salonIdStr, {
+      actor: platformActor,
+      note: "Cancellation review",
+      requestIp,
+    }),
+    /audit unavailable/
+  );
+
+  assert.equal(transactionStarted, true);
+  assert.equal(subscription.status, "active");
+  assert.equal(subscription.cancelledAt, concurrentCancelledAt);
+});
+
 test("cancelSalonSubscription rejects missing note", async () => {
   await assert.rejects(
     () =>
@@ -2083,6 +2123,41 @@ test("activateSalonSubscription creates one audit log with subscriptionId and re
   assert.equal(auditPayload.requestIp, requestIp);
 });
 
+test("activateSalonSubscription aborts the transaction when audit creation fails", async () => {
+  const subscription = saveableDoc({ ...subscriptionDoc, activeSeatCount: 0 });
+  const originalEnd = subscription.currentPeriodEnd;
+  let aborted = false;
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(SubscriptionPlan, "findOne", () => qc(planDoc));
+  mockMethod(Subscription, "findOne", () => Promise.resolve(subscription));
+  mockMethod(PlatformAuditLog, "create", async () => {
+    throw new Error("audit unavailable");
+  });
+  stubTransactionSession({
+    onAbort: () => {
+      aborted = true;
+      subscription.currentPeriodEnd = originalEnd;
+      subscription.status = "active";
+    },
+  });
+
+  await assert.rejects(
+    () => activateSalonSubscription(salonIdStr, {
+      actor: platformActor,
+      note: "Manual renewal",
+      seatCount: 2,
+      months: 1,
+      requestIp,
+    }),
+    /audit unavailable/
+  );
+
+  assert.equal(aborted, true);
+  assert.equal(subscription.status, "active");
+  assert.equal(subscription.currentPeriodEnd, originalEnd);
+});
+
 test("updateSalonSeatCount requires note and validates positive integer", async () => {
   await assert.rejects(
     () => updateSalonSeatCount(salonIdStr, { actor: platformActor, seatCount: 2, note: "" }),
@@ -2104,6 +2179,28 @@ test("updateSalonSeatCount requires note and validates positive integer", async 
   );
 });
 
+test("platform billing mutations fail closed before reads when a transaction session is unavailable", async () => {
+  let salonRead = false;
+  mongoose.startSession = async () => null;
+  mockMethod(Salon, "findById", () => {
+    salonRead = true;
+    return qc(salonDoc);
+  });
+
+  await assert.rejects(
+    () => updateSalonSeatCount(salonIdStr, {
+      actor: platformActor,
+      seatCount: 2,
+      note: "Increase seats",
+    }),
+    (error) =>
+      error.statusCode === 503 &&
+      error.code === "PLATFORM_BILLING_TRANSACTION_UNAVAILABLE"
+  );
+
+  assert.equal(salonRead, false);
+});
+
 test("updateSalonSeatCount rejects count below used seats and does not audit", async () => {
   let auditCalled = false;
   mockQuery(Salon, "findById", salonDoc);
@@ -2120,9 +2217,10 @@ test("updateSalonSeatCount rejects count below used seats and does not audit", a
   assert.equal(auditCalled, false);
 });
 
-test("updateSalonSeatCount audits and rolls back when audit creation fails", async () => {
+test("updateSalonSeatCount aborts its transaction without compensating writes when audit creation fails", async () => {
   const subscription = saveableDoc({ ...subscriptionDoc, seatCount: 3, activeSeatCount: 0 });
   const savedValues = [];
+  let aborted = false;
 
   subscription.save = async function save() {
     savedValues.push(this.seatCount);
@@ -2138,6 +2236,12 @@ test("updateSalonSeatCount audits and rolls back when audit creation fails", asy
   mockMethod(PlatformAuditLog, "create", async () => {
     throw new Error("audit unavailable");
   });
+  stubTransactionSession({
+    onAbort: () => {
+      aborted = true;
+      subscription.seatCount = 3;
+    },
+  });
 
   await assert.rejects(
     () => updateSalonSeatCount(salonIdStr, {
@@ -2149,7 +2253,8 @@ test("updateSalonSeatCount audits and rolls back when audit creation fails", asy
     /audit unavailable/
   );
 
-  assert.deepEqual(savedValues, [4, 3]);
+  assert.equal(aborted, true);
+  assert.deepEqual(savedValues, [4]);
   assert.equal(subscription.seatCount, 3);
 });
 
@@ -2240,7 +2345,7 @@ test("assignSalonSeat creates active seat and audit log for accepted staff", asy
   assert.equal(auditPayload.requestIp, requestIp);
 });
 
-test("assignSalonSeat audit rollback deletes the seat and releases its capacity claim", async () => {
+test("assignSalonSeat aborts its transaction without deleting a seat after audit failure", async () => {
   const subscription = saveableDoc({ ...subscriptionDoc, activeSeatCount: 0 });
   const createdSeat = {
     _id: oid("64b000000000000000070011"),
@@ -2251,6 +2356,7 @@ test("assignSalonSeat audit rollback deletes the seat and releases its capacity 
     status: "active",
   };
   let deleted = false;
+  let aborted = false;
 
   mockQuery(Salon, "findById", salonDoc);
   mockMethod(Subscription, "findOne", () => Promise.resolve(subscription));
@@ -2265,6 +2371,13 @@ test("assignSalonSeat audit rollback deletes the seat and releases its capacity 
   mockMethod(PlatformAuditLog, "create", async () => {
     throw new Error("audit unavailable");
   });
+  stubTransactionSession({
+    onAbort: () => {
+      aborted = true;
+      subscription.activeSeatCount = 0;
+      createdSeat.status = "absent";
+    },
+  });
 
   await assert.rejects(
     () => assignSalonSeat(salonIdStr, {
@@ -2276,7 +2389,8 @@ test("assignSalonSeat audit rollback deletes the seat and releases its capacity 
     /audit unavailable/
   );
 
-  assert.equal(deleted, true);
+  assert.equal(aborted, true);
+  assert.equal(deleted, false);
   assert.equal(subscription.activeSeatCount, 0);
 });
 
@@ -2324,6 +2438,42 @@ test("revokeSalonSeat rejects non-assigned staff and audits successful revoke", 
   assert.equal(auditPayload.action, "salon_subscription.seat_revoke");
   assert.equal(auditPayload.targetUserId.toString(), acceptedStaffId.toString());
   assert.equal(auditPayload.requestIp, requestIp);
+});
+
+test("revokeSalonSeat aborts the transaction when audit creation fails", async () => {
+  const subscription = saveableDoc({ ...subscriptionDoc, activeSeatCount: 1 });
+  const seat = saveableDoc({ ...acceptedSeatDoc, barberId: acceptedStaffId, revokedAt: null });
+  let aborted = false;
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(Subscription, "findOne", () => Promise.resolve(subscription));
+  mockMethod(SubscriptionSeat, "findOne", () => Promise.resolve(seat));
+  mockMethod(PlatformAuditLog, "create", async () => {
+    throw new Error("audit unavailable");
+  });
+  stubTransactionSession({
+    onAbort: () => {
+      aborted = true;
+      subscription.activeSeatCount = 1;
+      seat.status = "active";
+      seat.revokedAt = null;
+    },
+  });
+
+  await assert.rejects(
+    () => revokeSalonSeat(salonIdStr, {
+      actor: platformActor,
+      barberId: acceptedStaffId,
+      note: "Revoke accepted staff",
+      requestIp,
+    }),
+    /audit unavailable/
+  );
+
+  assert.equal(aborted, true);
+  assert.equal(subscription.activeSeatCount, 1);
+  assert.equal(seat.status, "active");
+  assert.equal(seat.revokedAt, null);
 });
 
 test("confirmSalonPayment rejects missing note, booking deposits, disabled provider, and non-confirmable statuses", async () => {

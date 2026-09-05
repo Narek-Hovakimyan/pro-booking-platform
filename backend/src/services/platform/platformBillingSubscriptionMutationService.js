@@ -1,12 +1,16 @@
 import Salon from "../../models/Salon.js";
 import Subscription from "../../models/Subscription.js";
 import { getOrCreateDefaultSubscriptionPlan } from "../subscriptionService.js";
-import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
+import {
+  createPlatformBillingAuditLog,
+  runPlatformBillingTransaction,
+} from "./platformBillingAuditHelpers.js";
 import { getSalonBillingDetail } from "./platformBillingSalonReadService.js";
 import {
   mutateCanonicalSubscription,
 } from "../subscription/subscriptionManualMutations.js";
 import { assertSeatCountCanContainActiveSeats } from "../subscription/seatCapacityMutations.js";
+import { getOrCreateDefaultSubscriptionPlanWithSession } from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
 
 /**
  * Activate or renew a salon subscription.
@@ -27,101 +31,84 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
     throw error;
   }
 
-  const salon = await Salon.findById(salonId).lean();
-  if (!salon) {
-    const error = new Error("Salon not found");
-    error.statusCode = 404;
-    throw error;
-  }
+  await runPlatformBillingTransaction(async (session) => {
+    const salon = await Salon.findById(salonId, null, { session }).lean();
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  const normalizedSeatCount = Math.max(1, Math.floor(Number(seatCount) || 1));
-  const normalizedMonths = Math.max(1, Math.floor(Number(months) || 1));
+    const normalizedSeatCount = Math.max(1, Math.floor(Number(seatCount) || 1));
+    const normalizedMonths = Math.max(1, Math.floor(Number(months) || 1));
+    const plan = session
+      ? await getOrCreateDefaultSubscriptionPlanWithSession(session)
+      : await getOrCreateDefaultSubscriptionPlan();
+    const now = new Date();
+    const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
+    const extendFrom = (periodStart) => {
+      const periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + normalizedMonths);
+      return periodEnd;
+    };
+    const mutation = await mutateCanonicalSubscription({
+      ownerType: "salon",
+      ownerId: salon._id,
+      session,
+      createPayload: () => {
+        const periodStart = now;
+        return {
+          ownerType: "salon",
+          ownerId: salon._id,
+          ownerRefModel: "Salon",
+          payerId: salon.ownerId,
+          planId: plan._id,
+          status: "active",
+          seatCount: normalizedSeatCount,
+          pricePerSeat: plan.pricePerSeat,
+          totalPrice: monthlyTotal,
+          currentPeriodStart: periodStart,
+          currentPeriodEnd: extendFrom(periodStart),
+          provider: "manual",
+          lastPaymentAt: now,
+        };
+      },
+      updatePayload: (subscription) => {
+        assertSeatCountCanContainActiveSeats(subscription, normalizedSeatCount);
+        const isContinuing =
+          ["trialing", "active"].includes(subscription.status) &&
+          subscription.currentPeriodEnd &&
+          new Date(subscription.currentPeriodEnd) > now;
+        const periodStart = isContinuing
+          ? new Date(subscription.currentPeriodEnd)
+          : now;
 
-  const plan = await getOrCreateDefaultSubscriptionPlan();
-  const now = new Date();
-  const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
-  const extendFrom = (periodStart) => {
-    const periodEnd = new Date(periodStart);
-    periodEnd.setMonth(periodEnd.getMonth() + normalizedMonths);
-    return periodEnd;
-  };
-  const mutation = await mutateCanonicalSubscription({
-    ownerType: "salon",
-    ownerId: salon._id,
-    createPayload: () => {
-      const periodStart = now;
-      const periodEnd = extendFrom(periodStart);
-      return {
-        ownerType: "salon",
-        ownerId: salon._id,
-        ownerRefModel: "Salon",
-        payerId: salon.ownerId,
-        planId: plan._id,
-        status: "active",
-        seatCount: normalizedSeatCount,
-        pricePerSeat: plan.pricePerSeat,
-        totalPrice: monthlyTotal,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: periodEnd,
-        provider: "manual",
-        lastPaymentAt: now,
-      };
-    },
-    updatePayload: (subscription) => {
-      assertSeatCountCanContainActiveSeats(subscription, normalizedSeatCount);
-      const isContinuing =
-        ["trialing", "active"].includes(subscription.status) &&
-        subscription.currentPeriodEnd &&
-        new Date(subscription.currentPeriodEnd) > now;
-      const periodStart = isContinuing
-        ? new Date(subscription.currentPeriodEnd)
-        : now;
+        return {
+          status: "active",
+          seatCount: normalizedSeatCount,
+          pricePerSeat: plan.pricePerSeat,
+          totalPrice: monthlyTotal,
+          currentPeriodStart: periodStart,
+          currentPeriodEnd: extendFrom(periodStart),
+          lastPaymentAt: now,
+          trialEndsAt: undefined,
+          cancelledAt: undefined,
+          payerId: salon.ownerId,
+          planId: plan._id,
+          provider: "manual",
+        };
+      },
+    });
+    const { subscription, previous } = mutation;
+    const oldValue = previous
+      ? {
+          status: previous.status,
+          seatCount: previous.seatCount,
+          currentPeriodEnd: previous.currentPeriodEnd,
+        }
+      : null;
 
-      return {
-        status: "active",
-        seatCount: normalizedSeatCount,
-        pricePerSeat: plan.pricePerSeat,
-        totalPrice: monthlyTotal,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: extendFrom(periodStart),
-        lastPaymentAt: now,
-        trialEndsAt: undefined,
-        cancelledAt: undefined,
-        payerId: salon.ownerId,
-        planId: plan._id,
-        provider: "manual",
-      };
-    },
-  });
-  const subscription = mutation.subscription;
-  const previous = mutation.previous;
-  const oldValue = previous
-    ? {
-        status: previous.status,
-        seatCount: previous.seatCount,
-        currentPeriodEnd: previous.currentPeriodEnd,
-      }
-    : null;
-  const oldSubscriptionState = previous
-    ? {
-        status: previous.status,
-        seatCount: previous.seatCount,
-        pricePerSeat: previous.pricePerSeat,
-        totalPrice: previous.totalPrice,
-        currentPeriodStart: previous.currentPeriodStart,
-        currentPeriodEnd: previous.currentPeriodEnd,
-        lastPaymentAt: previous.lastPaymentAt,
-        trialEndsAt: previous.trialEndsAt,
-        cancelledAt: previous.cancelledAt,
-        payerId: previous.payerId,
-        planId: previous.planId,
-        provider: previous.provider,
-      }
-    : null;
-
-  // Create audit log
-  await createAuditLogOrRollback(
-    {
+    await createPlatformBillingAuditLog({
       actorId: actor._id,
       action: "salon_subscription.activate",
       salonId: salon._id,
@@ -135,35 +122,8 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
       note: note.trim(),
       requestIp,
     },
-    async () => {
-      if (oldSubscriptionState) {
-        if (Number.isInteger(subscription.__v)) {
-          const rollbackFilter = { _id: subscription._id, __v: subscription.__v };
-          if (Number.isInteger(oldSubscriptionState.seatCount)) {
-            rollbackFilter.$expr = {
-              $lte: [
-                { $ifNull: ["$activeSeatCount", 0] },
-                oldSubscriptionState.seatCount,
-              ],
-            };
-          }
-          await Subscription.findOneAndUpdate(
-            rollbackFilter,
-            { $set: oldSubscriptionState, $inc: { __v: 1 } },
-            { returnDocument: "after" }
-          );
-        } else {
-          Object.assign(subscription, oldSubscriptionState);
-          await subscription.save();
-        }
-      } else {
-        const filter = Number.isInteger(subscription.__v)
-          ? { _id: subscription._id, __v: subscription.__v }
-          : { _id: subscription._id };
-        await Subscription.deleteOne(filter);
-      }
-    }
-  );
+    session);
+  });
 
   // Return fresh billing detail
   return getSalonBillingDetail(salonId);
@@ -186,44 +146,43 @@ export const cancelSalonSubscription = async (salonId, { note, actor, requestIp 
     throw error;
   }
 
-  const salon = await Salon.findById(salonId).lean();
-  if (!salon) {
-    const error = new Error("Salon not found");
-    error.statusCode = 404;
-    throw error;
-  }
+  await runPlatformBillingTransaction(async (session) => {
+    const salon = await Salon.findById(salonId, null, { session }).lean();
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  const subscription = await Subscription.findOne({
-    ownerType: "salon",
-    ownerId: salon._id,
-  });
-
-  if (!subscription) {
-    const error = new Error("Salon does not have a subscription");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const cancellableStatuses = ["trialing", "active", "past_due"];
-  if (!cancellableStatuses.includes(subscription.status)) {
-    const error = new Error(
-      `Subscription status "${subscription.status}" cannot be cancelled. Only trialing, active, or past_due subscriptions can be cancelled.`
+    const subscription = await Subscription.findOne(
+      { ownerType: "salon", ownerId: salon._id },
+      null,
+      { session }
     );
-    error.statusCode = 400;
-    throw error;
-  }
+    if (!subscription) {
+      const error = new Error("Salon does not have a subscription");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  const oldValue = {
-    status: subscription.status,
-    cancelledAt: subscription.cancelledAt,
-  };
+    const cancellableStatuses = ["trialing", "active", "past_due"];
+    if (!cancellableStatuses.includes(subscription.status)) {
+      const error = new Error(
+        `Subscription status "${subscription.status}" cannot be cancelled. Only trialing, active, or past_due subscriptions can be cancelled.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
 
-  subscription.status = "cancelled";
-  subscription.cancelledAt = new Date();
-  await subscription.save();
+    const oldValue = {
+      status: subscription.status,
+      cancelledAt: subscription.cancelledAt,
+    };
+    subscription.status = "cancelled";
+    subscription.cancelledAt = new Date();
+    await subscription.save({ session });
 
-  await createAuditLogOrRollback(
-    {
+    await createPlatformBillingAuditLog({
       actorId: actor._id,
       action: "salon_subscription.cancel",
       salonId: salon._id,
@@ -233,12 +192,8 @@ export const cancelSalonSubscription = async (salonId, { note, actor, requestIp 
       note: note.trim(),
       requestIp,
     },
-    async () => {
-      subscription.status = oldValue.status;
-      subscription.cancelledAt = oldValue.cancelledAt;
-      await subscription.save();
-    }
-  );
+    session);
+  });
 
   return getSalonBillingDetail(salonId);
 };

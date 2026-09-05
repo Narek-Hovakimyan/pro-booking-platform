@@ -3,7 +3,10 @@ import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
-import { createAuditLogOrRollback } from "./platformBillingAuditHelpers.js";
+import {
+  createPlatformBillingAuditLog,
+  runPlatformBillingTransaction,
+} from "./platformBillingAuditHelpers.js";
 import { finalizeSubscriptionPaymentAttempt } from "../payment/paymentAttemptService.js";
 import { getIdString } from "./platformBillingCalculations.js";
 import { serializePaymentAttempt } from "./platformBillingSerializers.js";
@@ -33,7 +36,6 @@ import {
 } from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
 import {
   assignActiveSeat,
-  deleteActiveSeat,
   revokeActiveSeat,
   updateSubscriptionSeatCount,
 } from "../subscription/seatCapacityMutations.js";
@@ -48,7 +50,7 @@ export {
   getSalonPayments,
 };
 
-const createPlatformAuditLog = async (payload, session) =>
+const createPaymentConfirmationAuditLog = async (payload, session) =>
   createWithRequiredSession(
     PlatformAuditLog,
     {
@@ -65,27 +67,10 @@ const createPlatformAuditLog = async (payload, session) =>
     },
     session
   );
+
 export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, requestIp } = {}) => {
   if (!note || !note.trim()) {
     const error = new Error("note is required");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const salon = await Salon.findById(salonId).lean();
-  if (!salon) {
-    const error = new Error("Salon not found");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const subscription = await Subscription.findOne({
-    ownerType: "salon",
-    ownerId: salon._id,
-  });
-
-  if (!subscription) {
-    const error = new Error("Salon does not have a subscription");
     error.statusCode = 400;
     throw error;
   }
@@ -98,16 +83,35 @@ export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, re
   }
   const newCount = numericSeatCount;
 
-  const oldValue = { seatCount: subscription.seatCount };
-  const updatedSubscription = await updateSubscriptionSeatCount({
-    subscriptionId: subscription._id,
-    seatCount: newCount,
-    capacityMessage: `Cannot set seat count below ${subscription.activeSeatCount || 0} used seats. Revoke seats first.`,
-    subscription,
-  });
+  await runPlatformBillingTransaction(async (session) => {
+    const salon = await Salon.findById(salonId, null, { session }).lean();
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  await createAuditLogOrRollback(
-    {
+    const subscription = await Subscription.findOne(
+      { ownerType: "salon", ownerId: salon._id },
+      null,
+      { session }
+    );
+    if (!subscription) {
+      const error = new Error("Salon does not have a subscription");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const oldValue = { seatCount: subscription.seatCount };
+    const updatedSubscription = await updateSubscriptionSeatCount({
+      subscriptionId: subscription._id,
+      seatCount: newCount,
+      capacityMessage: `Cannot set seat count below ${subscription.activeSeatCount || 0} used seats. Revoke seats first.`,
+      session,
+      subscription,
+    });
+
+    await createPlatformBillingAuditLog({
       actorId: actor._id,
       action: "salon_subscription.seat_count_update",
       salonId: salon._id,
@@ -117,14 +121,8 @@ export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, re
       note: note.trim(),
       requestIp,
     },
-    async () => {
-      await updateSubscriptionSeatCount({
-        subscriptionId: updatedSubscription._id,
-        seatCount: oldValue.seatCount,
-        subscription: updatedSubscription,
-      });
-    }
-  );
+    session);
+  });
 
   return getSalonBillingDetail(salonId);
 };
@@ -142,69 +140,66 @@ export const assignSalonSeat = async (salonId, { barberId, note, actor, requestI
     throw error;
   }
 
-  const salon = await Salon.findById(salonId).lean();
-  if (!salon) {
-    const error = new Error("Salon not found");
-    error.statusCode = 404;
-    throw error;
-  }
+  await runPlatformBillingTransaction(async (session) => {
+    const salon = await Salon.findById(salonId, null, { session }).lean();
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  const subscription = await Subscription.findOne({
-    ownerType: "salon",
-    ownerId: salon._id,
-  });
-
-  if (!subscription) {
-    const error = new Error("Salon does not have a subscription");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // Validate barber is accepted staff
-  const isAccepted = await isBarberAcceptedStaffForSalon(barberId, salonId);
-  if (!isAccepted) {
-    // Check if rejected because barber is a chair_renter
-    const isChairRenter = await isBarberChairRenterForSalon(barberId, salonId);
-    if (isChairRenter) {
-      const error = new Error("Cannot assign a seat to a chair_renter");
+    const subscription = await Subscription.findOne(
+      { ownerType: "salon", ownerId: salon._id },
+      null,
+      { session }
+    );
+    if (!subscription) {
+      const error = new Error("Salon does not have a subscription");
       error.statusCode = 400;
       throw error;
     }
 
-    const error = new Error("Barber is not an accepted staff member of this salon");
-    error.statusCode = 400;
-    throw error;
-  }
+    const isAccepted = await isBarberAcceptedStaffForSalon(barberId, salonId);
+    if (!isAccepted) {
+      const isChairRenter = await isBarberChairRenterForSalon(barberId, salonId);
+      if (isChairRenter) {
+        const error = new Error("Cannot assign a seat to a chair_renter");
+        error.statusCode = 400;
+        throw error;
+      }
 
-  // Check for existing active seat (duplicate)
-  const existingSeat = await SubscriptionSeat.findOne({
-    subscriptionId: subscription._id,
-    barberId,
-    status: "active",
-  });
+      const error = new Error("Barber is not an accepted staff member of this salon");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  if (existingSeat) {
-    const error = new Error("Barber already has an active seat on this subscription");
-    error.statusCode = 400;
-    throw error;
-  }
+    const existingSeat = await SubscriptionSeat.findOne(
+      { subscriptionId: subscription._id, barberId, status: "active" },
+      null,
+      { session }
+    );
+    if (existingSeat) {
+      const error = new Error("Barber already has an active seat on this subscription");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  const { seat, idempotent } = await assignActiveSeat({
-    subscriptionId: subscription._id,
-    salonId: salon._id,
-    barberId,
-    assignedBy: actor._id,
-    subscription,
-    capacityMessage: `Seat cap reached (${subscription.seatCount}). Cannot assign more seats.`,
-  });
-  if (idempotent) {
-    const error = new Error("Barber already has an active seat on this subscription");
-    error.statusCode = 400;
-    throw error;
-  }
+    const { seat, idempotent } = await assignActiveSeat({
+      subscriptionId: subscription._id,
+      salonId: salon._id,
+      barberId,
+      assignedBy: actor._id,
+      session,
+      subscription,
+      capacityMessage: `Seat cap reached (${subscription.seatCount}). Cannot assign more seats.`,
+    });
+    if (idempotent) {
+      const error = new Error("Barber already has an active seat on this subscription");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  await createAuditLogOrRollback(
-    {
+    await createPlatformBillingAuditLog({
       actorId: actor._id,
       action: "salon_subscription.seat_assign",
       salonId: salon._id,
@@ -215,10 +210,8 @@ export const assignSalonSeat = async (salonId, { barberId, note, actor, requestI
       note: note.trim(),
       requestIp,
     },
-    async () => {
-      await deleteActiveSeat({ seatId: seat._id, subscriptionId: subscription._id, subscription });
-    }
-  );
+    session);
+  });
 
   return getSalonBillingDetail(salonId);
 };
@@ -236,52 +229,51 @@ export const revokeSalonSeat = async (salonId, { barberId, note, actor, requestI
     throw error;
   }
 
-  const salon = await Salon.findById(salonId).lean();
-  if (!salon) {
-    const error = new Error("Salon not found");
-    error.statusCode = 404;
-    throw error;
-  }
+  await runPlatformBillingTransaction(async (session) => {
+    const salon = await Salon.findById(salonId, null, { session }).lean();
+    if (!salon) {
+      const error = new Error("Salon not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  const subscription = await Subscription.findOne({
-    ownerType: "salon",
-    ownerId: salon._id,
-  });
+    const subscription = await Subscription.findOne(
+      { ownerType: "salon", ownerId: salon._id },
+      null,
+      { session }
+    );
+    if (!subscription) {
+      const error = new Error("Salon does not have a subscription");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  if (!subscription) {
-    const error = new Error("Salon does not have a subscription");
-    error.statusCode = 400;
-    throw error;
-  }
+    const existingSeat = await SubscriptionSeat.findOne(
+      { subscriptionId: subscription._id, barberId, status: "active" },
+      null,
+      { session }
+    );
+    if (!existingSeat) {
+      const error = new Error("Barber does not have an active seat on this subscription");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  // Find active seat
-  const existingSeat = await SubscriptionSeat.findOne({
-    subscriptionId: subscription._id,
-    barberId,
-    status: "active",
-  });
+    const oldValue = { seatId: existingSeat._id, barberId, status: existingSeat.status };
+    const revokedSeat = await revokeActiveSeat({
+      seatId: existingSeat._id,
+      subscriptionId: subscription._id,
+      session,
+      subscription,
+      seatDocument: existingSeat,
+    });
+    if (!revokedSeat) {
+      const error = new Error("Barber does not have an active seat on this subscription");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  if (!existingSeat) {
-    const error = new Error("Barber does not have an active seat on this subscription");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const oldValue = { seatId: existingSeat._id, barberId, status: existingSeat.status };
-  const revokedSeat = await revokeActiveSeat({
-    seatId: existingSeat._id,
-    subscriptionId: subscription._id,
-    subscription,
-    seatDocument: existingSeat,
-  });
-  if (!revokedSeat) {
-    const error = new Error("Barber does not have an active seat on this subscription");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  await createAuditLogOrRollback(
-    {
+    await createPlatformBillingAuditLog({
       actorId: actor._id,
       action: "salon_subscription.seat_revoke",
       salonId: salon._id,
@@ -292,17 +284,8 @@ export const revokeSalonSeat = async (salonId, { barberId, note, actor, requestI
       note: note.trim(),
       requestIp,
     },
-    async () => {
-      await assignActiveSeat({
-        subscriptionId: subscription._id,
-        salonId: salon._id,
-        barberId,
-        assignedBy: existingSeat.assignedBy,
-        now: existingSeat.assignedAt,
-        subscription,
-      });
-    }
-  );
+    session);
+  });
 
   return getSalonBillingDetail(salonId);
 };
@@ -373,7 +356,7 @@ export const confirmSalonPayment = async (paymentAttemptId, { note, actor, reque
     });
 
     if (!finalized.idempotent) {
-      await createPlatformAuditLog(
+      await createPaymentConfirmationAuditLog(
         {
           actorId: actor._id,
           action: "salon_subscription.payment_confirm",

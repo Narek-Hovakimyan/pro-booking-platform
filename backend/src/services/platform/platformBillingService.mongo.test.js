@@ -264,6 +264,49 @@ test(
 );
 
 test(
+  "real Mongo platform activation aborts both subscription mutation and audit on audit failure",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_audit_abort");
+    const ownerId = new mongoose.Types.ObjectId();
+    const salonId = new mongoose.Types.ObjectId();
+    const initialEnd = new Date("2030-02-01T00:00:00.000Z");
+
+    await User.create({
+      _id: ownerId,
+      name: "Audit Abort Owner",
+      phone: `+374${String(Date.now()).slice(-7)}3`,
+      email: `audit-abort-${Date.now()}@example.com`,
+      password: "hashed-password",
+      role: "barber",
+    });
+    await Salon.create({ _id: salonId, name: "Audit Abort Salon", city: "Yerevan", address: "1 Test St", phone: "+37410000003", ownerId });
+    const plan = await SubscriptionPlan.create({ name: "Barber Monthly", code: "barber_monthly", pricePerSeat: 5000, currency: "AMD", interval: "month", features: [], isActive: true });
+    const subscription = await Subscription.create({
+      ownerType: "salon", ownerId: salonId, ownerRefModel: "Salon", payerId: ownerId, planId: plan._id,
+      status: "active", seatCount: 1, pricePerSeat: 5000, totalPrice: 5000, provider: "manual",
+      currentPeriodStart: new Date("2030-01-01T00:00:00.000Z"), currentPeriodEnd: initialEnd,
+    });
+    PlatformAuditLog.create = async () => {
+      throw new Error("force activation audit failure");
+    };
+
+    await assert.rejects(
+      () => activateSalonSubscription(String(salonId), {
+        actor: { _id: actorId }, seatCount: 2, months: 1, note: "Audit failure", requestIp,
+      }),
+      /force activation audit failure/
+    );
+
+    const refreshed = await Subscription.findById(subscription._id).lean();
+    assert.equal(refreshed.status, "active");
+    assert.equal(refreshed.seatCount, 1);
+    assert.equal(refreshed.currentPeriodEnd.getTime(), initialEnd.getTime());
+    assert.equal(await PlatformAuditLog.countDocuments({ salonId }), 0);
+  }
+);
+
+test(
   "real Mongo confirmSalonPayment fails closed before mutation when a transaction session is unavailable",
   { skip: !REAL_MONGO_TESTS_ENABLED },
   async () => {

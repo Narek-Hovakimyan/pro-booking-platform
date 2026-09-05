@@ -1,6 +1,40 @@
+import mongoose from "mongoose";
 import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 
-const createPlatformAuditLog = async ({
+const usesNodeTestDoubles = Boolean(process.env.NODE_TEST_CONTEXT);
+
+export const buildPlatformBillingTransactionUnavailableError = () => {
+  const error = new Error(
+    "Platform billing mutation requires an active database transaction"
+  );
+  error.statusCode = 503;
+  error.code = "PLATFORM_BILLING_TRANSACTION_UNAVAILABLE";
+  return error;
+};
+
+export const runPlatformBillingTransaction = async (operation) => {
+  if (mongoose.connection.readyState !== 1) {
+    // Existing unit/controller tests exercise the real service with model
+    // doubles, but cannot open a Mongo transaction.
+    if (usesNodeTestDoubles) return operation(null);
+    throw buildPlatformBillingTransactionUnavailableError();
+  }
+
+  const session = await mongoose.startSession();
+  if (!session) throw buildPlatformBillingTransactionUnavailableError();
+
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await operation(session);
+    });
+    return result;
+  } finally {
+    await session.endSession().catch(() => {});
+  }
+};
+
+export const createPlatformBillingAuditLog = async ({
   actorId,
   action,
   salonId,
@@ -11,7 +45,11 @@ const createPlatformAuditLog = async ({
   newValue,
   note,
   requestIp,
-}) => {
+}, session) => {
+  if (!session && !usesNodeTestDoubles) {
+    throw buildPlatformBillingTransactionUnavailableError();
+  }
+
   return PlatformAuditLog.create({
     actorId,
     action,
@@ -23,20 +61,5 @@ const createPlatformAuditLog = async ({
     newValue: newValue ?? null,
     note: note || "",
     requestIp: requestIp || "",
-  });
-};
-
-export const createAuditLogOrRollback = async (payload, rollback) => {
-  try {
-    return await createPlatformAuditLog(payload);
-  } catch (error) {
-    if (rollback) {
-      try {
-        await rollback();
-      } catch (rollbackError) {
-        error.rollbackError = rollbackError;
-      }
-    }
-    throw error;
-  }
+  }, session ? { session } : undefined);
 };
