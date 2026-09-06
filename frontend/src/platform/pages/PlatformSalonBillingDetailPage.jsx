@@ -49,6 +49,7 @@ export default function PlatformSalonBillingDetailPage() {
   const [error, setError] = useState("");
   const [errorSalonId, setErrorSalonId] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [refreshWarning, setRefreshWarning] = useState("");
   const detailRequestRef = useRef(0);
   const paymentsRequestRef = useRef(0);
   const mutationRequestRef = useRef(0);
@@ -59,7 +60,7 @@ export default function PlatformSalonBillingDetailPage() {
   const [isSubmitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
   /* ── Data fetching ── */
-  const fetchDetail = useCallback(async () => {
+  const fetchDetail = useCallback(async ({ isReconciliation = false } = {}) => {
     const targetSalonId = String(salonId || "");
     const requestId = ++detailRequestRef.current;
     if (!targetSalonId) {
@@ -74,9 +75,16 @@ export default function PlatformSalonBillingDetailPage() {
       setDetail(result);
       setError("");
       setErrorSalonId("");
+      setRefreshWarning("");
       return result;
     } catch (err) {
       if (detailRequestRef.current !== requestId) return null;
+      if (isReconciliation) {
+        setRefreshWarning(
+          "Action succeeded, but the latest billing data could not be refreshed."
+        );
+        return null;
+      }
       setErrorSalonId(targetSalonId);
       if (err.response?.status === 403) {
         setError("Access denied. Platform superuser privileges required.");
@@ -121,6 +129,7 @@ export default function PlatformSalonBillingDetailPage() {
       setError("");
       setErrorSalonId("");
       setSuccessMessage("");
+      setRefreshWarning("");
       setModal(null);
       setModalError("");
       setSubmitting(false);
@@ -179,24 +188,32 @@ export default function PlatformSalonBillingDetailPage() {
     setSubmitting(true);
     setModalError("");
     try {
-      await apiCall(note);
+      const mutationResult = await apiCall(note);
       if (mutationRequestRef.current !== mutationId) return;
-      const refreshedDetail = await fetchDetail();
-      if (
-        mutationRequestRef.current !== mutationId ||
-        !refreshedDetail ||
-        getDetailSalonId(refreshedDetail) !== targetSalonId
-      ) {
-        return;
+
+      if (getDetailSalonId(mutationResult) === targetSalonId) {
+        setDetail(mutationResult);
+        setError("");
+        setErrorSalonId("");
+        setRefreshWarning("");
       }
-      await fetchPayments(targetSalonId);
-      if (mutationRequestRef.current !== mutationId) return;
+
       setSuccessMessage("Action completed successfully.");
       closeModal();
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
       successTimerRef.current = setTimeout(() => {
         if (mutationRequestRef.current === mutationId) setSuccessMessage("");
       }, 5000);
+
+      const refreshedDetail = await fetchDetail({ isReconciliation: true });
+      if (
+        mutationRequestRef.current !== mutationId ||
+        (refreshedDetail && getDetailSalonId(refreshedDetail) !== targetSalonId)
+      ) {
+        return;
+      }
+      await fetchPayments(targetSalonId);
+      if (mutationRequestRef.current !== mutationId) return;
     } catch (err) {
       if (mutationRequestRef.current !== mutationId) return;
       const status = err.response?.status;
@@ -360,6 +377,15 @@ export default function PlatformSalonBillingDetailPage() {
         onUpdateSeatCount={() => setModal({ type: "seatCount", salonId: String(salonId || "") })}
         onCancel={() => setModal({ type: "cancel", salonId: String(salonId || "") })}
       />
+      {refreshWarning && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{refreshWarning}</span>
+        </div>
+      )}
       <SalonBillingSummaryCards
         owner={currentDetail.owner}
         subscription={subscription}

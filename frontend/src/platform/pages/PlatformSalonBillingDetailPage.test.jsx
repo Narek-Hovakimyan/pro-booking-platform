@@ -32,11 +32,11 @@ vi.mock("@/shared/utils/platformAccess", () => ({
 }));
 
 vi.mock("../components/billing/SalonBillingHeader", () => ({
-  SalonBillingHeader: ({ salon, onActivate, successMessage }) => (
+  SalonBillingHeader: ({ salon, subscription, onActivate, successMessage }) => (
     <header>
       <h1>{salon?.name}</h1>
       <button type="button" onClick={onActivate}>
-        Open activation
+        {subscription ? "Renew subscription" : "Activate subscription"}
       </button>
       {successMessage && <p>{successMessage}</p>}
     </header>
@@ -44,7 +44,8 @@ vi.mock("../components/billing/SalonBillingHeader", () => ({
 }));
 
 vi.mock("../components/billing/SalonBillingSummaryCards", () => ({
-  SalonBillingSummaryCards: () => null,
+  SalonBillingSummaryCards: ({ subscription }) =>
+    subscription ? <p>Period end: {subscription.currentPeriodEnd}</p> : null,
 }));
 vi.mock("../components/billing/SalonBillingStaffTable", () => ({
   SalonBillingStaffTable: () => null,
@@ -72,11 +73,11 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function detailFor(id) {
+function detailFor(id, name = id === "salon-a" ? "Salon A" : "Salon B", subscription = null) {
   return {
-    salon: { id, name: id === "salon-a" ? "Salon A" : "Salon B" },
+    salon: { id, name },
     owner: null,
-    subscription: null,
+    subscription,
     seats: { assignments: [], total: 0, used: 0, available: 0 },
     acceptedStaff: [],
     latestPendingAttempt: null,
@@ -191,7 +192,7 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
 
     renderPage();
     await screen.findByRole("heading", { name: "Salon A" });
-    fireEvent.click(screen.getByRole("button", { name: "Open activation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
     fireEvent.change(screen.getByLabelText(/Audit note/), {
       target: { value: "A action" },
     });
@@ -219,7 +220,7 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
 
     renderPage();
     await screen.findByRole("heading", { name: "Salon A" });
-    fireEvent.click(screen.getByRole("button", { name: "Open activation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
     expect(screen.getByLabelText(/Audit note/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Go to B" }));
@@ -227,7 +228,7 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
     detailB.resolve(detailFor("salon-b"));
     await screen.findByRole("heading", { name: "Salon B" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open activation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
     fireEvent.change(screen.getByLabelText(/Audit note/), {
       target: { value: "B action" },
     });
@@ -259,13 +260,97 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
     });
   });
 
+  it("keeps a confirmed renewal successful when reconciliation fails", async () => {
+    const initialSubscription = {
+      id: "subscription-a",
+      status: "active",
+      provider: "manual",
+      seatCount: 2,
+      pricePerSeat: 5000,
+      totalPrice: 10000,
+      currentPeriodStart: "2026-01-01T00:00:00.000Z",
+      currentPeriodEnd: "2026-02-01T00:00:00.000Z",
+    };
+    const renewedSubscription = {
+      ...initialSubscription,
+      currentPeriodStart: "2026-02-01T00:00:00.000Z",
+      currentPeriodEnd: "2026-03-01T00:00:00.000Z",
+    };
+    const updatedDetail = detailFor("salon-a", "Salon A", renewedSubscription);
+    mocks.getDetail
+      .mockResolvedValueOnce(detailFor("salon-a", "Salon A", initialSubscription))
+      .mockRejectedValueOnce({
+        response: { status: 500, data: { message: "detail refresh unavailable" } },
+      });
+    mocks.activate.mockResolvedValue(updatedDetail);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Salon A" });
+    expect(screen.getByText("Period end: 2026-02-01T00:00:00.000Z")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Renew subscription" }));
+    fireEvent.change(screen.getByLabelText(/Audit note/), {
+      target: { value: "renew A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Renew" }));
+
+    expect(await screen.findByText("Period end: 2026-03-01T00:00:00.000Z")).toBeInTheDocument();
+    expect(screen.queryByText("Period end: 2026-02-01T00:00:00.000Z")).not.toBeInTheDocument();
+    expect(screen.getByText("Action completed successfully.")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Action succeeded, but the latest billing data could not be refreshed."
+    );
+    expect(screen.queryByLabelText(/Audit note/)).not.toBeInTheDocument();
+    expect(screen.queryByText("detail refresh unavailable")).not.toBeInTheDocument();
+    expect(mocks.activate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps mutation failure separate from a confirmed refresh warning", async () => {
+    mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
+    mocks.activate.mockRejectedValue({
+      response: { status: 400, data: { message: "Renewal was rejected" } },
+    });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Salon A" });
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
+    fireEvent.change(screen.getByLabelText(/Audit note/), {
+      target: { value: "renew A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+
+    expect(await screen.findByText("Renewal was rejected")).toBeInTheDocument();
+    expect(screen.queryByText("Action completed successfully.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Audit note/)).toBeInTheDocument();
+  });
+
+  it("does not submit the same action twice while the mutation is pending", async () => {
+    const activation = deferred();
+    mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
+    mocks.activate.mockReturnValue(activation.promise);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Salon A" });
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
+    fireEvent.change(screen.getByLabelText(/Audit note/), {
+      target: { value: "renew A" },
+    });
+    const confirmButton = screen.getByRole("button", { name: "Activate" });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(mocks.activate).toHaveBeenCalledTimes(1);
+    activation.resolve(detailFor("salon-a", "Salon A renewed"));
+    expect(await screen.findByText("Action completed successfully.")).toBeInTheDocument();
+  });
+
   it("keeps same-salon mutation refresh behavior intact", async () => {
     mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
     mocks.activate.mockResolvedValue({});
 
     renderPage();
     await screen.findByRole("heading", { name: "Salon A" });
-    fireEvent.click(screen.getByRole("button", { name: "Open activation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
     fireEvent.change(screen.getByLabelText(/Audit note/), {
       target: { value: "renew A" },
     });
