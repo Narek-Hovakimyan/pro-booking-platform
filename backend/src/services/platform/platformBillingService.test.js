@@ -1978,46 +1978,105 @@ test("getAllSalonBillingSummaries searches by salon name", async () => {
   assert.equal(result.salons.length, 1, "One salon matches search");
 });
 
-test("getAllSalonBillingSummaries applies active subscription filter before pagination", async () => {
-  const activeSubscriptionDoc = {
+test("getAllSalonBillingSummaries active filter only includes valid trialing and active periods", async () => {
+  const filterCases = [
+    { status: "active", currentPeriodEnd: new Date("2099-07-01"), included: true },
+    { status: "trialing", currentPeriodEnd: new Date("2099-07-01"), included: true },
+    { status: "active", currentPeriodEnd: new Date("2000-07-01"), included: false },
+    { status: "trialing", currentPeriodEnd: new Date("2000-07-01"), included: false },
+    { status: "cancelled", currentPeriodEnd: new Date("2099-07-01"), included: false },
+    { status: "cancelled", currentPeriodEnd: null, included: false },
+    { status: "past_due", currentPeriodEnd: new Date("2099-07-01"), included: false },
+    { status: "expired", currentPeriodEnd: new Date("2099-07-01"), included: false },
+    { status: "active", currentPeriodEnd: null, included: false },
+    { status: "trialing", currentPeriodEnd: null, included: false },
+  ];
+  const subscriptions = filterCases.map((entry, index) => ({
     ...subscriptionDoc,
-    currentPeriodStart: new Date("2026-06-01"),
-    currentPeriodEnd: new Date("2027-07-01"),
-  };
+    _id: oid(`64b00000000000000005${String(index).padStart(4, "0")}`),
+    ownerId: oid(`64b00000000000000001${String(index).padStart(4, "0")}`),
+    status: entry.status,
+    currentPeriodEnd: entry.currentPeriodEnd,
+  }));
   let capturedSalonFilter;
-  let subscriptionFindCallCount = 0;
 
   mockMethod(Salon, "countDocuments", async (filter) => {
     capturedSalonFilter = filter;
-    return 1;
+    return 2;
   });
   mockMethod(Salon, "find", (filter) => {
     capturedSalonFilter = filter;
-    return qc([{ ...salonDoc, ownerId }]);
+    return qc([]);
   });
-  mockMethod(Subscription, "find", () => {
-    subscriptionFindCallCount += 1;
-    return subscriptionFindCallCount === 1
-      ? qc([activeSubscriptionDoc, expiredSubscriptionDoc])
-      : qc([activeSubscriptionDoc]);
-  });
+  mockMethod(Subscription, "find", () => qc(subscriptions));
   mockMethod(User, "find", () => qc([ownerDoc]));
   mockMethod(SubscriptionPaymentAttempt, "aggregate", async () => []);
   mockMethod(SubscriptionSeat, "find", () => qc([]));
 
   const result = await getAllSalonBillingSummaries({
     subscriptionStatus: "active",
+    search: "Active",
     page: 1,
     limit: 20,
   });
 
   assert.ok(capturedSalonFilter._id?.$in, "Salon query constrained by active subscription ids");
+  assert.ok(capturedSalonFilter.$or, "Active filter composes with search");
   assert.deepEqual(
     capturedSalonFilter._id.$in.map((id) => id.toString()),
-    [salonId.toString()]
+    subscriptions
+      .filter((_, index) => filterCases[index].included)
+      .map((subscription) => subscription.ownerId.toString())
   );
-  assert.equal(result.total, 1);
-  assert.equal(result.salons.length, 1);
+  assert.equal(result.total, 2);
+  assert.equal(result.salons.length, 0);
+});
+
+test("getAllSalonBillingSummaries default listing retains cancelled and past-due salons", async () => {
+  const cancelledSalon = {
+    ...salonDoc,
+    _id: otherSalonId,
+    name: "Cancelled Salon",
+  };
+  const pastDueSalonId = oid("64b000000000000000010010");
+  const pastDueSalon = {
+    ...salonDoc,
+    _id: pastDueSalonId,
+    name: "Past Due Salon",
+  };
+  const cancelledSubscription = {
+    ...expiredSubscriptionDoc,
+    ownerId: otherSalonId,
+    status: "cancelled",
+    currentPeriodEnd: new Date("2099-07-01"),
+  };
+  const pastDueSubscription = {
+    ...subscriptionDoc,
+    _id: oid("64b000000000000000050010"),
+    ownerId: pastDueSalonId,
+    status: "past_due",
+    currentPeriodEnd: new Date("2099-07-01"),
+  };
+
+  mockMethod(Salon, "countDocuments", async (filter) => {
+    assert.deepEqual(filter, {});
+    return 2;
+  });
+  mockMethod(Salon, "find", (filter) => {
+    assert.deepEqual(filter, {});
+    return qc([cancelledSalon, pastDueSalon]);
+  });
+  mockMethod(Subscription, "find", () => qc([cancelledSubscription, pastDueSubscription]));
+  mockMethod(User, "find", () => qc([ownerDoc]));
+  mockMethod(SubscriptionPaymentAttempt, "aggregate", async () => []);
+  mockMethod(SubscriptionSeat, "find", () => qc([]));
+
+  const result = await getAllSalonBillingSummaries({ page: 1, limit: 20 });
+
+  assert.deepEqual(
+    result.salons.map((salon) => String(salon.id)).sort(),
+    [String(otherSalonId), String(pastDueSalonId)].sort()
+  );
 });
 
 test("getAllSalonBillingSummaries applies none subscription filter before pagination", async () => {

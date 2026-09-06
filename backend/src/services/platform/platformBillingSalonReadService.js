@@ -19,6 +19,15 @@ import {
   getAcceptedStaffBarbersForSalon,
   getSeatUsageForSalon,
 } from "./platformBillingSeatHelpers.js";
+import {
+  hasUnexpiredPeriod,
+  isSubscriptionStatusActive,
+} from "../subscription/subscriptionHelpers.js";
+
+const hasActiveSubscriptionForPlatformFilter = (subscription, now) =>
+  Boolean(subscription?.currentPeriodEnd) &&
+  isSubscriptionStatusActive(subscription.status) &&
+  hasUnexpiredPeriod(subscription, now);
 
 /**
  * Get paginated salon billing summaries for platform admin.
@@ -50,7 +59,7 @@ export const getAllSalonBillingSummaries = async ({
         .filter((sub) => {
           const serialized = serializeSubscriptionForPlatform(sub, now);
           return subscriptionStatus === "active"
-            ? !serialized.isExpired
+            ? hasActiveSubscriptionForPlatformFilter(sub, now)
             : serialized.isExpired;
         })
         .map((sub) => sub.ownerId)
