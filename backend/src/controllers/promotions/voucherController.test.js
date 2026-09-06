@@ -40,6 +40,7 @@ const originalScheduleFindOne = Schedule.findOne;
 const originalServiceFindOne = Service.findOne;
 const originalServiceFindById = Service.findById;
 const originalSubscriptionFindOne = Subscription.findOne;
+const originalSubscriptionSeatFind = SubscriptionSeat.find;
 const originalSubscriptionSeatFindOne = SubscriptionSeat.findOne;
 const originalUserFindById = User.findById;
 
@@ -79,6 +80,7 @@ afterEach(() => {
   Service.findOne = originalServiceFindOne;
   Service.findById = originalServiceFindById;
   Subscription.findOne = originalSubscriptionFindOne;
+  SubscriptionSeat.find = originalSubscriptionSeatFind;
   SubscriptionSeat.findOne = originalSubscriptionSeatFindOne;
   User.findById = originalUserFindById;
 });
@@ -89,7 +91,7 @@ beforeEach(() => {
     status: "active",
     currentPeriodEnd: new Date(Date.now() + 60_000),
   });
-  SubscriptionSeat.findOne = () => chainableSelect(null);
+  SubscriptionSeat.find = () => chainableSelect([]);
   User.findById = () => chainableSelect({ _id: barberA._id, role: "barber", salons: [] });
   BarberProfile.findOne = () => chainableSelect({ barberId: barberA._id, address: "1 Main St" });
   Schedule.findOne = () => chainableSelect(createCanonicalPersonalSchedule());
@@ -227,7 +229,7 @@ test("barber can create barber-scoped voucher", async () => {
 
 test("unpaid barber cannot create a barber-scoped voucher", async () => {
   Subscription.findOne = () => chainableSelect(null);
-  SubscriptionSeat.findOne = () => chainableSelect(null);
+  SubscriptionSeat.find = () => chainableSelect([]);
   Voucher.create = async () => {
     throw new Error("must not create");
   };
@@ -349,7 +351,7 @@ test("active salon permits an unpaid authorized manager to create a voucher", as
       ? { status: "active", currentPeriodEnd: new Date(Date.now() + 60_000) }
       : null
   );
-  SubscriptionSeat.findOne = () => {
+  SubscriptionSeat.find = () => {
     throw new Error("salon voucher access must not require a manager seat");
   };
   Voucher.findOne = () => chainableSelect(null);
@@ -378,7 +380,7 @@ for (const [name, seat] of [
         ? { status: "active", currentPeriodEnd: new Date(Date.now() + 60_000) }
         : null
     );
-    SubscriptionSeat.findOne = () => chainableSelect(seat);
+    SubscriptionSeat.find = () => chainableSelect([seat]);
     Voucher.create = async () => {
       throw new Error("must not create");
     };

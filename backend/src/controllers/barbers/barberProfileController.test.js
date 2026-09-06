@@ -1328,11 +1328,9 @@ test("getProfileByBarberId returns 404 for unpaid barber", async () => {
   User.findById = () => ({
     select: async () => barber,
   });
-  // barberHasPaidAccess calls findOne on Subscription and SubscriptionSeat
+  // barberHasPaidAccess checks the individual subscription, then enumerates active seats.
   Subscription.findOne = async () => null;
-  SubscriptionSeat.findOne = () => ({
-    populate: async () => null,
-  });
+  SubscriptionSeat.find = () => createFindChain([]);
 
   await getProfileByBarberId({ params: { barberId: unpaidBarberId } }, res);
 
