@@ -9,7 +9,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { NavLink, useSearchParams } from "react-router-dom";
 
@@ -133,6 +133,8 @@ export default function PlatformIndividualBillingPage() {
   const [error, setError] = useState("");
   const [expandedBarberId, setExpandedBarberId] = useState("");
   const [paymentState, setPaymentState] = useState({});
+  const paymentRequestRef = useRef(0);
+  const isPaymentLifecycleMountedRef = useRef(false);
 
   const isPlatformAdmin = canAccessPlatform(currentUser);
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -188,11 +190,28 @@ export default function PlatformIndividualBillingPage() {
     setSearchParams(params, { replace: true });
   }, [page, search, subscriptionStatus, hasExplicitStatus, setSearchParams]);
 
+  useEffect(() => {
+    isPaymentLifecycleMountedRef.current = true;
+
+    return () => {
+      isPaymentLifecycleMountedRef.current = false;
+      paymentRequestRef.current += 1;
+    };
+  }, []);
+
   const loadPayments = async (barberId, nextPage = 1) => {
+    const requestId = ++paymentRequestRef.current;
+    const paymentKey = String(barberId);
+    const isCurrentRequest = () =>
+      isPaymentLifecycleMountedRef.current &&
+      paymentRequestRef.current === requestId;
+
+    if (!isCurrentRequest()) return;
+
     setPaymentState((state) => ({
       ...state,
-      [barberId]: {
-        ...(state[barberId] || {}),
+      [paymentKey]: {
+        ...(state[paymentKey] || {}),
         isLoading: true,
         error: "",
       },
@@ -203,9 +222,10 @@ export default function PlatformIndividualBillingPage() {
         page: nextPage,
         limit: 10,
       });
+      if (!isCurrentRequest()) return;
       setPaymentState((state) => ({
         ...state,
-        [barberId]: {
+        [paymentKey]: {
           payments: result.payments || [],
           total: result.total || 0,
           page: result.page || nextPage,
@@ -215,10 +235,11 @@ export default function PlatformIndividualBillingPage() {
         },
       }));
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setPaymentState((state) => ({
         ...state,
-        [barberId]: {
-          ...(state[barberId] || {}),
+        [paymentKey]: {
+          ...(state[paymentKey] || {}),
           isLoading: false,
           error:
             err.response?.data?.message ||
@@ -242,9 +263,12 @@ export default function PlatformIndividualBillingPage() {
 
   const handleTogglePayments = (barberId) => {
     if (expandedBarberId === barberId) {
+      paymentRequestRef.current += 1;
       setExpandedBarberId("");
       return;
     }
+
+    paymentRequestRef.current += 1;
     setExpandedBarberId(barberId);
     if (!paymentState[barberId]?.payments) {
       loadPayments(barberId, 1);
