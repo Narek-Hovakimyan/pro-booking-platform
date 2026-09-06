@@ -51,6 +51,21 @@ function getStatusLabel(status) {
   return STATUS_OPTIONS.find((option) => option.value === status)?.label || status;
 }
 
+function getOnboardingStatusLabel(application) {
+  if (application.status !== "accepted") return "";
+
+  switch (application.onboardingStatus) {
+    case "pending_consent":
+      return "Waiting for applicant confirmation.";
+    case "confirmed":
+      return "Salon onboarding confirmed.";
+    case "blocked":
+      return "Automatic onboarding unavailable; manual follow-up may be needed.";
+    default:
+      return "Onboarding status unavailable; manual follow-up.";
+  }
+}
+
 export default function JobApplicationsDialog({ job, onClose }) {
   const [applications, setApplications] = useState([]);
   const [error, setError] = useState("");
@@ -210,6 +225,7 @@ export default function JobApplicationsDialog({ job, onClose }) {
                 const applicationId = getApplicationId(application);
                 const isUpdating = updatingApplicationId === applicationId;
                 const submittedDate = formatDate(application.createdAt);
+                const onboardingStatusLabel = getOnboardingStatusLabel(application);
 
                 return (
                   <article
@@ -313,6 +329,11 @@ export default function JobApplicationsDialog({ job, onClose }) {
                         >
                           {getStatusLabel(application.status)}
                         </span>
+                        {onboardingStatusLabel && (
+                          <p className="text-center text-xs text-neutral-600">
+                            {onboardingStatusLabel}
+                          </p>
+                        )}
                         <label className="grid gap-1 text-sm font-medium text-neutral-700">
                           Status
                           <select
