@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useNavigate } from "react-router-dom";
 
@@ -32,12 +33,17 @@ vi.mock("@/shared/utils/platformAccess", () => ({
 }));
 
 vi.mock("../components/billing/SalonBillingHeader", () => ({
-  SalonBillingHeader: ({ salon, subscription, onActivate, successMessage }) => (
+  SalonBillingHeader: ({ salon, subscription, onActivate, onCancel, successMessage }) => (
     <header>
       <h1>{salon?.name}</h1>
       <button type="button" onClick={onActivate}>
         {subscription ? "Renew subscription" : "Activate subscription"}
       </button>
+      {subscription?.status === "active" && (
+        <button type="button" onClick={onCancel}>
+          Cancel subscription
+        </button>
+      )}
       {successMessage && <p>{successMessage}</p>}
     </header>
   ),
@@ -342,6 +348,39 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
     expect(mocks.activate).toHaveBeenCalledTimes(1);
     activation.resolve(detailFor("salon-a", "Salon A renewed"));
     expect(await screen.findByText("Action completed successfully.")).toBeInTheDocument();
+  });
+
+  it("moves focus to the page fallback when cancellation removes its trigger", async () => {
+    const user = userEvent.setup();
+    const activeSubscription = {
+      id: "subscription-a",
+      status: "active",
+      provider: "manual",
+      seatCount: 1,
+    };
+    const cancelledDetail = detailFor("salon-a", "Salon A", {
+      ...activeSubscription,
+      status: "cancelled",
+    });
+    mocks.getDetail
+      .mockResolvedValueOnce(detailFor("salon-a", "Salon A", activeSubscription))
+      .mockRejectedValueOnce({ response: { status: 500 } });
+    mocks.cancel.mockResolvedValue(cancelledDetail);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Salon A" });
+    await user.click(screen.getByRole("button", { name: "Cancel subscription" }));
+    await user.type(screen.getByLabelText(/Audit note/), "cancelled by platform");
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Cancel subscription" })).getByRole(
+        "button",
+        { name: "Cancel subscription" }
+      )
+    );
+
+    await screen.findByText("Action completed successfully.");
+    expect(screen.queryByRole("button", { name: "Cancel subscription" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Salon billing detail" })).toHaveFocus();
   });
 
   it("keeps same-salon mutation refresh behavior intact", async () => {

@@ -1,6 +1,25 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { XCircle } from "lucide-react";
 import { Button } from "../../../shared/components/ui/button";
+
+const isConnectedFocusableElement = (element) =>
+  element instanceof HTMLElement &&
+  element !== document.body &&
+  element.isConnected &&
+  !element.matches(":disabled");
+
+const getFocusableElements = (container) =>
+  Array.from(
+    container?.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) || []
+  ).filter(
+    (element) =>
+      element instanceof HTMLElement &&
+      !element.hidden &&
+      !element.closest('[aria-hidden="true"]') &&
+      element.tabIndex >= 0
+  );
 
 export function PlatformActionModal({
   isOpen,
@@ -12,8 +31,48 @@ export function PlatformActionModal({
   isSubmitting = false,
   error = "",
   children,
+  fallbackFocusRef,
 }) {
   const [note, setNote] = useState("");
+  const dialogRef = useRef(null);
+  const cancelButtonRef = useRef(null);
+  const openerRef = useRef(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const errorId = useId();
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    openerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    cancelButtonRef.current?.focus();
+
+    return () => {
+      const opener = openerRef.current;
+      const fallback = fallbackFocusRef?.current;
+      const focusTarget =
+        isConnectedFocusableElement(opener)
+          ? opener
+          : isConnectedFocusableElement(fallback)
+            ? fallback
+            : null;
+
+      focusTarget?.focus();
+    };
+  }, [fallbackFocusRef, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !isSubmitting) return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (!getFocusableElements(dialog).includes(document.activeElement)) {
+      dialog.focus();
+    }
+  }, [isOpen, isSubmitting]);
 
   const handleConfirm = () => {
     const trimmed = note.trim();
@@ -21,17 +80,65 @@ export function PlatformActionModal({
     onConfirm(trimmed);
   };
 
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!isSubmitting) {
+        onClose();
+      }
+      return;
+    }
+
+    if (event.key !== "Tab") return;
+
+    const focusableElements = getFocusableElements(dialogRef.current);
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (!firstElement || !lastElement) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+
+    if (document.activeElement === dialogRef.current) {
+      event.preventDefault();
+      (event.shiftKey ? lastElement : firstElement).focus();
+    } else if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+    } else if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-3 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="w-full max-w-md space-y-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:rounded-3xl sm:p-6">
+      <div
+        ref={dialogRef}
+        aria-busy={isSubmitting}
+        aria-describedby={[warning && descriptionId, error && errorId].filter(Boolean).join(" ") || undefined}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="w-full max-w-md space-y-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl sm:rounded-3xl sm:p-6"
+        onKeyDown={handleKeyDown}
+        role="dialog"
+        tabIndex={-1}
+      >
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold sm:text-2xl">{title}</h2>
+            <h2 id={titleId} className="text-xl font-bold sm:text-2xl">
+              {title}
+            </h2>
             {warning && (
-              <p className="mt-2 text-sm text-neutral-600">{warning}</p>
+              <p id={descriptionId} className="mt-2 text-sm text-neutral-600">
+                {warning}
+              </p>
             )}
           </div>
           <Button
@@ -70,14 +177,21 @@ export function PlatformActionModal({
 
         {/* Error */}
         {error && (
-          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <p
+            id={errorId}
+            className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            role="alert"
+          >
             {error}
           </p>
         )}
 
+        {isSubmitting && <span className="sr-only" role="status">Action in progress.</span>}
+
         {/* Buttons */}
         <div className="grid gap-2 sm:flex sm:justify-end">
           <Button
+            ref={cancelButtonRef}
             className="w-full sm:w-auto"
             disabled={isSubmitting}
             onClick={onClose}

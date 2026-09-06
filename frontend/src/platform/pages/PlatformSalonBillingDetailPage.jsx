@@ -55,6 +55,7 @@ export default function PlatformSalonBillingDetailPage() {
   const mutationRequestRef = useRef(0);
   const currentRouteSalonIdRef = useRef("");
   const successTimerRef = useRef(null);
+  const modalFallbackFocusRef = useRef(null);
   /* ── Modal state ── */
   const [modal, setModal] = useState(null); // { type, extra }
   const [isSubmitting, setSubmitting] = useState(false);
@@ -366,7 +367,13 @@ export default function PlatformSalonBillingDetailPage() {
     );
   }
   return (
-    <div className="space-y-6">
+    <div
+      ref={modalFallbackFocusRef}
+      aria-label="Salon billing detail"
+      className="space-y-6"
+      role="region"
+      tabIndex={-1}
+    >
       <SalonBillingHeader
         salon={currentDetail.salon}
         subscription={subscription}
@@ -429,6 +436,7 @@ export default function PlatformSalonBillingDetailPage() {
         confirmLabel={subscription ? "Renew" : "Activate"}
         isSubmitting={isSubmitting}
         error={modalError}
+        fallbackFocusRef={modalFallbackFocusRef}
       >
         {!subscription && (
           <div className="space-y-3">
@@ -496,6 +504,7 @@ export default function PlatformSalonBillingDetailPage() {
         confirmLabel="Update"
         isSubmitting={isSubmitting}
         error={modalError}
+        fallbackFocusRef={modalFallbackFocusRef}
       >
         <div>
           <label
@@ -538,6 +547,7 @@ export default function PlatformSalonBillingDetailPage() {
         confirmLabel="Assign"
         isSubmitting={isSubmitting}
         error={modalError}
+        fallbackFocusRef={modalFallbackFocusRef}
       >
         {!modal?.extra?.barberId ? (
           <div>
@@ -602,6 +612,7 @@ export default function PlatformSalonBillingDetailPage() {
         confirmLabel="Revoke"
         isSubmitting={isSubmitting}
         error={modalError}
+        fallbackFocusRef={modalFallbackFocusRef}
       >
         {!modal?.extra?.barberId && (
           <div>
@@ -655,6 +666,7 @@ export default function PlatformSalonBillingDetailPage() {
         confirmLabel="Cancel subscription"
         isSubmitting={isSubmitting}
         error={modalError}
+        fallbackFocusRef={modalFallbackFocusRef}
       />
       {/* Confirm payment */}
       <PlatformActionModal
@@ -667,6 +679,7 @@ export default function PlatformSalonBillingDetailPage() {
         confirmLabel="Confirm payment"
         isSubmitting={isSubmitting}
         error={modalError}
+        fallbackFocusRef={modalFallbackFocusRef}
       />
     </div>
   );
