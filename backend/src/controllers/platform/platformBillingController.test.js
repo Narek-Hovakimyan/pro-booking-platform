@@ -251,6 +251,66 @@ test("activateSubscription preserves authenticated actor, body values, note, and
   assert.equal(res.statusCode, 200);
 });
 
+test("activateSubscription preserves existing capacity when the request omits seatCount", async () => {
+  const subscription = saveable({
+    _id: oid("21011"),
+    __v: 0,
+    ownerType: "salon",
+    ownerId: salonId,
+    status: "active",
+    seatCount: 5,
+    activeSeatCount: 4,
+    pricePerSeat: 5000,
+    totalPrice: 25000,
+    currentPeriodStart: new Date("2099-01-01T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2099-02-01T00:00:00.000Z"),
+    lastPaymentAt: null,
+    trialEndsAt: null,
+    cancelledAt: null,
+    payerId: ownerId,
+    planId: oid("21012"),
+    provider: "manual",
+  });
+  let persistedSubscription;
+  let auditPayload;
+  installCommonReadMocks(subscription);
+  Subscription.findOneAndUpdate = async (_filter, update) => {
+    persistedSubscription = saveable({
+      ...subscription,
+      ...update.$set,
+      __v: subscription.__v + 1,
+    });
+    return persistedSubscription;
+  };
+  SubscriptionPlan.findOne = async () => ({
+    _id: oid("21013"),
+    pricePerSeat: 5000,
+    currency: "AMD",
+  });
+  PlatformAuditLog.create = async (payload) => {
+    auditPayload = payload;
+    return payload;
+  };
+
+  const res = createResponse();
+  await activateSubscription(
+    {
+      params: { salonId: salonId.toString() },
+      body: { months: "1", note: "  preserve existing capacity  " },
+      user: actor,
+      ip: requestIp,
+    },
+    res,
+    assert.fail
+  );
+
+  assert.equal(persistedSubscription.seatCount, 5);
+  assert.equal(persistedSubscription.totalPrice, 25000);
+  assert.equal(auditPayload.oldValue.seatCount, 5);
+  assert.equal(auditPayload.newValue.seatCount, 5);
+  assert.equal(res.statusCode, 200);
+});
+
 test("assignSeat preserves authenticated actor, barberId, note, and socket request IP", async () => {
   const subscription = saveable({
     _id: oid("30001"),

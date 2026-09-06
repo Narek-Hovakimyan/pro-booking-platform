@@ -140,6 +140,70 @@ const createFixture = async ({ providerPaymentId, attemptStatus = "pending" }) =
   return { attempt, salonId, ownerId, subscriptionId };
 };
 
+const createActivationFixture = async ({
+  status = "active",
+  seatCount = 5,
+  activeSeatCount = 0,
+  currentPeriodEnd = new Date("2030-02-01T00:00:00.000Z"),
+} = {}) => {
+  const ownerId = new mongoose.Types.ObjectId();
+  const salonId = new mongoose.Types.ObjectId();
+  const planId = new mongoose.Types.ObjectId();
+
+  await User.create({
+    _id: ownerId,
+    name: "Activation Owner",
+    phone: `+374${String(Date.now()).slice(-7)}${String(Math.floor(Math.random() * 10))}`,
+    email: `activation-owner-${salonId}@example.com`,
+    password: "hashed-password",
+    role: "barber",
+  });
+  await Salon.create({
+    _id: salonId,
+    name: "Activation Salon",
+    city: "Yerevan",
+    address: "10 Test St",
+    phone: "+37410000004",
+    ownerId,
+  });
+  await SubscriptionPlan.create({
+    _id: planId,
+    name: "Barber Monthly",
+    code: "barber_monthly",
+    pricePerSeat: 5000,
+    currency: "AMD",
+    interval: "month",
+    features: [],
+    isActive: true,
+  });
+  const subscription = await Subscription.create({
+    ownerType: "salon",
+    ownerId: salonId,
+    ownerRefModel: "Salon",
+    payerId: ownerId,
+    planId,
+    status,
+    seatCount,
+    activeSeatCount,
+    pricePerSeat: 5000,
+    totalPrice: seatCount * 5000,
+    provider: "manual",
+    currentPeriodStart: new Date("2030-01-01T00:00:00.000Z"),
+    currentPeriodEnd,
+  });
+  await SubscriptionSeat.create(
+    Array.from({ length: activeSeatCount }, () => ({
+      subscriptionId: subscription._id,
+      salonId,
+      barberId: new mongoose.Types.ObjectId(),
+      assignedBy: ownerId,
+      status: "active",
+    }))
+  );
+
+  return { salonId, subscriptionId: subscription._id };
+};
+
 test(
   "real Mongo simultaneous platform activations preserve both extensions",
   { skip: !REAL_MONGO_TESTS_ENABLED },
@@ -207,6 +271,61 @@ test(
       await PlatformAuditLog.countDocuments({ action: "salon_subscription.activate", salonId }),
       2
     );
+  }
+);
+
+test(
+  "real Mongo platform activation preserves omitted multi-seat capacity with active assignments",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_omitted_active_seats");
+    const { salonId, subscriptionId } = await createActivationFixture({
+      seatCount: 5,
+      activeSeatCount: 4,
+    });
+
+    const result = await activateSalonSubscription(String(salonId), {
+      actor: { _id: actorId },
+      note: "Renew without seat count",
+      requestIp,
+    });
+
+    const refreshed = await Subscription.findById(subscriptionId).lean();
+    assert.equal(result.subscription.seatCount, 5);
+    assert.equal(refreshed.seatCount, 5);
+    assert.equal(refreshed.totalPrice, 25000);
+    assert.equal(refreshed.activeSeatCount, 4);
+    assert.equal(
+      await PlatformAuditLog.countDocuments({
+        action: "salon_subscription.activate",
+        salonId,
+        "oldValue.seatCount": 5,
+        "newValue.seatCount": 5,
+      }),
+      1
+    );
+  }
+);
+
+test(
+  "real Mongo platform activation does not shrink idle existing capacity when seatCount is omitted",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_omitted_idle_seats");
+    const { salonId, subscriptionId } = await createActivationFixture({
+      seatCount: 5,
+      activeSeatCount: 0,
+    });
+
+    await activateSalonSubscription(String(salonId), {
+      actor: { _id: actorId },
+      note: "Renew idle capacity",
+      requestIp,
+    });
+
+    const refreshed = await Subscription.findById(subscriptionId).lean();
+    assert.equal(refreshed.seatCount, 5);
+    assert.equal(refreshed.totalPrice, 25000);
   }
 );
 

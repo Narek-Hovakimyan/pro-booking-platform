@@ -18,13 +18,16 @@ import { getOrCreateDefaultSubscriptionPlanWithSession } from "../subscription/s
  *
  * @param {string} salonId
  * @param {Object} options
- * @param {number} [options.seatCount=1]
+ * @param {number} [options.seatCount]
  * @param {number} [options.months=1]
  * @param {string} options.note - Required reason for activation
  * @param {Object} options.actor - req.user (platform admin)
  * @returns {Object} Updated salon billing detail
  */
-export const activateSalonSubscription = async (salonId, { seatCount = 1, months = 1, note, actor, requestIp } = {}) => {
+export const activateSalonSubscription = async (salonId, options = {}) => {
+  const { months = 1, note, actor, requestIp } = options;
+  const hasSeatCount = options.seatCount !== undefined;
+
   if (!note || !note.trim()) {
     const error = new Error("note is required");
     error.statusCode = 400;
@@ -39,13 +42,15 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
       throw error;
     }
 
-    const normalizedSeatCount = Math.max(1, Math.floor(Number(seatCount) || 1));
+    const normalizeSeatCount = (value) => Math.max(1, Math.floor(Number(value) || 1));
+    const requestedSeatCount = hasSeatCount
+      ? normalizeSeatCount(options.seatCount)
+      : null;
     const normalizedMonths = Math.max(1, Math.floor(Number(months) || 1));
     const plan = session
       ? await getOrCreateDefaultSubscriptionPlanWithSession(session)
       : await getOrCreateDefaultSubscriptionPlan();
     const now = new Date();
-    const monthlyTotal = plan.pricePerSeat * normalizedSeatCount;
     const extendFrom = (periodStart) => {
       const periodEnd = new Date(periodStart);
       periodEnd.setMonth(periodEnd.getMonth() + normalizedMonths);
@@ -57,6 +62,7 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
       session,
       createPayload: () => {
         const periodStart = now;
+        const seatCount = requestedSeatCount ?? 1;
         return {
           ownerType: "salon",
           ownerId: salon._id,
@@ -64,9 +70,9 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
           payerId: salon.ownerId,
           planId: plan._id,
           status: "active",
-          seatCount: normalizedSeatCount,
+          seatCount,
           pricePerSeat: plan.pricePerSeat,
-          totalPrice: monthlyTotal,
+          totalPrice: plan.pricePerSeat * seatCount,
           currentPeriodStart: periodStart,
           currentPeriodEnd: extendFrom(periodStart),
           provider: "manual",
@@ -74,7 +80,8 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
         };
       },
       updatePayload: (subscription) => {
-        assertSeatCountCanContainActiveSeats(subscription, normalizedSeatCount);
+        const seatCount = requestedSeatCount ?? subscription.seatCount;
+        assertSeatCountCanContainActiveSeats(subscription, seatCount);
         const isContinuing =
           ["trialing", "active"].includes(subscription.status) &&
           subscription.currentPeriodEnd &&
@@ -85,9 +92,9 @@ export const activateSalonSubscription = async (salonId, { seatCount = 1, months
 
         return {
           status: "active",
-          seatCount: normalizedSeatCount,
+          seatCount,
           pricePerSeat: plan.pricePerSeat,
-          totalPrice: monthlyTotal,
+          totalPrice: plan.pricePerSeat * seatCount,
           currentPeriodStart: periodStart,
           currentPeriodEnd: extendFrom(periodStart),
           lastPaymentAt: now,

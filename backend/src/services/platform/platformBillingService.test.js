@@ -2075,6 +2075,44 @@ const mockPostMutationDetail = (subscription = subscriptionDoc, seats = []) => {
   return subscription;
 };
 
+const setupActivationMutationMocks = ({ currentSubscription = saveableDoc(subscriptionDoc) } = {}) => {
+  let detailSubscription = currentSubscription;
+  let subscriptionFindCalls = 0;
+  let auditPayload;
+
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(SubscriptionPlan, "findOne", () => Promise.resolve(planDoc));
+  mockMethod(Subscription, "findOne", () => {
+    subscriptionFindCalls += 1;
+    return subscriptionFindCalls === 1
+      ? Promise.resolve(currentSubscription)
+      : qc(detailSubscription);
+  });
+  mockMethod(Subscription, "create", async (payload) => {
+    const subscriptionPayload = Array.isArray(payload) ? payload[0] : payload;
+    detailSubscription = saveableDoc({
+      _id: subscriptionId,
+      ...subscriptionPayload,
+      activeSeatCount: 0,
+    });
+    return Array.isArray(payload) ? [detailSubscription] : detailSubscription;
+  });
+  mockMethod(PlatformAuditLog, "create", async (payload) => {
+    auditPayload = payload;
+    return payload;
+  });
+  mockPostMutationDetail();
+
+  return {
+    get auditPayload() {
+      return auditPayload;
+    },
+    get detailSubscription() {
+      return detailSubscription;
+    },
+  };
+};
+
 test("activateSalonSubscription requires note before mutation", async () => {
   let salonRead = false;
   mockMethod(Salon, "findById", () => {
@@ -2121,6 +2159,168 @@ test("activateSalonSubscription creates one audit log with subscriptionId and re
   assert.equal(auditPayload.subscriptionId.toString(), subscriptionId.toString());
   assert.equal(auditPayload.note, "Manual renewal");
   assert.equal(auditPayload.requestIp, requestIp);
+});
+
+test("activateSalonSubscription preserves omitted seatCount for active, trial, expired, and cancelled subscriptions", async () => {
+  const scenarios = [
+    {
+      status: "active",
+      activeSeatCount: 4,
+      currentPeriodEnd: new Date("2099-07-01"),
+    },
+    {
+      status: "trialing",
+      activeSeatCount: 2,
+      currentPeriodEnd: new Date("2099-07-01"),
+    },
+    {
+      status: "expired",
+      activeSeatCount: 0,
+      currentPeriodEnd: new Date("2024-02-01"),
+    },
+    {
+      status: "cancelled",
+      activeSeatCount: 0,
+      currentPeriodEnd: new Date("2024-02-01"),
+      cancelledAt: new Date("2024-02-02"),
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const subscription = saveableDoc({
+      ...subscriptionDoc,
+      status: scenario.status,
+      seatCount: 5,
+      activeSeatCount: scenario.activeSeatCount,
+      totalPrice: 500,
+      currentPeriodEnd: scenario.currentPeriodEnd,
+      cancelledAt: scenario.cancelledAt ?? null,
+    });
+    const mocks = setupActivationMutationMocks({ currentSubscription: subscription });
+
+    await activateSalonSubscription(salonIdStr, {
+      actor: platformActor,
+      note: `Renew ${scenario.status}`,
+      months: 1,
+      requestIp,
+    });
+
+    assert.equal(subscription.status, "active", `${scenario.status} status`);
+    assert.equal(subscription.seatCount, 5, `${scenario.status} seat count`);
+    assert.equal(subscription.totalPrice, 500, `${scenario.status} total price`);
+    assert.equal(mocks.auditPayload.oldValue.seatCount, 5);
+    assert.equal(mocks.auditPayload.newValue.seatCount, 5);
+  }
+});
+
+test("activateSalonSubscription does not shrink idle capacity when seatCount is omitted", async () => {
+  const subscription = saveableDoc({
+    ...subscriptionDoc,
+    seatCount: 5,
+    activeSeatCount: 0,
+    totalPrice: 500,
+  });
+  setupActivationMutationMocks({ currentSubscription: subscription });
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Renew idle seats",
+    requestIp,
+  });
+
+  assert.equal(subscription.seatCount, 5);
+  assert.equal(subscription.totalPrice, 500);
+});
+
+test("activateSalonSubscription treats an explicit undefined seatCount as omitted", async () => {
+  const existingSubscription = saveableDoc({
+    ...subscriptionDoc,
+    seatCount: 5,
+    activeSeatCount: 4,
+    totalPrice: 500,
+  });
+  setupActivationMutationMocks({ currentSubscription: existingSubscription });
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Renew without a seat count value",
+    seatCount: undefined,
+    requestIp,
+  });
+
+  assert.equal(existingSubscription.seatCount, 5);
+  assert.equal(existingSubscription.totalPrice, 500);
+
+  const mocks = setupActivationMutationMocks({ currentSubscription: null });
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Initial activation without a seat count value",
+    seatCount: undefined,
+    requestIp,
+  });
+
+  assert.equal(mocks.detailSubscription.seatCount, 1);
+  assert.equal(mocks.detailSubscription.totalPrice, 100);
+});
+
+test("activateSalonSubscription keeps explicit seatCount validation and valid changes", async () => {
+  const tooSmallSubscription = saveableDoc({
+    ...subscriptionDoc,
+    seatCount: 5,
+    activeSeatCount: 4,
+    totalPrice: 500,
+  });
+  let auditCalled = false;
+
+  setupActivationMutationMocks({ currentSubscription: tooSmallSubscription });
+  mockMethod(PlatformAuditLog, "create", async () => {
+    auditCalled = true;
+  });
+
+  await assert.rejects(
+    () => activateSalonSubscription(salonIdStr, {
+      actor: platformActor,
+      note: "Shrink too far",
+      seatCount: 1,
+      requestIp,
+    }),
+    { statusCode: 400 }
+  );
+  assert.equal(auditCalled, false);
+  assert.equal(tooSmallSubscription.seatCount, 5);
+
+  const validSubscription = saveableDoc({
+    ...subscriptionDoc,
+    seatCount: 5,
+    activeSeatCount: 2,
+    totalPrice: 500,
+  });
+  setupActivationMutationMocks({ currentSubscription: validSubscription });
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Resize seats",
+    seatCount: 4,
+    requestIp,
+  });
+
+  assert.equal(validSubscription.seatCount, 4);
+  assert.equal(validSubscription.totalPrice, 400);
+});
+
+test("activateSalonSubscription defaults new subscriptions to one seat when seatCount is omitted", async () => {
+  const mocks = setupActivationMutationMocks({ currentSubscription: null });
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Initial activation",
+    requestIp,
+  });
+
+  assert.equal(mocks.detailSubscription.seatCount, 1);
+  assert.equal(mocks.detailSubscription.totalPrice, 100);
+  assert.equal(mocks.auditPayload.oldValue, null);
+  assert.equal(mocks.auditPayload.newValue.seatCount, 1);
 });
 
 test("activateSalonSubscription aborts the transaction when audit creation fails", async () => {
