@@ -330,6 +330,65 @@ test(
 );
 
 test(
+  "real Mongo platform activation rejects string Infinity before durable mutation",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_rejects_non_finite_count");
+    const { salonId, subscriptionId } = await createActivationFixture({
+      seatCount: 5,
+      activeSeatCount: 0,
+    });
+
+    await assert.rejects(
+      () => activateSalonSubscription(String(salonId), {
+        actor: { _id: actorId },
+        note: "Reject non-finite seat count",
+        seatCount: "Infinity",
+        requestIp,
+      }),
+      { statusCode: 400 }
+    );
+
+    const refreshed = await Subscription.findById(subscriptionId).lean();
+    assert.equal(refreshed.seatCount, 5);
+    assert.equal(refreshed.totalPrice, 25000);
+    assert.equal(await PlatformAuditLog.countDocuments({ salonId }), 0);
+  }
+);
+
+test(
+  "real Mongo platform activation rejects unsafe totals and unrepresentable periods",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_rejects_unsafe_calculations");
+    const { salonId, subscriptionId } = await createActivationFixture({
+      seatCount: 5,
+      activeSeatCount: 0,
+    });
+
+    for (const options of [
+      { seatCount: String(Number.MAX_SAFE_INTEGER) },
+      { months: String(Number.MAX_SAFE_INTEGER) },
+    ]) {
+      await assert.rejects(
+        () => activateSalonSubscription(String(salonId), {
+          actor: { _id: actorId },
+          note: "Reject unsafe calculation",
+          ...options,
+          requestIp,
+        }),
+        { statusCode: 400 }
+      );
+    }
+
+    const refreshed = await Subscription.findById(subscriptionId).lean();
+    assert.equal(refreshed.seatCount, 5);
+    assert.equal(refreshed.totalPrice, 25000);
+    assert.equal(await PlatformAuditLog.countDocuments({ salonId }), 0);
+  }
+);
+
+test(
   "real Mongo platform activation reduction cannot bypass current seat capacity with a stale __v",
   { skip: !REAL_MONGO_TESTS_ENABLED },
   async () => {

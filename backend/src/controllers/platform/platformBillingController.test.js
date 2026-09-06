@@ -311,6 +311,127 @@ test("activateSubscription preserves existing capacity when the request omits se
   assert.equal(res.statusCode, 200);
 });
 
+test("activateSubscription rejects JSON-safe invalid seat counts and durations", async () => {
+  const invalidBodies = [
+    { seatCount: "Infinity", note: "Reject non-finite seat count" },
+    { seatCount: "1.5", note: "Reject fractional seat count" },
+    { months: "Infinity", note: "Reject non-finite duration" },
+    { months: "not-a-number", note: "Reject malformed duration" },
+  ];
+  let salonRead = false;
+  Salon.findById = () => {
+    salonRead = true;
+    return query(null);
+  };
+
+  for (const body of invalidBodies) {
+    const res = createResponse();
+    let nextError;
+    await activateSubscription(
+      {
+        params: { salonId: salonId.toString() },
+        body,
+        user: actor,
+        ip: requestIp,
+      },
+      res,
+      (error) => {
+        nextError = error;
+      }
+    );
+
+    assert.equal(nextError?.statusCode, 400);
+    assert.equal(res.body, undefined);
+  }
+
+  assert.equal(salonRead, false);
+});
+
+test("updateSeatCount rejects a JSON-safe non-finite value", async () => {
+  let salonRead = false;
+  Salon.findById = () => {
+    salonRead = true;
+    return query(null);
+  };
+  const res = createResponse();
+  let nextError;
+
+  await updateSeatCount(
+    {
+      params: { salonId: salonId.toString() },
+      body: { seatCount: "Infinity", note: "Reject non-finite seat count" },
+      user: actor,
+      ip: requestIp,
+    },
+    res,
+    (error) => {
+      nextError = error;
+    }
+  );
+
+  assert.equal(nextError?.statusCode, 400);
+  assert.equal(res.body, undefined);
+  assert.equal(salonRead, false);
+});
+
+test("activateSubscription rejects JSON-safe calculation overflows without auditing", async () => {
+  const subscription = saveable({
+    _id: oid("21021"),
+    __v: 0,
+    ownerType: "salon",
+    ownerId: salonId,
+    status: "active",
+    seatCount: 5,
+    activeSeatCount: 0,
+    pricePerSeat: 5000,
+    totalPrice: 25000,
+    currentPeriodStart: new Date("2099-01-01T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2099-02-01T00:00:00.000Z"),
+    payerId: ownerId,
+    planId: oid("21022"),
+    provider: "manual",
+  });
+  let auditCalled = false;
+  installCommonReadMocks(subscription);
+  SubscriptionPlan.findOne = async () => ({
+    _id: oid("21023"),
+    pricePerSeat: 5000,
+    currency: "AMD",
+  });
+  PlatformAuditLog.create = async () => {
+    auditCalled = true;
+  };
+
+  const invalidBodies = [
+    { seatCount: String(Number.MAX_SAFE_INTEGER), note: "Reject unsafe total" },
+    { months: String(Number.MAX_SAFE_INTEGER), note: "Reject invalid period" },
+  ];
+
+  for (const body of invalidBodies) {
+    const res = createResponse();
+    let nextError;
+    await activateSubscription(
+      {
+        params: { salonId: salonId.toString() },
+        body,
+        user: actor,
+        ip: requestIp,
+      },
+      res,
+      (error) => {
+        nextError = error;
+      }
+    );
+
+    assert.equal(nextError?.statusCode, 400);
+    assert.equal(res.body, undefined);
+  }
+
+  assert.equal(auditCalled, false);
+  assert.equal(subscription.seatCount, 5);
+  assert.equal(subscription.totalPrice, 25000);
+});
+
 test("assignSeat preserves authenticated actor, barberId, note, and socket request IP", async () => {
   const subscription = saveable({
     _id: oid("30001"),

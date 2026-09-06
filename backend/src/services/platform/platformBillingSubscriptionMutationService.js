@@ -11,6 +11,11 @@ import {
 } from "../subscription/subscriptionManualMutations.js";
 import { assertSeatCountCanContainActiveSeats } from "../subscription/seatCapacityMutations.js";
 import { getOrCreateDefaultSubscriptionPlanWithSession } from "../subscription/subscriptionPaymentMutationTransactionHelpers.js";
+import {
+  addMonthsToValidDate,
+  calculateSafeTotalPrice,
+  normalizePositiveSafeInteger,
+} from "./platformBillingCalculations.js";
 
 /**
  * Activate or renew a salon subscription.
@@ -25,7 +30,7 @@ import { getOrCreateDefaultSubscriptionPlanWithSession } from "../subscription/s
  * @returns {Object} Updated salon billing detail
  */
 export const activateSalonSubscription = async (salonId, options = {}) => {
-  const { months = 1, note, actor, requestIp } = options;
+  const { months, note, actor, requestIp } = options;
   const hasSeatCount = options.seatCount !== undefined;
 
   if (!note || !note.trim()) {
@@ -33,6 +38,13 @@ export const activateSalonSubscription = async (salonId, options = {}) => {
     error.statusCode = 400;
     throw error;
   }
+
+  const requestedSeatCount = hasSeatCount
+    ? normalizePositiveSafeInteger(options.seatCount, "seatCount")
+    : null;
+  const normalizedMonths = months === undefined
+    ? 1
+    : normalizePositiveSafeInteger(months, "months");
 
   await runPlatformBillingTransaction(async (session) => {
     const salon = await Salon.findById(salonId, null, { session }).lean();
@@ -42,20 +54,12 @@ export const activateSalonSubscription = async (salonId, options = {}) => {
       throw error;
     }
 
-    const normalizeSeatCount = (value) => Math.max(1, Math.floor(Number(value) || 1));
-    const requestedSeatCount = hasSeatCount
-      ? normalizeSeatCount(options.seatCount)
-      : null;
-    const normalizedMonths = Math.max(1, Math.floor(Number(months) || 1));
     const plan = session
       ? await getOrCreateDefaultSubscriptionPlanWithSession(session)
       : await getOrCreateDefaultSubscriptionPlan();
     const now = new Date();
-    const extendFrom = (periodStart) => {
-      const periodEnd = new Date(periodStart);
-      periodEnd.setMonth(periodEnd.getMonth() + normalizedMonths);
-      return periodEnd;
-    };
+    const extendFrom = (periodStart) =>
+      addMonthsToValidDate(periodStart, normalizedMonths);
     const mutation = await mutateCanonicalSubscription({
       ownerType: "salon",
       ownerId: salon._id,
@@ -72,7 +76,7 @@ export const activateSalonSubscription = async (salonId, options = {}) => {
           status: "active",
           seatCount,
           pricePerSeat: plan.pricePerSeat,
-          totalPrice: plan.pricePerSeat * seatCount,
+          totalPrice: calculateSafeTotalPrice(plan.pricePerSeat, seatCount),
           currentPeriodStart: periodStart,
           currentPeriodEnd: extendFrom(periodStart),
           provider: "manual",
@@ -94,7 +98,7 @@ export const activateSalonSubscription = async (salonId, options = {}) => {
           status: "active",
           seatCount,
           pricePerSeat: plan.pricePerSeat,
-          totalPrice: plan.pricePerSeat * seatCount,
+          totalPrice: calculateSafeTotalPrice(plan.pricePerSeat, seatCount),
           currentPeriodStart: periodStart,
           currentPeriodEnd: extendFrom(periodStart),
           lastPaymentAt: now,

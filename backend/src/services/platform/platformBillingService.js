@@ -8,7 +8,10 @@ import {
   runPlatformBillingTransaction,
 } from "./platformBillingAuditHelpers.js";
 import { finalizeSubscriptionPaymentAttempt } from "../payment/paymentAttemptService.js";
-import { getIdString } from "./platformBillingCalculations.js";
+import {
+  getIdString,
+  normalizePositiveSafeInteger,
+} from "./platformBillingCalculations.js";
 import { serializePaymentAttempt } from "./platformBillingSerializers.js";
 import {
   getAllIndividualBillingSummaries,
@@ -75,13 +78,7 @@ export const updateSalonSeatCount = async (salonId, { seatCount, note, actor, re
     throw error;
   }
 
-  const numericSeatCount = Number(seatCount);
-  if (!Number.isInteger(numericSeatCount) || numericSeatCount < 1) {
-    const error = new Error("seatCount must be a positive integer");
-    error.statusCode = 400;
-    throw error;
-  }
-  const newCount = numericSeatCount;
+  const newCount = normalizePositiveSafeInteger(seatCount, "seatCount");
 
   await runPlatformBillingTransaction(async (session) => {
     const salon = await Salon.findById(salonId, null, { session }).lean();

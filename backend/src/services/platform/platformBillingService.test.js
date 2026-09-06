@@ -2133,7 +2133,7 @@ test("activateSalonSubscription creates one audit log with subscriptionId and re
   const subscription = saveableDoc(subscriptionDoc);
 
   mockQuery(Salon, "findById", salonDoc);
-  mockMethod(SubscriptionPlan, "findOne", () => qc(planDoc));
+  mockMethod(SubscriptionPlan, "findOne", () => Promise.resolve(planDoc));
   let subscriptionFindCalls = 0;
   mockMethod(Subscription, "findOne", () => {
     subscriptionFindCalls += 1;
@@ -2245,6 +2245,7 @@ test("activateSalonSubscription treats an explicit undefined seatCount as omitte
     actor: platformActor,
     note: "Renew without a seat count value",
     seatCount: undefined,
+    months: undefined,
     requestIp,
   });
 
@@ -2256,11 +2257,132 @@ test("activateSalonSubscription treats an explicit undefined seatCount as omitte
     actor: platformActor,
     note: "Initial activation without a seat count value",
     seatCount: undefined,
+    months: undefined,
     requestIp,
   });
 
   assert.equal(mocks.detailSubscription.seatCount, 1);
   assert.equal(mocks.detailSubscription.totalPrice, 100);
+});
+
+test("activateSalonSubscription accepts compatible numeric strings", async () => {
+  const mocks = setupActivationMutationMocks({ currentSubscription: null });
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Initial activation with numeric strings",
+    seatCount: "5",
+    months: "3",
+    requestIp,
+  });
+
+  assert.equal(mocks.detailSubscription.seatCount, 5);
+  assert.equal(mocks.detailSubscription.totalPrice, 500);
+});
+
+test("activateSalonSubscription rejects invalid explicit counts before reading or mutating", async () => {
+  const invalidValues = [
+    Infinity,
+    -Infinity,
+    "Infinity",
+    "-Infinity",
+    NaN,
+    0,
+    -1,
+    1.5,
+    "1.5",
+    "not-a-number",
+    null,
+    Number.MAX_SAFE_INTEGER + 1,
+  ];
+  let salonRead = false;
+  mockMethod(Salon, "findById", () => {
+    salonRead = true;
+    return qc(salonDoc);
+  });
+
+  for (const seatCount of invalidValues) {
+    await assert.rejects(
+      () => activateSalonSubscription(salonIdStr, {
+        actor: platformActor,
+        note: "Reject invalid seat count",
+        seatCount,
+        requestIp,
+      }),
+      { statusCode: 400, message: "seatCount must be a positive integer" }
+    );
+  }
+
+  for (const months of invalidValues) {
+    await assert.rejects(
+      () => activateSalonSubscription(salonIdStr, {
+        actor: platformActor,
+        note: "Reject invalid duration",
+        months,
+        requestIp,
+      }),
+      { statusCode: 400, message: "months must be a positive integer" }
+    );
+  }
+
+  assert.equal(salonRead, false);
+});
+
+test("activateSalonSubscription rejects unsafe total prices without mutating", async () => {
+  for (const seatCount of [Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)]) {
+    const mocks = setupActivationMutationMocks({ currentSubscription: null });
+
+    await assert.rejects(
+      () => activateSalonSubscription(salonIdStr, {
+        actor: platformActor,
+        note: "Reject unsafe total price",
+        seatCount,
+        requestIp,
+      }),
+      { statusCode: 400, message: "totalPrice exceeds the supported range" }
+    );
+
+    assert.equal(mocks.detailSubscription, null);
+    assert.equal(mocks.auditPayload, undefined);
+  }
+});
+
+test("activateSalonSubscription accepts the largest calculation-safe seat count", async () => {
+  const seatCount = Math.floor(Number.MAX_SAFE_INTEGER / planDoc.pricePerSeat);
+  const mocks = setupActivationMutationMocks({ currentSubscription: null });
+
+  await activateSalonSubscription(salonIdStr, {
+    actor: platformActor,
+    note: "Activate at the safe price boundary",
+    seatCount,
+    requestIp,
+  });
+
+  assert.equal(mocks.detailSubscription.seatCount, seatCount);
+  assert.equal(
+    mocks.detailSubscription.totalPrice,
+    planDoc.pricePerSeat * seatCount
+  );
+  assert.equal(Number.isSafeInteger(mocks.detailSubscription.totalPrice), true);
+});
+
+test("activateSalonSubscription rejects unrepresentable subscription periods without mutating", async () => {
+  for (const months of [Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)]) {
+    const mocks = setupActivationMutationMocks({ currentSubscription: null });
+
+    await assert.rejects(
+      () => activateSalonSubscription(salonIdStr, {
+        actor: platformActor,
+        note: "Reject unrepresentable period",
+        months,
+        requestIp,
+      }),
+      { statusCode: 400, message: "subscription period exceeds the supported range" }
+    );
+
+    assert.equal(mocks.detailSubscription, null);
+    assert.equal(mocks.auditPayload, undefined);
+  }
 });
 
 test("activateSalonSubscription keeps explicit seatCount validation and valid changes", async () => {
@@ -2329,7 +2451,7 @@ test("activateSalonSubscription aborts the transaction when audit creation fails
   let aborted = false;
 
   mockQuery(Salon, "findById", salonDoc);
-  mockMethod(SubscriptionPlan, "findOne", () => qc(planDoc));
+  mockMethod(SubscriptionPlan, "findOne", () => Promise.resolve(planDoc));
   mockMethod(Subscription, "findOne", () => Promise.resolve(subscription));
   mockMethod(PlatformAuditLog, "create", async () => {
     throw new Error("audit unavailable");
@@ -2377,6 +2499,41 @@ test("updateSalonSeatCount requires note and validates positive integer", async 
     () => updateSalonSeatCount(salonIdStr, { actor: platformActor, seatCount: 1.5, note: "Bad count" }),
     { statusCode: 400, message: "seatCount must be a positive integer" }
   );
+});
+
+test("updateSalonSeatCount rejects non-finite, unsafe, and malformed counts before reading", async () => {
+  const invalidValues = [
+    Infinity,
+    -Infinity,
+    "Infinity",
+    "-Infinity",
+    NaN,
+    0,
+    -1,
+    1.5,
+    "1.5",
+    "not-a-number",
+    null,
+    Number.MAX_SAFE_INTEGER + 1,
+  ];
+  let salonRead = false;
+  mockMethod(Salon, "findById", () => {
+    salonRead = true;
+    return qc(salonDoc);
+  });
+
+  for (const seatCount of invalidValues) {
+    await assert.rejects(
+      () => updateSalonSeatCount(salonIdStr, {
+        actor: platformActor,
+        seatCount,
+        note: "Reject invalid seat count",
+      }),
+      { statusCode: 400, message: "seatCount must be a positive integer" }
+    );
+  }
+
+  assert.equal(salonRead, false);
 });
 
 test("platform billing mutations fail closed before reads when a transaction session is unavailable", async () => {
