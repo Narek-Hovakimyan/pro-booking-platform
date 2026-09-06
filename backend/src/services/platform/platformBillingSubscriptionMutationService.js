@@ -6,6 +6,16 @@ import {
   runPlatformBillingTransaction,
 } from "./platformBillingAuditHelpers.js";
 import { getSalonBillingDetail } from "./platformBillingSalonReadService.js";
+import { serializeSalonSubscriptionForPlatform } from "./platformBillingSerializers.js";
+import {
+  PLATFORM_SALON_ACTIVATION_ACTION,
+  assertMatchingPlatformBillingOperation,
+  createActivationRequestFingerprint,
+  createPlatformBillingOperation,
+  findPlatformBillingOperation,
+  isDuplicatePlatformBillingOperationError,
+  normalizePlatformBillingIdempotencyKey,
+} from "./platformBillingIdempotencyService.js";
 import {
   mutateCanonicalSubscription,
 } from "../subscription/subscriptionManualMutations.js";
@@ -45,8 +55,39 @@ export const activateSalonSubscription = async (salonId, options = {}) => {
   const normalizedMonths = months === undefined
     ? 1
     : normalizePositiveSafeInteger(months, "months");
+  const idempotencyKey = normalizePlatformBillingIdempotencyKey(options.idempotencyKey);
+  const operationContext = idempotencyKey
+    ? {
+        key: idempotencyKey,
+        actorId: actor?._id,
+        action: PLATFORM_SALON_ACTIVATION_ACTION,
+        resourceType: "salon",
+        resourceId: String(salonId),
+        requestFingerprint: createActivationRequestFingerprint({
+          months: normalizedMonths,
+          hasSeatCount,
+          seatCount: requestedSeatCount,
+          note,
+        }),
+      }
+    : null;
+  const detailBeforeMutation = operationContext
+    ? await getSalonBillingDetail(salonId)
+    : null;
+  let replaySnapshot = null;
 
-  await runPlatformBillingTransaction(async (session) => {
+  try {
+    await runPlatformBillingTransaction(async (session) => {
+      if (operationContext) {
+        const existing = await findPlatformBillingOperation(operationContext, session);
+        if (existing) {
+          replaySnapshot = assertMatchingPlatformBillingOperation(
+            existing,
+            operationContext.requestFingerprint
+          );
+          return;
+        }
+      }
     const salon = await Salon.findById(salonId, null, { session }).lean();
     if (!salon) {
       const error = new Error("Salon not found");
@@ -134,10 +175,34 @@ export const activateSalonSubscription = async (salonId, options = {}) => {
       requestIp,
     },
     session);
-  });
+      if (operationContext) {
+        const previousSeats = detailBeforeMutation?.seats || {
+          total: 0, used: 0, available: 0, assignments: [],
+        };
+        const responseSnapshot = {
+          ...detailBeforeMutation,
+          subscription: serializeSalonSubscriptionForPlatform(subscription),
+          seats: {
+            ...previousSeats,
+            total: subscription.seatCount,
+            available: Math.max(0, subscription.seatCount - previousSeats.used),
+          },
+        };
+        await createPlatformBillingOperation(operationContext, responseSnapshot, session);
+        replaySnapshot = responseSnapshot;
+      }
+    });
+  } catch (error) {
+    if (!operationContext || !isDuplicatePlatformBillingOperationError(error)) throw error;
+    const existing = await findPlatformBillingOperation(operationContext);
+    if (!existing) throw error;
+    replaySnapshot = assertMatchingPlatformBillingOperation(
+      existing,
+      operationContext.requestFingerprint
+    );
+  }
 
-  // Return fresh billing detail
-  return getSalonBillingDetail(salonId);
+  return replaySnapshot || getSalonBillingDetail(salonId);
 };
 
 /**

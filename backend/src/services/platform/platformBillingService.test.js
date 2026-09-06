@@ -10,6 +10,7 @@ import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import PaymentRecord from "../../models/PaymentRecord.js";
 import PlatformAuditLog from "../../models/PlatformAuditLog.js";
+import PlatformBillingIdempotencyOperation from "../../models/PlatformBillingIdempotencyOperation.js";
 import {
   activateSalonSubscription,
   updateSalonSeatCount,
@@ -595,7 +596,7 @@ const restoreOriginals = () => {
   for (const [key, value] of Object.entries(originals)) {
     const [modelName, method] = key.split("__");
     const modelMap = {
-      Salon, User, Subscription, SubscriptionPlan, SubscriptionSeat, SubscriptionPaymentAttempt, PaymentRecord, PlatformAuditLog,
+      Salon, User, Subscription, SubscriptionPlan, SubscriptionSeat, SubscriptionPaymentAttempt, PaymentRecord, PlatformAuditLog, PlatformBillingIdempotencyOperation,
     };
     if (modelMap[modelName] && value !== undefined) {
       modelMap[modelName][method] = value;
@@ -2171,6 +2172,98 @@ const setupActivationMutationMocks = ({ currentSubscription = saveableDoc(subscr
     },
   };
 };
+
+const setupActivationIdempotencyStore = () => {
+  const operations = [];
+  mockMethod(PlatformBillingIdempotencyOperation, "findOne", async (filter) =>
+    operations.find((operation) =>
+      ["actorId", "action", "resourceType", "resourceId", "key"].every(
+        (field) => String(operation[field]) === String(filter[field])
+      )
+    ) || null
+  );
+  mockMethod(PlatformBillingIdempotencyOperation, "create", async ([payload]) => {
+    operations.push(payload);
+    return [payload];
+  });
+  return operations;
+};
+
+const setupIdempotentActivationSubscriptionReads = (subscription) => {
+  let calls = 0;
+  mockMethod(Subscription, "findOne", () => {
+    calls += 1;
+    return calls % 2 === 0 ? Promise.resolve(subscription) : qc(subscription);
+  });
+};
+
+test("activateSalonSubscription replays one same-key activation without a second mutation or audit", async () => {
+  const subscription = saveableDoc({
+    ...subscriptionDoc, activeSeatCount: 0,
+    currentPeriodEnd: new Date("2099-10-01T00:00:00.000Z"),
+  });
+  const mocks = setupActivationMutationMocks({ currentSubscription: subscription });
+  const operations = setupActivationIdempotencyStore();
+  setupIdempotentActivationSubscriptionReads(subscription);
+  let saves = 0;
+  subscription.save = async () => { saves += 1; return subscription; };
+  let audits = 0;
+  mockMethod(PlatformAuditLog, "create", async (payload) => { audits += 1; return payload; });
+  const options = { actor: platformActor, months: 1, note: "Replay-safe renewal", requestIp, idempotencyKey: "K1" };
+  const first = await activateSalonSubscription(salonIdStr, options);
+  const firstEnd = subscription.currentPeriodEnd.getTime();
+  const replay = await activateSalonSubscription(salonIdStr, options);
+
+  assert.deepEqual(replay, first);
+  assert.equal(saves, 1);
+  assert.equal(audits, 1);
+  assert.equal(operations.length, 1);
+  assert.equal(subscription.currentPeriodEnd.getTime(), firstEnd);
+  assert.equal(mocks.detailSubscription, subscription);
+});
+
+test("activateSalonSubscription conflicts for a reused key with a different payload without a second mutation", async () => {
+  const subscription = saveableDoc({ ...subscriptionDoc, activeSeatCount: 0, currentPeriodEnd: new Date("2099-10-01") });
+  setupActivationMutationMocks({ currentSubscription: subscription });
+  const operations = setupActivationIdempotencyStore();
+  setupIdempotentActivationSubscriptionReads(subscription);
+  let saves = 0;
+  let audits = 0;
+  subscription.save = async () => { saves += 1; return subscription; };
+  mockMethod(PlatformAuditLog, "create", async (payload) => { audits += 1; return payload; });
+  await activateSalonSubscription(salonIdStr, { actor: platformActor, months: 1, note: "Original", requestIp, idempotencyKey: "K1" });
+  const originalSnapshot = operations[0].responseSnapshot;
+  await assert.rejects(
+    () => activateSalonSubscription(salonIdStr, { actor: platformActor, months: 12, note: "Original", requestIp, idempotencyKey: "K1" }),
+    { statusCode: 409, message: "Idempotency-Key was already used with a different request" }
+  );
+  assert.equal(saves, 1);
+  assert.equal(audits, 1);
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].responseSnapshot, originalSnapshot);
+});
+
+test("activateSalonSubscription permits intentional renewals with distinct idempotency keys", async () => {
+  const subscription = saveableDoc({
+    ...subscriptionDoc, activeSeatCount: 0,
+    currentPeriodEnd: new Date("2099-10-01T00:00:00.000Z"),
+  });
+  setupActivationMutationMocks({ currentSubscription: subscription });
+  const operations = setupActivationIdempotencyStore();
+  setupIdempotentActivationSubscriptionReads(subscription);
+  let saves = 0;
+  let audits = 0;
+  subscription.save = async () => { saves += 1; return subscription; };
+  mockMethod(PlatformAuditLog, "create", async (payload) => { audits += 1; return payload; });
+  const first = await activateSalonSubscription(salonIdStr, { actor: platformActor, months: 1, note: "Renew", requestIp, idempotencyKey: "K1" });
+  await activateSalonSubscription(salonIdStr, { actor: platformActor, months: 1, note: "Renew", requestIp, idempotencyKey: "K2" });
+  const replay = await activateSalonSubscription(salonIdStr, { actor: platformActor, months: 1, note: "Renew", requestIp, idempotencyKey: "K1" });
+  assert.equal(saves, 2);
+  assert.equal(audits, 2);
+  assert.equal(operations.length, 2);
+  assert.equal(subscription.currentPeriodEnd.toISOString(), "2099-12-01T00:00:00.000Z");
+  assert.deepEqual(replay, first);
+});
 
 test("activateSalonSubscription requires note before mutation", async () => {
   let salonRead = false;

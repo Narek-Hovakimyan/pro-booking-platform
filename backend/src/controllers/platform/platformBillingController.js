@@ -143,6 +143,7 @@ export const activateSubscription = async (req, res, next) => {
   try {
     const { salonId } = req.params;
     const { seatCount, months, note } = req.body;
+    const idempotencyKey = req.get?.("Idempotency-Key") || req.headers?.["idempotency-key"];
 
     const result = await activateSalonSubscription(salonId, {
       seatCount,
@@ -150,6 +151,7 @@ export const activateSubscription = async (req, res, next) => {
       note,
       actor: req.user,
       requestIp: getRequestIp(req),
+      idempotencyKey,
     });
 
     return res.json(result);

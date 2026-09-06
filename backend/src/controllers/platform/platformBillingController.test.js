@@ -10,6 +10,7 @@ import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import PaymentRecord from "../../models/PaymentRecord.js";
 import PlatformAuditLog from "../../models/PlatformAuditLog.js";
+import PlatformBillingIdempotencyOperation from "../../models/PlatformBillingIdempotencyOperation.js";
 import {
   activateSubscription,
   assignSeat,
@@ -42,6 +43,8 @@ const originalMethods = {
   paymentAttemptFindOne: SubscriptionPaymentAttempt.findOne,
   paymentAttemptCountDocuments: SubscriptionPaymentAttempt.countDocuments,
   platformAuditCreate: PlatformAuditLog.create,
+  idempotencyFindOne: PlatformBillingIdempotencyOperation.findOne,
+  idempotencyCreate: PlatformBillingIdempotencyOperation.create,
   paymentRecordCreate: PaymentRecord.create,
   paymentRecordFindOneAndUpdate: PaymentRecord.findOneAndUpdate,
 };
@@ -72,6 +75,8 @@ afterEach(() => {
   SubscriptionPaymentAttempt.findOne = originalMethods.paymentAttemptFindOne;
   SubscriptionPaymentAttempt.countDocuments = originalMethods.paymentAttemptCountDocuments;
   PlatformAuditLog.create = originalMethods.platformAuditCreate;
+  PlatformBillingIdempotencyOperation.findOne = originalMethods.idempotencyFindOne;
+  PlatformBillingIdempotencyOperation.create = originalMethods.idempotencyCreate;
   PaymentRecord.create = originalMethods.paymentRecordCreate;
   PaymentRecord.findOneAndUpdate = originalMethods.paymentRecordFindOneAndUpdate;
 });
@@ -249,6 +254,100 @@ test("activateSubscription preserves authenticated actor, body values, note, and
   assert.equal(auditPayload.newValue.status, "active");
   assert.equal(auditPayload.newValue.seatCount, 4);
   assert.equal(res.statusCode, 200);
+});
+
+test("activateSubscription reads Idempotency-Key through req.get and preserves the activation request", async () => {
+  const subscription = saveable({
+    _id: oid("21031"), __v: 0, ownerType: "salon", ownerId: salonId, status: "active",
+    seatCount: 1, pricePerSeat: 4000, totalPrice: 4000,
+    currentPeriodStart: new Date("2099-01-01T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2099-02-01T00:00:00.000Z"), payerId: ownerId,
+    planId: oid("21032"), provider: "manual",
+  });
+  let update;
+  let auditPayload;
+  let operationPayload;
+  installCommonReadMocks(subscription);
+  Subscription.findOneAndUpdate = async (_filter, next) => {
+    update = next.$set;
+    return saveable({ ...subscription, ...update, __v: 1 });
+  };
+  SubscriptionPlan.findOne = async () => ({ _id: oid("21033"), pricePerSeat: 5000, currency: "AMD" });
+  PlatformAuditLog.create = async (payload) => { auditPayload = payload; return payload; };
+  PlatformBillingIdempotencyOperation.findOne = async () => null;
+  PlatformBillingIdempotencyOperation.create = async ([payload]) => {
+    operationPayload = payload;
+    return [payload];
+  };
+  const res = createResponse();
+  await activateSubscription({
+    params: { salonId: salonId.toString() },
+    body: { seatCount: "4", months: "2", note: "  opaque key request  " },
+    user: actor, ip: requestIp,
+    headers: { "idempotency-key": "wrong-fallback" },
+    get(name) { return name === "Idempotency-Key" ? "operation-123" : undefined; },
+  }, res, assert.fail);
+
+  assert.equal(operationPayload.key, "operation-123");
+  assert.equal(operationPayload.actorId, actor._id);
+  assert.equal(operationPayload.resourceId, salonId.toString());
+  assert.equal(update.seatCount, 4);
+  assert.equal(auditPayload.note, "opaque key request");
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body?.subscription);
+});
+
+test("activateSubscription accepts omitted Idempotency-Key and rejects malformed supplied keys before mutation", async () => {
+  const subscription = saveable({
+    _id: oid("21041"), ownerType: "salon", ownerId: salonId, status: "active", seatCount: 1,
+    pricePerSeat: 5000, totalPrice: 5000, currentPeriodStart: new Date("2099-01-01"),
+    currentPeriodEnd: new Date("2099-02-01"), payerId: ownerId, planId: oid("21042"), provider: "manual",
+  });
+  let operationReads = 0;
+  let auditWrites = 0;
+  installCommonReadMocks(subscription);
+  SubscriptionPlan.findOne = async () => ({ _id: oid("21043"), pricePerSeat: 5000, currency: "AMD" });
+  PlatformAuditLog.create = async (payload) => { auditWrites += 1; return payload; };
+  PlatformBillingIdempotencyOperation.findOne = async () => { operationReads += 1; return null; };
+  const res = createResponse();
+  await activateSubscription({ params: { salonId: salonId.toString() }, body: { note: "Legacy renewal" }, user: actor, ip: requestIp }, res, assert.fail);
+  assert.equal(res.statusCode, 200);
+  assert.equal(operationReads, 0);
+
+  for (const idempotencyKey of ["   ", "x".repeat(201)]) {
+    let nextError;
+    const malformedRes = createResponse();
+    await activateSubscription({
+      params: { salonId: salonId.toString() }, body: { note: "Must not mutate" }, user: actor, ip: requestIp,
+      get(name) { return name === "Idempotency-Key" ? idempotencyKey : undefined; },
+    }, malformedRes, (error) => { nextError = error; });
+    assert.equal(nextError?.statusCode, 400);
+    assert.equal(malformedRes.body, undefined);
+  }
+  assert.equal(operationReads, 0);
+  assert.equal(auditWrites, 1);
+});
+
+test("activateSubscription forwards an idempotency conflict without leaking operation details", async () => {
+  const subscription = saveable({
+    _id: oid("21051"), ownerType: "salon", ownerId: salonId, status: "active", seatCount: 1,
+    pricePerSeat: 5000, totalPrice: 5000, currentPeriodStart: new Date("2099-01-01"),
+    currentPeriodEnd: new Date("2099-02-01"), payerId: ownerId, planId: oid("21052"), provider: "manual",
+  });
+  let auditCalled = false;
+  installCommonReadMocks(subscription);
+  PlatformBillingIdempotencyOperation.findOne = async () => ({ requestFingerprint: "different", responseSnapshot: { secret: true } });
+  PlatformAuditLog.create = async () => { auditCalled = true; };
+  let nextError;
+  const res = createResponse();
+  await activateSubscription({
+    params: { salonId: salonId.toString() }, body: { months: 12, note: "Different request" }, user: actor, ip: requestIp,
+    get(name) { return name === "Idempotency-Key" ? "operation-123" : undefined; },
+  }, res, (error) => { nextError = error; });
+  assert.equal(nextError?.statusCode, 409);
+  assert.equal(nextError?.message, "Idempotency-Key was already used with a different request");
+  assert.equal(res.body, undefined);
+  assert.equal(auditCalled, false);
 });
 
 test("activateSubscription preserves existing capacity when the request omits seatCount", async () => {

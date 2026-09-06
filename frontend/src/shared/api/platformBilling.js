@@ -70,8 +70,10 @@ export async function getPlatformBillingIndividualPayments(barberId, params = {}
  * @param {object} payload - { seatCount?, months?, note }
  * @returns {Promise<object>} Updated salon billing detail
  */
-export async function activatePlatformSalonSubscription(salonId, payload) {
-  const { data } = await api.patch(`/platform/billing/salons/${salonId}/subscription/activate`, payload);
+export async function activatePlatformSalonSubscription(salonId, payload, idempotencyKey) {
+  const { data } = await api.patch(`/platform/billing/salons/${salonId}/subscription/activate`, payload, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
   return data;
 }
 

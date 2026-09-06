@@ -241,7 +241,7 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Activate" }));
 
     await waitFor(() => {
-      expect(mocks.activate).toHaveBeenCalledWith("salon-b", expect.any(Object));
+      expect(mocks.activate).toHaveBeenCalledWith("salon-b", expect.any(Object), expect.any(String));
     });
     expect(mocks.activate).not.toHaveBeenCalledWith("salon-a", expect.anything());
   });
@@ -350,6 +350,40 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
     expect(await screen.findByText("Action completed successfully.")).toBeInTheDocument();
   });
 
+  it("reuses an activation key after a rejected request", async () => {
+    mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
+    mocks.activate
+      .mockRejectedValueOnce({ response: { status: 500 } })
+      .mockResolvedValueOnce(detailFor("salon-a", "Salon A renewed"));
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Salon A" });
+    fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
+    fireEvent.change(screen.getByLabelText(/Audit note/), { target: { value: "renew A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+    await screen.findByText("An unexpected error occurred.");
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+    await screen.findByText("Action completed successfully.");
+
+    expect(mocks.activate.mock.calls[0][2]).toBe(mocks.activate.mock.calls[1][2]);
+  });
+
+  it("uses a new activation key after confirmed success", async () => {
+    mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
+    mocks.activate.mockResolvedValue(detailFor("salon-a", "Salon A renewed"));
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Salon A" });
+    for (const note of ["first renewal", "second renewal"]) {
+      fireEvent.click(screen.getByRole("button", { name: "Activate subscription" }));
+      fireEvent.change(screen.getByLabelText(/Audit note/), { target: { value: note } });
+      fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+      await screen.findByText("Action completed successfully.");
+    }
+
+    expect(mocks.activate.mock.calls[0][2]).not.toBe(mocks.activate.mock.calls[1][2]);
+  });
+
   it("moves focus to the page fallback when cancellation removes its trigger", async () => {
     const user = userEvent.setup();
     const activeSubscription = {
@@ -396,7 +430,7 @@ describe("PlatformSalonBillingDetailPage request isolation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Activate" }));
 
     await waitFor(() => {
-      expect(mocks.activate).toHaveBeenCalledWith("salon-a", expect.any(Object));
+      expect(mocks.activate).toHaveBeenCalledWith("salon-a", expect.any(Object), expect.any(String));
       expect(screen.getByText("Action completed successfully.")).toBeInTheDocument();
     });
   });

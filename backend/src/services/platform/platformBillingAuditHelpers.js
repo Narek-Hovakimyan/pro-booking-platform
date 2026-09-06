@@ -50,7 +50,7 @@ export const createPlatformBillingAuditLog = async ({
     throw buildPlatformBillingTransactionUnavailableError();
   }
 
-  return PlatformAuditLog.create({
+  const audit = {
     actorId,
     action,
     salonId: salonId || null,
@@ -61,5 +61,11 @@ export const createPlatformBillingAuditLog = async ({
     newValue: newValue ?? null,
     note: note || "",
     requestIp: requestIp || "",
-  }, session ? { session } : undefined);
+  };
+
+  if (session && !usesNodeTestDoubles) {
+    return PlatformAuditLog.create([audit], { session }).then(([created]) => created);
+  }
+
+  return PlatformAuditLog.create(audit, session ? { session } : undefined);
 };

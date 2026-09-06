@@ -38,6 +38,7 @@ export default function PlatformSalonBillingDetailPage() {
   const { currentUser } = useSelector((state) => state.auth);
   const isPlatformAdmin = canAccessPlatform(currentUser);
   const modalFallbackFocusRef = useRef(null);
+  const activationOperationKeysRef = useRef(new Map());
   const {
     detail,
     payments,
@@ -67,24 +68,41 @@ export default function PlatformSalonBillingDetailPage() {
     setModal(null);
     clearMutationError();
   };
-  const handleMutation = (apiCall, note, targetSalonId) => {
+  const handleMutation = (apiCall, note, targetSalonId, onSuccess) => {
     executeMutation({
       apiCall,
       note,
       targetSalonId,
-      onSuccess: () => setModal(null),
+      onSuccess: () => {
+        onSuccess?.();
+        setModal(null);
+      },
     });
   };
-  /* ── Activate / Renew ── */
   const handleActivateConfirm = (note) => {
     const targetSalonId = modal?.salonId;
+    const payload = {
+      note,
+      seatCount: modal?.extra?.seatCount || 1,
+      months: modal?.extra?.months || 1,
+    };
+    const operationIdentity = JSON.stringify({
+      salonId: targetSalonId,
+      months: payload.months,
+      seatCount: payload.seatCount,
+      note: payload.note.trim(),
+    });
+    let idempotencyKey = activationOperationKeysRef.current.get(operationIdentity);
+    if (!idempotencyKey) {
+      idempotencyKey = globalThis.crypto?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      activationOperationKeysRef.current.set(operationIdentity, idempotencyKey);
+    }
     handleMutation(async (n) => {
-      return activatePlatformSalonSubscription(targetSalonId, {
-        note: n,
-        seatCount: modal?.extra?.seatCount || 1,
-        months: modal?.extra?.months || 1,
-      });
-    }, note, targetSalonId);
+      return activatePlatformSalonSubscription(targetSalonId, { ...payload, note: n }, idempotencyKey);
+    }, note, targetSalonId, () => {
+      activationOperationKeysRef.current.delete(operationIdentity);
+    });
   };
   /* ── Update seat count ── */
   const handleSeatCountConfirm = (note) => {

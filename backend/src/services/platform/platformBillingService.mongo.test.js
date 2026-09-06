@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 
 import PaymentRecord from "../../models/PaymentRecord.js";
 import PlatformAuditLog from "../../models/PlatformAuditLog.js";
+import PlatformBillingIdempotencyOperation from "../../models/PlatformBillingIdempotencyOperation.js";
 import Salon from "../../models/Salon.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
@@ -21,6 +22,7 @@ const REAL_MONGO_TESTS_ENABLED =
 
 const originals = {
   platformAuditLogCreate: PlatformAuditLog.create,
+  platformBillingOperationCreate: PlatformBillingIdempotencyOperation.create,
   startSession: mongoose.startSession,
   subscriptionFindOneAndUpdate: Subscription.findOneAndUpdate,
 };
@@ -46,6 +48,7 @@ const connectIsolatedDb = async (suffix) => {
   await Promise.all([
     PaymentRecord.deleteMany({}),
     PlatformAuditLog.deleteMany({}),
+    PlatformBillingIdempotencyOperation.deleteMany({}),
     Salon.deleteMany({}),
     Subscription.deleteMany({}),
     SubscriptionPaymentAttempt.deleteMany({}),
@@ -58,11 +61,13 @@ const connectIsolatedDb = async (suffix) => {
     SubscriptionPlan.createIndexes(),
     Subscription.createIndexes(),
     SubscriptionSeat.createIndexes(),
+    PlatformBillingIdempotencyOperation.createIndexes(),
   ]);
 };
 
 afterEach(async () => {
   PlatformAuditLog.create = originals.platformAuditLogCreate;
+  PlatformBillingIdempotencyOperation.create = originals.platformBillingOperationCreate;
   mongoose.startSession = originals.startSession;
   Subscription.findOneAndUpdate = originals.subscriptionFindOneAndUpdate;
   if (mongoose.connection.readyState !== 0) {
@@ -275,6 +280,77 @@ test(
 );
 
 test(
+  "real Mongo concurrent same-key platform activation commits one renewal and replays its snapshot",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_activation_idempotency");
+    const initialEnd = new Date("2030-02-01T00:00:00.000Z");
+    const { salonId, subscriptionId } = await createActivationFixture({ currentPeriodEnd: initialEnd });
+    const options = {
+      actor: { _id: actorId }, note: "Retry-safe renewal", requestIp,
+      idempotencyKey: "activation-retry-key",
+    };
+
+    const firstCall = activateSalonSubscription(String(salonId), options);
+    const replayCall = activateSalonSubscription(String(salonId), options);
+    const [first, replay] = await Promise.all([firstCall, replayCall]);
+    const subscription = await Subscription.findById(subscriptionId).lean();
+    const expectedEnd = new Date(initialEnd);
+    expectedEnd.setMonth(expectedEnd.getMonth() + 1);
+
+    assert.equal(subscription.currentPeriodEnd.getTime(), expectedEnd.getTime());
+    assert.deepEqual(JSON.parse(JSON.stringify(replay)), JSON.parse(JSON.stringify(first)));
+    assert.equal(await PlatformAuditLog.countDocuments({ action: "salon_subscription.activate", salonId, actorId }), 1);
+    const operations = await PlatformBillingIdempotencyOperation.find({ actorId, resourceId: String(salonId), key: options.idempotencyKey }).lean();
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0].status, "completed");
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(operations[0].responseSnapshot)),
+      JSON.parse(JSON.stringify(replay))
+    );
+  }
+);
+
+test(
+  "real Mongo idempotency operation unique index rejects a duplicate scope",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_idempotency_unique");
+    const resourceId = new mongoose.Types.ObjectId().toString();
+    const payload = {
+      actorId, action: "salon_subscription.activate.v1", resourceType: "salon", resourceId,
+      key: "unique-key", requestFingerprint: "fingerprint", status: "completed", responseSnapshot: { subscription: null },
+    };
+    await PlatformBillingIdempotencyOperation.create(payload);
+    await assert.rejects(
+      () => PlatformBillingIdempotencyOperation.create(payload),
+      (error) => error?.code === 11000
+    );
+  }
+);
+
+test(
+  "real Mongo same key with a different activation payload conflicts without a second renewal",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_idempotency_conflict");
+    const initialEnd = new Date("2030-02-01T00:00:00.000Z");
+    const { salonId, subscriptionId } = await createActivationFixture({ currentPeriodEnd: initialEnd });
+    const common = { actor: { _id: actorId }, note: "Same key", requestIp, idempotencyKey: "conflict-key" };
+    await activateSalonSubscription(String(salonId), { ...common, months: 1 });
+    await assert.rejects(
+      () => activateSalonSubscription(String(salonId), { ...common, months: 12 }),
+      { statusCode: 409, message: "Idempotency-Key was already used with a different request" }
+    );
+    const subscription = await Subscription.findById(subscriptionId).lean();
+    const expectedEnd = new Date(initialEnd); expectedEnd.setMonth(expectedEnd.getMonth() + 1);
+    assert.equal(subscription.currentPeriodEnd.getTime(), expectedEnd.getTime());
+    assert.equal(await PlatformAuditLog.countDocuments({ action: "salon_subscription.activate", salonId, actorId }), 1);
+    assert.equal(await PlatformBillingIdempotencyOperation.countDocuments({ actorId, resourceId: String(salonId), key: common.idempotencyKey }), 1);
+  }
+);
+
+test(
   "real Mongo platform activation preserves omitted multi-seat capacity with active assignments",
   { skip: !REAL_MONGO_TESTS_ENABLED },
   async () => {
@@ -471,7 +547,7 @@ test(
 
     await assert.rejects(
       () => activateSalonSubscription(String(salonId), {
-        actor: { _id: actorId }, seatCount: 2, months: 1, note: "Audit failure", requestIp,
+        actor: { _id: actorId }, seatCount: 2, months: 1, note: "Audit failure", requestIp, idempotencyKey: "aborted-key",
       }),
       /force activation audit failure/
     );
@@ -481,6 +557,30 @@ test(
     assert.equal(refreshed.seatCount, 1);
     assert.equal(refreshed.currentPeriodEnd.getTime(), initialEnd.getTime());
     assert.equal(await PlatformAuditLog.countDocuments({ salonId }), 0);
+    assert.equal(await PlatformBillingIdempotencyOperation.countDocuments({ actorId, resourceId: String(salonId), key: "aborted-key" }), 0);
+  }
+);
+
+test(
+  "real Mongo rolls back a persisted idempotency operation when its transaction cannot commit",
+  { skip: !REAL_MONGO_TESTS_ENABLED },
+  async () => {
+    await connectIsolatedDb("platform_idempotency_abort");
+    const initialEnd = new Date("2030-02-01T00:00:00.000Z");
+    const { salonId, subscriptionId } = await createActivationFixture({ currentPeriodEnd: initialEnd });
+    PlatformBillingIdempotencyOperation.create = async function createThenAbort(...args) {
+      await originals.platformBillingOperationCreate.apply(this, args);
+      throw new Error("force operation write abort");
+    };
+    const options = {
+      actor: { _id: actorId }, months: 1, note: "Operation rollback", requestIp,
+      idempotencyKey: "operation-abort-key",
+    };
+    await assert.rejects(() => activateSalonSubscription(String(salonId), options), /force operation write abort/);
+    const subscription = await Subscription.findById(subscriptionId).lean();
+    assert.equal(subscription.currentPeriodEnd.getTime(), initialEnd.getTime());
+    assert.equal(await PlatformAuditLog.countDocuments({ action: "salon_subscription.activate", salonId, actorId }), 0);
+    assert.equal(await PlatformBillingIdempotencyOperation.countDocuments({ actorId, resourceId: String(salonId), key: options.idempotencyKey }), 0);
   }
 );
 
