@@ -56,11 +56,14 @@ export default function Header() {
   const { pathname } = useLocation();
   const { i18n, t } = useTranslation();
   const { currentUser, isAuthenticated, token } = useSelector((state) => state.auth);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [notificationCount, setNotificationCount] = useState(0);
+  const [unreadState, setUnreadState] = useState({ userId: null, count: 0 });
+  const [notificationState, setNotificationState] = useState({ userId: null, count: 0 });
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [canManageSalon, setCanManageSalon] = useState(false);
+  const [salonCapabilityState, setSalonCapabilityState] = useState({
+    userId: null,
+    canManage: false,
+  });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [clientMenuPathname, setClientMenuPathname] = useState(null);
   const moreMenuRef = useRef(null);
@@ -71,6 +74,16 @@ export default function Header() {
   const showBarberChrome = isAuthenticated && isBarber && !isBarberOnboarding;
   const isPlatformAdmin = canAccessPlatform(currentUser);
   const currentUserId = currentUser?.id || currentUser?._id;
+  const currentUserKey = currentUserId ? String(currentUserId) : null;
+  const currentSessionKey =
+    isAuthenticated && currentUserKey && token ? `${currentUserKey}:${token}` : null;
+  const activeSessionKeyRef = useRef(null);
+  const requestVersionsRef = useRef({ messages: 0, notifications: 0, salon: 0 });
+  const unreadCount = unreadState.userId === currentSessionKey ? unreadState.count : 0;
+  const notificationCount =
+    notificationState.userId === currentSessionKey ? notificationState.count : 0;
+  const canManageSalon =
+    salonCapabilityState.userId === currentSessionKey && salonCapabilityState.canManage;
   const canShowManageHiring =
     showBarberChrome && Boolean(currentUserId) && Boolean(token) && canManageSalon;
   const isClientProfileMenu = isClient && !isPlatformAdmin;
@@ -79,44 +92,57 @@ export default function Header() {
     isClientProfileMenu && isMoreOpen && clientMenuPathname === pathname;
 
   useEffect(() => {
+    isMountedRef.current = true;
+
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
   useEffect(() => {
+    activeSessionKeyRef.current = currentSessionKey;
+
+    return () => {
+      if (activeSessionKeyRef.current === currentSessionKey) {
+        activeSessionKeyRef.current = null;
+      }
+      requestVersionsRef.current.messages += 1;
+      requestVersionsRef.current.notifications += 1;
+      requestVersionsRef.current.salon += 1;
+    };
+  }, [currentSessionKey]);
+
+  useEffect(() => {
     if (!showBarberChrome || !currentUserId || !token) {
-      let isMounted = true;
-
-      queueMicrotask(() => {
-        if (isMounted) setCanManageSalon(false);
-      });
-
-      return () => {
-        isMounted = false;
-      };
+      return undefined;
     }
 
-    let isMounted = true;
+    const requestVersion = ++requestVersionsRef.current.salon;
+    const canApply = () =>
+      activeSessionKeyRef.current === currentSessionKey &&
+      requestVersionsRef.current.salon === requestVersion;
 
     api
       .get("/salons/mine/manageable")
       .then(({ data }) => {
-        if (isMounted) {
+        if (canApply()) {
           const salons = getSalonList(data);
-          setCanManageSalon(
-            salons.some((salon) => isSalonOwnerOrAdmin(salon, currentUserId))
-          );
+          setSalonCapabilityState({
+            userId: currentSessionKey,
+            canManage: salons.some((salon) => isSalonOwnerOrAdmin(salon, currentUserId)),
+          });
         }
       })
       .catch(() => {
-        if (isMounted) setCanManageSalon(false);
+        if (canApply()) {
+          setSalonCapabilityState({ userId: currentSessionKey, canManage: false });
+        }
       });
 
     return () => {
-      isMounted = false;
+      requestVersionsRef.current.salon += 1;
     };
-  }, [currentUser?._id, currentUser?.id, currentUserId, showBarberChrome, token]);
+  }, [currentSessionKey, currentUserId, showBarberChrome, token]);
 
   // Primary barber nav items (visible in top bar)
   const barberNavItems = [
@@ -128,27 +154,30 @@ export default function Header() {
   ];
 
   useEffect(() => {
-    if (!currentUser?.id) {
+    if (!currentSessionKey) {
       return undefined;
     }
 
-    let isMounted = true;
-
     async function loadUnreadCount() {
+      const requestVersion = ++requestVersionsRef.current.messages;
+      const canApply = () =>
+        activeSessionKeyRef.current === currentSessionKey &&
+        requestVersionsRef.current.messages === requestVersion;
+
       try {
         const { data } = await api.get("/messages");
         const nextUnreadCount = data.filter(
           (message) =>
             String(getUserId(message.receiverId) || message.receiverId) ===
-              String(currentUser.id) && !message.isRead
+              currentUserKey && !message.isRead
         ).length;
 
-        if (isMounted) {
-          setUnreadCount(nextUnreadCount);
+        if (canApply()) {
+          setUnreadState({ userId: currentSessionKey, count: nextUnreadCount });
         }
       } catch {
-        if (isMounted) {
-          setUnreadCount(0);
+        if (canApply()) {
+          setUnreadState({ userId: currentSessionKey, count: 0 });
         }
       }
     }
@@ -156,29 +185,31 @@ export default function Header() {
     loadUnreadCount();
 
     return () => {
-      isMounted = false;
+      requestVersionsRef.current.messages += 1;
     };
-  }, [currentUser?.id]);
+  }, [currentSessionKey, currentUserKey]);
 
   useEffect(() => {
-    if (!currentUser?.id) {
+    if (!currentSessionKey) {
       return undefined;
     }
 
-    let isMounted = true;
-    let intervalId = null;
-
     async function loadNotificationCount() {
+      const requestVersion = ++requestVersionsRef.current.notifications;
+      const canApply = () =>
+        activeSessionKeyRef.current === currentSessionKey &&
+        requestVersionsRef.current.notifications === requestVersion;
+
       try {
         const { data } = await api.get("/notifications");
         const nextCount = data.filter((notification) => !notification.isRead).length;
 
-        if (isMounted) {
-          setNotificationCount(nextCount);
+        if (canApply()) {
+          setNotificationState({ userId: currentSessionKey, count: nextCount });
         }
       } catch {
-        if (isMounted) {
-          setNotificationCount(0);
+        if (canApply()) {
+          setNotificationState({ userId: currentSessionKey, count: 0 });
         }
       }
     }
@@ -188,29 +219,43 @@ export default function Header() {
     };
 
     loadNotificationCount();
-    intervalId = setInterval(loadNotificationCount, 15000);
+    const intervalId = setInterval(loadNotificationCount, 15000);
     window.addEventListener("notifications:updated", handleNotificationsUpdated);
 
     return () => {
-      isMounted = false;
       clearInterval(intervalId);
       window.removeEventListener("notifications:updated", handleNotificationsUpdated);
+      requestVersionsRef.current.notifications += 1;
     };
-  }, [currentUser?.id]);
+  }, [currentSessionKey]);
 
   useEffect(() => {
-    if (!currentUser?.id || !token) return undefined;
+    if (!currentSessionKey) return undefined;
 
     const socket = getSocket();
     const handleNewMessage = (message) => {
       const receiverId = getUserId(message.receiverId) || message.receiverId;
 
-      if (String(receiverId) === String(currentUser.id) && !message.isRead) {
-        setUnreadCount((currentCount) => currentCount + 1);
+      if (
+        activeSessionKeyRef.current === currentSessionKey &&
+        String(receiverId) === currentUserKey &&
+        !message.isRead
+      ) {
+        requestVersionsRef.current.messages += 1;
+        setUnreadState((currentState) => ({
+          userId: currentSessionKey,
+          count: (currentState.userId === currentSessionKey ? currentState.count : 0) + 1,
+        }));
       }
     };
     const handleNotification = (notification) => {
-      setNotificationCount((currentCount) => currentCount + 1);
+      if (activeSessionKeyRef.current !== currentSessionKey) return;
+
+      requestVersionsRef.current.notifications += 1;
+      setNotificationState((currentState) => ({
+        userId: currentSessionKey,
+        count: (currentState.userId === currentSessionKey ? currentState.count : 0) + 1,
+      }));
       dispatch(
         addNotification({
           message: notification.message,
@@ -222,7 +267,16 @@ export default function Header() {
     const handleMessagesRead = (event) => {
       const count = event.detail?.count || 0;
 
-      setUnreadCount((currentCount) => Math.max(0, currentCount - count));
+      if (activeSessionKeyRef.current !== currentSessionKey) return;
+
+      requestVersionsRef.current.messages += 1;
+      setUnreadState((currentState) => ({
+        userId: currentSessionKey,
+        count: Math.max(
+          0,
+          (currentState.userId === currentSessionKey ? currentState.count : 0) - count
+        ),
+      }));
     };
 
     socket?.on("newMessage", handleNewMessage);
@@ -234,7 +288,7 @@ export default function Header() {
       socket?.off("notification", handleNotification);
       window.removeEventListener("messages:read", handleMessagesRead);
     };
-  }, [currentUser?.id, dispatch, token]);
+  }, [currentSessionKey, currentUserKey, dispatch]);
 
   useEffect(() => {
     if (!isClientProfileOpen) return undefined;
@@ -268,8 +322,8 @@ export default function Header() {
       dispatch,
       navigate,
       onCleanup: () => {
-        setUnreadCount(0);
-        setNotificationCount(0);
+        setUnreadState({ userId: null, count: 0 });
+        setNotificationState({ userId: null, count: 0 });
         setIsMoreOpen(false);
         setIsMobileMenuOpen(false);
       },
