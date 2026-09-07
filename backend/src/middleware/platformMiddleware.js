@@ -29,6 +29,15 @@ const getAdminIdSet = () => {
   return parseAllowlist(process.env.PLATFORM_ADMIN_IDS);
 };
 
+export const PLATFORM_CAPABILITIES = Object.freeze({
+  BILLING_READ: "billing.read",
+  BILLING_MANAGE: "billing.manage",
+  AUDIT_READ: "audit.read",
+});
+
+const SUPERUSER_CAPABILITIES = Object.freeze(Object.values(PLATFORM_CAPABILITIES));
+const knownPlatformCapabilities = new Set(SUPERUSER_CAPABILITIES);
+
 /**
  * Kept as a compatibility no-op for tests/imports; allowlists are read live.
  */
@@ -65,6 +74,16 @@ export const isPlatformSuperuser = (user) => {
 
 export const isPlatformAdmin = isPlatformSuperuser;
 
+export const isKnownPlatformCapability = (capability) =>
+  typeof capability === "string" && knownPlatformCapabilities.has(capability);
+
+export const resolvePlatformCapabilities = (user) =>
+  isPlatformSuperuser(user) ? [...SUPERUSER_CAPABILITIES] : [];
+
+export const hasPlatformCapability = (user, capability) =>
+  isKnownPlatformCapability(capability) &&
+  resolvePlatformCapabilities(user).includes(capability);
+
 /**
  * Express middleware: require the authenticated user to be a platform superuser.
  * Must be placed after the `protect` middleware.
@@ -86,6 +105,26 @@ export const requirePlatformSuperuser = (req, res, next) => {
   }
 
   return next();
+};
+
+export const requirePlatformCapability = (capability) => {
+  function requirePlatformCapability(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authorized, no token" });
+    }
+
+    if (!hasPlatformCapability(req.user, capability)) {
+      return res.status(403).json({
+        code: "FORBIDDEN",
+        message: "Platform capability required",
+      });
+    }
+
+    return next();
+  }
+
+  requirePlatformCapability.platformCapability = capability;
+  return requirePlatformCapability;
 };
 
 export const requirePlatformAdmin = requirePlatformSuperuser;

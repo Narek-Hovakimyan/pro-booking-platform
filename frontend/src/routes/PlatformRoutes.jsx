@@ -27,7 +27,7 @@ export const platformRoutes = (
     <Route
       path="/admin/platform/dashboard"
       element={
-        <ProtectedRoute requiredPlatformRole="superuser">
+        <ProtectedRoute requiredPlatformCapability="billing.read">
           <PlatformDashboardPage />
         </ProtectedRoute>
       }
@@ -39,7 +39,7 @@ export const platformRoutes = (
     <Route
       path="/admin/platform/billing/salons"
       element={
-        <ProtectedRoute requiredPlatformRole="superuser">
+        <ProtectedRoute requiredPlatformCapability="billing.read">
           <PlatformBillingPage />
         </ProtectedRoute>
       }
@@ -47,7 +47,7 @@ export const platformRoutes = (
     <Route
       path="/admin/platform/billing/salons/:salonId"
       element={
-        <ProtectedRoute requiredPlatformRole="superuser">
+        <ProtectedRoute requiredPlatformCapability="billing.read">
           <PlatformSalonBillingDetailPage />
         </ProtectedRoute>
       }
@@ -55,7 +55,7 @@ export const platformRoutes = (
     <Route
       path="/admin/platform/billing/individuals"
       element={
-        <ProtectedRoute requiredPlatformRole="superuser">
+        <ProtectedRoute requiredPlatformCapability="billing.read">
           <PlatformIndividualBillingPage />
         </ProtectedRoute>
       }

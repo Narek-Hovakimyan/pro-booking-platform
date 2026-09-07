@@ -1,8 +1,16 @@
 import { useSelector } from "react-redux";
 import { Navigate } from "react-router-dom";
-import { canAccessPlatform } from "@/shared/utils/platformAccess";
+import {
+  canAccessPlatform,
+  hasPlatformCapability,
+} from "@/shared/utils/platformAccess";
 
-export default function ProtectedRoute({ children, role, requiredPlatformRole }) {
+export default function ProtectedRoute({
+  children,
+  role,
+  requiredPlatformRole,
+  requiredPlatformCapability,
+}) {
   const { currentUser, isAuthenticated } = useSelector((state) => state.auth);
 
   if (!isAuthenticated) {
@@ -19,6 +27,18 @@ export default function ProtectedRoute({ children, role, requiredPlatformRole })
   }
 
   if (requiredPlatformRole && !canAccessPlatform(currentUser)) {
+    return (
+      <Navigate
+        to={currentUser?.role === "barber" ? "/admin" : "/"}
+        replace
+      />
+    );
+  }
+
+  if (
+    requiredPlatformCapability &&
+    !hasPlatformCapability(currentUser, requiredPlatformCapability)
+  ) {
     return (
       <Navigate
         to={currentUser?.role === "barber" ? "/admin" : "/"}

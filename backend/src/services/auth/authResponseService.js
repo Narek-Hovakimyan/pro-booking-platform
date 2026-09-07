@@ -1,4 +1,7 @@
-import { isPlatformSuperuser } from "../../middleware/platformMiddleware.js";
+import {
+  isPlatformSuperuser,
+  resolvePlatformCapabilities,
+} from "../../middleware/platformMiddleware.js";
 import { serializeSpecialistOnboardingState } from "../../utils/specialistOnboardingState.js";
 import { signAccessTokenForUser } from "./accessTokenService.js";
 
@@ -28,6 +31,7 @@ const getRawSalonMemberships = (user) => {
 
 export function serializeAuthUser(user) {
   const specialistOnboarding = serializeSpecialistOnboardingState(user);
+  const platformCapabilities = resolvePlatformCapabilities(user);
 
   return {
     id: user._id,
@@ -49,6 +53,7 @@ export function serializeAuthUser(user) {
     favoriteBarbers: user.favoriteBarbers || [],
     favoriteSalons: user.favoriteSalons || [],
     canAccessPlatform: isPlatformSuperuser(user),
+    platformCapabilities,
     createdAt: user.createdAt,
     ...(specialistOnboarding ? { specialistOnboarding } : {}),
   };

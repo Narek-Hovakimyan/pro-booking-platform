@@ -1,6 +1,9 @@
 import express from "express";
 import { protect } from "../../middleware/authMiddleware.js";
-import { requirePlatformSuperuser } from "../../middleware/platformMiddleware.js";
+import {
+  PLATFORM_CAPABILITIES,
+  requirePlatformCapability,
+} from "../../middleware/platformMiddleware.js";
 import { getPlatformDashboardSummaryHandler } from "../../controllers/platform/platformDashboardController.js";
 import {
   listSalonBillingSummaries,
@@ -24,14 +27,19 @@ const router = express.Router();
  * Protected — platform superuser only.
  * Returns safe platform superuser identity info.
  */
-router.get("/access-check", protect, requirePlatformSuperuser, (req, res) => {
-  return res.json({
-    id: req.user._id,
-    email: req.user.email || "",
-    name: req.user.name,
-    canAccessPlatform: true,
-  });
-});
+router.get(
+  "/access-check",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
+  (req, res) => {
+    return res.json({
+      id: req.user._id,
+      email: req.user.email || "",
+      name: req.user.name,
+      canAccessPlatform: true,
+    });
+  }
+);
 
 /**
  * GET /api/platform/dashboard/summary
@@ -41,7 +49,7 @@ router.get("/access-check", protect, requirePlatformSuperuser, (req, res) => {
 router.get(
   "/dashboard/summary",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   getPlatformDashboardSummaryHandler
 );
 
@@ -53,7 +61,7 @@ router.get(
 router.get(
   "/billing/salons",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   listSalonBillingSummaries
 );
 
@@ -65,7 +73,7 @@ router.get(
 router.get(
   "/billing/salons/:salonId",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   getSalonBillingDetailHandler
 );
 
@@ -77,7 +85,7 @@ router.get(
 router.get(
   "/billing/salons/:salonId/payments",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   getSalonPaymentsHandler
 );
 
@@ -89,7 +97,7 @@ router.get(
 router.get(
   "/billing/payments",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   listAllSalonPayments
 );
 
@@ -101,7 +109,7 @@ router.get(
 router.get(
   "/billing/individuals",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   listIndividualBillingSummaries
 );
 
@@ -113,7 +121,7 @@ router.get(
 router.get(
   "/billing/individuals/:barberId/payments",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   getIndividualPaymentsHandler
 );
 
@@ -126,7 +134,7 @@ router.get(
 router.patch(
   "/billing/salons/:salonId/subscription/activate",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
   activateSubscription
 );
 
@@ -139,7 +147,7 @@ router.patch(
 router.patch(
   "/billing/salons/:salonId/subscription/seat-count",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
   updateSeatCount
 );
 
@@ -152,7 +160,7 @@ router.patch(
 router.post(
   "/billing/salons/:salonId/seats/assign",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
   assignSeat
 );
 
@@ -165,7 +173,7 @@ router.post(
 router.post(
   "/billing/salons/:salonId/seats/revoke",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
   revokeSeat
 );
 
@@ -178,7 +186,7 @@ router.post(
 router.post(
   "/billing/salons/:salonId/subscription/cancel",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
   cancelSubscription
 );
 
@@ -191,7 +199,7 @@ router.post(
 router.post(
   "/billing/payments/:paymentId/confirm",
   protect,
-  requirePlatformSuperuser,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
   confirmPayment
 );
 
