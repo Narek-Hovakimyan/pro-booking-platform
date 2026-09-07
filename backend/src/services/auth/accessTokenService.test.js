@@ -12,12 +12,18 @@ import {
 import { serializeAuthUser } from "./authResponseService.js";
 
 const originalJwtSecret = process.env.JWT_SECRET;
+const originalPlatformAdminEmails = process.env.PLATFORM_ADMIN_EMAILS;
+const originalPlatformAdminIds = process.env.PLATFORM_ADMIN_IDS;
 const jwtSecret = "access-token-service-test-secret";
 const userId = "64d000000000000000000001";
 
 afterEach(() => {
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = originalJwtSecret;
+  if (originalPlatformAdminEmails === undefined) delete process.env.PLATFORM_ADMIN_EMAILS;
+  else process.env.PLATFORM_ADMIN_EMAILS = originalPlatformAdminEmails;
+  if (originalPlatformAdminIds === undefined) delete process.env.PLATFORM_ADMIN_IDS;
+  else process.env.PLATFORM_ADMIN_IDS = originalPlatformAdminIds;
 });
 
 test("signs a versioned 15-minute token with string id and integer auth version", () => {
@@ -110,4 +116,30 @@ test("serialized public auth user never exposes authVersion", () => {
   });
 
   assert.equal(publicUser.authVersion, undefined);
+});
+
+test("serialized auth users expose fixed capabilities without raw platform identity", () => {
+  const superuser = serializeAuthUser({
+    _id: userId,
+    name: "Platform User",
+    phone: "+37400111222",
+    role: "client",
+    platformRole: "superuser",
+  });
+  const normalUser = serializeAuthUser({
+    _id: "64d000000000000000000002",
+    name: "Normal User",
+    phone: "+37400111223",
+    role: "client",
+  });
+
+  assert.equal(superuser.canAccessPlatform, true);
+  assert.deepEqual(superuser.platformCapabilities, [
+    "billing.read",
+    "billing.manage",
+    "audit.read",
+  ]);
+  assert.equal(superuser.platformRole, undefined);
+  assert.equal(normalUser.canAccessPlatform, false);
+  assert.deepEqual(normalUser.platformCapabilities, []);
 });

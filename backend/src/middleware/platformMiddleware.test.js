@@ -7,10 +7,14 @@ import { googleAuth } from "../controllers/auth/authController.js";
 import { setGoogleAuthClientFactoryForTesting } from "../services/auth/googleAuthService.js";
 import { protect } from "./authMiddleware.js";
 import {
+  PLATFORM_CAPABILITIES,
+  hasPlatformCapability,
   isPlatformAdmin,
   isPlatformSuperuser,
+  requirePlatformCapability,
   requirePlatformAdmin,
   requirePlatformSuperuser,
+  resolvePlatformCapabilities,
   resetAllowlistCache,
 } from "./platformMiddleware.js";
 
@@ -52,6 +56,54 @@ afterEach(() => {
 test("isPlatformAdmin returns false for null/undefined user", () => {
   assert.equal(isPlatformAdmin(null), false);
   assert.equal(isPlatformAdmin(undefined), false);
+});
+
+test("effective platform superusers resolve only the fixed capability set", () => {
+  const dbSuperuser = {
+    _id: "64b000000000000000000040",
+    platformRole: "superuser",
+  };
+  process.env.PLATFORM_ADMIN_EMAILS = "allowlisted@example.com";
+  process.env.PLATFORM_ADMIN_IDS = "64b000000000000000000041";
+
+  const emailAllowlisted = {
+    _id: "64b000000000000000000042",
+    email: "allowlisted@example.com",
+    emailVerified: true,
+  };
+  const idAllowlisted = { _id: "64b000000000000000000041" };
+  const expected = Object.values(PLATFORM_CAPABILITIES);
+
+  for (const user of [dbSuperuser, emailAllowlisted, idAllowlisted]) {
+    assert.deepEqual(resolvePlatformCapabilities(user), expected);
+    assert.equal(hasPlatformCapability(user, PLATFORM_CAPABILITIES.BILLING_READ), true);
+    assert.equal(hasPlatformCapability(user, PLATFORM_CAPABILITIES.BILLING_MANAGE), true);
+    assert.equal(hasPlatformCapability(user, PLATFORM_CAPABILITIES.AUDIT_READ), true);
+    assert.equal(hasPlatformCapability(user, "unknown.capability"), false);
+  }
+});
+
+test("requirePlatformCapability fails closed for unknown capabilities and non-platform users", () => {
+  const unknown = requirePlatformCapability("unknown.capability");
+  const forbidden = makeResponse();
+  let nextCalled = false;
+
+  unknown(
+    { user: { _id: "64b000000000000000000043", platformRole: "superuser" } },
+    forbidden,
+    () => { nextCalled = true; }
+  );
+  assert.equal(nextCalled, false);
+  assert.equal(forbidden.statusCode, 403);
+
+  const billingRead = requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ);
+  const normalUser = makeResponse();
+  billingRead(
+    { user: { _id: "64b000000000000000000044", role: "barber" } },
+    normalUser,
+    () => { nextCalled = true; }
+  );
+  assert.equal(normalUser.statusCode, 403);
 });
 
 test("isPlatformAdmin returns false for user without _id", () => {

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { resetAllowlistCache } from "../middleware/platformMiddleware.js";
+import {
+  PLATFORM_CAPABILITIES,
+  resetAllowlistCache,
+} from "../middleware/platformMiddleware.js";
 import platformRoutes from "./platform/platformRoutes.js";
 
 afterEach(() => {
@@ -15,7 +18,19 @@ const writeBillingRoutes = [
   "/billing/salons/:salonId/subscription/seat-count",
   "/billing/salons/:salonId/seats/assign",
   "/billing/salons/:salonId/seats/revoke",
+  "/billing/salons/:salonId/subscription/cancel",
   "/billing/payments/:paymentId/confirm",
+];
+
+const readPlatformRoutes = [
+  "/access-check",
+  "/dashboard/summary",
+  "/billing/salons",
+  "/billing/salons/:salonId",
+  "/billing/salons/:salonId/payments",
+  "/billing/payments",
+  "/billing/individuals",
+  "/billing/individuals/:barberId/payments",
 ];
 
 /* ── Middleware helper ────────────────────────────────── */
@@ -30,7 +45,7 @@ const checkMiddleware = (route, expectedMiddlewares) => {
 
 /* ── Route structure tests ────────────────────────────── */
 
-test("all routes have protect + requirePlatformSuperuser middleware", () => {
+test("all routes have protect plus their fixed platform capability", () => {
   const expectedPaths = [
     { path: "/access-check", method: "get" },
     { path: "/dashboard/summary", method: "get" },
@@ -44,6 +59,7 @@ test("all routes have protect + requirePlatformSuperuser middleware", () => {
     { path: "/billing/salons/:salonId/subscription/seat-count", method: "patch" },
     { path: "/billing/salons/:salonId/seats/assign", method: "post" },
     { path: "/billing/salons/:salonId/seats/revoke", method: "post" },
+    { path: "/billing/salons/:salonId/subscription/cancel", method: "post" },
     { path: "/billing/payments/:paymentId/confirm", method: "post" },
   ];
 
@@ -56,7 +72,12 @@ test("all routes have protect + requirePlatformSuperuser middleware", () => {
     );
     assert.ok(route, `Route ${path} should exist`);
     assert.ok(route.route.methods[method], `${path} should accept ${method.toUpperCase()}`);
-    checkMiddleware(route, ["protect", "requirePlatformSuperuser"]);
+    checkMiddleware(route, ["protect", "requirePlatformCapability"]);
+    const capabilityMiddleware = route.route.stack[1].handle;
+    const expectedCapability = readPlatformRoutes.includes(path)
+      ? PLATFORM_CAPABILITIES.BILLING_READ
+      : PLATFORM_CAPABILITIES.BILLING_MANAGE;
+    assert.equal(capabilityMiddleware.platformCapability, expectedCapability);
   }
 });
 
@@ -91,6 +112,7 @@ test("write handler names are correct", () => {
   assert.equal(getHandlerName("/billing/salons/:salonId/subscription/seat-count"), "updateSeatCount");
   assert.equal(getHandlerName("/billing/salons/:salonId/seats/assign"), "assignSeat");
   assert.equal(getHandlerName("/billing/salons/:salonId/seats/revoke"), "revokeSeat");
+  assert.equal(getHandlerName("/billing/salons/:salonId/subscription/cancel"), "cancelSubscription");
   assert.equal(getHandlerName("/billing/payments/:paymentId/confirm"), "confirmPayment");
 });
 
@@ -263,6 +285,7 @@ test("user with platformRole superuser allowed and returns identity info", async
   assert.equal(body.name, "Platform Superuser");
   assert.equal(body.email, "superuser@example.com");
   assert.equal(body.canAccessPlatform, true);
+  assert.deepEqual(body.platformCapabilities, undefined);
   assert.equal(body.platformRole, undefined);
   assert.equal(body.token, undefined);
   assert.equal(body.password, undefined);
