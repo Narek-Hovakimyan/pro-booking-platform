@@ -215,6 +215,7 @@ export default function ServiceCard({
           {deleteConfirmId === service.id ? (
             <div className="flex flex-wrap items-center justify-end gap-1">
               <Button
+                disabled={isSaving}
                 size="sm"
                 variant="destructive"
                 className="h-10 rounded-2xl px-3 text-xs"

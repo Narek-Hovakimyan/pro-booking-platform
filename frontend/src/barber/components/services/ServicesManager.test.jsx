@@ -11,6 +11,13 @@ const deleteConfirmationState = vi.hoisted(() => ({
   calls: [],
 }));
 
+const mutationLockState = vi.hoisted(() => ({
+  capture: false,
+  falseStateCalls: 0,
+  setter: null,
+  calls: [],
+}));
+
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal();
 
@@ -19,6 +26,21 @@ vi.mock("react", async (importOriginal) => {
     useState(initialValue) {
       const state = actual.useState(initialValue);
       const stack = new Error().stack || "";
+      if (mutationLockState.capture && stack.includes("ServicesManager.jsx")) {
+        if (Array.isArray(initialValue) && initialValue.length === 0) {
+          mutationLockState.falseStateCalls = 0;
+        }
+        if (initialValue === false) {
+          mutationLockState.falseStateCalls += 1;
+          if (mutationLockState.falseStateCalls === 2) {
+            const frozenSetter = (value) => {
+              mutationLockState.calls.push(value);
+            };
+            mutationLockState.setter = frozenSetter;
+            return [state[0], frozenSetter];
+          }
+        }
+      }
       if (
         deleteConfirmationState.capture &&
         initialValue === null &&
@@ -59,6 +81,10 @@ afterEach(() => {
   deleteConfirmationState.nullStateCalls = 0;
   deleteConfirmationState.setter = null;
   deleteConfirmationState.calls = [];
+  mutationLockState.capture = false;
+  mutationLockState.falseStateCalls = 0;
+  mutationLockState.setter = null;
+  mutationLockState.calls = [];
 });
 
 function ServiceToggleHarness({ initialService, request }) {
@@ -300,6 +326,79 @@ describe("ServicesManager", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
+  test("accepts only one pending create and releases the lock after success", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const pendingCreate = createDeferred();
+    const addService = vi.fn().mockReturnValueOnce(pendingCreate.promise);
+
+    render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Haircut" } });
+    const [priceInput, durationInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "5000" } });
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+
+    await waitFor(() => expect(addService).toHaveBeenCalledTimes(1));
+    const saveButton = screen.getByRole("button", { name: "Saving..." });
+    expect(saveButton).toBeDisabled();
+    fireEvent.click(saveButton);
+    expect(addService).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingCreate.resolve({ id: "service-1" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  test("uses the ref guard before mutation-lock state can render disabled controls", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const pendingCreate = createDeferred();
+    const addService = vi.fn().mockReturnValueOnce(pendingCreate.promise);
+    mutationLockState.capture = true;
+
+    render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+    expect(mutationLockState.setter).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Haircut" } });
+    const [priceInput, durationInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "5000" } });
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    const saveButton = screen.getByRole("button", { name: "Add service" });
+
+    fireEvent.click(saveButton);
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+
+    expect(mutationLockState.calls).toEqual([true]);
+    expect(addService).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingCreate.resolve({ id: "service-1" });
+      await Promise.resolve();
+    });
+
+    expect(mutationLockState.calls).toEqual([true, false]);
+  });
+
   test("keeps the dialog open for blank, negative, or malformed prices without creating a service", () => {
     fetchServiceCategories.mockResolvedValue([]);
     const addService = vi.fn();
@@ -404,6 +503,88 @@ describe("ServicesManager", () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Haircut" })).not.toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  test("keeps an open delete confirmation disabled until a pending update settles", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const pendingUpdate = createDeferred();
+    const updateService = vi.fn().mockReturnValueOnce(pendingUpdate.promise);
+    const removeService = vi.fn().mockResolvedValueOnce({});
+
+    render(
+      <ServicesManager
+        services={[service]}
+        removeService={removeService}
+        addService={vi.fn()}
+        updateService={updateService}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Delete"));
+    fireEvent.click(screen.getByTitle("Deactivate"));
+
+    await waitFor(() => expect(updateService).toHaveBeenCalledWith("service-1", { active: false }));
+    const deleteButton = screen.getByRole("button", { name: "Delete" });
+    expect(deleteButton).toBeDisabled();
+    fireEvent.click(deleteButton);
+    expect(removeService).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingUpdate.resolve({ ...service, active: false });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(removeService).toHaveBeenCalledTimes(1));
+  });
+
+  test("blocks other mutations during a pending delete and releases the lock after rejection", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const pendingDelete = createDeferred();
+    const removeService = vi.fn()
+      .mockReturnValueOnce(pendingDelete.promise)
+      .mockResolvedValueOnce({});
+    const updateService = vi.fn();
+
+    render(
+      <ServicesManager
+        services={[service]}
+        removeService={removeService}
+        addService={vi.fn()}
+        updateService={updateService}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Delete"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(removeService).toHaveBeenCalledTimes(1));
+    expect(screen.getByTitle("Deactivate")).toBeDisabled();
+    expect(screen.getByTitle("Edit")).toBeDisabled();
+    fireEvent.click(screen.getByTitle("Deactivate"));
+    fireEvent.click(screen.getByTitle("Edit"));
+    expect(updateService).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingDelete.reject(new Error("temporary failure"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled());
+    expect(screen.getByTitle("Edit")).toBeEnabled();
+    fireEvent.click(screen.getByTitle("Edit"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(removeService).toHaveBeenCalledTimes(2));
   });
 
   test("does not attempt delete-confirmation state after late delete success unmount", async () => {

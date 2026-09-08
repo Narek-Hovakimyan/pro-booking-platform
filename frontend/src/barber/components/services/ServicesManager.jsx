@@ -67,6 +67,8 @@ export default function ServicesManager({
 
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const deletingServiceIdRef = useRef(null);
+  const mutationInFlightRef = useRef(false);
+  const [isMutationLocked, setIsMutationLocked] = useState(false);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -75,6 +77,23 @@ export default function ServicesManager({
       isMountedRef.current = false;
     };
   }, []);
+
+  const mutationBusy = isSaving || isMutationLocked;
+  const runServiceMutation = async (operation) => {
+    if (mutationInFlightRef.current || isSaving) return false;
+
+    mutationInFlightRef.current = true;
+    setIsMutationLocked(true);
+    try {
+      await operation();
+      return true;
+    } finally {
+      mutationInFlightRef.current = false;
+      if (isMountedRef.current) {
+        setIsMutationLocked(false);
+      }
+    }
+  };
 
   const retainsMissingCustomCategory =
     form.currentCustomCategory?.missing &&
@@ -279,46 +298,54 @@ export default function ServicesManager({
     }
 
     if (editingService) {
-      try {
-        await updateService(editingService.id, basePayload);
-        closeModal();
-      } catch (err) {
-        setModalError(err.response?.data?.message || "Could not update service.");
-      }
+      await runServiceMutation(async () => {
+        try {
+          await updateService(editingService.id, basePayload);
+          closeModal();
+        } catch (err) {
+          setModalError(err.response?.data?.message || "Could not update service.");
+        }
+      });
     } else {
-      try {
-        await addService(basePayload);
-        closeModal();
-      } catch (err) {
-        setModalError(err.response?.data?.message || "Could not create service.");
-      }
+      await runServiceMutation(async () => {
+        try {
+          await addService(basePayload);
+          closeModal();
+        } catch (err) {
+          setModalError(err.response?.data?.message || "Could not create service.");
+        }
+      });
     }
   };
 
   const handleDelete = async (serviceId) => {
     if (deletingServiceIdRef.current === serviceId) return;
 
-    deletingServiceIdRef.current = serviceId;
-    try {
-      await removeService(serviceId);
-      if (isMountedRef.current) {
-        setDeleteConfirmId(null);
+    await runServiceMutation(async () => {
+      deletingServiceIdRef.current = serviceId;
+      try {
+        await removeService(serviceId);
+        if (isMountedRef.current) {
+          setDeleteConfirmId(null);
+        }
+      } catch {
+        // useServiceManagement has already reported the expected request failure.
+      } finally {
+        if (deletingServiceIdRef.current === serviceId) {
+          deletingServiceIdRef.current = null;
+        }
       }
-    } catch {
-      // useServiceManagement has already reported the expected request failure.
-    } finally {
-      if (deletingServiceIdRef.current === serviceId) {
-        deletingServiceIdRef.current = null;
-      }
-    }
+    });
   };
 
   const handleToggleActive = async (service) => {
-    try {
-      await updateService(service.id, { active: !service.active });
-    } catch {
-      // useServiceManagement has already reported the expected request failure.
-    }
+    await runServiceMutation(async () => {
+      try {
+        await updateService(service.id, { active: !service.active });
+      } catch {
+        // useServiceManagement has already reported the expected request failure.
+      }
+    });
   };
 
   return (
@@ -329,7 +356,7 @@ export default function ServicesManager({
         inactiveCount={inactiveServices.length}
         error={error}
         isLoading={isLoading}
-        isSaving={isSaving}
+        isSaving={mutationBusy}
         isEmpty={services.length === 0}
         onAdd={openAddModal}
         fullPage={fullPage}
@@ -347,7 +374,7 @@ export default function ServicesManager({
                     const unavailableMembers = getUnavailablePackageMembers(service.includedServiceIds);
                     return (
                       <div key={service.id} className="space-y-2">
-                        <ServiceCard service={service} customCategories={customCategories} isSaving={isSaving} deleteConfirmId={deleteConfirmId}
+                        <ServiceCard service={service} customCategories={customCategories} isSaving={mutationBusy} deleteConfirmId={deleteConfirmId}
                           onEdit={() => openEditModal(service)} onToggleActive={() => handleToggleActive(service)}
                           onDeleteConfirm={() => setDeleteConfirmId(service.id)} onDeleteCancel={() => setDeleteConfirmId(null)}
                           onDeleteConfirmExecute={() => handleDelete(service.id)} />
@@ -371,7 +398,7 @@ export default function ServicesManager({
                     const unavailableMembers = getUnavailablePackageMembers(service.includedServiceIds);
                     return (
                       <div key={service.id} className="space-y-2">
-                        <ServiceCard service={service} customCategories={customCategories} isSaving={isSaving} deleteConfirmId={deleteConfirmId}
+                        <ServiceCard service={service} customCategories={customCategories} isSaving={mutationBusy} deleteConfirmId={deleteConfirmId}
                           onEdit={() => openEditModal(service)} onToggleActive={() => handleToggleActive(service)}
                           onDeleteConfirm={() => setDeleteConfirmId(service.id)} onDeleteCancel={() => setDeleteConfirmId(null)}
                           onDeleteConfirmExecute={() => handleDelete(service.id)} />
@@ -388,16 +415,16 @@ export default function ServicesManager({
         )}
       </ServiceManagerHeader>
 
-      <ServiceFormModal showModal={showModal} editingService={editingService} isSaving={isSaving} modalError={modalError}
+      <ServiceFormModal showModal={showModal} editingService={editingService} isSaving={mutationBusy} modalError={modalError}
         saveDisabled={
-          isSaving ||
+          mutationBusy ||
           (form.categoryType === "custom" && !form.customCategoryId) ||
           retainsMissingCustomCategory ||
           (form.categoryType === "custom" && !canUseSelectedCustomCategory) ||
           unavailablePackageMembers.length > 0
         }
         onClose={closeModal} onSave={handleSave}>
-        <ServiceBasicDetailsForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} />
+        <ServiceBasicDetailsForm form={form} handleFieldChange={handleFieldChange} isSaving={mutationBusy} />
         <section className="space-y-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
           <div>
             <p className="text-sm font-bold text-neutral-900">Price and duration</p>
@@ -405,7 +432,7 @@ export default function ServicesManager({
           </div>
           {form.type === "package" ? (
             <>
-              <ServicePackagePricingForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving}
+              <ServicePackagePricingForm form={form} handleFieldChange={handleFieldChange} isSaving={mutationBusy}
                 availablePackageServices={availablePackageServices} formatPrice={formatPrice}
                 isPackageSumPrice={isPackageSumPrice} isPackageSumDuration={isPackageSumDuration}
                 computedPackagePrice={computedPackagePrice}
@@ -415,7 +442,7 @@ export default function ServicesManager({
                   <p>Unavailable package member{unavailablePackageMembers.length === 1 ? "" : "s"}: {unavailablePackageMembers.join(", ")}</p>
                   <div className="flex flex-wrap gap-2">
                     {unavailablePackageMembers.map((id) => (
-                      <button key={id} type="button" disabled={isSaving} className="rounded-lg border border-amber-300 px-2 py-1 text-xs font-semibold" onClick={() => handleFieldChange("includedServiceIds", form.includedServiceIds.filter((memberId) => String(memberId) !== String(id)))}>
+                      <button key={id} type="button" disabled={mutationBusy} className="rounded-lg border border-amber-300 px-2 py-1 text-xs font-semibold" onClick={() => handleFieldChange("includedServiceIds", form.includedServiceIds.filter((memberId) => String(memberId) !== String(id)))}>
                         Remove unavailable service {id}
                       </button>
                     ))}
@@ -424,11 +451,11 @@ export default function ServicesManager({
               )}
             </>
           ) : (
-            <ServiceSinglePriceForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} />
+            <ServiceSinglePriceForm form={form} handleFieldChange={handleFieldChange} isSaving={mutationBusy} />
           )}
         </section>
-        <ServiceDiscountForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} formOriginalPrice={formOriginalPrice} />
-        <ServiceCategoryDescriptionForm form={form} handleFieldChange={handleFieldChange} isSaving={isSaving} barberId={barberId} onCustomCategoriesChange={setCustomCategories} />
+        <ServiceDiscountForm form={form} handleFieldChange={handleFieldChange} isSaving={mutationBusy} formOriginalPrice={formOriginalPrice} />
+        <ServiceCategoryDescriptionForm form={form} handleFieldChange={handleFieldChange} isSaving={mutationBusy} barberId={barberId} onCustomCategoriesChange={setCustomCategories} />
       </ServiceFormModal>
     </>
   );
