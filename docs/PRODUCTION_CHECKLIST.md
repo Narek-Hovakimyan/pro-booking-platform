@@ -80,6 +80,9 @@ These control stale-claim recovery timing for reminder workers after failures an
   - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
   - `Strict-Transport-Security: max-age=31536000; includeSubDomains` (production only)
 - [ ] Rate limiting is enabled
+- [ ] `PLATFORM_ADMIN_EMAILS` / `PLATFORM_ADMIN_IDS`, when configured, contain only verified bootstrap/recovery superuser principals; they are not a staff permission system.
+- [ ] Platform operations remain under `/api/platform/*` and require explicit known capabilities (`billing.read`, `billing.manage`, or `audit.read`); unknown capabilities fail closed.
+- [ ] Platform access is separate from global `client`/`barber` roles and salon-scoped owner/admin/staff/chair_renter relationships; raw `platformRole` is not exposed in normal/public responses.
 - [ ] Upload directory static middleware is configured safely:
   - `dotfiles: "deny"`
   - `fallthrough: false`

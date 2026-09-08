@@ -3,9 +3,17 @@
 A full-stack SaaS application for salon and barber appointment management. HairBook connects clients with barbers and salons, providing booking, messaging, reviews, portfolio, events, jobs, and a subscription-based access model.
 
 **Global roles:** Client | Barber  
-**Salon permissions:** Owner | Admin | Staff | Chair Renter  
+**Salon relationships:** Owner | Admin | Staff | Chair Renter (salon-scoped only)
 **Monetization:** Individual barber subscriptions + salon seat subscriptions  
 **Privacy model:** Staff vs. Chair Renter — owners see movement for staff only
+
+Platform access is separate from both global roles and salon relationships. It is limited to
+`User.platformRole === "superuser"` or the verified `PLATFORM_ADMIN_EMAILS` /
+`PLATFORM_ADMIN_IDS` bootstrap-recovery allowlists. Platform routes under `/api/platform/*`
+use explicit capabilities: `billing.read`, `billing.manage`, and `audit.read`; unknown
+capabilities fail closed. Platform access does not bypass ordinary salon or business routes,
+and raw `platformRole` is not included in normal or public responses. Scoped platform roles
+remain deferred until a real second operator or equivalent operational need exists.
 
 ## AI Project Context
 
@@ -201,7 +209,7 @@ For detailed architecture, feature behavior, business rules, high-risk areas, an
 | `/admin/salon/billing` | barber | Salon subscription billing |
 | `/admin/salon/promotions` | barber | Salon promotions management |
 | `/admin/salon/reports` | barber | Salon owner analytics reports |
-| `/admin/platform*` | platform superuser | Platform admin dashboard and billing routes |
+| `/admin/platform*` | platform capability | Platform billing and read-only Audit routes |
 
 *\* Requires active subscription or salon seat*
 
@@ -229,7 +237,7 @@ For detailed architecture, feature behavior, business rules, high-risk areas, an
 | Waitlist | `/api/waitlist` | Waitlist entries, offers |
 | Subscriptions | `/api/subscriptions` | Plans, subscriptions, seats, payment attempts |
 | Payments | `/api/payments` | Payment provider routes and webhooks |
-| Platform | `/api/platform` | Platform admin access checks, dashboard, billing |
+| Platform | `/api/platform` | Capability-protected billing administration and read-only Audit |
 | Loyalty | `/api/loyalty` | Loyalty programs |
 | Vouchers | `/api/vouchers` | Discount vouchers |
 | Revenue | `/api/revenue` | Revenue analytics |
@@ -287,7 +295,7 @@ hairdressProject/
 │   │   │   ├── hooks/           # Barber/admin page hooks
 │   │   │   └── pages/           # AdminPage, BillingPage, SalonDashboardPage, SalonCalendarPage, etc.
 │   │   ├── features/            # Feature modules (events, messages, jobs, reviews)
-│   │   ├── platform/            # Platform admin pages, components, utilities
+│   │   ├── platform/            # Capability-protected platform pages and utilities
 │   │   ├── routes/              # Route group definitions
 │   │   ├── i18n/                # i18n setup and locales
 │   │   ├── shared/              # Shared UI, API client, hooks, utils, SubscriptionGuard
@@ -305,7 +313,7 @@ hairdressProject/
 - **`frontend/src/barber`** — Barber/admin dashboard: manage services, schedule, bookings, calendar, portfolio, events, certificates, billing, salon management (includes `SalonPromotionsManager`, `SalonDashboardPage`, `SalonReportsPage`, etc.).
 - **`frontend/src/barber/hooks/`** — Barber/admin hooks for page-specific state and account/profile helpers.
 - **`frontend/src/features/`** — Modular feature directories for events, jobs, messages, and reviews.
-- **`frontend/src/platform/`** — Platform admin pages/components for dashboard and billing management.
+- **`frontend/src/platform/`** — Platform pages/components for billing administration and read-only Audit.
 - **`frontend/src/routes/`** — Route group definitions for public, client discovery, booking, barber admin, and platform routes.
 - **`frontend/src/i18n/`** — i18next setup and locale resources.
 - **`frontend/src/shared/api/`** — API client modules for subscriptions, salon dashboard, salon calendar, public booking, revenue, portfolio, service categories, loyalty, salon promotions.
@@ -438,7 +446,7 @@ Default ports:
 
 ## Testing Checklist
 
-- [ ] Backend: `npm test` (large backend test suite covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, salon dashboard, salon calendar, salon reports, subscription, waitlist, socket auth, availability, deposit settings, platform billing, and more)
+- [ ] Backend: `npm test` (large backend test suite covering auth, bookings, events, certificates, reviews, schedules, services, salon membership, salon dashboard, salon calendar, salon reports, subscription, waitlist, socket auth, availability, deposit settings, platform capabilities, billing, Audit, and more)
 
 - [ ] Frontend lint: `npm run lint`
 - [ ] Frontend build: `npm run build`

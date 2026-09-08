@@ -12,7 +12,7 @@ Main user types:
 - `barber`: the business-user role for specialists and salon managers. Despite the name, the app supports multiple professions through `profession` and `barberType`.
 - Salon owner/admin: still `role: "barber"` at the auth level, with salon-scoped management rights through `Salon.ownerId` or `Salon.admins`.
 - Salon staff/chair renter: a barber connected to a salon through `User.salons[]`, with `relationshipType` and `relationshipStatus`.
-- Platform superuser: optional platform-level access through `User.platformRole === "superuser"` or allowlist env vars; separate from `role`.
+- Platform superuser: optional platform-level identity through `User.platformRole === "superuser"` or verified bootstrap/recovery allowlists; separate from `role` and salon relationships.
 
 Current development status:
 
@@ -102,7 +102,7 @@ Styling/UI approach:
 - `frontend/src/client`: client-facing booking/search/profile/favorites/waitlist pages and components.
 - `frontend/src/shared`: shared API clients, components, hooks, utilities, and data constants.
 - `frontend/src/features`: feature-specific components/utils are present for jobs and events.
-- `frontend/src/platform`: platform admin billing pages.
+- `frontend/src/platform`: capability-protected billing and read-only Audit pages.
 - `uploads/`: repo-root upload folders also exist. Backend code uses `process.cwd()/uploads`, so runtime cwd determines which upload root is active. Verify server cwd before changing media behavior.
 
 ## 4. How to run the project
@@ -139,7 +139,10 @@ Do not put real credentials, URLs, tokens, emails, or keys in docs.
 Application auth roles:
 
 - `User.role` is either `client` or `barber`.
-- Platform superuser access is separate: `platformRole: "superuser"` or configured allowlists in platform middleware.
+- `admin`, `superuser`, owner, staff, and chair_renter are not global application roles.
+- Platform access is separate: `platformRole: "superuser"` or verified `PLATFORM_ADMIN_EMAILS` / `PLATFORM_ADMIN_IDS` bootstrap-recovery allowlists.
+- Platform routes under `/api/platform/*` require explicit known capabilities: `billing.read`, `billing.manage`, or `audit.read`; unknown capabilities fail closed.
+- Platform authority never grants salon authority, and salon authority never grants platform authority. Raw `platformRole` is absent from normal and public auth responses.
 
 Salon access:
 
@@ -164,6 +167,10 @@ Important rules:
 - Chair renter privacy must be preserved. Chair renters are excluded from salon subscription seats and salon staff earnings reporting.
 - Exact `salonId` context matters for schedules, services access, bookings, public salon booking, reports, subscriptions, and billing.
 - `worksAsSpecialist === false` excludes a member from staff/specialist listing.
+
+### Deferred scoped platform roles
+
+Scoped platform roles are intentionally deferred until there is a real second platform operator or equivalent operational need. For a small number of simple future roles, first consider expanding `User.platformRole` and its explicit capability mapping. Use a separate `PlatformAccess` model only when grants/revocations, temporary access, or an independent access-audit lifecycle require that complexity. No dynamic per-user `platformPermissions[]` exists today.
 
 ## 6. Frontend route map
 
@@ -218,8 +225,9 @@ Admin/specialist routes:
 - `/admin/salon/dashboard`: `frontend/src/barber/pages/SalonDashboardPage.jsx`; salon owner/admin dashboard.
 - `/admin/salon/calendar`: `frontend/src/barber/pages/SalonCalendarPage.jsx`; salon calendar.
 - `/admin/salon/reports`: `frontend/src/barber/pages/SalonReportsPage.jsx`; salon reports/CSV export.
-- `/admin/platform/billing`: `frontend/src/platform/pages/PlatformBillingPage.jsx`; protected platform billing UI, backend also requires platform admin.
-- `/admin/platform/billing/salons/:salonId`: `frontend/src/platform/pages/PlatformSalonBillingDetailPage.jsx`; platform salon billing detail.
+- `/admin/platform/billing`: `frontend/src/platform/pages/PlatformBillingPage.jsx`; requires `billing.read`; mutation controls require `billing.manage` and backend enforcement.
+- `/admin/platform/billing/salons/:salonId`: `frontend/src/platform/pages/PlatformSalonBillingDetailPage.jsx`; capability-protected platform salon billing detail.
+- `/admin/platform/audit`: `frontend/src/platform/pages/PlatformAuditPage.jsx`; read-only Audit UI requiring `audit.read`.
 
 Do not break:
 
@@ -300,8 +308,8 @@ Subscriptions/billing/payment:
 
 - `backend/src/routes/subscriptionRoutes.js` -> `subscriptionController.js`, `subscriptionService.js`, `paymentAttemptService.js`.
 - `backend/src/routes/paymentRoutes.js` -> `paymentController.js`; raw webhook route is mounted before JSON parser.
-- `backend/src/routes/platformRoutes.js` -> `platformBillingController.js`; platform admin only.
-- Important access: exact ownerType/ownerId checks; salon billing owner/admin only; platform billing platform admin only.
+- `backend/src/routes/platformRoutes.js` -> platform billing and Audit controllers; each `/api/platform/*` route uses its required capability.
+- Important access: exact ownerType/ownerId checks; salon billing owner/admin only; platform billing/Audit require their explicit platform capability and do not bypass salon authorization.
 
 Reports/export:
 
@@ -751,7 +759,7 @@ Payment attempts:
 - `SubscriptionPaymentAttempt` supports statuses `pending`, `requires_action`, `paid`, `failed`, `cancelled`, `refunded`, `expired`.
 - Payment attempt expiry default is 24 hours.
 - Manual/dev confirmation is available only outside production; production runtime checks fail closed.
-- Platform admin can manually manage/confirm salon billing in platform billing routes.
+- A `billing.manage` platform principal can manually manage/confirm salon billing in `/api/platform/*` routes.
 
 Exact salon subscription gate:
 
@@ -788,7 +796,7 @@ Auth and roles:
 
 - Protected routes use `protect` JWT middleware.
 - Optional public/auth hybrid routes use `optionalAuth`.
-- Platform routes require `protect` plus `requirePlatformAdmin`.
+- Platform routes require `protect` plus `requirePlatformCapability(...)`; billing reads use `billing.read`, billing mutations use `billing.manage`, and Audit reads use `audit.read`.
 - Subscription-gated barber features use `requireBarberSubscription`.
 
 Salon-scoped access:
@@ -889,7 +897,7 @@ Do not invent test commands. If you add or change code later, run the relevant r
 - Review replies: only owning barber/salon manager should reply; completed own booking is required for reviews.
 - Profile image upload: shared avatar upload path updates auth/profile state and public display.
 - Route ordering: Express static routes must stay before `/:id` routes in several route files.
-- Platform admin: do not confuse platformRole with salon owner/admin or app role.
+- Platform access: do not confuse `platformRole` with salon owner/admin or an application role; it is not a generic business-route bypass.
 
 ## 24. Safe change workflow for future AI
 
