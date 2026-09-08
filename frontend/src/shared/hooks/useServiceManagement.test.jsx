@@ -7,10 +7,11 @@ import { useServiceManagement } from "./useServiceManagement";
 const mocks = vi.hoisted(() => ({
   post: vi.fn(),
   put: vi.fn(),
+  delete: vi.fn(),
 }));
 
 vi.mock("../api/axios", () => ({
-  default: { post: mocks.post, put: mocks.put },
+  default: { post: mocks.post, put: mocks.put, delete: mocks.delete },
 }));
 
 const Harness = forwardRef((props, ref) => {
@@ -51,6 +52,7 @@ describe("useServiceManagement addService", () => {
   beforeEach(() => {
     mocks.post.mockReset();
     mocks.put.mockReset();
+    mocks.delete.mockReset();
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -191,6 +193,48 @@ describe("useServiceManagement updateService", () => {
     expect(dispatch.mock.calls[0][0]).toMatchObject({
       type: "services/updateService",
       payload: updatedService,
+    });
+    expect(setDataError).toHaveBeenCalledWith("");
+    expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
+  });
+});
+
+describe("useServiceManagement deleteService", () => {
+  test("propagates a rejected delete after reporting a safe error and settling saving", async () => {
+    const error = { response: { data: { message: "Could not delete service" } } };
+    mocks.delete.mockRejectedValueOnce(error);
+    const { ref, dispatch, setDataError, setIsSaving } = renderHookHarness();
+    let receivedError;
+
+    await act(async () => {
+      try {
+        await ref.current.deleteService("service-1");
+      } catch (requestError) {
+        receivedError = requestError;
+      }
+    });
+
+    expect(receivedError).toBe(error);
+    expect(mocks.delete).toHaveBeenCalledWith("/services/service-1");
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(setDataError).toHaveBeenNthCalledWith(1, "");
+    expect(setDataError).toHaveBeenLastCalledWith("Could not delete service");
+    expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
+  });
+
+  test("dispatches a successful delete and settles saving", async () => {
+    mocks.delete.mockResolvedValueOnce({});
+    const { ref, dispatch, setDataError, setIsSaving } = renderHookHarness();
+
+    await act(async () => {
+      await ref.current.deleteService("service-1");
+    });
+
+    expect(mocks.delete).toHaveBeenCalledWith("/services/service-1");
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0][0]).toMatchObject({
+      type: "services/removeService",
+      payload: "service-1",
     });
     expect(setDataError).toHaveBeenCalledWith("");
     expect(setIsSaving.mock.calls).toEqual([[true], [false]]);

@@ -1,8 +1,44 @@
 import { useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import ServicesManager from "./ServicesManager";
+
+const deleteConfirmationState = vi.hoisted(() => ({
+  capture: false,
+  nullStateCalls: 0,
+  setter: null,
+  calls: [],
+}));
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal();
+
+  return {
+    ...actual,
+    useState(initialValue) {
+      const state = actual.useState(initialValue);
+      const stack = new Error().stack || "";
+      if (
+        deleteConfirmationState.capture &&
+        initialValue === null &&
+        stack.includes("ServicesManager.jsx")
+      ) {
+        deleteConfirmationState.nullStateCalls += 1;
+        if (deleteConfirmationState.nullStateCalls === 2) {
+          const [, setState] = state;
+          const observedSetter = (value) => {
+            deleteConfirmationState.calls.push(value);
+            return setState(value);
+          };
+          deleteConfirmationState.setter = observedSetter;
+          return [state[0], observedSetter];
+        }
+      }
+      return state;
+    },
+  };
+});
 
 const fetchServiceCategories = vi.fn();
 const setServiceCategoryActive = vi.fn();
@@ -17,7 +53,13 @@ vi.mock("@/shared/api/serviceCategories", () => ({
   setServiceCategoryActive: (...args) => setServiceCategoryActive(...args),
 }));
 
-afterEach(() => vi.resetAllMocks());
+afterEach(() => {
+  vi.resetAllMocks();
+  deleteConfirmationState.capture = false;
+  deleteConfirmationState.nullStateCalls = 0;
+  deleteConfirmationState.setter = null;
+  deleteConfirmationState.calls = [];
+});
 
 function ServiceToggleHarness({ initialService, request }) {
   const [services, setServices] = useState([initialService]);
@@ -51,6 +93,50 @@ function ServiceToggleHarness({ initialService, request }) {
       isSaving={isSaving}
     />
   );
+}
+
+function ServiceDeleteHarness({ initialService, request }) {
+  const [services, setServices] = useState([initialService]);
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const removeService = async (serviceId) => {
+    setIsSaving(true);
+    setError("");
+
+    try {
+      await request(serviceId);
+      setServices((currentServices) => currentServices.filter(
+        (service) => service.id !== serviceId
+      ));
+    } catch (requestError) {
+      setError("Could not delete service. Please try again.");
+      throw requestError;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <ServicesManager
+      services={services}
+      removeService={removeService}
+      addService={vi.fn()}
+      updateService={vi.fn()}
+      error={error}
+      isSaving={isSaving}
+    />
+  );
+}
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("ServicesManager", () => {
@@ -286,5 +372,104 @@ describe("ServicesManager", () => {
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("service-1", { active: true }));
     expect(screen.getByTitle("Deactivate")).toBeEnabled();
+  });
+
+  test("retains failed delete confirmation and removes the service only after a successful retry", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const failedRequest = createDeferred();
+    const request = vi.fn()
+      .mockReturnValueOnce(failedRequest.promise)
+      .mockResolvedValueOnce({});
+
+    render(<ServiceDeleteHarness initialService={service} request={request} />);
+
+    fireEvent.click(screen.getByTitle("Delete"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    failedRequest.reject(new Error("temporary failure"));
+
+    expect(await screen.findByText("Could not delete service. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Haircut" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
+    expect(screen.getByTitle("Edit")).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Haircut" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  test("does not attempt delete-confirmation state after late delete success unmount", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const pendingRequest = createDeferred();
+    const removeService = vi.fn().mockReturnValueOnce(pendingRequest.promise);
+
+    deleteConfirmationState.capture = true;
+
+    const { unmount } = render(
+      <ServicesManager
+        services={[service]}
+        removeService={removeService}
+        addService={vi.fn()}
+        updateService={vi.fn()}
+      />
+    );
+    expect(deleteConfirmationState.setter).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByTitle("Delete"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(removeService).toHaveBeenCalledTimes(1);
+    deleteConfirmationState.calls = [];
+
+    unmount();
+    await act(async () => {
+      pendingRequest.resolve();
+      await Promise.resolve();
+    });
+
+    expect(removeService).toHaveBeenCalledTimes(1);
+    expect(deleteConfirmationState.calls).toEqual([]);
+  });
+
+  test("settles a late delete failure after unmount without unsafe caller updates", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const pendingRequest = createDeferred();
+    const removeService = vi.fn().mockReturnValueOnce(pendingRequest.promise);
+
+    const { unmount } = render(
+      <ServicesManager
+        services={[service]}
+        removeService={removeService}
+        addService={vi.fn()}
+        updateService={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Delete"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(removeService).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await act(async () => {
+      pendingRequest.reject(new Error("temporary failure"));
+      await Promise.resolve();
+    });
+
+    expect(removeService).toHaveBeenCalledTimes(1);
   });
 });

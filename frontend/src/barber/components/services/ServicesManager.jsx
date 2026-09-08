@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSelector } from "react-redux";
 
 import { fetchServiceCategories } from "@/shared/api/serviceCategories";
@@ -66,6 +66,16 @@ export default function ServicesManager({
   const [modalError, setModalError] = useState("");
 
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const deletingServiceIdRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const retainsMissingCustomCategory =
     form.currentCustomCategory?.missing &&
     String(form.currentCustomCategory.id) === String(form.customCategoryId);
@@ -286,8 +296,21 @@ export default function ServicesManager({
   };
 
   const handleDelete = async (serviceId) => {
-    setDeleteConfirmId(null);
-    await removeService(serviceId);
+    if (deletingServiceIdRef.current === serviceId) return;
+
+    deletingServiceIdRef.current = serviceId;
+    try {
+      await removeService(serviceId);
+      if (isMountedRef.current) {
+        setDeleteConfirmId(null);
+      }
+    } catch {
+      // useServiceManagement has already reported the expected request failure.
+    } finally {
+      if (deletingServiceIdRef.current === serviceId) {
+        deletingServiceIdRef.current = null;
+      }
+    }
   };
 
   const handleToggleActive = async (service) => {

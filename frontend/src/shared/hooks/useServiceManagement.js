@@ -146,6 +146,7 @@ export function useServiceManagement({
           "Could not delete service. Please try again."
         )
       );
+      throw requestError;
     } finally {
       setIsSaving(false);
     }
