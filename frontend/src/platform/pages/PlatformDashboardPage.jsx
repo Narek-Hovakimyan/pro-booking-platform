@@ -284,7 +284,7 @@ export default function PlatformDashboardPage() {
                       >
                         <div className="min-w-0 flex-1">
                           <div className="font-medium text-neutral-900">
-                            {payment.ownerName || payment.ownerEmail || "Unknown"}
+                            {payment.ownerName || "Unknown"}
                           </div>
                           <div className="text-xs text-neutral-500">
                             {payment.ownerType === "salon" ? "Salon" : "Individual"}
@@ -332,7 +332,7 @@ export default function PlatformDashboardPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="font-medium text-amber-900">
-                            {alert.ownerName || alert.ownerEmail || "Unknown"}
+                            {alert.ownerName || "Unknown"}
                           </div>
                           <div className="text-xs text-amber-700">
                             {alert.ownerType === "salon" ? "Salon" : "Individual"}

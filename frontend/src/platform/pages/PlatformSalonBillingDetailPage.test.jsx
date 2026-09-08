@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getDetail: vi.fn(),
   getPayments: vi.fn(),
   getAttempts: vi.fn(),
+  getSeatManagement: vi.fn(),
   activate: vi.fn(),
   updateSeatCount: vi.fn(),
   assignSeat: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/shared/api/platformBilling", () => ({
   getPlatformBillingSalonDetail: mocks.getDetail,
   getPlatformBillingSalonTransactions: mocks.getPayments,
   getPlatformBillingSalonPaymentAttempts: mocks.getAttempts,
+  getPlatformBillingSalonSeatManagement: mocks.getSeatManagement,
   activatePlatformSalonSubscription: mocks.activate,
   updatePlatformSalonSeatCount: mocks.updateSeatCount,
   assignPlatformSalonSeat: mocks.assignSeat,
@@ -146,6 +148,7 @@ beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset());
   mocks.getPayments.mockResolvedValue({ transactions: [], total: 0 });
   mocks.getAttempts.mockResolvedValue({ paymentAttempts: [], total: 0 });
+  mocks.getSeatManagement.mockResolvedValue({ seats: { assignments: [], total: 0, used: 0, available: 0 }, acceptedStaff: [], latestPendingAttempt: null });
   mocks.canReadBilling.mockReturnValue(true);
   mocks.canManageBilling.mockReturnValue(true);
 });
@@ -155,6 +158,27 @@ afterEach(() => {
 });
 
 describe("PlatformSalonBillingDetailPage request isolation", () => {
+  it("does not request seat management for a read-only billing user", async () => {
+    mocks.canManageBilling.mockReturnValue(false);
+    mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
+
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Salon A" });
+    expect(mocks.getSeatManagement).not.toHaveBeenCalled();
+  });
+
+  it("keeps the billing overview usable when seat management loading fails", async () => {
+    mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
+    mocks.getSeatManagement.mockRejectedValue({ response: { data: { message: "Seat data unavailable" } } });
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Salon A" })).toBeInTheDocument();
+    expect(await screen.findByText("Seat data unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Transactions" })).toBeInTheDocument();
+  });
+
   it("renders transactions and payment attempts as separate read models", async () => {
     mocks.getDetail.mockResolvedValue(detailFor("salon-a"));
     mocks.getPayments.mockResolvedValue({ transactions: [{ id: "record-1", status: "paid" }], total: 1 });

@@ -38,16 +38,8 @@ export function SalonBillingHeader({
       <Card>
         <CardContent className="space-y-4">
           <div className="flex items-start gap-4">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100">
-              {salon?.imageUrl ? (
-                <img
-                  src={salon.imageUrl}
-                  alt={salon.name || ""}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <Building2 className="h-7 w-7 text-neutral-400" />
-              )}
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-neutral-100">
+              <Building2 className="h-7 w-7 text-neutral-400" />
             </div>
 
             <div className="min-w-0 flex-1">
@@ -56,7 +48,6 @@ export function SalonBillingHeader({
               </h1>
               <p className="text-sm text-neutral-500">
                 {salon?.city || "No city"}
-                {salon?.address ? `, ${salon.address}` : ""}
               </p>
 
               {subscription && (

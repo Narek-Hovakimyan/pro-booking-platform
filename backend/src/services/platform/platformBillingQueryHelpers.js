@@ -1,5 +1,5 @@
 import User from "../../models/User.js";
-import { SAFE_OWNER_FIELDS } from "./platformBillingConstants.js";
+import { BILLING_OWNER_SUMMARY_FIELDS } from "./platformBillingConstants.js";
 import { getIdString } from "./platformBillingCalculations.js";
 
 /* ── Owner lookup helper ─────────────────────────────── */
@@ -9,7 +9,7 @@ export const getOwnerMap = async (ownerIds) => {
   if (uniqueIds.length === 0) return {};
 
   const owners = await User.find({ _id: { $in: uniqueIds } })
-    .select(SAFE_OWNER_FIELDS)
+    .select(BILLING_OWNER_SUMMARY_FIELDS)
     .lean();
 
   const map = {};

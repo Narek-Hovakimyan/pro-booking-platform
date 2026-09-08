@@ -655,7 +655,7 @@ test(
     assert.equal(result.salon.id.toString(), String(salonId));
     assert.equal(result.subscription.status, "active");
     assert.equal(result.subscription.seatCount, 3);
-    assert.equal(result.latestPendingAttempt, null);
+    assert.equal(result.latestPendingAttempt, undefined);
     assert.equal(
       await PaymentRecord.countDocuments({ subscriptionId, ownerType: "salon", ownerId: salonId }),
       1

@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import User from "../../models/User.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import { isWorkingSpecialist } from "../salon/salonRelationshipService.js";
-import { SAFE_BARBER_SEAT_FIELDS } from "./platformBillingConstants.js";
+import { BILLING_SEAT_OPERATOR_FIELDS } from "./platformBillingConstants.js";
 import { getIdString } from "./platformBillingCalculations.js";
 
 const getMatchingSalonEntries = (barber, salonId) =>
@@ -39,7 +39,7 @@ export const getAcceptedStaffBarbersForSalon = async (salonId) => {
       },
     ],
   })
-    .select(SAFE_BARBER_SEAT_FIELDS)
+    .select(BILLING_SEAT_OPERATOR_FIELDS)
     .lean();
 
   return barbers.filter((barber) => isAcceptedWorkingSpecialistForSalon(barber, stringId));
@@ -81,7 +81,7 @@ export const getSeatUsageForSalon = async (salonId, subscriptionId) => {
     subscriptionId,
     status: "active",
   })
-    .populate("barberId", SAFE_BARBER_SEAT_FIELDS)
+    .populate("barberId", BILLING_SEAT_OPERATOR_FIELDS)
     .lean();
 
   // Filter to only accepted staff (reuses existing logic from subscriptionService)
@@ -103,7 +103,7 @@ export const getSeatUsageForSalon = async (salonId, subscriptionId) => {
   const assignments = filteredSeats.map((seat) => {
     const barber = seat.barberId || {};
     const safeBarber = typeof barber === "object" && barber._id
-      ? { id: barber._id, name: barber.name, avatarUrl: barber.avatarUrl, email: barber.email }
+      ? { id: barber._id, name: barber.name }
       : { id: barber };
     return {
       barber: safeBarber,

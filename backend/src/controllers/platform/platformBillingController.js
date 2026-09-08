@@ -2,6 +2,7 @@ import Salon from "../../models/Salon.js";
 import {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
+  getSalonSeatManagement,
   getSalonPayments,
   getSalonTransactions,
   getSalonPaymentAttempts,
@@ -52,6 +53,18 @@ export const getSalonBillingDetailHandler = async (req, res, next) => {
       return res.status(404).json({ message: "Salon not found" });
     }
     return res.json(detail);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getSalonSeatManagementHandler = async (req, res, next) => {
+  try {
+    const management = await getSalonSeatManagement(req.params.salonId);
+    if (!management) {
+      return res.status(404).json({ message: "Salon not found" });
+    }
+    return res.json(management);
   } catch (error) {
     next(error);
   }

@@ -22,6 +22,7 @@ import {
 import {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
+  getSalonSeatManagement,
 } from "./platformBillingSalonReadService.js";
 import {
   activateSalonSubscription,
@@ -50,6 +51,7 @@ import {
 export {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
+  getSalonSeatManagement,
   activateSalonSubscription,
   cancelSalonSubscription,
   getAllIndividualBillingSummaries,

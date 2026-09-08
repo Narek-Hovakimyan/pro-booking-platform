@@ -2,7 +2,11 @@ import Salon from "../../models/Salon.js";
 import User from "../../models/User.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
-import { SAFE_OWNER_FIELDS } from "./platformBillingConstants.js";
+import {
+  BILLING_OWNER_SUMMARY_FIELDS,
+  BILLING_SALON_SUMMARY_FIELDS,
+  BILLING_SUBSCRIPTION_SUMMARY_FIELDS,
+} from "./platformBillingConstants.js";
 import {
   computeSeatUsage,
   escapeRegex,
@@ -29,9 +33,39 @@ const hasActiveSubscriptionForPlatformFilter = (subscription, now) =>
   isSubscriptionStatusActive(subscription.status) &&
   hasUnexpiredPeriod(subscription, now);
 
-/**
- * Get paginated salon billing summaries for platform admin.
- */
+const getBillingSeatUsage = async (salonId, subscription) => {
+  if (!subscription) return { total: 0, used: 0, available: 0 };
+  if (Number.isInteger(subscription.activeSeatCount)) {
+    return computeSeatUsage(subscription.seatCount, subscription.activeSeatCount);
+  }
+
+  // Compatibility only for records created before activeSeatCount was maintained.
+  const seatInfo = await getSeatUsageForSalon(salonId, subscription._id);
+  return computeSeatUsage(subscription.seatCount, seatInfo.used);
+};
+
+const serializeSeatManagement = (seatInfo, acceptedStaff) => ({
+  seats: {
+    total: seatInfo.total,
+    used: seatInfo.used,
+    available: seatInfo.available,
+    assignments: (seatInfo.assignments || []).map((assignment) => ({
+      barber: {
+        id: assignment.barber?.id || assignment.barber,
+        name: assignment.barber?.name || "",
+      },
+      assignedAt: assignment.assignedAt || null,
+      status: assignment.status,
+    })),
+  },
+  acceptedStaff: acceptedStaff.map((staff) => ({
+    id: staff._id,
+    name: staff.name || "",
+    email: staff.email || "",
+    barberType: staff.barberType || "",
+  })),
+});
+
 export const getAllSalonBillingSummaries = async ({
   page = 1,
   limit = 20,
@@ -43,109 +77,64 @@ export const getAllSalonBillingSummaries = async ({
 
   if (search) {
     const escaped = escapeRegex(search);
-    filter.$or = [
-      { name: { $regex: escaped, $options: "i" } },
-    ];
+    filter.$or = [{ name: { $regex: escaped, $options: "i" } }];
   }
 
   if (subscriptionStatus) {
-    const subscriptions = await Subscription.find({ ownerType: "salon" }).lean();
+    const subscriptions = await Subscription.find({ ownerType: "salon" })
+      .select("ownerId status currentPeriodEnd trialEndsAt")
+      .lean();
     const salonIdsWithSubscriptions = subscriptions.map((sub) => sub.ownerId).filter(Boolean);
 
     if (subscriptionStatus === "none") {
       filter._id = { $nin: salonIdsWithSubscriptions };
     } else if (subscriptionStatus === "active" || subscriptionStatus === "expired") {
-      const matchingSalonIds = subscriptions
-        .filter((sub) => {
-          const serialized = serializeSubscriptionForPlatform(sub, now);
-          return subscriptionStatus === "active"
-            ? hasActiveSubscriptionForPlatformFilter(sub, now)
-            : serialized.isExpired;
-        })
-        .map((sub) => sub.ownerId)
-        .filter(Boolean);
-
-      filter._id = { $in: matchingSalonIds };
+      filter._id = {
+        $in: subscriptions
+          .filter((sub) => {
+            const serialized = serializeSubscriptionForPlatform(sub, now);
+            return subscriptionStatus === "active"
+              ? hasActiveSubscriptionForPlatformFilter(sub, now)
+              : serialized.isExpired;
+          })
+          .map((sub) => sub.ownerId)
+          .filter(Boolean),
+      };
     }
   }
 
   const total = await Salon.countDocuments(filter);
   const salons = await paginateQuery(
-    Salon.find(filter).sort({ createdAt: -1 }),
+    Salon.find(filter)
+      .select(BILLING_SALON_SUMMARY_FIELDS)
+      .sort({ createdAt: -1 }),
     { page, limit }
   );
-
-  // Build owner map
-  const ownerIds = salons.map((s) => s.ownerId);
-  const ownerMap = await getOwnerMap(ownerIds);
-
-  // Build subscription + seat data per salon
-  const salonIds = salons.map((s) => s._id);
+  const ownerMap = await getOwnerMap(salons.map((salon) => salon.ownerId));
+  const salonIds = salons.map((salon) => salon._id);
   const subscriptions = await Subscription.find({
     ownerType: "salon",
     ownerId: { $in: salonIds },
-  }).lean();
+  })
+    .select(BILLING_SUBSCRIPTION_SUMMARY_FIELDS)
+    .lean();
+  const subscriptionMap = Object.fromEntries(
+    subscriptions.map((subscription) => [getIdString(subscription.ownerId), subscription])
+  );
 
-  const subMap = {};
-  for (const sub of subscriptions) {
-    subMap[getIdString(sub.ownerId)] = sub;
-  }
-
-  // Get latest payment attempt per salon (any status)
-  const latestAttempts = await SubscriptionPaymentAttempt.aggregate([
-    {
-      $match: {
-        ownerType: "salon",
-        ownerId: { $in: salonIds },
-        purpose: "subscription",
-      },
-    },
-    { $sort: { createdAt: -1 } },
-    {
-      $group: {
-        _id: "$ownerId",
-        doc: { $first: "$$ROOT" },
-      },
-    },
-  ]);
-
-  const attemptMap = {};
-  for (const entry of latestAttempts) {
-    attemptMap[getIdString(entry._id)] = entry.doc;
-  }
-
-  // Build results
-  const results = [];
-  for (const salon of salons) {
-    const salonIdStr = getIdString(salon._id);
-    const subscription = subMap[salonIdStr] || null;
+  const results = await Promise.all(salons.map(async (salon) => {
+    const salonId = getIdString(salon._id);
+    const subscription = subscriptionMap[salonId] || null;
     const owner = ownerMap[getIdString(salon.ownerId)] || null;
-    const latestAttempt = attemptMap[salonIdStr] || null;
-
-    // Calculate seat usage
-    let seatUsage = { total: 0, used: 0, available: 0 };
-    if (subscription) {
-      const seatInfo = await getSeatUsageForSalon(salonIdStr, subscription._id);
-      seatUsage = computeSeatUsage(subscription.seatCount, seatInfo.used);
-    }
-
-    const safeOwner = owner
-      ? { id: owner._id, name: owner.name, email: owner.email, avatarUrl: owner.avatarUrl, city: owner.city }
-      : null;
-
-    results.push({
+    return {
       id: salon._id,
       name: salon.name,
       city: salon.city,
-      imageUrl: salon.imageUrl,
-      owner: safeOwner,
+      owner: owner ? { id: owner._id, name: owner.name, email: owner.email } : null,
       subscription: serializeSalonSubscriptionForPlatform(subscription, now),
-      seats: seatUsage,
-      latestPaymentAttempt: latestAttempt
-        ? serializePaymentAttempt(latestAttempt)
-        : null,
-    });
-  }
+      seats: await getBillingSeatUsage(salonId, subscription),
+    };
+  }));
 
   return {
     salons: results,
@@ -155,76 +144,62 @@ export const getAllSalonBillingSummaries = async ({
   };
 };
 
-/**
- * Get full billing detail for a single salon.
- */
 export const getSalonBillingDetail = async (salonId) => {
-  const salon = await Salon.findById(salonId).lean();
+  const salon = await Salon.findById(salonId)
+    .select(BILLING_SALON_SUMMARY_FIELDS)
+    .lean();
   if (!salon) return null;
 
-  const salonIdStr = getIdString(salon._id);
-
-  // Owner
   const owner = await User.findById(salon.ownerId)
-    .select(SAFE_OWNER_FIELDS)
+    .select(BILLING_OWNER_SUMMARY_FIELDS)
     .lean();
-
-  const safeOwner = owner
-    ? { id: owner._id, name: owner.name, email: owner.email, avatarUrl: owner.avatarUrl, city: owner.city, phone: owner.phone }
-    : null;
-
-  // Subscription
-  const subscription = await Subscription.findOne({
+  const subscriptionResult = await Subscription.findOne({
     ownerType: "salon",
     ownerId: salon._id,
-  }).lean();
-
-  // Seat usage
-  let seatUsage = { total: 0, used: 0, available: 0, assignments: [] };
-  if (subscription) {
-    const seatInfo = await getSeatUsageForSalon(salonIdStr, subscription._id);
-    seatUsage = {
-      ...computeSeatUsage(subscription.seatCount, seatInfo.used),
-      assignments: seatInfo.assignments,
-    };
-  }
-
-  // Latest actionable payment attempt
-  const latestPendingAttempt = subscription
-    ? await SubscriptionPaymentAttempt.findOne({
-        ownerType: "salon",
-        ownerId: salon._id,
-        purpose: "subscription",
-        status: { $in: ["pending", "requires_action"] },
-      })
-        .sort({ createdAt: -1 })
-        .lean()
-    : null;
-
-  // Accepted staff list (not assigned seat — just approved staff)
-  const acceptedStaff = await getAcceptedStaffBarbersForSalon(salonIdStr);
+  })
+    .select(BILLING_SUBSCRIPTION_SUMMARY_FIELDS)
+    .lean();
+  const subscription = subscriptionResult?._id ? subscriptionResult : null;
 
   return {
-    salon: {
-      id: salon._id,
-      name: salon.name,
-      city: salon.city,
-      address: salon.address,
-      phone: salon.phone,
-      imageUrl: salon.imageUrl,
-      createdAt: salon.createdAt,
-    },
-    owner: safeOwner,
+    salon: { id: salon._id, name: salon.name, city: salon.city },
+    owner: owner ? { id: owner._id, name: owner.name, email: owner.email } : null,
     subscription: serializeSalonSubscriptionForPlatform(subscription),
-    seats: seatUsage,
-    acceptedStaff: acceptedStaff.map((s) => ({
-      id: s._id,
-      name: s.name,
-      avatarUrl: s.avatarUrl,
-      email: s.email,
-      profession: s.profession,
-      barberType: s.barberType,
-    })),
+    seats: await getBillingSeatUsage(getIdString(salon._id), subscription),
+  };
+};
+
+export const getSalonSeatManagement = async (salonId) => {
+  const salon = await Salon.findById(salonId).select("_id").lean();
+  if (!salon) return null;
+
+  const subscriptionResult = await Subscription.findOne({
+    ownerType: "salon",
+    ownerId: salon._id,
+  })
+    .select(BILLING_SUBSCRIPTION_SUMMARY_FIELDS)
+    .lean();
+  const subscription = subscriptionResult?._id ? subscriptionResult : null;
+  const [seatInfo, acceptedStaff, latestPendingAttempt] = await Promise.all([
+    subscription ? getSeatUsageForSalon(getIdString(salon._id), subscription._id) : null,
+    getAcceptedStaffBarbersForSalon(getIdString(salon._id)),
+    subscription
+      ? SubscriptionPaymentAttempt.findOne({
+          ownerType: "salon",
+          ownerId: salon._id,
+          purpose: "subscription",
+          status: { $in: ["pending", "requires_action"] },
+        })
+          .sort({ createdAt: -1 })
+          .lean()
+      : null,
+  ]);
+  const seats = subscription
+    ? { ...computeSeatUsage(subscription.seatCount, seatInfo.used), assignments: seatInfo.assignments }
+    : { total: 0, used: 0, available: 0, assignments: [] };
+
+  return {
+    ...serializeSeatManagement(seats, acceptedStaff),
     latestPendingAttempt: latestPendingAttempt
       ? serializePaymentAttempt(latestPendingAttempt)
       : null,

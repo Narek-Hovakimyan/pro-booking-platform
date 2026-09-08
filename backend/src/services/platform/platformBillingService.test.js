@@ -20,6 +20,7 @@ import {
   confirmSalonPayment,
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
+  getSalonSeatManagement,
   getSalonPayments,
   getSalonTransactions,
   getSalonPaymentAttempts,
@@ -970,205 +971,6 @@ test("platform billing seat eligibility accepts identical approved working-staff
 });
 
 /* ════════════════════════════════════════════════════════ */
-/* Test 1: detail includes modern accepted staff            */
-/* ════════════════════════════════════════════════════════ */
-
-test("salon billing detail includes modern accepted staff", async () => {
-  const barbers = [acceptedStaffDoc, legacyStaffDoc, chairRenterDoc, pendingStaffDoc, rejectedStaffDoc];
-
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc(barbers));
-  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-
-  const staffNames = detail.acceptedStaff.map((s) => s.name);
-  assert.ok(staffNames.includes("Accepted Staff"), "Modern accepted staff included");
-  assert.ok(staffNames.includes("Legacy Staff"), "Legacy accepted staff included");
-  assert.equal(staffNames.includes("Chair Renter"), false, "Chair renter excluded");
-  assert.equal(staffNames.includes("Pending Staff"), false, "Pending staff excluded");
-  assert.equal(staffNames.includes("Rejected Staff"), false, "Rejected staff excluded");
-
-  assert.equal(detail.seats.used, 1, "Only 1 accepted staff seat used");
-  assert.equal(detail.seats.total, 3, "Total seats = subscription seatCount");
-  assert.equal(detail.seats.available, 2, "Available = total - used");
-  assert.equal(String(detail.salon.id), String(salonId), "Salon stable id present");
-  assert.equal(detail.salon._id, undefined, "Salon _id excluded");
-  assert.equal(String(detail.owner.id), String(ownerId), "Owner stable id present");
-  assert.equal(detail.owner._id, undefined, "Owner _id excluded");
-  assert.equal(detail.owner.password, undefined, "Owner password excluded");
-  assert.equal(detail.owner.platformRole, undefined, "Owner platformRole excluded");
-  assert.equal(detail.owner.emailVerificationTokenHash, undefined, "Owner private auth fields excluded");
-  assert.equal(String(detail.acceptedStaff[0].id), String(acceptedStaffId), "Staff stable id present");
-  assert.equal(detail.acceptedStaff[0]._id, undefined, "Staff _id excluded");
-  assert.equal(detail.acceptedStaff[0].password, undefined, "Staff password excluded");
-  assert.equal(detail.acceptedStaff[0].platformRole, undefined, "Staff platformRole excluded");
-  assert.equal(String(detail.seats.assignments[0].barber.id), String(acceptedStaffId), "Seat barber stable id present");
-  assert.equal(detail.seats.assignments[0]._id, undefined, "Seat assignment _id excluded");
-  assert.equal(detail.seats.assignments[0].barber._id, undefined, "Seat barber _id excluded");
-  assert.equal(detail.seats.assignments[0].barber.password, undefined, "Seat barber password excluded");
-  assert.equal(detail.seats.assignments[0].barber.platformRole, undefined, "Seat barber platformRole excluded");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 2: detail includes legacy staff                    */
-/* ════════════════════════════════════════════════════════ */
-
-test("salon billing detail includes legacy accepted staff (barber.salon + salonStatus)", async () => {
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc([legacyStaffDoc]));
-  mockMethod(SubscriptionSeat, "find", () => qc([legacySeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-  assert.ok(detail.acceptedStaff.map((s) => s.name).includes("Legacy Staff"), "Legacy staff included");
-  assert.equal(detail.seats.used, 1, "Legacy staff seat counted");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 3: chair renter excluded                           */
-/* ════════════════════════════════════════════════════════ */
-
-test("chair renter excluded from staff list, used seats, and assignments", async () => {
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc([chairRenterDoc]));
-  mockMethod(SubscriptionSeat, "find", () => qc([chairRenterSeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-
-  assert.equal(detail.acceptedStaff.length, 0, "No accepted staff (chair renter excluded)");
-  assert.equal(detail.seats.used, 0, "Chair renter seat does not consume capacity");
-  assert.equal(detail.seats.assignments.length, 0, "No seat assignments for chair renter");
-  assert.equal(detail.seats.available, 3, "Full capacity available");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 4: pending staff excluded                          */
-/* ════════════════════════════════════════════════════════ */
-
-test("pending staff excluded from staff list and seat usage", async () => {
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc([pendingStaffDoc]));
-  mockMethod(SubscriptionSeat, "find", () => qc([pendingSeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-  assert.equal(detail.acceptedStaff.length, 0, "Pending staff excluded");
-  assert.equal(detail.seats.used, 0, "Pending staff seat not counted");
-  assert.equal(detail.seats.available, 3, "Full capacity available");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 5: rejected staff excluded                         */
-/* ════════════════════════════════════════════════════════ */
-
-test("rejected staff excluded from staff list and seat usage", async () => {
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc([rejectedStaffDoc]));
-  mockMethod(SubscriptionSeat, "find", () => qc([rejectedSeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-  assert.equal(detail.acceptedStaff.length, 0, "Rejected staff excluded");
-  assert.equal(detail.seats.used, 0, "Rejected staff seat not counted");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 6: used seats count only active accepted staff     */
-/* ════════════════════════════════════════════════════════ */
-
-test("used seats count only accepted staff with active seat", async () => {
-  const barbers = [acceptedStaffDoc, legacyStaffDoc, unassignedAcceptedDoc];
-
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc(barbers));
-  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc, legacySeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-  assert.equal(detail.seats.used, 2, "2 accepted staff have active seats");
-  assert.equal(detail.seats.total, 3, "Total = 3 seats");
-  assert.equal(detail.seats.available, 1, "Available = 3 - 2");
-  assert.equal(detail.acceptedStaff.length, 3, "3 accepted staff in list");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 7: chair renter seat does not consume capacity     */
-/* ════════════════════════════════════════════════════════ */
-
-test("chair renter active seat does not consume salon seat capacity", async () => {
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc([acceptedStaffDoc, chairRenterDoc]));
-  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc, chairRenterSeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-  assert.equal(detail.seats.used, 1, "Only 1 accepted staff seat counted");
-  assert.equal(detail.seats.available, 2, "Chair renter seat does not reduce availability");
-  assert.equal(detail.seats.assignments.length, 1, "Only accepted staff in assignments");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 8: pending/rejected seats do not consume capacity  */
-/* ════════════════════════════════════════════════════════ */
-
-test("pending or rejected staff seats do not consume capacity", async () => {
-  mockQuery(Salon, "findById", salonDoc);
-  mockMethod(User, "findById", () => qc(ownerDoc));
-  mockQuery(Subscription, "findOne", subscriptionDoc);
-  mockMethod(User, "find", () => qc([pendingStaffDoc, rejectedStaffDoc]));
-  mockMethod(SubscriptionSeat, "find", () => qc([pendingSeatDoc, rejectedSeatDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
-    sort: () => ({ lean: async () => null }),
-  }));
-
-  const detail = await getSalonBillingDetail(salonIdStr);
-  assert.ok(detail, "Should return salon detail");
-  assert.equal(detail.seats.used, 0, "Neither pending nor rejected seat counted");
-  assert.equal(detail.seats.available, 3, "Full capacity available");
-  assert.equal(detail.seats.assignments.length, 0, "No assignments for non-accepted staff");
-});
-
-/* ════════════════════════════════════════════════════════ */
-/* Test 9: available seats never below 0                   */
-/* ════════════════════════════════════════════════════════ */
 
 test("available seats never goes below 0 even with over-assignment", async () => {
   const lowSeatCountSub = { ...subscriptionDoc, seatCount: 1 };
@@ -1475,6 +1277,10 @@ test("individual billing summaries return only barber ownerType data", async () 
   assert.equal(result.individuals[0].subscription.ownerId, undefined);
   assert.equal(result.individuals[0].barber.password, undefined);
   assert.equal(result.individuals[0].barber.platformRole, undefined);
+  assert.equal(result.individuals[0].barber.avatarUrl, undefined);
+  assert.equal(result.individuals[0].barber.city, undefined);
+  assert.equal(result.individuals[0].barber.profession, undefined);
+  assert.equal(result.individuals[0].barber.barberType, undefined);
   assert.equal(result.individuals[0].latestPayment.ownerType, undefined);
   assert.equal(result.individuals[0].latestPayment.purpose, undefined);
   assert.equal(result.individuals[0].latestPayment.providerPaymentId, undefined);
@@ -1917,8 +1723,6 @@ test("salon without subscription returns null subscription and zero seats", asyn
   mockQuery(Salon, "findById", salonDoc);
   mockMethod(User, "findById", () => qc(ownerDoc));
   mockMethod(Subscription, "findOne", () => qc(null));
-  // getAcceptedStaffBarbersForSalon calls User.find().select().lean()
-  mockMethod(User, "find", () => qc([]));
 
   const detail = await getSalonBillingDetail(salonIdStr);
   assert.ok(detail, "Should return salon detail even without subscription");
@@ -1926,10 +1730,10 @@ test("salon without subscription returns null subscription and zero seats", asyn
   assert.equal(detail.seats.total, 0, "total = 0 no subscription");
   assert.equal(detail.seats.used, 0, "used = 0 no subscription");
   assert.equal(detail.seats.available, 0, "available = 0 no subscription");
-  assert.equal(detail.latestPendingAttempt, null, "no pending attempt");
+  assert.equal(detail.latestPendingAttempt, undefined, "management attempt is not in billing summary");
 });
 
-test("salon billing detail includes latest pending or requires_action subscription attempt", async () => {
+test("salon seat management includes the latest pending or requires_action subscription attempt", async () => {
   let capturedFilter = null;
   const requiresActionAttempt = {
     ...subscriptionPaymentDoc,
@@ -1951,20 +1755,20 @@ test("salon billing detail includes latest pending or requires_action subscripti
     };
   });
 
-  const detail = await getSalonBillingDetail(salonIdStr);
+  const management = await getSalonSeatManagement(salonIdStr);
 
   assert.deepEqual(capturedFilter.status, { $in: ["pending", "requires_action"] });
-  assert.equal(detail.latestPendingAttempt.status, "requires_action");
-  assert.equal(String(detail.latestPendingAttempt.id), String(paymentId));
-  assert.equal(detail.latestPendingAttempt._id, undefined);
-  assert.equal(detail.latestPendingAttempt.purpose, undefined);
-  assert.equal(detail.latestPendingAttempt.ownerType, undefined);
-  assert.equal(detail.latestPendingAttempt.ownerId, undefined);
-  assert.equal(detail.latestPendingAttempt.payerId, undefined);
-  assert.equal(detail.latestPendingAttempt.subscriptionId, undefined);
-  assert.equal(detail.latestPendingAttempt.checkoutUrl, undefined);
-  assert.equal(detail.latestPendingAttempt.providerPaymentId, undefined);
-  assert.equal(detail.latestPendingAttempt.metadata, undefined);
+  assert.equal(management.latestPendingAttempt.status, "requires_action");
+  assert.equal(String(management.latestPendingAttempt.id), String(paymentId));
+  assert.equal(management.latestPendingAttempt._id, undefined);
+  assert.equal(management.latestPendingAttempt.purpose, undefined);
+  assert.equal(management.latestPendingAttempt.ownerType, undefined);
+  assert.equal(management.latestPendingAttempt.ownerId, undefined);
+  assert.equal(management.latestPendingAttempt.payerId, undefined);
+  assert.equal(management.latestPendingAttempt.subscriptionId, undefined);
+  assert.equal(management.latestPendingAttempt.checkoutUrl, undefined);
+  assert.equal(management.latestPendingAttempt.providerPaymentId, undefined);
+  assert.equal(management.latestPendingAttempt.metadata, undefined);
 });
 
 /* ════════════════════════════════════════════════════════ */
@@ -2015,9 +1819,6 @@ test("getAllSalonBillingSummaries returns paginated results", async () => {
   mockMethod(Salon, "find", () => qc([{ ...salonDoc, ownerId }]));
   mockMethod(User, "find", () => qc([ownerDoc]));
   mockMethod(Subscription, "find", () => qc([subscriptionDoc]));
-  mockMethod(SubscriptionPaymentAttempt, "aggregate", async () => [
-    { _id: salonId, doc: subscriptionPaymentDoc },
-  ]);
   // Second User.find call inside getSeatUsageForSalon
   mockMethod(SubscriptionSeat, "find", () => qc([]));
 
@@ -2033,14 +1834,7 @@ test("getAllSalonBillingSummaries returns paginated results", async () => {
   assert.equal(result.salons[0].subscription._id, undefined);
   assert.equal(result.salons[0].subscription.ownerId, undefined);
   assert.equal(result.salons[0].subscription.ownerType, undefined);
-  assert.equal(String(result.salons[0].latestPaymentAttempt.id), String(paymentId));
-  assert.equal(result.salons[0].latestPaymentAttempt._id, undefined);
-  assert.equal(result.salons[0].latestPaymentAttempt.providerPaymentId, undefined);
-  assert.equal(result.salons[0].latestPaymentAttempt.checkoutUrl, undefined);
-  assert.equal(result.salons[0].latestPaymentAttempt.payerId, undefined);
-  assert.equal(result.salons[0].latestPaymentAttempt.subscriptionId, undefined);
-  assert.equal(result.salons[0].latestPaymentAttempt.ownerId, undefined);
-  assert.equal(result.salons[0].latestPaymentAttempt.ownerType, undefined);
+  assert.equal(result.salons[0].latestPaymentAttempt, undefined);
 });
 
 test("getAllSalonBillingSummaries searches by salon name", async () => {
@@ -3250,4 +3044,37 @@ test("confirmSalonPayment fails closed before reading when a transaction session
   );
 
   assert.equal(attemptReadCount, 0);
+});
+
+test("billing summary excludes management-only staff, assignments, and contact fields", async () => {
+  mockQuery(Salon, "findById", salonDoc);
+  mockMethod(User, "findById", () => qc(ownerDoc));
+  mockQuery(Subscription, "findOne", { ...subscriptionDoc, activeSeatCount: 1 });
+
+  const detail = await getSalonBillingDetail(salonIdStr);
+  assert.deepEqual(Object.keys(detail.salon).sort(), ["city", "id", "name"]);
+  assert.deepEqual(Object.keys(detail.owner).sort(), ["email", "id", "name"]);
+  assert.equal(detail.owner.phone, undefined);
+  assert.equal(detail.salon.address, undefined);
+  assert.equal(detail.acceptedStaff, undefined);
+  assert.equal(detail.seats.assignments, undefined);
+  assert.equal(detail.latestPendingAttempt, undefined);
+  assert.equal(detail.seats.used, 1);
+});
+
+test("seat management returns only eligible staff and minimal assignments", async () => {
+  mockQuery(Salon, "findById", salonDoc);
+  mockQuery(Subscription, "findOne", subscriptionDoc);
+  mockMethod(User, "find", () => qc([acceptedStaffDoc, chairRenterDoc, pendingStaffDoc]));
+  mockMethod(SubscriptionSeat, "find", () => qc([acceptedSeatDoc, chairRenterSeatDoc]));
+  mockMethod(SubscriptionPaymentAttempt, "findOne", () => ({
+    sort: () => ({ lean: async () => null }),
+  }));
+
+  const management = await getSalonSeatManagement(salonIdStr);
+  assert.deepEqual(management.acceptedStaff.map((staff) => staff.name), ["Accepted Staff"]);
+  assert.equal(management.seats.assignments.length, 1);
+  assert.deepEqual(Object.keys(management.seats.assignments[0].barber).sort(), ["id", "name"]);
+  assert.equal(management.acceptedStaff[0].platformRole, undefined);
+  assert.equal(management.acceptedStaff[0].salons, undefined);
 });

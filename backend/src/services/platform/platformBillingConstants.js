@@ -1,11 +1,11 @@
-export const SAFE_OWNER_FIELDS = "name email avatarUrl city emailVerified profession barberType";
-export const SAFE_BARBER_SEAT_FIELDS =
-  "name avatarUrl profession barberType email salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist";
-export const SAFE_INDIVIDUAL_FIELDS = "name email avatarUrl city profession barberType createdAt";
+export const BILLING_OWNER_SUMMARY_FIELDS = "name email";
+export const BILLING_SALON_SUMMARY_FIELDS = "name city ownerId";
+export const BILLING_SUBSCRIPTION_SUMMARY_FIELDS =
+  "ownerId status seatCount activeSeatCount pricePerSeat totalPrice provider currentPeriodStart currentPeriodEnd trialEndsAt lastPaymentAt cancelledAt";
+export const BILLING_SEAT_OPERATOR_FIELDS =
+  "name email barberType salon salonStatus salons.salon salons.status salons.relationshipType salons.relationshipStatus salons.worksAsSpecialist";
+export const BILLING_INDIVIDUAL_SUMMARY_FIELDS = "name email";
 export const SAFE_PAYMENT_FIELDS = [
-  "amount", "currency", "status", "provider",
-  "seatCount", "months", "createdAt", "updatedAt",
-  "paidAt", "confirmedAt", "failedAt", "cancelledAt",
-  "refundedAt", "expiresAt", "periodStart", "periodEnd",
-  "source", "action",
+  "amount", "currency", "status", "provider", "seatCount", "months",
+  "createdAt", "paidAt", "periodStart", "periodEnd",
 ];

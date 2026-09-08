@@ -7,12 +7,14 @@ const mocks = vi.hoisted(() => ({
   getDetail: vi.fn(),
   getPayments: vi.fn(),
   getAttempts: vi.fn(),
+  getSeatManagement: vi.fn(),
 }));
 
 vi.mock("@/shared/api/platformBilling", () => ({
   getPlatformBillingSalonDetail: mocks.getDetail,
   getPlatformBillingSalonTransactions: mocks.getPayments,
   getPlatformBillingSalonPaymentAttempts: mocks.getAttempts,
+  getPlatformBillingSalonSeatManagement: mocks.getSeatManagement,
 }));
 
 function deferred() {
@@ -29,15 +31,17 @@ function detailFor(id, name = id) {
   return { salon: { id, name } };
 }
 
-function HookHarness({ salonId, mutation = vi.fn() }) {
+function HookHarness({ salonId, mutation = vi.fn(), loadSeatManagement = false }) {
   const {
     detail,
     error,
     refreshWarning,
     isSubmitting,
     mutationError,
+    seatManagement,
+    seatManagementError,
     executeMutation,
-  } = usePlatformSalonBillingDetail(salonId);
+  } = usePlatformSalonBillingDetail(salonId, { loadSeatManagement });
 
   return (
     <div>
@@ -46,6 +50,8 @@ function HookHarness({ salonId, mutation = vi.fn() }) {
       <p data-testid="warning">{refreshWarning}</p>
       <p data-testid="mutation-error">{mutationError}</p>
       <p data-testid="submitting">{String(isSubmitting)}</p>
+      <p data-testid="seat-management">{seatManagement?.salonId || "none"}</p>
+      <p data-testid="seat-management-error">{seatManagementError}</p>
       <button
         type="button"
         onClick={() =>
@@ -62,6 +68,7 @@ beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset());
   mocks.getPayments.mockResolvedValue({ transactions: [], total: 0 });
   mocks.getAttempts.mockResolvedValue({ paymentAttempts: [], total: 0 });
+  mocks.getSeatManagement.mockResolvedValue({ salonId: "default" });
 });
 
 afterEach(() => {
@@ -120,6 +127,28 @@ describe("usePlatformSalonBillingDetail", () => {
       await Promise.resolve();
     });
     expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("does not apply stale seat management data after route navigation", async () => {
+    const managementA = deferred();
+    const managementB = deferred();
+    mocks.getDetail.mockImplementation((id) => Promise.resolve(detailFor(id, id)));
+    mocks.getSeatManagement.mockImplementation((id) =>
+      id === "salon-a" ? managementA.promise : managementB.promise
+    );
+    const { rerender } = render(<HookHarness salonId="salon-a" loadSeatManagement />);
+    await screen.findByText("salon-a");
+
+    rerender(<HookHarness salonId="salon-b" loadSeatManagement />);
+    await screen.findByText("salon-b");
+    managementB.resolve({ salonId: "salon-b" });
+    expect(await screen.findByTestId("seat-management")).toHaveTextContent("salon-b");
+
+    await act(async () => {
+      managementA.resolve({ salonId: "salon-a" });
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("seat-management")).toHaveTextContent("salon-b");
   });
 
   it("submits only one duplicate mutation while it is pending", async () => {

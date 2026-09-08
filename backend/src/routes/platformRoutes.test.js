@@ -58,6 +58,7 @@ test("all routes have protect plus their fixed platform capability", () => {
     { path: "/dashboard/summary", method: "get" },
     { path: "/billing/salons", method: "get" },
     { path: "/billing/salons/:salonId", method: "get" },
+    { path: "/billing/salons/:salonId/seat-management", method: "get" },
     { path: "/billing/salons/:salonId/payments", method: "get" },
     { path: "/billing/salons/:salonId/transactions", method: "get" },
     { path: "/billing/salons/:salonId/payment-attempts", method: "get" },
@@ -86,9 +87,11 @@ test("all routes have protect plus their fixed platform capability", () => {
     assert.ok(route.route.methods[method], `${path} should accept ${method.toUpperCase()}`);
     const middlewareNames = checkMiddleware(route, ["protect", "requirePlatformCapability"]);
     const capabilityMiddleware = route.route.stack[1].handle;
-    const expectedCapability = readPlatformRoutes.includes(path)
-      ? PLATFORM_CAPABILITIES.BILLING_READ
-      : PLATFORM_CAPABILITIES.BILLING_MANAGE;
+    const expectedCapability = path === "/billing/salons/:salonId/seat-management"
+      ? PLATFORM_CAPABILITIES.BILLING_MANAGE
+      : readPlatformRoutes.includes(path)
+        ? PLATFORM_CAPABILITIES.BILLING_READ
+        : PLATFORM_CAPABILITIES.BILLING_MANAGE;
     assert.equal(capabilityMiddleware.platformCapability, expectedCapability);
     if (readPlatformRoutes.includes(path)) {
       assert.ok(
@@ -115,6 +118,7 @@ test("read handler names are correct", () => {
   assert.equal(getHandlerName("/billing/salons"), "listSalonBillingSummaries");
   assert.equal(getHandlerName("/dashboard/summary"), "getPlatformDashboardSummaryHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId"), "getSalonBillingDetailHandler");
+  assert.equal(getHandlerName("/billing/salons/:salonId/seat-management"), "getSalonSeatManagementHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId/payments"), "getSalonPaymentsHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId/transactions"), "getSalonTransactionsHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId/payment-attempts"), "getSalonPaymentAttemptsHandler");

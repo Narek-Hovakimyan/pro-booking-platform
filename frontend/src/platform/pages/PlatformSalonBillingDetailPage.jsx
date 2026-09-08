@@ -63,7 +63,10 @@ export default function PlatformSalonBillingDetailPage() {
     recentAuthChallenge,
     retryRecentAuthMutation,
     dismissRecentAuthChallenge,
-  } = usePlatformSalonBillingDetail(salonId);
+    seatManagement,
+    seatManagementError,
+    seatManagementLoading,
+  } = usePlatformSalonBillingDetail(salonId, { loadSeatManagement: canManageBilling });
   const [storedModal, setModal] = useState(null);
   const modal =
     storedModal?.routeRevision === routeRevision ? storedModal : null;
@@ -181,13 +184,14 @@ export default function PlatformSalonBillingDetailPage() {
   const currentDetail = detailMatchesRoute ? detail : null;
   const subscription = currentDetail?.subscription;
   const seats = currentDetail?.seats;
-  const acceptedStaff = currentDetail?.acceptedStaff || [];
-  const latestPendingAttempt = currentDetail?.latestPendingAttempt;
+  const managementSeats = seatManagement?.seats || { assignments: [] };
+  const acceptedStaff = seatManagement?.acceptedStaff || [];
+  const latestPendingAttempt = seatManagement?.latestPendingAttempt;
   const subscriptionIsCancelled = subscription?.status === "cancelled";
   const totalTransactionsPages = Math.max(1, Math.ceil(transactionsTotal / 10));
   const totalPaymentAttemptsPages = Math.max(1, Math.ceil(paymentAttemptsTotal / 10));
   const assignedBarberIds = new Set(
-    (seats?.assignments || []).map((a) => String(a.barber?.id || a.barber))
+    (managementSeats.assignments || []).map((a) => String(a.barber?.id || a.barber))
   );
   const isConfirmablePayment = latestPendingAttempt
     ? latestPendingAttempt.provider === "manual" &&
@@ -262,23 +266,40 @@ export default function PlatformSalonBillingDetailPage() {
         seats={seats}
         subscriptionIsCancelled={subscriptionIsCancelled}
       />
-      <SalonBillingStaffTable
-        acceptedStaff={acceptedStaff}
-        assignedBarberIds={assignedBarberIds}
-        seats={seats}
-        isPlatformAdmin={canManageBilling}
-        subscription={subscription}
-        onAssign={(extra) => openModal({ type: "assign", extra, salonId: String(salonId || "") })}
-        onRevoke={(extra) => openModal({ type: "revoke", extra, salonId: String(salonId || "") })}
-      />
-      <SalonBillingPendingPaymentCard
-        latestPendingAttempt={latestPendingAttempt}
-        isConfirmablePayment={isConfirmablePayment}
-        isPlatformAdmin={canManageBilling}
-        onConfirmPayment={(extra) =>
-          openModal({ type: "confirmPayment", extra, salonId: String(salonId || "") })
-        }
-      />
+      {canManageBilling && (
+        <>
+          {seatManagementError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {seatManagementError}
+            </div>
+          )}
+          {seatManagementLoading ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
+            </div>
+          ) : (
+            <>
+              <SalonBillingStaffTable
+                acceptedStaff={acceptedStaff}
+                assignedBarberIds={assignedBarberIds}
+                seats={managementSeats}
+                isPlatformAdmin
+                subscription={subscription}
+                onAssign={(extra) => openModal({ type: "assign", extra, salonId: String(salonId || "") })}
+                onRevoke={(extra) => openModal({ type: "revoke", extra, salonId: String(salonId || "") })}
+              />
+              <SalonBillingPendingPaymentCard
+                latestPendingAttempt={latestPendingAttempt}
+                isConfirmablePayment={isConfirmablePayment}
+                isPlatformAdmin
+                onConfirmPayment={(extra) =>
+                  openModal({ type: "confirmPayment", extra, salonId: String(salonId || "") })
+                }
+              />
+            </>
+          )}
+        </>
+      )}
       <SalonBillingPaymentHistory
         payments={transactions}
         paymentsTotal={transactionsTotal}

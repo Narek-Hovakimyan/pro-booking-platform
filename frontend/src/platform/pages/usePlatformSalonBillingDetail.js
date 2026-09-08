@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getPlatformBillingSalonDetail,
+  getPlatformBillingSalonSeatManagement,
   getPlatformBillingSalonTransactions,
   getPlatformBillingSalonPaymentAttempts,
 } from "@/shared/api/platformBilling";
@@ -13,7 +14,7 @@ export const getSalonBillingDetailSalonId = (detail) => {
   return id ? String(id) : "";
 };
 
-export function usePlatformSalonBillingDetail(salonId) {
+export function usePlatformSalonBillingDetail(salonId, { loadSeatManagement = false } = {}) {
   const [detail, setDetail] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [transactionsTotal, setTransactionsTotal] = useState(0);
@@ -21,6 +22,9 @@ export function usePlatformSalonBillingDetail(salonId) {
   const [paymentAttempts, setPaymentAttempts] = useState([]);
   const [paymentAttemptsTotal, setPaymentAttemptsTotal] = useState(0);
   const [paymentAttemptsPage, setPaymentAttemptsPage] = useState(1);
+  const [seatManagement, setSeatManagement] = useState(null);
+  const [seatManagementError, setSeatManagementError] = useState("");
+  const [seatManagementLoading, setSeatManagementLoading] = useState(false);
   const [routeRevision, setRouteRevision] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -33,6 +37,7 @@ export function usePlatformSalonBillingDetail(salonId) {
   const detailRequestRef = useRef(0);
   const transactionsRequestRef = useRef(0);
   const paymentAttemptsRequestRef = useRef(0);
+  const seatManagementRequestRef = useRef(0);
   const mutationRequestRef = useRef(0);
   const isMutationInFlightRef = useRef(false);
   const currentRouteSalonIdRef = useRef("");
@@ -136,6 +141,9 @@ export function usePlatformSalonBillingDetail(salonId) {
       setPaymentAttempts([]);
       setPaymentAttemptsTotal(0);
       setPaymentAttemptsPage(1);
+      setSeatManagement(null);
+      setSeatManagementError("");
+      setSeatManagementLoading(false);
       setError("");
       setErrorSalonId("");
       setSuccessMessage("");
@@ -158,6 +166,7 @@ export function usePlatformSalonBillingDetail(salonId) {
       detailRequestRef.current += 1;
       transactionsRequestRef.current += 1;
       paymentAttemptsRequestRef.current += 1;
+      seatManagementRequestRef.current += 1;
       mutationRequestRef.current += 1;
     };
   }, [fetchDetail]);
@@ -181,6 +190,40 @@ export function usePlatformSalonBillingDetail(salonId) {
       paymentAttemptsRequestRef.current += 1;
     };
   }, [detail, fetchPaymentAttempts, fetchTransactions, salonId]);
+
+  useEffect(() => {
+    const targetSalonId = String(salonId || "");
+    const loadedSalonId = getSalonBillingDetailSalonId(detail);
+    const requestId = ++seatManagementRequestRef.current;
+    if (!loadSeatManagement || !targetSalonId || loadedSalonId !== targetSalonId) {
+      return undefined;
+    }
+
+    async function loadSeatManagementForSalon() {
+      setSeatManagementLoading(true);
+      setSeatManagementError("");
+      try {
+        const result = await getPlatformBillingSalonSeatManagement(targetSalonId);
+        if (seatManagementRequestRef.current !== requestId) return;
+        setSeatManagement(result);
+      } catch (err) {
+        if (seatManagementRequestRef.current !== requestId) return;
+        setSeatManagementError(
+          err.response?.data?.message || "Failed to load seat management data."
+        );
+      } finally {
+        if (seatManagementRequestRef.current === requestId) {
+          setSeatManagementLoading(false);
+        }
+      }
+    }
+
+    loadSeatManagementForSalon();
+
+    return () => {
+      seatManagementRequestRef.current += 1;
+    };
+  }, [detail, loadSeatManagement, salonId]);
 
   const clearMutationError = useCallback(() => {
     setMutationError("");
@@ -278,6 +321,9 @@ export function usePlatformSalonBillingDetail(salonId) {
     paymentAttemptsTotal,
     paymentAttemptsPage,
     setPaymentAttemptsPage,
+    seatManagement,
+    seatManagementError,
+    seatManagementLoading,
     routeRevision,
     isLoading,
     error,

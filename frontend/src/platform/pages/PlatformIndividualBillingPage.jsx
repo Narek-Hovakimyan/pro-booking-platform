@@ -424,11 +424,6 @@ export default function PlatformIndividualBillingPage() {
                         <p className="truncate text-xs text-neutral-500">
                           {item.barber?.email || "No email"}
                         </p>
-                        <p className="mt-1 text-xs text-neutral-500">
-                          {[item.barber?.city, item.barber?.profession]
-                            .filter(Boolean)
-                            .join(" · ") || "No profile details"}
-                        </p>
                       </div>
 
                       <span

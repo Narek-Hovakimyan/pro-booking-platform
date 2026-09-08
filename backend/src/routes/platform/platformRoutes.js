@@ -10,6 +10,7 @@ import { getPlatformDashboardSummaryHandler } from "../../controllers/platform/p
 import {
   listSalonBillingSummaries,
   getSalonBillingDetailHandler,
+  getSalonSeatManagementHandler,
   getSalonPaymentsHandler,
   getSalonTransactionsHandler,
   getSalonPaymentAttemptsHandler,
@@ -82,6 +83,13 @@ router.get(
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   getSalonBillingDetailHandler
+);
+
+router.get(
+  "/billing/salons/:salonId/seat-management",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  getSalonSeatManagementHandler
 );
 
 /**

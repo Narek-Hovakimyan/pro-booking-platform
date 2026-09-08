@@ -45,18 +45,6 @@ const getStatusBadgeClass = (sub) => {
   return "bg-neutral-100 text-neutral-700";
 };
 
-const getPaymentStatusLabel = (payment) => {
-  if (!payment) return null;
-  const status = payment.status || "unknown";
-  if (status === "paid" || status === "confirmed") return "Paid";
-  if (status === "pending") return "Pending — not paid";
-  if (status === "requires_action") return "Requires action";
-  if (status === "failed") return "Failed";
-  if (status === "cancelled") return "Cancelled";
-  if (status === "refunded") return "Refunded";
-  return status.replace(/_/g, " ");
-};
-
 const getProviderLabel = (provider) => {
   if (!provider || provider === "manual") return "Manual provider";
   if (provider === "disabled") return "Disabled provider";
@@ -277,17 +265,8 @@ export default function PlatformBillingPage() {
               className="flex w-full items-start gap-4 rounded-2xl border border-neutral-200 bg-white p-4 text-left shadow-sm transition hover:border-neutral-300 hover:shadow-md sm:items-center"
               type="button"
             >
-              {/* Salon image */}
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-neutral-100">
-                {salon.imageUrl ? (
-                  <img
-                    src={salon.imageUrl}
-                    alt={salon.name || ""}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <Building2 className="h-6 w-6 text-neutral-400" />
-                )}
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-neutral-100">
+                <Building2 className="h-6 w-6 text-neutral-400" />
               </div>
 
               {/* Info */}
@@ -341,16 +320,6 @@ export default function PlatformBillingPage() {
                       )}
                       <span className="text-neutral-300">·</span>
                     </>
-                  )}
-
-                  {/* Latest payment status */}
-                  {salon.latestPaymentAttempt && (
-                    <span>
-                      Payment:{" "}
-                      <span className="font-medium">
-                        {getPaymentStatusLabel(salon.latestPaymentAttempt)}
-                      </span>
-                    </span>
                   )}
 
                   {!salon.subscription && (

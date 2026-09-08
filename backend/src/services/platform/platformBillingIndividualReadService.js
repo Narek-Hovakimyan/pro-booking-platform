@@ -2,7 +2,7 @@ import User from "../../models/User.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
 import PaymentRecord from "../../models/PaymentRecord.js";
-import { SAFE_INDIVIDUAL_FIELDS } from "./platformBillingConstants.js";
+import { BILLING_INDIVIDUAL_SUMMARY_FIELDS } from "./platformBillingConstants.js";
 import {
   escapeRegex,
   getPaymentSortTime,
@@ -98,7 +98,7 @@ export const getAllIndividualBillingSummaries = async ({
 
   const total = await User.countDocuments(filter);
   const barbers = await paginateQuery(
-    User.find(filter).select(SAFE_INDIVIDUAL_FIELDS).sort({ createdAt: -1 }),
+    User.find(filter).select(BILLING_INDIVIDUAL_SUMMARY_FIELDS).sort({ createdAt: -1 }),
     { page: safePage, limit: safeLimit }
   );
   const barberIds = barbers.map((barber) => barber._id);
@@ -157,11 +157,6 @@ export const getAllIndividualBillingSummaries = async ({
           id: barber._id,
           name: barber.name,
           email: barber.email || "",
-          avatarUrl: barber.avatarUrl || "",
-          city: barber.city || "",
-          profession: barber.profession || "",
-          barberType: barber.barberType || "",
-          createdAt: barber.createdAt || null,
         },
         subscription: serializeIndividualSubscriptionForPlatform(
           subscriptionMap[barberId] || null,
@@ -187,7 +182,7 @@ export const getIndividualPayments = async (
     _id: barberObjectId,
     role: "barber",
   })
-    .select(SAFE_INDIVIDUAL_FIELDS)
+    .select(BILLING_INDIVIDUAL_SUMMARY_FIELDS)
     .lean();
 
   if (!barber || !barber._id) return null;
@@ -233,10 +228,6 @@ export const getIndividualPayments = async (
       id: barber._id,
       name: barber.name,
       email: barber.email || "",
-      avatarUrl: barber.avatarUrl || "",
-      city: barber.city || "",
-      profession: barber.profession || "",
-      barberType: barber.barberType || "",
     },
     payments,
     total: attemptTotal + recordTotal,
@@ -249,7 +240,7 @@ const getIndividualBarber = async (barberId) => {
   const barberObjectId = toObjectIdOrNull(barberId);
   if (!barberObjectId) return null;
   return User.findOne({ _id: barberObjectId, role: "barber" })
-    .select(SAFE_INDIVIDUAL_FIELDS)
+    .select(BILLING_INDIVIDUAL_SUMMARY_FIELDS)
     .lean();
 };
 
@@ -257,10 +248,6 @@ const serializeIndividualBarber = (barber) => ({
   id: barber._id,
   name: barber.name,
   email: barber.email || "",
-  avatarUrl: barber.avatarUrl || "",
-  city: barber.city || "",
-  profession: barber.profession || "",
-  barberType: barber.barberType || "",
 });
 
 export const getIndividualTransactions = async (barberId, { page = 1, limit = 20 } = {}) => {

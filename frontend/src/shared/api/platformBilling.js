@@ -24,6 +24,11 @@ export async function getPlatformBillingSalonDetail(salonId) {
   return data;
 }
 
+export async function getPlatformBillingSalonSeatManagement(salonId) {
+  const { data } = await api.get(`/platform/billing/salons/${salonId}/seat-management`);
+  return data;
+}
+
 export async function getPlatformBillingSalonTransactions(salonId, params = {}) {
   const { data } = await api.get(`/platform/billing/salons/${salonId}/transactions`, { params });
   return data;

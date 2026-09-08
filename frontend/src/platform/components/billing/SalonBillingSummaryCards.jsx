@@ -15,7 +15,6 @@ export function SalonBillingSummaryCards({ owner, subscription, seats, subscript
             <div className="space-y-2 text-sm">
               <InfoRow label="Name" value={owner.name} />
               <InfoRow label="Email" value={owner.email} />
-              <InfoRow label="City" value={owner.city} />
             </div>
           ) : (
             <p className="text-sm text-neutral-400">No owner data</p>
@@ -48,7 +47,7 @@ export function SalonBillingSummaryCards({ owner, subscription, seats, subscript
           {subscription ? (
             <div className="grid grid-cols-3 gap-2">
               <StatCard icon={Users} label="Total Seats" value={seats?.total ?? 0} />
-              <StatCard icon={UserCheck} label="Used" value={seats?.used ?? 0} sub={`${seats?.assignments?.length || 0} assigned`} />
+              <StatCard icon={UserCheck} label="Used" value={seats?.used ?? 0} />
               <StatCard icon={CheckCircle2} label="Available" value={seats?.available ?? 0} />
             </div>
           ) : (

@@ -9,11 +9,11 @@ const RECENT_PAYMENT_LIMIT = 10;
 const ALERT_LIMIT = 10;
 
 const SAFE_PAYMENT_FIELDS =
-  "_id ownerType ownerId amount currency status provider seatCount periodStart periodEnd paidAt createdAt updatedAt";
+  "_id ownerType ownerId amount currency status provider seatCount periodStart periodEnd paidAt createdAt";
 const SAFE_SUBSCRIPTION_FIELDS =
-  "_id ownerType ownerId status seatCount pricePerSeat totalPrice provider currentPeriodStart currentPeriodEnd trialEndsAt lastPaymentAt cancelledAt createdAt updatedAt";
-const SAFE_SALON_FIELDS = "_id name ownerId city";
-const SAFE_USER_FIELDS = "_id name email city profession barberType";
+  "_id ownerType ownerId status seatCount totalPrice provider currentPeriodStart currentPeriodEnd trialEndsAt";
+const SAFE_SALON_FIELDS = "_id name ownerId";
+const SAFE_USER_FIELDS = "_id name";
 
 const getIdString = (value) => {
   if (!value) return "";
@@ -113,14 +113,12 @@ const getOwnerInfo = (ownerType, ownerId, lookups) => {
     const owner = lookups.users.get(getIdString(salon.ownerId)) || {};
     return {
       name: salon.name || "Unknown salon",
-      email: owner.email || "",
     };
   }
 
   const barber = lookups.users.get(id) || {};
   return {
     name: barber.name || "Unknown barber",
-    email: barber.email || "",
   };
 };
 
@@ -131,7 +129,6 @@ const serializeRecentPayment = (payment, lookups) => {
     id: getIdString(payment._id),
     ownerType: toOwnerLabel(payment.ownerType),
     ownerName: owner.name,
-    ownerEmail: owner.email,
     amount: Number(payment.amount || 0),
     currency: normalizeCurrency(payment.currency),
     status: payment.status,
@@ -152,7 +149,6 @@ const serializeAlertSubscription = (subscription, lookups, now = new Date()) => 
   return {
     ownerType: toOwnerLabel(subscription.ownerType),
     ownerName: owner.name,
-    ownerEmail: owner.email,
     status: subscription.status,
     provider: subscription.provider || "manual",
     currentPeriodStart: subscription.currentPeriodStart || null,
