@@ -149,4 +149,63 @@ describe("ServicesManager", () => {
     expect(screen.getAllByRole("spinbutton")[0]).toHaveValue(null);
     expect(screen.getAllByRole("spinbutton")[1]).toHaveValue(null);
   });
+
+  test("creates a zero-price service once and closes the dialog after success", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const addService = vi.fn().mockResolvedValueOnce({ id: "service-free" });
+
+    render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Consultation" } });
+    const [priceInput, durationInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "0" } });
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+
+    await waitFor(() => expect(addService).toHaveBeenCalledTimes(1));
+    expect(addService.mock.calls[0][0]).toMatchObject({
+      name: "Consultation",
+      price: 0,
+      duration: 30,
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  test("keeps the dialog open for blank, negative, or malformed prices without creating a service", () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const addService = vi.fn();
+
+    for (const price of ["", "-1", "not-a-price"]) {
+      const { unmount } = render(
+        <ServicesManager
+          services={[]}
+          removeService={vi.fn()}
+          addService={addService}
+          updateService={vi.fn()}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+      fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Consultation" } });
+      const [, durationInput] = screen.getAllByRole("spinbutton");
+      fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: price } });
+      fireEvent.change(durationInput, { target: { value: "30" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByText("Price must be a non-negative number.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Service name")).toHaveValue("Consultation");
+      unmount();
+    }
+
+    expect(addService).not.toHaveBeenCalled();
+  });
 });

@@ -101,4 +101,51 @@ describe("useServiceManagement addService", () => {
     expect(setDataError).toHaveBeenCalledWith("");
     expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
   });
+
+  test("creates a zero-price service like any other valid service", async () => {
+    const zeroPricePayload = { ...servicePayload, price: 0 };
+    const createdService = { _id: "service-free", barberId: "barber-1", ...zeroPricePayload };
+    mocks.post.mockResolvedValueOnce({ data: createdService });
+    const { ref, dispatch, setIsSaving } = renderHookHarness();
+
+    await act(async () => {
+      await ref.current.addService(zeroPricePayload);
+    });
+
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ price: 0 });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0][0]).toMatchObject({
+      type: "services/addService",
+      payload: createdService,
+    });
+    expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
+  });
+
+  test.each([
+    ["blank", ""],
+    ["negative", -1],
+    ["NaN", Number.NaN],
+    ["positive infinity", Infinity],
+    ["negative infinity", -Infinity],
+    ["malformed", "not-a-price"],
+  ])("rejects %s prices without creating a service", async (_label, price) => {
+    const { ref, dispatch, setDataError, setIsSaving, setNewService } = renderHookHarness();
+    let receivedError;
+
+    await act(async () => {
+      try {
+        await ref.current.addService({ ...servicePayload, price });
+      } catch (error) {
+        receivedError = error;
+      }
+    });
+
+    expect(receivedError).toMatchObject({ message: "Price must be a non-negative number." });
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(setNewService).not.toHaveBeenCalled();
+    expect(setDataError).toHaveBeenCalledWith("Price must be a non-negative number.");
+    expect(setIsSaving).not.toHaveBeenCalled();
+  });
 });

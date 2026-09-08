@@ -30,12 +30,19 @@ export function useServiceManagement({
     const isSumDuration = type === "package" && packageDurationMode === "sum";
 
     const serviceDuration = Number(duration);
+    const isBlankPrice =
+      price === null ||
+      price === undefined ||
+      (typeof price === "string" && !price.trim());
+    const servicePrice = Number(price);
 
     if (!currentUserId || !name) return;
 
     // Validate price: required for single services and manual-mode packages
-    if (!isSumPrice && (!price || !Number.isFinite(Number(price)) || Number(price) < 0)) {
-      return;
+    if (!isSumPrice && (isBlankPrice || !Number.isFinite(servicePrice) || servicePrice < 0)) {
+      const error = new Error("Price must be a non-negative number.");
+      setDataError(error.message);
+      throw error;
     }
 
     // Validate duration: required for single services and manual-mode packages
@@ -59,7 +66,7 @@ export function useServiceManagement({
 
       // Only include price when not auto-calculated via sum mode
       if (!isSumPrice) {
-        payload.price = Number(price);
+        payload.price = servicePrice;
       }
 
       // Only include duration when not auto-calculated via sum mode

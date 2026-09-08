@@ -176,7 +176,10 @@ export default function ServicesManager({
 
   const handleSave = async () => {
     const name = form.name.trim();
-    const price = Number(form.price);
+    const price =
+      typeof form.price === "string" && !form.price.trim()
+        ? Number.NaN
+        : Number(form.price);
     const duration = Number(form.duration);
     const discountType = form.discountType || "none";
     const discountValue =
