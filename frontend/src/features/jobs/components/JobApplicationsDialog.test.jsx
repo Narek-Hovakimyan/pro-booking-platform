@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,16 @@ const application = (overrides = {}) => ({
   status: "accepted",
   ...overrides,
 });
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, reject, resolve };
+};
 
 const renderDialog = (applications) => {
   api.get.mockResolvedValue({ data: applications });
@@ -47,6 +57,94 @@ describe("JobApplicationsDialog", () => {
 
     expect(await screen.findByRole("combobox", { name: "Status" })).toHaveValue("pending");
     expect(screen.queryByText("Salon onboarding confirmed.")).not.toBeInTheDocument();
+  });
+
+  it("keeps job B authoritative when job A resolves late", async () => {
+    const first = deferred();
+    const second = deferred();
+    const jobB = { id: "job-b", title: "Nail artist" };
+    api.get.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    view.rerender(<JobApplicationsDialog job={jobB} onClose={vi.fn()} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      second.resolve({ data: [application({ id: "application-b", onboardingStatus: "confirmed" })] });
+      await second.promise;
+    });
+    expect(await screen.findByText("Salon onboarding confirmed.")).toBeVisible();
+
+    await act(async () => {
+      first.resolve({ data: [application({ onboardingStatus: "blocked" })] });
+      await first.promise;
+    });
+    expect(screen.queryByText("Automatic onboarding unavailable; manual follow-up may be needed.")).not.toBeInTheDocument();
+  });
+
+  it("keeps job B loading when job A reaches its stale finally", async () => {
+    const first = deferred();
+    const second = deferred();
+    api.get.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    view.rerender(<JobApplicationsDialog job={{ id: "job-b", title: "Nail artist" }} onClose={vi.fn()} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    expect(view.container.querySelectorAll(".animate-pulse")).toHaveLength(3);
+
+    await act(async () => {
+      first.resolve({ data: [application({ onboardingStatus: "blocked" })] });
+      await first.promise;
+    });
+    expect(view.container.querySelectorAll(".animate-pulse")).toHaveLength(3);
+
+    await act(async () => {
+      second.resolve({ data: [application({ id: "application-b", onboardingStatus: "confirmed" })] });
+      await second.promise;
+    });
+    expect(await screen.findByText("Salon onboarding confirmed.")).toBeVisible();
+  });
+
+  it("ignores a late job A error after job B has loaded", async () => {
+    const first = deferred();
+    const second = deferred();
+    api.get.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    view.rerender(<JobApplicationsDialog job={{ id: "job-b", title: "Nail artist" }} onClose={vi.fn()} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      second.resolve({ data: [application({ id: "application-b", onboardingStatus: "pending_consent" })] });
+      await second.promise;
+    });
+    expect(await screen.findByText("Waiting for applicant confirmation.")).toBeVisible();
+
+    await act(async () => {
+      first.reject({ response: { data: { message: "Job A failed" } } });
+      await first.promise.catch(() => {});
+    });
+    expect(screen.queryByText("Job A failed")).not.toBeInTheDocument();
+  });
+
+  it("refetches current authoritative statuses after reopening and ignores late completion after unmount", async () => {
+    const first = deferred();
+    api.get.mockReturnValueOnce(first.promise);
+    const firstView = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    firstView.unmount();
+    await act(async () => {
+      first.resolve({ data: [application({ onboardingStatus: "blocked" })] });
+      await first.promise;
+    });
+    expect(screen.queryByText("Automatic onboarding unavailable; manual follow-up may be needed.")).not.toBeInTheDocument();
+
+    api.get.mockResolvedValueOnce({ data: [application({ onboardingStatus: "confirmed" })] });
+    render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+    expect(await screen.findByText("Salon onboarding confirmed.")).toBeVisible();
+    expect(api.get).toHaveBeenLastCalledWith("/salon-jobs/job-a/applications");
   });
 
   it("uses the authoritative accept response and preserves status actions", async () => {

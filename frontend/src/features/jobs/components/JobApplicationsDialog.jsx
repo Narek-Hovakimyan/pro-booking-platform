@@ -5,7 +5,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import api from "@/shared/api/axios";
 import EmptyState from "@/shared/components/common/EmptyState";
@@ -71,6 +71,7 @@ export default function JobApplicationsDialog({ job, onClose }) {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [updatingApplicationId, setUpdatingApplicationId] = useState("");
+  const requestRevision = useRef(0);
   const jobId = getJobId(job);
 
   useEffect(() => {
@@ -88,6 +89,7 @@ export default function JobApplicationsDialog({ job, onClose }) {
   }, [onClose]);
 
   useEffect(() => {
+    const requestId = ++requestRevision.current;
     let isMounted = true;
 
     const loadApplications = async () => {
@@ -97,11 +99,11 @@ export default function JobApplicationsDialog({ job, onClose }) {
       try {
         const { data } = await api.get(`/salon-jobs/${jobId}/applications`);
 
-        if (isMounted) {
+        if (isMounted && requestRevision.current === requestId) {
           setApplications(Array.isArray(data) ? data : []);
         }
       } catch (requestError) {
-        if (isMounted) {
+        if (isMounted && requestRevision.current === requestId) {
           setError(
             requestError.response?.data?.message ||
               "Could not load applications."
@@ -109,7 +111,7 @@ export default function JobApplicationsDialog({ job, onClose }) {
           setApplications([]);
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && requestRevision.current === requestId) {
           setIsLoading(false);
         }
       }
