@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   canManagePlatformBilling,
   canReadPlatformBilling,
+  canReadPlatformAudit,
   canAccessPlatform,
   hasPlatformCapability,
 } from "./platformAccess";
@@ -16,6 +17,7 @@ describe("platform capability access", () => {
     expect(hasPlatformCapability(legacyPlatformUser, "billing.manage")).toBe(true);
     expect(canReadPlatformBilling(legacyPlatformUser)).toBe(true);
     expect(canManagePlatformBilling(legacyPlatformUser)).toBe(true);
+    expect(canReadPlatformAudit(legacyPlatformUser)).toBe(true);
   });
 
   test("uses explicit capabilities when the auth response supplies them", () => {
@@ -29,6 +31,7 @@ describe("platform capability access", () => {
     expect(hasPlatformCapability(readOnlyUser, "unknown.capability")).toBe(false);
     expect(canReadPlatformBilling(readOnlyUser)).toBe(true);
     expect(canManagePlatformBilling(readOnlyUser)).toBe(false);
+    expect(canReadPlatformAudit(readOnlyUser)).toBe(false);
   });
 
   test("denies non-platform users", () => {

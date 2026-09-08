@@ -61,6 +61,7 @@ platformAuditLogSchema.index({ salonId: 1, createdAt: -1 });
 platformAuditLogSchema.index({ subscriptionId: 1, createdAt: -1 });
 platformAuditLogSchema.index({ paymentAttemptId: 1, createdAt: -1 });
 platformAuditLogSchema.index({ action: 1, createdAt: -1 });
+platformAuditLogSchema.index({ createdAt: -1, _id: -1 });
 
 const PlatformAuditLog = mongoose.model(
   "PlatformAuditLog",

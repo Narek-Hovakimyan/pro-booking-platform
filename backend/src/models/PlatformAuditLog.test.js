@@ -110,10 +110,14 @@ test("has expected indexes", () => {
   const hasActionIndex = indexFields.some(
     (keys) => keys.includes("action") && keys.includes("createdAt")
   );
+  const hasChronologicalIndex = indexFields.some(
+    (keys) => keys.includes("createdAt") && keys.includes("_id")
+  );
 
   assert.ok(hasActorIndex, "Missing actorId+createdAt index");
   assert.ok(hasSalonIndex, "Missing salonId+createdAt index");
   assert.ok(hasSubscriptionIndex, "Missing subscriptionId+createdAt index");
   assert.ok(hasPaymentAttemptIndex, "Missing paymentAttemptId+createdAt index");
   assert.ok(hasActionIndex, "Missing action+createdAt index");
+  assert.ok(hasChronologicalIndex, "Missing chronological audit index");
 });

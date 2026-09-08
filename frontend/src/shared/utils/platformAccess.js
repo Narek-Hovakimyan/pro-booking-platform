@@ -24,3 +24,6 @@ export const canReadPlatformBilling = (user) =>
 
 export const canManagePlatformBilling = (user) =>
   hasPlatformCapability(user, PLATFORM_CAPABILITIES.BILLING_MANAGE);
+
+export const canReadPlatformAudit = (user) =>
+  hasPlatformCapability(user, PLATFORM_CAPABILITIES.AUDIT_READ);

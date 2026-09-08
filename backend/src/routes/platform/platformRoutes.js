@@ -7,6 +7,7 @@ import {
 import { requireRecentAuthentication } from "../../middleware/recentAuthenticationMiddleware.js";
 import { securityMutationLimiter } from "../../middleware/rateLimitMiddleware.js";
 import { getPlatformDashboardSummaryHandler } from "../../controllers/platform/platformDashboardController.js";
+import { listPlatformAuditLogsHandler } from "../../controllers/platform/platformAuditController.js";
 import {
   listSalonBillingSummaries,
   getSalonBillingDetailHandler,
@@ -29,6 +30,13 @@ import {
 } from "../../controllers/platform/platformBillingController.js";
 
 const router = express.Router();
+
+router.get(
+  "/audit",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.AUDIT_READ),
+  listPlatformAuditLogsHandler
+);
 
 /**
  * GET /api/platform/access-check

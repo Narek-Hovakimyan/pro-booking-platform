@@ -17,6 +17,9 @@ const PlatformSalonBillingDetailPage = lazy(() =>
 const PlatformIndividualBillingPage = lazy(() =>
   import("../platform/pages/PlatformIndividualBillingPage")
 );
+const PlatformAuditPage = lazy(() =>
+  import("../platform/pages/PlatformAuditPage")
+);
 
 export const platformRoutes = (
   <>
@@ -57,6 +60,14 @@ export const platformRoutes = (
       element={
         <ProtectedRoute requiredPlatformCapability="billing.read">
           <PlatformIndividualBillingPage />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/admin/platform/audit"
+      element={
+        <ProtectedRoute requiredPlatformCapability="audit.read">
+          <PlatformAuditPage />
         </ProtectedRoute>
       }
     />

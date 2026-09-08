@@ -2,23 +2,32 @@ import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
+import { canReadPlatformAudit } from "@/shared/utils/platformAccess";
 
 const getMenuGroups = (
   canShowManageHiring,
   canManageSalon,
   canReadPlatformBilling,
+  canReadPlatformAudit,
   showBusinessGroups,
   t
 ) => {
   const groups = [];
 
-  if (canReadPlatformBilling) {
+  if (canReadPlatformBilling || canReadPlatformAudit) {
     groups.push({
       key: "platform",
       label: t("nav.platform"),
       children: [
-        { label: "Platform Dashboard", to: "/admin/platform/dashboard" },
-        { label: t("nav.platformBilling"), to: "/admin/platform/billing" },
+        ...(canReadPlatformBilling
+          ? [
+              { label: "Platform Dashboard", to: "/admin/platform/dashboard" },
+              { label: t("nav.platformBilling"), to: "/admin/platform/billing" },
+            ]
+          : []),
+        ...(canReadPlatformAudit
+          ? [{ label: "Platform Audit", to: "/admin/platform/audit" }]
+          : []),
       ],
     });
   }
@@ -121,6 +130,7 @@ export default function NestedHeaderMenu({
 }) {
   const { pathname } = useLocation();
   const { t } = useTranslation();
+  const canReadAudit = canReadPlatformAudit(currentUser);
 
   const isNavActive = (itemTo) => {
     if (!itemTo) return false;
@@ -202,6 +212,7 @@ export default function NestedHeaderMenu({
             canShowManageHiring,
             canManageSalon,
             canReadPlatformBilling,
+            canReadAudit,
             showBusinessGroups,
             t
           ).map((group) => (
@@ -265,6 +276,7 @@ export default function NestedHeaderMenu({
         canShowManageHiring,
         canManageSalon,
         canReadPlatformBilling,
+        canReadAudit,
         showBusinessGroups,
         t
       ).map((group) => {

@@ -25,6 +25,7 @@ const writeBillingRoutes = [
 ];
 
 const readPlatformRoutes = [
+  "/audit",
   "/access-check",
   "/dashboard/summary",
   "/billing/salons",
@@ -55,6 +56,7 @@ const checkMiddleware = (route, expectedMiddlewares) => {
 test("all routes have protect plus their fixed platform capability", () => {
   const expectedPaths = [
     { path: "/access-check", method: "get" },
+    { path: "/audit", method: "get" },
     { path: "/dashboard/summary", method: "get" },
     { path: "/billing/salons", method: "get" },
     { path: "/billing/salons/:salonId", method: "get" },
@@ -87,7 +89,9 @@ test("all routes have protect plus their fixed platform capability", () => {
     assert.ok(route.route.methods[method], `${path} should accept ${method.toUpperCase()}`);
     const middlewareNames = checkMiddleware(route, ["protect", "requirePlatformCapability"]);
     const capabilityMiddleware = route.route.stack[1].handle;
-    const expectedCapability = path === "/billing/salons/:salonId/seat-management"
+    const expectedCapability = path === "/audit"
+      ? PLATFORM_CAPABILITIES.AUDIT_READ
+      : path === "/billing/salons/:salonId/seat-management"
       ? PLATFORM_CAPABILITIES.BILLING_MANAGE
       : readPlatformRoutes.includes(path)
         ? PLATFORM_CAPABILITIES.BILLING_READ
@@ -115,6 +119,7 @@ test("read handler names are correct", () => {
     return route.route.stack[2].handle.name || route.route.stack[2].name;
   };
 
+  assert.equal(getHandlerName("/audit"), "listPlatformAuditLogsHandler");
   assert.equal(getHandlerName("/billing/salons"), "listSalonBillingSummaries");
   assert.equal(getHandlerName("/dashboard/summary"), "getPlatformDashboardSummaryHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId"), "getSalonBillingDetailHandler");
@@ -387,6 +392,24 @@ test("billing route rejects normal client", async () => {
   assert.equal(nextCalled, false);
   assert.equal(res.statusCode, 403);
   assert.equal(res.body.code, "FORBIDDEN");
+});
+
+test("audit route requires audit.read and allows an effective platform superuser", async () => {
+  const normalUser = makeReqRes({
+    _id: "64b000000000000000000045",
+    role: "barber",
+    platformRole: null,
+  });
+  assert.equal(await runRoutePlatformGate("/audit", normalUser.req, normalUser.res), false);
+  assert.equal(normalUser.res.statusCode, 403);
+
+  const platformSuperuser = makeReqRes({
+    _id: "64b000000000000000000046",
+    role: "barber",
+    platformRole: "superuser",
+  });
+  assert.equal(await runRoutePlatformGate("/audit", platformSuperuser.req, platformSuperuser.res), true);
+  assert.equal(platformSuperuser.res.statusCode, 200);
 });
 
 test("individual billing route rejects normal client", async () => {
