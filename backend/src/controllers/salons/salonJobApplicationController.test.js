@@ -31,6 +31,7 @@ const originalMethods = {
   jobFindById: SalonJobPost.findById,
   applicationFind: SalonJobApplication.find,
   applicationFindById: SalonJobApplication.findById,
+  applicationFindOneAndUpdate: SalonJobApplication.findOneAndUpdate,
   applicationFindOne: SalonJobApplication.findOne,
   applicationCreate: SalonJobApplication.create,
   notificationCreate: Notification.create,
@@ -42,6 +43,7 @@ afterEach(() => {
   SalonJobPost.findById = originalMethods.jobFindById;
   SalonJobApplication.find = originalMethods.applicationFind;
   SalonJobApplication.findById = originalMethods.applicationFindById;
+  SalonJobApplication.findOneAndUpdate = originalMethods.applicationFindOneAndUpdate;
   SalonJobApplication.findOne = originalMethods.applicationFindOne;
   SalonJobApplication.create = originalMethods.applicationCreate;
   Notification.create = originalMethods.notificationCreate;
@@ -923,8 +925,16 @@ const mockStatusUpdateDependencies = (app = createApplication()) => {
   };
   Salon.findById = async () => createSalon();
   SalonJobPost.findById = async () => createActiveJob({ employmentType: "full-time" });
+  mockStatusUpdateWrite(app);
 
   return app;
+};
+
+const mockStatusUpdateWrite = (app) => {
+  SalonJobApplication.findOneAndUpdate = async (_filter, update) => {
+    Object.assign(app, update.$set);
+    return app;
+  };
 };
 
 test("owner can update to reviewed", async () => {
@@ -940,6 +950,10 @@ test("owner can update to reviewed", async () => {
     return mockQuery(mockPopulateApplication(raw));
   };
   Salon.findById = async () => createSalon();
+  SalonJobApplication.findOneAndUpdate = async (_filter, update) => ({
+    ...app,
+    ...update.$set,
+  });
   Notification.create = async (payload) => payload;
 
   await updateSalonJobApplicationStatus(
@@ -1040,6 +1054,82 @@ test("unauthorized status update does not create notification", async () => {
   );
 
   assert.equal(res.statusCode, 403);
+  assert.equal(notificationCreated, false);
+});
+
+test("confirmed onboarding rejects a manager transition without application, membership, or notification mutation", async () => {
+  const res = createResponse();
+  const membership = { status: "approved", salon: salonId };
+  const app = createApplication({
+    status: "accepted",
+    onboardingStatus: "confirmed",
+  });
+  let updateCalled = false;
+  let notificationCreated = false;
+
+  SalonJobApplication.findById = async () => app;
+  Salon.findById = async () => createSalon();
+  SalonJobApplication.findOneAndUpdate = async () => {
+    updateCalled = true;
+    return app;
+  };
+  Notification.create = async () => {
+    notificationCreated = true;
+    return null;
+  };
+
+  await updateSalonJobApplicationStatus(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { applicationId },
+      body: { status: "rejected" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.message, "Confirmed onboarding applications must remain accepted");
+  assert.equal(app.status, "accepted");
+  assert.equal(membership.status, "approved");
+  assert.equal(updateCalled, false);
+  assert.equal(notificationCreated, false);
+});
+
+test("a terminal confirmation racing a manager transition fails closed at the update", async () => {
+  const res = createResponse();
+  const app = createApplication({
+    status: "accepted",
+    onboardingStatus: "pending_consent",
+  });
+  let updateFilter = null;
+  let notificationCreated = false;
+
+  SalonJobApplication.findById = async () => app;
+  Salon.findById = async () => createSalon();
+  SalonJobApplication.findOneAndUpdate = async (filter) => {
+    updateFilter = filter;
+    return null;
+  };
+  Notification.create = async () => {
+    notificationCreated = true;
+    return null;
+  };
+
+  await updateSalonJobApplicationStatus(
+    {
+      user: { _id: ownerId, role: "barber" },
+      params: { applicationId },
+      body: { status: "rejected" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(updateFilter, {
+    _id: applicationId,
+    onboardingStatus: { $ne: "confirmed" },
+  });
+  assert.equal(app.status, "accepted");
   assert.equal(notificationCreated, false);
 });
 
@@ -1173,6 +1263,7 @@ test("owner can update to accepted", async () => {
   };
   Salon.findById = async () => createSalon();
   SalonJobPost.findById = async () => createActiveJob({ employmentType: "full-time" });
+  mockStatusUpdateWrite(app);
   Notification.create = async (payload) => payload;
 
   await updateSalonJobApplicationStatus(
@@ -1199,6 +1290,7 @@ test("first supported acceptance stores an immutable specialist onboarding offer
   Salon.findById = async () => createSalon();
   SalonJobPost.findById = async () =>
     createActiveJob({ role: "barber", employmentType: "rent-chair" });
+  mockStatusUpdateWrite(app);
   Notification.create = async () => null;
 
   await updateSalonJobApplicationStatus(
@@ -1223,6 +1315,7 @@ test("receptionist acceptance records a non-specialist staff offer", async () =>
   Salon.findById = async () => createSalon();
   SalonJobPost.findById = async () =>
     createActiveJob({ role: "receptionist", employmentType: "part-time" });
+  mockStatusUpdateWrite(app);
   Notification.create = async () => null;
 
   await updateSalonJobApplicationStatus(
@@ -1262,6 +1355,7 @@ test("replayed accepted status does not rewrite an immutable onboarding offer", 
   })();
   Salon.findById = async () => createSalon();
   SalonJobPost.findById = async () => createActiveJob({ role: "other" });
+  mockStatusUpdateWrite(app);
 
   await updateSalonJobApplicationStatus(
     { user: { _id: ownerId, role: "barber" }, params: { applicationId }, body: { status: "accepted" } },
@@ -1282,6 +1376,7 @@ test("unsupported accepted role is blocked without an onboarding offer", async (
   })();
   Salon.findById = async () => createSalon();
   SalonJobPost.findById = async () => createActiveJob({ role: "other", employmentType: "full-time" });
+  mockStatusUpdateWrite(app);
   Notification.create = async () => null;
 
   await updateSalonJobApplicationStatus(
@@ -1307,6 +1402,7 @@ test("owner can update to rejected", async () => {
     return mockQuery(mockPopulateApplication(raw));
   };
   Salon.findById = async () => createSalon();
+  mockStatusUpdateWrite(app);
   Notification.create = async (payload) => payload;
 
   await updateSalonJobApplicationStatus(

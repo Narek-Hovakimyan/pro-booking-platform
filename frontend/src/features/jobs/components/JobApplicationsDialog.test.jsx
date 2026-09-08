@@ -59,6 +59,13 @@ describe("JobApplicationsDialog", () => {
     expect(screen.queryByText("Salon onboarding confirmed.")).not.toBeInTheDocument();
   });
 
+  it("keeps confirmed onboarding visible and prevents its terminal status from changing", async () => {
+    renderDialog([application({ onboardingStatus: "confirmed" })]);
+
+    expect(await screen.findByText("Salon onboarding confirmed.")).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Status" })).toBeDisabled();
+  });
+
   it("keeps job B authoritative when job A resolves late", async () => {
     const first = deferred();
     const second = deferred();

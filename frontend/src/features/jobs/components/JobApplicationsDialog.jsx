@@ -340,7 +340,7 @@ export default function JobApplicationsDialog({ job, onClose }) {
                           Status
                           <select
                             className="h-10 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-950"
-                            disabled={isUpdating}
+                            disabled={isUpdating || application.onboardingStatus === "confirmed"}
                             onChange={(event) =>
                               updateStatus(application, event.target.value)
                             }

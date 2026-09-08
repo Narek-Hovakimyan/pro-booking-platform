@@ -328,6 +328,12 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
       });
     }
 
+    if (application.onboardingStatus === "confirmed" && status !== "accepted") {
+      return res.status(409).json({
+        message: "Confirmed onboarding applications must remain accepted",
+      });
+    }
+
     const previousStatus = application.status;
     const isFirstAcceptance =
       status === "accepted" &&
@@ -336,15 +342,17 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
       !application.onboardingStatus &&
       !application.onboardingOffer?.mappingVersion;
 
-    application.status = status;
-    application.statusUpdatedBy = getUserId(req.user);
+    const statusUpdate = {
+      status,
+      statusUpdatedBy: getUserId(req.user),
+    };
 
     // Set the matching timestamp without clearing older ones
     const now = new Date();
 
-    if (status === "reviewed") application.reviewedAt = now;
-    if (status === "accepted") application.acceptedAt = now;
-    if (status === "rejected") application.rejectedAt = now;
+    if (status === "reviewed") statusUpdate.reviewedAt = now;
+    if (status === "accepted") statusUpdate.acceptedAt = now;
+    if (status === "rejected") statusUpdate.rejectedAt = now;
 
     // Hiring acceptance only records an immutable offer. Membership requires the
     // applicant's separate, authenticated confirmation.
@@ -352,14 +360,29 @@ export const updateSalonJobApplicationStatus = async (req, res) => {
       const job = await SalonJobPost.findById(application.jobId);
       const offer = buildJobOnboardingOffer(job, now);
 
-      application.onboardingStatus = offer ? "pending_consent" : "blocked";
-      if (offer) application.onboardingOffer = offer;
+      statusUpdate.onboardingStatus = offer ? "pending_consent" : "blocked";
+      if (offer) statusUpdate.onboardingOffer = offer;
     }
 
-    await application.save();
+    const updateFilter = { _id: application._id };
+    if (status !== "accepted") {
+      updateFilter.onboardingStatus = { $ne: "confirmed" };
+    }
+
+    const updatedApplication = await SalonJobApplication.findOneAndUpdate(
+      updateFilter,
+      { $set: statusUpdate },
+      { returnDocument: "after", runValidators: true }
+    );
+
+    if (!updatedApplication) {
+      return res.status(409).json({
+        message: "Confirmed onboarding applications must remain accepted",
+      });
+    }
 
     if (previousStatus !== status) {
-      await notifyApplicationStatusChange(req, application, status);
+      await notifyApplicationStatusChange(req, updatedApplication, status);
     }
 
     const populated = await applyApplicantPopulate(
