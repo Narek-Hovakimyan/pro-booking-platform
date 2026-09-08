@@ -291,7 +291,11 @@ export default function ServicesManager({
   };
 
   const handleToggleActive = async (service) => {
-    await updateService(service.id, { active: !service.active });
+    try {
+      await updateService(service.id, { active: !service.active });
+    } catch {
+      // useServiceManagement has already reported the expected request failure.
+    }
   };
 
   return (

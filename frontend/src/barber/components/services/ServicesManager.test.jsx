@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -17,6 +18,40 @@ vi.mock("@/shared/api/serviceCategories", () => ({
 }));
 
 afterEach(() => vi.resetAllMocks());
+
+function ServiceToggleHarness({ initialService, request }) {
+  const [services, setServices] = useState([initialService]);
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const updateService = async (serviceId, payload) => {
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const updatedService = await request(serviceId, payload);
+      setServices((currentServices) => currentServices.map((service) =>
+        service.id === serviceId ? updatedService : service
+      ));
+    } catch (requestError) {
+      setError("Could not update service. Please try again.");
+      throw requestError;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <ServicesManager
+      services={services}
+      removeService={vi.fn()}
+      addService={vi.fn()}
+      updateService={updateService}
+      error={error}
+      isSaving={isSaving}
+    />
+  );
+}
 
 describe("ServicesManager", () => {
   test("editing retains an owner-visible inactive custom category", async () => {
@@ -207,5 +242,49 @@ describe("ServicesManager", () => {
     }
 
     expect(addService).not.toHaveBeenCalled();
+  });
+
+  test("contains a failed deactivation, preserves the active service, and allows a successful retry", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const activeService = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const request = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ ...activeService, active: false });
+
+    render(<ServiceToggleHarness initialService={activeService} request={request} />);
+
+    const toggle = screen.getByTitle("Deactivate");
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request).toHaveBeenLastCalledWith("service-1", { active: false });
+    expect(await screen.findByText("Could not update service. Please try again.")).toBeInTheDocument();
+    expect(screen.getByTitle("Deactivate")).toBeEnabled();
+
+    fireEvent.click(screen.getByTitle("Deactivate"));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request).toHaveBeenLastCalledWith("service-1", { active: false });
+    expect(screen.queryByText("Could not update service. Please try again.")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Activate")).toBeEnabled();
+  });
+
+  test("activates an inactive service through the shared toggle path", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const inactiveService = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: false, category: "haircut",
+    };
+    const request = vi.fn().mockResolvedValueOnce({ ...inactiveService, active: true });
+
+    render(<ServiceToggleHarness initialService={inactiveService} request={request} />);
+
+    fireEvent.click(screen.getByTitle("Activate"));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("service-1", { active: true }));
+    expect(screen.getByTitle("Deactivate")).toBeEnabled();
   });
 });

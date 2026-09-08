@@ -6,10 +6,11 @@ import { useServiceManagement } from "./useServiceManagement";
 
 const mocks = vi.hoisted(() => ({
   post: vi.fn(),
+  put: vi.fn(),
 }));
 
 vi.mock("../api/axios", () => ({
-  default: { post: mocks.post },
+  default: { post: mocks.post, put: mocks.put },
 }));
 
 const Harness = forwardRef((props, ref) => {
@@ -47,7 +48,10 @@ function renderHookHarness() {
 }
 
 describe("useServiceManagement addService", () => {
-  beforeEach(() => mocks.post.mockReset());
+  beforeEach(() => {
+    mocks.post.mockReset();
+    mocks.put.mockReset();
+  });
   afterEach(() => vi.restoreAllMocks());
 
   test("propagates a rejected create after reporting a safe error and settling saving", async () => {
@@ -147,5 +151,48 @@ describe("useServiceManagement addService", () => {
     expect(setNewService).not.toHaveBeenCalled();
     expect(setDataError).toHaveBeenCalledWith("Price must be a non-negative number.");
     expect(setIsSaving).not.toHaveBeenCalled();
+  });
+});
+
+describe("useServiceManagement updateService", () => {
+  test("propagates a rejected update after reporting a safe error and settling saving", async () => {
+    const error = { response: { data: { message: "Could not update service" } } };
+    mocks.put.mockRejectedValueOnce(error);
+    const { ref, dispatch, setDataError, setIsSaving } = renderHookHarness();
+    let receivedError;
+
+    await act(async () => {
+      try {
+        await ref.current.updateService("service-1", { active: false });
+      } catch (requestError) {
+        receivedError = requestError;
+      }
+    });
+
+    expect(receivedError).toBe(error);
+    expect(mocks.put).toHaveBeenCalledWith("/services/service-1", { active: false });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(setDataError).toHaveBeenNthCalledWith(1, "");
+    expect(setDataError).toHaveBeenLastCalledWith("Could not update service");
+    expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
+  });
+
+  test("dispatches a successful update and settles saving", async () => {
+    const updatedService = { _id: "service-1", ...servicePayload, active: false };
+    mocks.put.mockResolvedValueOnce({ data: updatedService });
+    const { ref, dispatch, setDataError, setIsSaving } = renderHookHarness();
+
+    await act(async () => {
+      await ref.current.updateService("service-1", { active: false });
+    });
+
+    expect(mocks.put).toHaveBeenCalledWith("/services/service-1", { active: false });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0][0]).toMatchObject({
+      type: "services/updateService",
+      payload: updatedService,
+    });
+    expect(setDataError).toHaveBeenCalledWith("");
+    expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
   });
 });
