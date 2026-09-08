@@ -14,11 +14,13 @@ import { useSelector } from "react-redux";
 import { NavLink, useSearchParams } from "react-router-dom";
 
 import {
-  getPlatformBillingIndividualPayments,
+  getPlatformBillingIndividualTransactions,
+  getPlatformBillingIndividualPaymentAttempts,
   getPlatformBillingIndividuals,
 } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import { canAccessPlatform } from "@/shared/utils/platformAccess";
+import { canReadPlatformBilling } from "@/shared/utils/platformAccess";
+import { IndividualPaymentReadModels } from "../components/billing/IndividualPaymentReadModels";
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -67,31 +69,10 @@ const getPaymentStatusLabel = (payment) => {
   return status.replace(/_/g, " ");
 };
 
-const getPaymentBadgeClass = (payment) => {
-  if (!payment) return "bg-neutral-100 text-neutral-700";
-  if (payment.status === "paid" || payment.status === "confirmed") {
-    return "bg-emerald-50 text-emerald-700";
-  }
-  if (payment.status === "failed" || payment.status === "cancelled") {
-    return "bg-red-50 text-red-700";
-  }
-  if (payment.status === "pending" || payment.status === "requires_action") {
-    return "bg-amber-50 text-amber-700";
-  }
-  return "bg-neutral-100 text-neutral-700";
-};
-
 const getProviderLabel = (provider) => {
   if (!provider || provider === "manual") return "Manual provider";
   if (provider === "disabled") return "Disabled provider";
   return provider;
-};
-
-const getSourceLabel = (payment) => {
-  if (!payment) return "";
-  const source =
-    payment.source === "payment_record" ? "Payment record" : "Payment attempt";
-  return payment.action ? `${source} · ${payment.action}` : source;
 };
 
 const billingTabs = [
@@ -133,10 +114,11 @@ export default function PlatformIndividualBillingPage() {
   const [error, setError] = useState("");
   const [expandedBarberId, setExpandedBarberId] = useState("");
   const [paymentState, setPaymentState] = useState({});
-  const paymentRequestRef = useRef(0);
+  const transactionRequestRef = useRef(0);
+  const attemptRequestRef = useRef(0);
   const isPaymentLifecycleMountedRef = useRef(false);
 
-  const isPlatformAdmin = canAccessPlatform(currentUser);
+  const canReadBilling = canReadPlatformBilling(currentUser);
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   useEffect(() => {
@@ -195,16 +177,17 @@ export default function PlatformIndividualBillingPage() {
 
     return () => {
       isPaymentLifecycleMountedRef.current = false;
-      paymentRequestRef.current += 1;
+      transactionRequestRef.current += 1;
+      attemptRequestRef.current += 1;
     };
   }, []);
 
-  const loadPayments = async (barberId, nextPage = 1) => {
-    const requestId = ++paymentRequestRef.current;
+  const loadTransactions = async (barberId, nextPage = 1) => {
+    const requestId = ++transactionRequestRef.current;
     const paymentKey = String(barberId);
     const isCurrentRequest = () =>
       isPaymentLifecycleMountedRef.current &&
-      paymentRequestRef.current === requestId;
+      transactionRequestRef.current === requestId;
 
     if (!isCurrentRequest()) return;
 
@@ -212,26 +195,27 @@ export default function PlatformIndividualBillingPage() {
       ...state,
       [paymentKey]: {
         ...(state[paymentKey] || {}),
-        isLoading: true,
-        error: "",
+        transactionsLoading: true,
+        transactionsError: "",
       },
     }));
 
     try {
-      const result = await getPlatformBillingIndividualPayments(barberId, {
+      const result = await getPlatformBillingIndividualTransactions(barberId, {
         page: nextPage,
         limit: 10,
       });
       if (!isCurrentRequest()) return;
+      const data = result || {};
       setPaymentState((state) => ({
         ...state,
         [paymentKey]: {
-          payments: result.payments || [],
-          total: result.total || 0,
-          page: result.page || nextPage,
-          limit: result.limit || 10,
-          isLoading: false,
-          error: "",
+          transactions: data.transactions || [],
+          transactionsTotal: data.total || 0,
+          transactionsPage: data.page || nextPage,
+          transactionsLimit: data.limit || 10,
+          transactionsLoading: false,
+          transactionsError: "",
         },
       }));
     } catch (err) {
@@ -240,11 +224,42 @@ export default function PlatformIndividualBillingPage() {
         ...state,
         [paymentKey]: {
           ...(state[paymentKey] || {}),
-          isLoading: false,
-          error:
-            err.response?.data?.message ||
-            "Failed to load individual payment history.",
+          transactionsLoading: false,
+          transactionsError: err.response?.data?.message || "Failed to load transactions.",
         },
+      }));
+    }
+  };
+
+  const loadPaymentAttempts = async (barberId, nextPage = 1) => {
+    const requestId = ++attemptRequestRef.current;
+    const paymentKey = String(barberId);
+    const isCurrentRequest = () =>
+      isPaymentLifecycleMountedRef.current && attemptRequestRef.current === requestId;
+    if (!isCurrentRequest()) return;
+    setPaymentState((state) => ({
+      ...state,
+      [paymentKey]: { ...(state[paymentKey] || {}), attemptsLoading: true, attemptsError: "" },
+    }));
+    try {
+      const result = await getPlatformBillingIndividualPaymentAttempts(barberId, { page: nextPage, limit: 10 });
+      if (!isCurrentRequest()) return;
+      const data = result || {};
+      setPaymentState((state) => ({
+        ...state,
+        [paymentKey]: {
+          ...(state[paymentKey] || {}),
+          paymentAttempts: data.paymentAttempts || [], attemptsTotal: data.total || 0,
+          attemptsPage: data.page || nextPage, attemptsLimit: data.limit || 10,
+          attemptsLoading: false, attemptsError: "",
+        },
+      }));
+    } catch (err) {
+      if (!isCurrentRequest()) return;
+      setPaymentState((state) => ({
+        ...state,
+        [paymentKey]: { ...(state[paymentKey] || {}), attemptsLoading: false,
+          attemptsError: err.response?.data?.message || "Failed to load payment attempts." },
       }));
     }
   };
@@ -263,19 +278,20 @@ export default function PlatformIndividualBillingPage() {
 
   const handleTogglePayments = (barberId) => {
     if (expandedBarberId === barberId) {
-      paymentRequestRef.current += 1;
+      transactionRequestRef.current += 1;
+      attemptRequestRef.current += 1;
       setExpandedBarberId("");
       return;
     }
 
-    paymentRequestRef.current += 1;
+    transactionRequestRef.current += 1;
+    attemptRequestRef.current += 1;
     setExpandedBarberId(barberId);
-    if (!paymentState[barberId]?.payments) {
-      loadPayments(barberId, 1);
-    }
+    if (!paymentState[barberId]?.transactions) loadTransactions(barberId, 1);
+    if (!paymentState[barberId]?.paymentAttempts) loadPaymentAttempts(barberId, 1);
   };
 
-  if (!isPlatformAdmin && error) {
+  if (!canReadBilling && error) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
@@ -392,10 +408,6 @@ export default function PlatformIndividualBillingPage() {
             const barberId = item.barberId || item.barber?.id;
             const payment = item.latestPayment;
             const paymentInfo = paymentState[barberId] || {};
-            const paymentTotalPages = Math.max(
-              1,
-              Math.ceil((paymentInfo.total || 0) / (paymentInfo.limit || 10))
-            );
 
             return (
               <div
@@ -463,11 +475,6 @@ export default function PlatformIndividualBillingPage() {
                       </div>
                     </div>
 
-                    {payment && (
-                      <div className="mt-2 text-[11px] text-neutral-400">
-                        {getSourceLabel(payment)}
-                      </div>
-                    )}
                   </div>
 
                   <button
@@ -485,135 +492,13 @@ export default function PlatformIndividualBillingPage() {
                 </div>
 
                 {expandedBarberId === barberId && (
-                  <div className="mt-4 rounded-2xl border border-neutral-100 bg-neutral-50 p-3">
-                    {paymentInfo.isLoading && (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
-                      </div>
-                    )}
-
-                    {paymentInfo.error && (
-                      <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between">
-                        <span>{paymentInfo.error}</span>
-                        <button
-                          onClick={() =>
-                            loadPayments(barberId, paymentInfo.page || 1)
-                          }
-                          className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-red-700"
-                          type="button"
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    )}
-
-                    {!paymentInfo.isLoading &&
-                      !paymentInfo.error &&
-                      paymentInfo.payments?.length === 0 && (
-                        <div className="py-8 text-center text-sm text-neutral-500">
-                          No individual payments found.
-                        </div>
-                      )}
-
-                    {!paymentInfo.isLoading &&
-                      !paymentInfo.error &&
-                      paymentInfo.payments?.length > 0 && (
-                        <div className="space-y-2">
-                          {paymentInfo.payments.map((historyItem, index) => (
-                            <div
-                              key={historyItem.id || `${barberId}-${index}`}
-                              className="grid gap-2 rounded-xl border border-neutral-100 bg-white p-3 text-xs text-neutral-500 sm:grid-cols-2 lg:grid-cols-5"
-                            >
-                              <div>
-                                <span className="block text-neutral-400">Amount</span>
-                                <span className="font-semibold text-neutral-800">
-                                  {formatAmount(
-                                    historyItem.amount,
-                                    historyItem.currency
-                                  )}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="block text-neutral-400">Status</span>
-                                <span
-                                  className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${getPaymentBadgeClass(historyItem)}`}
-                                >
-                                  {getPaymentStatusLabel(historyItem)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="block text-neutral-400">Provider</span>
-                                <span className="font-medium text-neutral-700">
-                                  {getProviderLabel(historyItem.provider)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="block text-neutral-400">Dates</span>
-                                <span className="font-medium text-neutral-700">
-                                  {formatDate(historyItem.paidAt)} ·{" "}
-                                  {formatDate(historyItem.createdAt)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="block text-neutral-400">Source</span>
-                                <span className="font-medium text-neutral-700">
-                                  {getSourceLabel(historyItem)}
-                                </span>
-                              </div>
-                              {(historyItem.periodStart ||
-                                historyItem.periodEnd) && (
-                                <div className="sm:col-span-2 lg:col-span-5">
-                                  <span className="text-neutral-400">Period: </span>
-                                  <span className="font-medium text-neutral-700">
-                                    {formatDate(historyItem.periodStart)} →{" "}
-                                    {formatDate(historyItem.periodEnd)}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-
-                          {paymentTotalPages > 1 && (
-                            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                              <button
-                                onClick={() =>
-                                  loadPayments(
-                                    barberId,
-                                    Math.max(1, (paymentInfo.page || 1) - 1)
-                                  )
-                                }
-                                disabled={(paymentInfo.page || 1) <= 1}
-                                className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-white disabled:opacity-30"
-                                type="button"
-                              >
-                                <ChevronLeft className="h-4 w-4" />
-                                Previous
-                              </button>
-                              <span className="text-xs text-neutral-500">
-                                Page {paymentInfo.page || 1} of {paymentTotalPages}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  loadPayments(
-                                    barberId,
-                                    Math.min(
-                                      paymentTotalPages,
-                                      (paymentInfo.page || 1) + 1
-                                    )
-                                  )
-                                }
-                                disabled={(paymentInfo.page || 1) >= paymentTotalPages}
-                                className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-white disabled:opacity-30"
-                                type="button"
-                              >
-                                Next
-                                <ChevronRight className="h-4 w-4" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                  </div>
+                  <IndividualPaymentReadModels
+                    state={paymentInfo}
+                    onTransactionsPageChange={(nextPage) => loadTransactions(barberId, nextPage)}
+                    onAttemptsPageChange={(nextPage) => loadPaymentAttempts(barberId, nextPage)}
+                    formatAmount={formatAmount}
+                    formatDate={formatDate}
+                  />
                 )}
               </div>
             );

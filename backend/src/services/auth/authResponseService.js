@@ -29,6 +29,11 @@ const getRawSalonMemberships = (user) => {
   return [];
 };
 
+const getRecentAuthenticationMethods = (user) =>
+  Array.isArray(user.authProviders)
+    ? user.authProviders.filter((provider) => provider === "password" || provider === "google")
+    : [];
+
 export function serializeAuthUser(user) {
   const specialistOnboarding = serializeSpecialistOnboardingState(user);
   const platformCapabilities = resolvePlatformCapabilities(user);
@@ -54,6 +59,7 @@ export function serializeAuthUser(user) {
     favoriteSalons: user.favoriteSalons || [],
     canAccessPlatform: isPlatformSuperuser(user),
     platformCapabilities,
+    recentAuthenticationMethods: getRecentAuthenticationMethods(user),
     createdAt: user.createdAt,
     ...(specialistOnboarding ? { specialistOnboarding } : {}),
   };

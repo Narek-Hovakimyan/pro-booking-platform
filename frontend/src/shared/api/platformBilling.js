@@ -24,16 +24,13 @@ export async function getPlatformBillingSalonDetail(salonId) {
   return data;
 }
 
-/**
- * Fetch paginated payment attempts for a salon (platform admin only).
- * @param {string} salonId
- * @param {object} params
- * @param {number} params.page
- * @param {number} params.limit
- * @returns {Promise<object>} { payments, total }
- */
-export async function getPlatformBillingSalonPayments(salonId, params = {}) {
-  const { data } = await api.get(`/platform/billing/salons/${salonId}/payments`, { params });
+export async function getPlatformBillingSalonTransactions(salonId, params = {}) {
+  const { data } = await api.get(`/platform/billing/salons/${salonId}/transactions`, { params });
+  return data;
+}
+
+export async function getPlatformBillingSalonPaymentAttempts(salonId, params = {}) {
+  const { data } = await api.get(`/platform/billing/salons/${salonId}/payment-attempts`, { params });
   return data;
 }
 
@@ -51,16 +48,13 @@ export async function getPlatformBillingIndividuals(params = {}) {
   return data;
 }
 
-/**
- * Fetch paginated subscription payment history for one barber (platform admin only).
- * @param {string} barberId
- * @param {object} params
- * @param {number} params.page
- * @param {number} params.limit
- * @returns {Promise<object>} { barber, payments, total }
- */
-export async function getPlatformBillingIndividualPayments(barberId, params = {}) {
-  const { data } = await api.get(`/platform/billing/individuals/${barberId}/payments`, { params });
+export async function getPlatformBillingIndividualTransactions(barberId, params = {}) {
+  const { data } = await api.get(`/platform/billing/individuals/${barberId}/transactions`, { params });
+  return data;
+}
+
+export async function getPlatformBillingIndividualPaymentAttempts(barberId, params = {}) {
+  const { data } = await api.get(`/platform/billing/individuals/${barberId}/payment-attempts`, { params });
   return data;
 }
 

@@ -30,13 +30,15 @@ export function SalonBillingPaymentHistory({
   paymentsPage,
   subscriptionIsCancelled,
   onPageChange,
+  title = "Payment Attempts",
+  emptyMessage = "No payment attempts found.",
 }) {
   return (
     <Card>
       <CardContent>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-500">
-            Payment History
+            {title}
           </h2>
           {payments.length > 0 && (
             <span className="text-xs text-neutral-400">
@@ -47,12 +49,12 @@ export function SalonBillingPaymentHistory({
 
         {subscriptionIsCancelled && (
           <div className="mb-4 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
-            Paid payments remain in history. Subscription is currently cancelled.
+            Settled transactions remain in history. Subscription is currently cancelled.
           </div>
         )}
 
         {payments.length === 0 ? (
-          <p className="text-sm text-neutral-400">No payment attempts found.</p>
+          <p className="text-sm text-neutral-400">{emptyMessage}</p>
         ) : (
           <div className="space-y-2">
             <div className="grid grid-cols-12 gap-3 px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-neutral-500">

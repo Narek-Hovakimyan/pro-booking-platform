@@ -7,7 +7,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import api from "@/shared/api/axios";
 import { performLogout } from "@/shared/auth/performLogout";
 import { getSocket } from "@/shared/lib/socket";
-import { canAccessPlatform } from "@/shared/utils/platformAccess";
+import { canReadPlatformBilling } from "@/shared/utils/platformAccess";
 import { addNotification } from "@/store/slices/notificationsSlice";
 import NestedHeaderMenu from "@/shared/components/NestedHeaderMenu";
 
@@ -72,7 +72,7 @@ export default function Header() {
   const isBarber = currentUser?.role === "barber";
   const isBarberOnboarding = isAuthenticated && isBarber && pathname === "/onboarding";
   const showBarberChrome = isAuthenticated && isBarber && !isBarberOnboarding;
-  const isPlatformAdmin = canAccessPlatform(currentUser);
+  const isPlatformAdmin = canReadPlatformBilling(currentUser);
   const currentUserId = currentUser?.id || currentUser?._id;
   const currentUserKey = currentUserId ? String(currentUserId) : null;
   const currentSessionKey =
@@ -534,7 +534,7 @@ export default function Header() {
                     onLogout={logout}
                     canShowManageHiring={canShowManageHiring}
                     canManageSalon={canManageSalon}
-                    isPlatformAdmin={isPlatformAdmin}
+                    canReadPlatformBilling={isPlatformAdmin}
                     showBusinessGroups={isBarber}
                   />
                     </div>
@@ -652,7 +652,7 @@ export default function Header() {
                 onLogout={logout}
                 canShowManageHiring={canShowManageHiring}
                 canManageSalon={canManageSalon}
-                isPlatformAdmin={isPlatformAdmin}
+                canReadPlatformBilling={isPlatformAdmin}
                 showBusinessGroups={isBarber}
               />
             )}

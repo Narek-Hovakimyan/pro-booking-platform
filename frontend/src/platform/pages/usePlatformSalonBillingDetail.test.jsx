@@ -6,11 +6,13 @@ import { usePlatformSalonBillingDetail } from "./usePlatformSalonBillingDetail";
 const mocks = vi.hoisted(() => ({
   getDetail: vi.fn(),
   getPayments: vi.fn(),
+  getAttempts: vi.fn(),
 }));
 
 vi.mock("@/shared/api/platformBilling", () => ({
   getPlatformBillingSalonDetail: mocks.getDetail,
-  getPlatformBillingSalonPayments: mocks.getPayments,
+  getPlatformBillingSalonTransactions: mocks.getPayments,
+  getPlatformBillingSalonPaymentAttempts: mocks.getAttempts,
 }));
 
 function deferred() {
@@ -58,7 +60,8 @@ function HookHarness({ salonId, mutation = vi.fn() }) {
 
 beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset());
-  mocks.getPayments.mockResolvedValue({ payments: [], total: 0 });
+  mocks.getPayments.mockResolvedValue({ transactions: [], total: 0 });
+  mocks.getAttempts.mockResolvedValue({ paymentAttempts: [], total: 0 });
 });
 
 afterEach(() => {

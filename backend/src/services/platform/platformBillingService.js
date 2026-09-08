@@ -16,6 +16,8 @@ import { serializePaymentAttempt } from "./platformBillingSerializers.js";
 import {
   getAllIndividualBillingSummaries,
   getIndividualPayments,
+  getIndividualTransactions,
+  getIndividualPaymentAttempts,
 } from "./platformBillingIndividualReadService.js";
 import {
   getAllSalonBillingSummaries,
@@ -27,7 +29,10 @@ import {
 } from "./platformBillingSubscriptionMutationService.js";
 import {
   getAllSalonPayments,
+  getAllSalonPaymentAttempts,
   getSalonPayments,
+  getSalonTransactions,
+  getSalonPaymentAttempts,
 } from "./platformBillingSalonPaymentReadService.js";
 import {
   isBarberAcceptedStaffForSalon,
@@ -49,8 +54,13 @@ export {
   cancelSalonSubscription,
   getAllIndividualBillingSummaries,
   getIndividualPayments,
+  getIndividualTransactions,
+  getIndividualPaymentAttempts,
   getAllSalonPayments,
+  getAllSalonPaymentAttempts,
   getSalonPayments,
+  getSalonTransactions,
+  getSalonPaymentAttempts,
 };
 
 const createPaymentConfirmationAuditLog = async (payload, session) =>

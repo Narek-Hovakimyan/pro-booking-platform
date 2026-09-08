@@ -244,3 +244,75 @@ export const getIndividualPayments = async (
     limit: safeLimit,
   };
 };
+
+const getIndividualBarber = async (barberId) => {
+  const barberObjectId = toObjectIdOrNull(barberId);
+  if (!barberObjectId) return null;
+  return User.findOne({ _id: barberObjectId, role: "barber" })
+    .select(SAFE_INDIVIDUAL_FIELDS)
+    .lean();
+};
+
+const serializeIndividualBarber = (barber) => ({
+  id: barber._id,
+  name: barber.name,
+  email: barber.email || "",
+  avatarUrl: barber.avatarUrl || "",
+  city: barber.city || "",
+  profession: barber.profession || "",
+  barberType: barber.barberType || "",
+});
+
+export const getIndividualTransactions = async (barberId, { page = 1, limit = 20 } = {}) => {
+  const barber = await getIndividualBarber(barberId);
+  if (!barber) return null;
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const filter = { ownerType: "barber", ownerId: barber._id };
+  const [total, records] = await Promise.all([
+    PaymentRecord.countDocuments(filter),
+    PaymentRecord.find(filter)
+      .sort({ paidAt: -1, createdAt: -1, _id: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+  ]);
+  return {
+    barber: serializeIndividualBarber(barber),
+    transactions: records.map(serializeIndividualPaymentRecord),
+    total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};
+
+export const getIndividualPaymentAttempts = async (
+  barberId,
+  { page = 1, limit = 20, status } = {}
+) => {
+  const barber = await getIndividualBarber(barberId);
+  if (!barber) return null;
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const filter = {
+    ownerType: "barber",
+    ownerId: barber._id,
+    purpose: "subscription",
+  };
+  if (status) filter.status = status;
+  const [total, attempts] = await Promise.all([
+    SubscriptionPaymentAttempt.countDocuments(filter),
+    SubscriptionPaymentAttempt.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+  ]);
+  return {
+    barber: serializeIndividualBarber(barber),
+    paymentAttempts: attempts.map(serializeIndividualPaymentAttempt),
+    total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};

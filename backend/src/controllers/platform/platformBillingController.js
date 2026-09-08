@@ -3,9 +3,14 @@ import {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
   getSalonPayments,
+  getSalonTransactions,
+  getSalonPaymentAttempts,
   getAllSalonPayments,
+  getAllSalonPaymentAttempts,
   getAllIndividualBillingSummaries,
   getIndividualPayments,
+  getIndividualTransactions,
+  getIndividualPaymentAttempts,
   activateSalonSubscription,
   updateSalonSeatCount,
   assignSalonSeat,
@@ -53,8 +58,8 @@ export const getSalonBillingDetailHandler = async (req, res, next) => {
 };
 
 /**
- * GET /api/platform/billing/salons/:salonId/payments
- * Get payment attempts for one salon.
+ * Legacy GET /api/platform/billing/salons/:salonId/payments.
+ * Kept temporarily for external compatibility; new clients use the explicit reads.
  */
 export const getSalonPaymentsHandler = async (req, res, next) => {
   try {
@@ -76,9 +81,43 @@ export const getSalonPaymentsHandler = async (req, res, next) => {
   }
 };
 
+const getExistingSalon = async (salonId) =>
+  Salon.findById(salonId).select("_id").lean();
+
+export const getSalonTransactionsHandler = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    if (!(await getExistingSalon(salonId))) {
+      return res.status(404).json({ message: "Salon not found" });
+    }
+    return res.json(await getSalonTransactions(salonId, {
+      page: Number(req.query.page) || 1,
+      limit: Number(req.query.limit) || 20,
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getSalonPaymentAttemptsHandler = async (req, res, next) => {
+  try {
+    const { salonId } = req.params;
+    if (!(await getExistingSalon(salonId))) {
+      return res.status(404).json({ message: "Salon not found" });
+    }
+    return res.json(await getSalonPaymentAttempts(salonId, {
+      page: Number(req.query.page) || 1,
+      limit: Number(req.query.limit) || 20,
+      status: req.query.status || undefined,
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
- * GET /api/platform/billing/payments
- * All salon subscription payment attempts (paginated).
+ * Legacy GET /api/platform/billing/payments.
+ * Kept temporarily for external compatibility; new clients use /payment-attempts.
  */
 export const listAllSalonPayments = async (req, res, next) => {
   try {
@@ -88,6 +127,18 @@ export const listAllSalonPayments = async (req, res, next) => {
       limit: Number(limit) || 20,
     });
     return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const listAllSalonPaymentAttempts = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query;
+    return res.json(await getAllSalonPaymentAttempts({
+      page: Number(page) || 1,
+      limit: Number(limit) || 20,
+    }));
   } catch (error) {
     next(error);
   }
@@ -113,8 +164,8 @@ export const listIndividualBillingSummaries = async (req, res, next) => {
 };
 
 /**
- * GET /api/platform/billing/individuals/:barberId/payments
- * Get subscription payment history for one individual barber.
+ * Legacy GET /api/platform/billing/individuals/:barberId/payments.
+ * Kept temporarily for external compatibility; new clients use the explicit reads.
  */
 export const getIndividualPaymentsHandler = async (req, res, next) => {
   try {
@@ -134,6 +185,26 @@ export const getIndividualPaymentsHandler = async (req, res, next) => {
     next(error);
   }
 };
+
+const sendIndividualRead = async (req, res, next, read) => {
+  try {
+    const result = await read(req.params.barberId, {
+      page: Number(req.query.page) || 1,
+      limit: Number(req.query.limit) || 20,
+      status: req.query.status || undefined,
+    });
+    if (!result) return res.status(404).json({ message: "Barber not found" });
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getIndividualTransactionsHandler = (req, res, next) =>
+  sendIndividualRead(req, res, next, getIndividualTransactions);
+
+export const getIndividualPaymentAttemptsHandler = (req, res, next) =>
+  sendIndividualRead(req, res, next, getIndividualPaymentAttempts);
 
 /**
  * PATCH /api/platform/billing/salons/:salonId/subscription/activate

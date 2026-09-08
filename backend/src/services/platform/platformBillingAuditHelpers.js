@@ -1,7 +1,9 @@
 import mongoose from "mongoose";
 import PlatformAuditLog from "../../models/PlatformAuditLog.js";
 
-const usesNodeTestDoubles = Boolean(process.env.NODE_TEST_CONTEXT);
+const usesNodeTestDoubles = (session = null) =>
+  Boolean(process.env.NODE_TEST_CONTEXT) &&
+  (!session || typeof session.startTransaction !== "function");
 
 export const buildPlatformBillingTransactionUnavailableError = () => {
   const error = new Error(
@@ -46,7 +48,7 @@ export const createPlatformBillingAuditLog = async ({
   note,
   requestIp,
 }, session) => {
-  if (!session && !usesNodeTestDoubles) {
+  if (!session && !usesNodeTestDoubles(session)) {
     throw buildPlatformBillingTransactionUnavailableError();
   }
 
@@ -63,7 +65,7 @@ export const createPlatformBillingAuditLog = async ({
     requestIp: requestIp || "",
   };
 
-  if (session && !usesNodeTestDoubles) {
+  if (session && !usesNodeTestDoubles(session)) {
     return PlatformAuditLog.create([audit], { session }).then(([created]) => created);
   }
 

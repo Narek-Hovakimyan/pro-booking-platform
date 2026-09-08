@@ -20,7 +20,11 @@ const renderProtectedRoute = (currentUser, capability) =>
 describe("ProtectedRoute platform capabilities", () => {
   test("allows an explicit matching capability", () => {
     renderProtectedRoute(
-      { role: "client", platformCapabilities: ["billing.read"] },
+      {
+        role: "client",
+        canAccessPlatform: true,
+        platformCapabilities: ["billing.read"],
+      },
       "billing.read"
     );
 

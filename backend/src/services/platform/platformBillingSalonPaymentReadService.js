@@ -59,6 +59,56 @@ export const getSalonPayments = async (salonId, { page = 1, limit = 20 } = {}) =
   };
 };
 
+export const getSalonTransactions = async (salonId, { page = 1, limit = 20 } = {}) => {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const filter = {
+    ownerType: "salon",
+    ownerId: new mongoose.Types.ObjectId(getIdString(salonId)),
+  };
+  const [total, records] = await Promise.all([
+    PaymentRecord.countDocuments(filter),
+    PaymentRecord.find(filter)
+      .sort({ paidAt: -1, createdAt: -1, _id: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+  ]);
+
+  return {
+    transactions: records.map(serializePaymentRecord),
+    total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};
+
+export const getSalonPaymentAttempts = async (salonId, { page = 1, limit = 20, status } = {}) => {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const filter = {
+    ownerType: "salon",
+    ownerId: new mongoose.Types.ObjectId(getIdString(salonId)),
+    purpose: "subscription",
+  };
+  if (status) filter.status = status;
+  const [total, attempts] = await Promise.all([
+    SubscriptionPaymentAttempt.countDocuments(filter),
+    SubscriptionPaymentAttempt.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+  ]);
+
+  return {
+    paymentAttempts: attempts.map(serializePaymentAttempt),
+    total,
+    page: safePage,
+    limit: safeLimit,
+  };
+};
+
 export const getAllSalonPayments = async ({ page = 1, limit = 20 } = {}) => {
   const safePage = Math.max(1, Number(page) || 1);
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -82,4 +132,9 @@ export const getAllSalonPayments = async ({ page = 1, limit = 20 } = {}) => {
     page: safePage,
     limit: safeLimit,
   };
+};
+
+export const getAllSalonPaymentAttempts = async (options = {}) => {
+  const { payments, ...result } = await getAllSalonPayments(options);
+  return { ...result, paymentAttempts: payments };
 };

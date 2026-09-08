@@ -21,9 +21,14 @@ import {
   getAllSalonBillingSummaries,
   getSalonBillingDetail,
   getSalonPayments,
+  getSalonTransactions,
+  getSalonPaymentAttempts,
   getAllSalonPayments,
+  getAllSalonPaymentAttempts,
   getAllIndividualBillingSummaries,
   getIndividualPayments,
+  getIndividualTransactions,
+  getIndividualPaymentAttempts,
 } from "./platformBillingService.js";
 import {
   getAcceptedStaffBarbersForSalon,
@@ -1261,6 +1266,16 @@ test("getAllSalonPayments excludes booking deposit attempts", async () => {
   assert.equal(capturedFilter.purpose, "subscription", "purpose = subscription");
 });
 
+test("getAllSalonPaymentAttempts uses an explicit response key", async () => {
+  mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => 1);
+  mockMethod(SubscriptionPaymentAttempt, "find", () => qc([subscriptionPaymentDoc]));
+
+  const result = await getAllSalonPaymentAttempts({ page: 1, limit: 20 });
+  assert.equal(result.total, 1);
+  assert.equal(result.payments, undefined);
+  assert.equal(result.paymentAttempts[0].source, "payment_attempt");
+});
+
 /* ════════════════════════════════════════════════════════ */
 /* Test 12: other salon payments excluded                  */
 /* ════════════════════════════════════════════════════════ */
@@ -1363,6 +1378,62 @@ test("getSalonPayments includes paid payment records with period details", async
   assert.equal(result.payments[0].payerId, undefined);
   assert.equal(result.payments[0].subscriptionId, undefined);
   assert.equal(result.payments[0].periodStart.getTime(), paymentRecordDoc.periodStart.getTime());
+});
+
+test("salon transactions read only payment records with independent totals and pagination", async () => {
+  let recordFilter;
+  let recordSort;
+  mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => {
+    throw new Error("transactions must not count payment attempts");
+  });
+  mockMethod(SubscriptionPaymentAttempt, "find", () => {
+    throw new Error("transactions must not read payment attempts");
+  });
+  mockMethod(PaymentRecord, "countDocuments", async (filter) => {
+    recordFilter = filter;
+    return 1;
+  });
+  mockMethod(PaymentRecord, "find", (filter) => ({
+    sort: (sort) => {
+      recordSort = sort;
+      return qc([paymentRecordDoc]);
+    },
+  }));
+
+  const result = await getSalonTransactions(salonIdStr, { page: 2, limit: 1 });
+  assert.equal(recordFilter.ownerType, "salon");
+  assert.equal(recordFilter.ownerId.toString(), salonIdStr);
+  assert.deepEqual(recordSort, { paidAt: -1, createdAt: -1, _id: -1 });
+  assert.equal(result.total, 1);
+  assert.equal(result.page, 2);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].source, "payment_record");
+});
+
+test("salon payment attempts exclude records, retain paid and failed attempts, and filter by status", async () => {
+  let attemptFilter;
+  mockMethod(PaymentRecord, "countDocuments", async () => {
+    throw new Error("payment attempts must not count payment records");
+  });
+  mockMethod(PaymentRecord, "find", () => {
+    throw new Error("payment attempts must not read payment records");
+  });
+  mockMethod(SubscriptionPaymentAttempt, "countDocuments", async (filter) => {
+    attemptFilter = filter;
+    return 2;
+  });
+  mockMethod(SubscriptionPaymentAttempt, "find", () => qc([
+    subscriptionPaymentDoc,
+    { ...subscriptionPaymentDoc, _id: depositPaymentId, status: "failed" },
+  ]));
+
+  const result = await getSalonPaymentAttempts(salonIdStr, { page: 1, limit: 10, status: "failed" });
+  assert.equal(attemptFilter.ownerType, "salon");
+  assert.equal(attemptFilter.purpose, "subscription");
+  assert.equal(attemptFilter.status, "failed");
+  assert.equal(result.total, 2);
+  assert.deepEqual(result.paymentAttempts.map((attempt) => attempt.source), ["payment_attempt", "payment_attempt"]);
+  assert.deepEqual(result.paymentAttempts.map((attempt) => attempt.status), ["paid", "failed"]);
 });
 
 test("individual billing summaries return only barber ownerType data", async () => {
@@ -1677,6 +1748,28 @@ test("individual payment history returns null for non-barber", async () => {
   const result = await getIndividualPayments(individualBarberId.toString());
 
   assert.equal(result, null);
+});
+
+test("individual transactions and attempts are independently sourced and paginated", async () => {
+  mockMethod(User, "findOne", () => qc(individualBarberDoc));
+  mockMethod(PaymentRecord, "countDocuments", async () => 1);
+  mockMethod(PaymentRecord, "find", () => qc([individualPaymentRecordDoc]));
+  mockMethod(SubscriptionPaymentAttempt, "countDocuments", async () => 2);
+  mockMethod(SubscriptionPaymentAttempt, "find", () => qc([
+    individualPaymentDoc,
+    { ...individualPaymentDoc, _id: depositPaymentId, status: "failed" },
+  ]));
+
+  const transactions = await getIndividualTransactions(individualBarberId.toString(), { page: 1, limit: 1 });
+  const attempts = await getIndividualPaymentAttempts(individualBarberId.toString(), { page: 2, limit: 1 });
+
+  assert.equal(transactions.total, 1);
+  assert.equal(transactions.transactions.length, 1);
+  assert.equal(transactions.transactions[0].source, "payment_record");
+  assert.equal(attempts.total, 2);
+  assert.equal(attempts.page, 2);
+  assert.deepEqual(attempts.paymentAttempts.map((attempt) => attempt.source), ["payment_attempt", "payment_attempt"]);
+  assert.ok(attempts.paymentAttempts.some((attempt) => attempt.status === "failed"));
 });
 
 /* ════════════════════════════════════════════════════════ */

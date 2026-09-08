@@ -15,12 +15,13 @@ import {
   confirmPlatformSalonPayment,
 } from "@/shared/api/platformBilling";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import { canAccessPlatform } from "@/shared/utils/platformAccess";
+import { canManagePlatformBilling, canReadPlatformBilling } from "@/shared/utils/platformAccess";
 import {
   formatCurrency,
   getProviderLabel,
 } from "../utils/billingFormatters";
 import { PlatformActionModal } from "../components/billing/PlatformActionModal";
+import { RecentAuthenticationDialog } from "../components/billing/RecentAuthenticationDialog";
 import { SalonBillingHeader } from "../components/billing/SalonBillingHeader";
 import { SalonBillingSummaryCards } from "../components/billing/SalonBillingSummaryCards";
 import { SalonBillingStaffTable } from "../components/billing/SalonBillingStaffTable";
@@ -31,20 +32,23 @@ import {
   usePlatformSalonBillingDetail,
 } from "./usePlatformSalonBillingDetail";
 
-/* ─── Page Component ──────────────────────────────────── */
 export default function PlatformSalonBillingDetailPage() {
   const navigate = useNavigate();
   const { salonId } = useParams();
   const { currentUser } = useSelector((state) => state.auth);
-  const isPlatformAdmin = canAccessPlatform(currentUser);
+  const canReadBilling = canReadPlatformBilling(currentUser), canManageBilling = canManagePlatformBilling(currentUser);
   const modalFallbackFocusRef = useRef(null);
   const activationOperationKeysRef = useRef(new Map());
   const {
     detail,
-    payments,
-    paymentsTotal,
-    paymentsPage,
-    setPaymentsPage,
+    transactions,
+    transactionsTotal,
+    transactionsPage,
+    setTransactionsPage,
+    paymentAttempts,
+    paymentAttemptsTotal,
+    paymentAttemptsPage,
+    setPaymentAttemptsPage,
     routeRevision,
     isLoading,
     error,
@@ -56,6 +60,9 @@ export default function PlatformSalonBillingDetailPage() {
     setMutationError,
     clearMutationError,
     executeMutation,
+    recentAuthChallenge,
+    retryRecentAuthMutation,
+    dismissRecentAuthChallenge,
   } = usePlatformSalonBillingDetail(salonId);
   const [storedModal, setModal] = useState(null);
   const modal =
@@ -104,7 +111,6 @@ export default function PlatformSalonBillingDetailPage() {
       activationOperationKeysRef.current.delete(operationIdentity);
     });
   };
-  /* ── Update seat count ── */
   const handleSeatCountConfirm = (note) => {
     const targetSalonId = modal?.salonId;
     const newCount = Number(modal?.extra?.newSeatCount);
@@ -119,7 +125,6 @@ export default function PlatformSalonBillingDetailPage() {
       });
     }, note, targetSalonId);
   };
-  /* ── Assign seat ── */
   const handleAssignConfirm = (note) => {
     const targetSalonId = modal?.salonId;
     const barberId = modal?.extra?.barberId;
@@ -134,7 +139,6 @@ export default function PlatformSalonBillingDetailPage() {
       });
     }, note, targetSalonId);
   };
-  /* ── Revoke seat ── */
   const handleRevokeConfirm = (note) => {
     const targetSalonId = modal?.salonId;
     const barberId = modal?.extra?.barberId;
@@ -149,7 +153,6 @@ export default function PlatformSalonBillingDetailPage() {
       });
     }, note, targetSalonId);
   };
-  /* ── Cancel subscription ── */
   const handleCancelConfirm = (note) => {
     const targetSalonId = modal?.salonId;
     handleMutation(async (n) => {
@@ -158,7 +161,6 @@ export default function PlatformSalonBillingDetailPage() {
       });
     }, note, targetSalonId);
   };
-  /* ── Confirm payment ── */
   const handlePaymentConfirm = (note) => {
     const targetSalonId = modal?.salonId;
     const paymentId = modal?.extra?.paymentId;
@@ -172,7 +174,6 @@ export default function PlatformSalonBillingDetailPage() {
       });
     }, note, targetSalonId);
   };
-  /* ── Derived data ── */
   const routeSalonId = String(salonId || "");
   const detailMatchesRoute =
     Boolean(detail) && getSalonBillingDetailSalonId(detail) === routeSalonId;
@@ -183,17 +184,16 @@ export default function PlatformSalonBillingDetailPage() {
   const acceptedStaff = currentDetail?.acceptedStaff || [];
   const latestPendingAttempt = currentDetail?.latestPendingAttempt;
   const subscriptionIsCancelled = subscription?.status === "cancelled";
-  const totalPaymentsPages = Math.max(1, Math.ceil(paymentsTotal / 10));
+  const totalTransactionsPages = Math.max(1, Math.ceil(transactionsTotal / 10));
+  const totalPaymentAttemptsPages = Math.max(1, Math.ceil(paymentAttemptsTotal / 10));
   const assignedBarberIds = new Set(
     (seats?.assignments || []).map((a) => String(a.barber?.id || a.barber))
   );
-  // Determine if a payment attempt is eligible for manual confirmation
   const isConfirmablePayment = latestPendingAttempt
     ? latestPendingAttempt.provider === "manual" &&
       (latestPendingAttempt.status === "pending" ||
         latestPendingAttempt.status === "requires_action")
     : false;
-  /* ── Loading ── */
   if (!routeSalonId || isLoading || (!detailMatchesRoute && !errorMatchesRoute)) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -201,7 +201,6 @@ export default function PlatformSalonBillingDetailPage() {
       </div>
     );
   }
-  /* ── Error state ── */
   if (errorMatchesRoute) {
     return (
       <Card>
@@ -220,7 +219,7 @@ export default function PlatformSalonBillingDetailPage() {
       </Card>
     );
   }
-  if (!currentDetail || !isPlatformAdmin) {
+  if (!currentDetail || !canReadBilling) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
@@ -241,7 +240,7 @@ export default function PlatformSalonBillingDetailPage() {
       <SalonBillingHeader
         salon={currentDetail.salon}
         subscription={subscription}
-        isPlatformAdmin={isPlatformAdmin}
+        isPlatformAdmin={canManageBilling}
         onBack={() => navigate("/admin/platform/billing")}
         successMessage={successMessage}
         onActivate={() => openModal({ type: "activate", salonId: String(salonId || "") })}
@@ -267,7 +266,7 @@ export default function PlatformSalonBillingDetailPage() {
         acceptedStaff={acceptedStaff}
         assignedBarberIds={assignedBarberIds}
         seats={seats}
-        isPlatformAdmin={isPlatformAdmin}
+        isPlatformAdmin={canManageBilling}
         subscription={subscription}
         onAssign={(extra) => openModal({ type: "assign", extra, salonId: String(salonId || "") })}
         onRevoke={(extra) => openModal({ type: "revoke", extra, salonId: String(salonId || "") })}
@@ -275,18 +274,29 @@ export default function PlatformSalonBillingDetailPage() {
       <SalonBillingPendingPaymentCard
         latestPendingAttempt={latestPendingAttempt}
         isConfirmablePayment={isConfirmablePayment}
-        isPlatformAdmin={isPlatformAdmin}
+        isPlatformAdmin={canManageBilling}
         onConfirmPayment={(extra) =>
           openModal({ type: "confirmPayment", extra, salonId: String(salonId || "") })
         }
       />
       <SalonBillingPaymentHistory
-        payments={payments}
-        paymentsTotal={paymentsTotal}
-        totalPaymentsPages={totalPaymentsPages}
-        paymentsPage={paymentsPage}
+        payments={transactions}
+        paymentsTotal={transactionsTotal}
+        totalPaymentsPages={totalTransactionsPages}
+        paymentsPage={transactionsPage}
         subscriptionIsCancelled={subscriptionIsCancelled}
-        onPageChange={setPaymentsPage}
+        onPageChange={setTransactionsPage}
+        title="Transactions"
+        emptyMessage="No settled transactions found."
+      />
+      <SalonBillingPaymentHistory
+        payments={paymentAttempts}
+        paymentsTotal={paymentAttemptsTotal}
+        totalPaymentsPages={totalPaymentAttemptsPages}
+        paymentsPage={paymentAttemptsPage}
+        subscriptionIsCancelled={subscriptionIsCancelled}
+        onPageChange={setPaymentAttemptsPage}
+        title="Payment Attempts"
       />
       {/* ─── Modals ─── */}
       {/* Activate / Renew */}
@@ -544,6 +554,12 @@ export default function PlatformSalonBillingDetailPage() {
         isSubmitting={isSubmitting}
         error={mutationError}
         fallbackFocusRef={modalFallbackFocusRef}
+      />
+      <RecentAuthenticationDialog
+        isOpen={Boolean(recentAuthChallenge)}
+        methods={currentUser?.recentAuthenticationMethods}
+        onCancel={dismissRecentAuthChallenge}
+        onConfirmed={retryRecentAuthMutation}
       />
     </div>
   );

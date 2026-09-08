@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getPlatformBillingSalonDetail,
-  getPlatformBillingSalonPayments,
+  getPlatformBillingSalonTransactions,
+  getPlatformBillingSalonPaymentAttempts,
 } from "@/shared/api/platformBilling";
 
 const getEntityId = (entity) => entity?.id ?? entity?._id ?? entity ?? null;
@@ -14,9 +15,12 @@ export const getSalonBillingDetailSalonId = (detail) => {
 
 export function usePlatformSalonBillingDetail(salonId) {
   const [detail, setDetail] = useState(null);
-  const [payments, setPayments] = useState([]);
-  const [paymentsTotal, setPaymentsTotal] = useState(0);
-  const [paymentsPage, setPaymentsPage] = useState(1);
+  const [transactions, setTransactions] = useState([]);
+  const [transactionsTotal, setTransactionsTotal] = useState(0);
+  const [transactionsPage, setTransactionsPage] = useState(1);
+  const [paymentAttempts, setPaymentAttempts] = useState([]);
+  const [paymentAttemptsTotal, setPaymentAttemptsTotal] = useState(0);
+  const [paymentAttemptsPage, setPaymentAttemptsPage] = useState(1);
   const [routeRevision, setRouteRevision] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -25,8 +29,10 @@ export function usePlatformSalonBillingDetail(salonId) {
   const [refreshWarning, setRefreshWarning] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
   const [mutationError, setMutationError] = useState("");
+  const [recentAuthChallenge, setRecentAuthChallenge] = useState(null);
   const detailRequestRef = useRef(0);
-  const paymentsRequestRef = useRef(0);
+  const transactionsRequestRef = useRef(0);
+  const paymentAttemptsRequestRef = useRef(0);
   const mutationRequestRef = useRef(0);
   const isMutationInFlightRef = useRef(false);
   const currentRouteSalonIdRef = useRef("");
@@ -77,24 +83,43 @@ export function usePlatformSalonBillingDetail(salonId) {
     [salonId]
   );
 
-  const fetchPayments = useCallback(
+  const fetchTransactions = useCallback(
     async (targetSalonId = String(salonId || "")) => {
-      const requestId = ++paymentsRequestRef.current;
+      const requestId = ++transactionsRequestRef.current;
       if (!targetSalonId) return;
 
       try {
-        const result = await getPlatformBillingSalonPayments(targetSalonId, {
-          page: paymentsPage,
+        const result = await getPlatformBillingSalonTransactions(targetSalonId, {
+          page: transactionsPage,
           limit: 10,
         });
-        if (paymentsRequestRef.current !== requestId) return;
-        setPayments(result.payments || []);
-        setPaymentsTotal(result.total || 0);
+        if (transactionsRequestRef.current !== requestId) return;
+        setTransactions(result.transactions || []);
+        setTransactionsTotal(result.total || 0);
       } catch {
         // Payment history is secondary to the salon billing detail.
       }
     },
-    [paymentsPage, salonId]
+    [transactionsPage, salonId]
+  );
+
+  const fetchPaymentAttempts = useCallback(
+    async (targetSalonId = String(salonId || "")) => {
+      const requestId = ++paymentAttemptsRequestRef.current;
+      if (!targetSalonId) return;
+      try {
+        const result = await getPlatformBillingSalonPaymentAttempts(targetSalonId, {
+          page: paymentAttemptsPage,
+          limit: 10,
+        });
+        if (paymentAttemptsRequestRef.current !== requestId) return;
+        setPaymentAttempts(result.paymentAttempts || []);
+        setPaymentAttemptsTotal(result.total || 0);
+      } catch {
+        // Attempts are secondary to the billing detail.
+      }
+    },
+    [paymentAttemptsPage, salonId]
   );
 
   useEffect(() => {
@@ -105,14 +130,18 @@ export function usePlatformSalonBillingDetail(salonId) {
     async function loadCurrentSalon() {
       setRouteRevision((revision) => revision + 1);
       setDetail(null);
-      setPayments([]);
-      setPaymentsTotal(0);
-      setPaymentsPage(1);
+      setTransactions([]);
+      setTransactionsTotal(0);
+      setTransactionsPage(1);
+      setPaymentAttempts([]);
+      setPaymentAttemptsTotal(0);
+      setPaymentAttemptsPage(1);
       setError("");
       setErrorSalonId("");
       setSuccessMessage("");
       setRefreshWarning("");
       setMutationError("");
+      setRecentAuthChallenge(null);
       setSubmitting(false);
       isMutationInFlightRef.current = false;
       if (successTimerRef.current) {
@@ -127,7 +156,8 @@ export function usePlatformSalonBillingDetail(salonId) {
 
     return () => {
       detailRequestRef.current += 1;
-      paymentsRequestRef.current += 1;
+      transactionsRequestRef.current += 1;
+      paymentAttemptsRequestRef.current += 1;
       mutationRequestRef.current += 1;
     };
   }, [fetchDetail]);
@@ -142,21 +172,22 @@ export function usePlatformSalonBillingDetail(salonId) {
       return undefined;
     }
 
-    async function loadCurrentPayments() {
-      await fetchPayments(targetSalonId);
+    async function loadCurrentReadModels() {
+      await Promise.all([fetchTransactions(targetSalonId), fetchPaymentAttempts(targetSalonId)]);
     }
-    loadCurrentPayments();
+    loadCurrentReadModels();
     return () => {
-      paymentsRequestRef.current += 1;
+      transactionsRequestRef.current += 1;
+      paymentAttemptsRequestRef.current += 1;
     };
-  }, [detail, fetchPayments, paymentsPage, salonId]);
+  }, [detail, fetchPaymentAttempts, fetchTransactions, salonId]);
 
   const clearMutationError = useCallback(() => {
     setMutationError("");
   }, []);
 
   const executeMutation = useCallback(
-    async ({ apiCall, note, targetSalonId, onSuccess }) => {
+    async ({ apiCall, note, targetSalonId, onSuccess, allowRecentAuthRetry = true }) => {
       const currentSalonId = String(salonId || "");
       const loadedSalonId = getSalonBillingDetailSalonId(detail);
       if (
@@ -201,11 +232,17 @@ export function usePlatformSalonBillingDetail(salonId) {
         ) {
           return;
         }
-        await fetchPayments(targetSalonId);
+        await Promise.all([fetchTransactions(targetSalonId), fetchPaymentAttempts(targetSalonId)]);
       } catch (err) {
         if (mutationRequestRef.current !== mutationId) return;
         const status = err.response?.status;
-        if (status === 403 || status === 401) {
+        if (err.response?.data?.code === "RECENT_AUTH_REQUIRED") {
+          if (allowRecentAuthRetry) {
+            setRecentAuthChallenge({ apiCall, note, targetSalonId, onSuccess });
+          } else {
+            setMutationError("Recent authentication is still required. Please try again.");
+          }
+        } else if (status === 403 || status === 401) {
           setMutationError("Forbidden. Platform superuser privileges required.");
         } else if (status === 400) {
           setMutationError(err.response?.data?.message || "Validation error.");
@@ -221,15 +258,26 @@ export function usePlatformSalonBillingDetail(salonId) {
         }
       }
     },
-    [detail, fetchDetail, fetchPayments, salonId]
+    [detail, fetchDetail, fetchPaymentAttempts, fetchTransactions, salonId]
   );
+
+  const retryRecentAuthMutation = useCallback(async () => {
+    const pendingMutation = recentAuthChallenge;
+    setRecentAuthChallenge(null);
+    if (!pendingMutation) return;
+    await executeMutation({ ...pendingMutation, allowRecentAuthRetry: false });
+  }, [executeMutation, recentAuthChallenge]);
 
   return {
     detail,
-    payments,
-    paymentsTotal,
-    paymentsPage,
-    setPaymentsPage,
+    transactions,
+    transactionsTotal,
+    transactionsPage,
+    setTransactionsPage,
+    paymentAttempts,
+    paymentAttemptsTotal,
+    paymentAttemptsPage,
+    setPaymentAttemptsPage,
     routeRevision,
     isLoading,
     error,
@@ -241,5 +289,8 @@ export function usePlatformSalonBillingDetail(salonId) {
     setMutationError,
     clearMutationError,
     executeMutation,
+    recentAuthChallenge,
+    retryRecentAuthMutation,
+    dismissRecentAuthChallenge: () => setRecentAuthChallenge(null),
   };
 }

@@ -4,14 +4,21 @@ import {
   PLATFORM_CAPABILITIES,
   requirePlatformCapability,
 } from "../../middleware/platformMiddleware.js";
+import { requireRecentAuthentication } from "../../middleware/recentAuthenticationMiddleware.js";
+import { securityMutationLimiter } from "../../middleware/rateLimitMiddleware.js";
 import { getPlatformDashboardSummaryHandler } from "../../controllers/platform/platformDashboardController.js";
 import {
   listSalonBillingSummaries,
   getSalonBillingDetailHandler,
   getSalonPaymentsHandler,
+  getSalonTransactionsHandler,
+  getSalonPaymentAttemptsHandler,
   listAllSalonPayments,
+  listAllSalonPaymentAttempts,
   listIndividualBillingSummaries,
   getIndividualPaymentsHandler,
+  getIndividualTransactionsHandler,
+  getIndividualPaymentAttemptsHandler,
   activateSubscription,
   updateSeatCount,
   assignSeat,
@@ -78,8 +85,7 @@ router.get(
 );
 
 /**
- * GET /api/platform/billing/salons/:salonId/payments
- * Get payment attempts for one salon.
+ * Legacy payment history endpoint, retained temporarily for external clients.
  * Protected — platform superuser only.
  */
 router.get(
@@ -89,9 +95,22 @@ router.get(
   getSalonPaymentsHandler
 );
 
+router.get(
+  "/billing/salons/:salonId/transactions",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
+  getSalonTransactionsHandler
+);
+
+router.get(
+  "/billing/salons/:salonId/payment-attempts",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
+  getSalonPaymentAttemptsHandler
+);
+
 /**
- * GET /api/platform/billing/payments
- * All salon subscription payments across platform.
+ * Legacy payment history endpoint, retained temporarily for external clients.
  * Protected — platform superuser only.
  */
 router.get(
@@ -99,6 +118,13 @@ router.get(
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   listAllSalonPayments
+);
+
+router.get(
+  "/billing/payment-attempts",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
+  listAllSalonPaymentAttempts
 );
 
 /**
@@ -114,8 +140,7 @@ router.get(
 );
 
 /**
- * GET /api/platform/billing/individuals/:barberId/payments
- * Get individual barber subscription payments.
+ * Legacy payment history endpoint, retained temporarily for external clients.
  * Protected — platform superuser only.
  */
 router.get(
@@ -123,6 +148,20 @@ router.get(
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
   getIndividualPaymentsHandler
+);
+
+router.get(
+  "/billing/individuals/:barberId/transactions",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
+  getIndividualTransactionsHandler
+);
+
+router.get(
+  "/billing/individuals/:barberId/payment-attempts",
+  protect,
+  requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_READ),
+  getIndividualPaymentAttemptsHandler
 );
 
 /**
@@ -135,6 +174,8 @@ router.patch(
   "/billing/salons/:salonId/subscription/activate",
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  securityMutationLimiter,
+  requireRecentAuthentication,
   activateSubscription
 );
 
@@ -148,6 +189,8 @@ router.patch(
   "/billing/salons/:salonId/subscription/seat-count",
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  securityMutationLimiter,
+  requireRecentAuthentication,
   updateSeatCount
 );
 
@@ -161,6 +204,8 @@ router.post(
   "/billing/salons/:salonId/seats/assign",
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  securityMutationLimiter,
+  requireRecentAuthentication,
   assignSeat
 );
 
@@ -174,6 +219,8 @@ router.post(
   "/billing/salons/:salonId/seats/revoke",
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  securityMutationLimiter,
+  requireRecentAuthentication,
   revokeSeat
 );
 
@@ -187,6 +234,8 @@ router.post(
   "/billing/salons/:salonId/subscription/cancel",
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  securityMutationLimiter,
+  requireRecentAuthentication,
   cancelSubscription
 );
 
@@ -200,6 +249,8 @@ router.post(
   "/billing/payments/:paymentId/confirm",
   protect,
   requirePlatformCapability(PLATFORM_CAPABILITIES.BILLING_MANAGE),
+  securityMutationLimiter,
+  requireRecentAuthentication,
   confirmPayment
 );
 

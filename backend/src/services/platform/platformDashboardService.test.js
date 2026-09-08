@@ -169,6 +169,7 @@ const individualPayment = {
 const mockDashboardModels = ({
   revenueRecords = [salonPayment, individualPayment],
   recentRecords = [individualPayment, salonPayment],
+  applyRevenueFilter = false,
 } = {}) => {
   const captured = {};
 
@@ -184,7 +185,16 @@ const mockDashboardModels = ({
   mockMethod(PaymentRecord, "find", (filter) => {
     if (filter.paidAt) {
       captured.revenueFilter = filter;
-      return qc(revenueRecords);
+      const records = applyRevenueFilter
+        ? revenueRecords.filter(
+            (record) =>
+              record.status === filter.status &&
+              filter.ownerType.$in.includes(record.ownerType) &&
+              record.paidAt >= filter.paidAt.$gte &&
+              record.paidAt < filter.paidAt.$lt
+          )
+        : revenueRecords;
+      return qc(records);
     }
 
     captured.recentFilter = filter;
@@ -253,6 +263,27 @@ test("platform dashboard revenue uses current-month paid payment records only", 
   assert.equal(result.revenueThisMonth.individual.amount, 100);
   assert.equal(result.revenueThisMonth.total.amount, 400);
   assert.equal(result.revenueThisMonth.total.currency, "AMD");
+});
+
+test("platform dashboard excludes pending and failed financial records from settled revenue", async () => {
+  mockDashboardModels({
+    applyRevenueFilter: true,
+    revenueRecords: [
+      salonPayment,
+      { ...individualPayment, status: "pending", amount: 900 },
+      { ...individualPayment, status: "failed", amount: 800 },
+      { ...individualPayment, status: "refunded", amount: 700 },
+    ],
+    recentRecords: [],
+  });
+
+  const result = await getPlatformDashboardSummary({
+    now: new Date("2025-06-15T12:00:00Z"),
+  });
+
+  assert.equal(result.revenueThisMonth.salon.amount, 300);
+  assert.equal(result.revenueThisMonth.individual.amount, 0);
+  assert.equal(result.revenueThisMonth.total.amount, 300);
 });
 
 test("platform dashboard revenue reports mixed currencies without summing", async () => {

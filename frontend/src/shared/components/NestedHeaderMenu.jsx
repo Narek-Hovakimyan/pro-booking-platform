@@ -6,13 +6,13 @@ import { useLocation } from "react-router-dom";
 const getMenuGroups = (
   canShowManageHiring,
   canManageSalon,
-  isPlatformAdmin,
+  canReadPlatformBilling,
   showBusinessGroups,
   t
 ) => {
   const groups = [];
 
-  if (isPlatformAdmin) {
+  if (canReadPlatformBilling) {
     groups.push({
       key: "platform",
       label: t("nav.platform"),
@@ -116,7 +116,7 @@ export default function NestedHeaderMenu({
   onLogout,
   canShowManageHiring = false,
   canManageSalon = false,
-  isPlatformAdmin = false,
+  canReadPlatformBilling = false,
   showBusinessGroups = true,
 }) {
   const { pathname } = useLocation();
@@ -201,7 +201,7 @@ export default function NestedHeaderMenu({
           {getMenuGroups(
             canShowManageHiring,
             canManageSalon,
-            isPlatformAdmin,
+            canReadPlatformBilling,
             showBusinessGroups,
             t
           ).map((group) => (
@@ -264,7 +264,7 @@ export default function NestedHeaderMenu({
       {getMenuGroups(
         canShowManageHiring,
         canManageSalon,
-        isPlatformAdmin,
+        canReadPlatformBilling,
         showBusinessGroups,
         t
       ).map((group) => {

@@ -8,15 +8,17 @@ import PlatformIndividualBillingPage from "./PlatformIndividualBillingPage";
 const mocks = vi.hoisted(() => ({
   getIndividuals: vi.fn(),
   getPayments: vi.fn(),
+  getAttempts: vi.fn(),
 }));
 
 vi.mock("@/shared/api/platformBilling", () => ({
   getPlatformBillingIndividuals: mocks.getIndividuals,
-  getPlatformBillingIndividualPayments: mocks.getPayments,
+  getPlatformBillingIndividualTransactions: mocks.getPayments,
+  getPlatformBillingIndividualPaymentAttempts: mocks.getAttempts,
 }));
 
 vi.mock("@/shared/utils/platformAccess", () => ({
-  canAccessPlatform: () => true,
+  canReadPlatformBilling: () => true,
 }));
 
 function deferred() {
@@ -87,6 +89,7 @@ async function togglePayments(user) {
 
 beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset());
+  mocks.getAttempts.mockResolvedValue({ paymentAttempts: [], total: 0 });
 });
 
 afterEach(() => {
@@ -94,6 +97,24 @@ afterEach(() => {
 });
 
 describe("PlatformIndividualBillingPage payment request lifecycle", () => {
+  it("renders record transactions separately from operational payment attempts", async () => {
+    const user = userEvent.setup();
+    mocks.getPayments.mockResolvedValue({ transactions: [paymentFor(100)], total: 1 });
+    mocks.getAttempts.mockResolvedValue({
+      paymentAttempts: [{ ...paymentFor(20), id: "failed-attempt", status: "failed" }],
+      total: 1,
+    });
+    await renderLoadedPage();
+
+    await togglePayments(user);
+
+    expect(await screen.findByRole("heading", { name: "Transactions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Payment Attempts" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Transactions")).toHaveTextContent("100 USD");
+    expect(screen.getByLabelText("Payment Attempts")).toHaveTextContent("20 USD");
+    expect(screen.getByLabelText("Payment Attempts")).toHaveTextContent("failed");
+  });
+
   it("keeps the newer request loading when an older request settles first", async () => {
     const user = userEvent.setup();
     const requestA = deferred();
@@ -107,12 +128,12 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
     await togglePayments(user);
     await togglePayments(user);
 
-    requestA.resolve({ payments: [paymentFor(100)], total: 1 });
+    requestA.resolve({ transactions: [paymentFor(100)], total: 1 });
     await waitFor(() => {
       expect(container.querySelector("svg.animate-spin")).toBeInTheDocument();
     });
 
-    requestB.resolve({ payments: [paymentFor(200)], total: 1 });
+    requestB.resolve({ transactions: [paymentFor(200)], total: 1 });
     expect(await screen.findByText("200 USD")).toBeInTheDocument();
     expect(screen.queryByText("100 USD")).not.toBeInTheDocument();
   });
@@ -130,12 +151,12 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
     await togglePayments(user);
     await togglePayments(user);
 
-    requestB.resolve({ payments: [paymentFor(200)], total: 1 });
+    requestB.resolve({ transactions: [paymentFor(200)], total: 1 });
     expect(await screen.findByText("200 USD")).toBeInTheDocument();
     expect(screen.queryByText("100 USD")).not.toBeInTheDocument();
 
     await act(async () => {
-      requestA.resolve({ payments: [paymentFor(100)], total: 1 });
+      requestA.resolve({ transactions: [paymentFor(100)], total: 1 });
       await Promise.resolve();
     });
 
@@ -155,7 +176,7 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
     await togglePayments(user);
     await togglePayments(user);
     await togglePayments(user);
-    requestB.resolve({ payments: [paymentFor(200)], total: 1 });
+    requestB.resolve({ transactions: [paymentFor(200)], total: 1 });
     expect(await screen.findByText("200 USD")).toBeInTheDocument();
 
     requestA.reject({ response: { data: { message: "Old request failed" } } });
@@ -177,7 +198,7 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
     const paymentButtons = screen.getAllByRole("button", { name: "View payments" });
     await user.click(paymentButtons[0]);
     await user.click(paymentButtons[1]);
-    requestB.resolve({ payments: [paymentFor(200)], total: 1 });
+    requestB.resolve({ transactions: [paymentFor(200)], total: 1 });
     expect(await screen.findByText("200 USD")).toBeInTheDocument();
 
     requestA.reject({ response: { data: { message: "Barber A failed" } } });
@@ -195,7 +216,7 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
 
     await togglePayments(user);
     await togglePayments(user);
-    request.resolve({ payments: [paymentFor(100)], total: 1 });
+    request.resolve({ transactions: [paymentFor(100)], total: 1 });
 
     await waitFor(() => {
       expect(screen.queryByText("100 USD")).not.toBeInTheDocument();
@@ -211,7 +232,7 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
 
     await togglePayments(user);
     unmount();
-    request.resolve({ payments: [paymentFor(100)], total: 1 });
+    request.resolve({ transactions: [paymentFor(100)], total: 1 });
 
     await Promise.resolve();
     expect(consoleError).not.toHaveBeenCalled();
@@ -223,7 +244,7 @@ describe("PlatformIndividualBillingPage payment request lifecycle", () => {
       .mockRejectedValueOnce({
         response: { data: { message: "Payment history unavailable" } },
       })
-      .mockResolvedValueOnce({ payments: [paymentFor(200)], total: 1 });
+      .mockResolvedValueOnce({ transactions: [paymentFor(200)], total: 1 });
     await renderLoadedPage();
 
     await togglePayments(user);

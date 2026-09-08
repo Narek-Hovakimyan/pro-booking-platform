@@ -5,6 +5,8 @@ import {
   PLATFORM_CAPABILITIES,
   resetAllowlistCache,
 } from "../middleware/platformMiddleware.js";
+import { requireRecentAuthentication } from "../middleware/recentAuthenticationMiddleware.js";
+import { securityMutationLimiter } from "../middleware/rateLimitMiddleware.js";
 import platformRoutes from "./platform/platformRoutes.js";
 
 afterEach(() => {
@@ -28,9 +30,14 @@ const readPlatformRoutes = [
   "/billing/salons",
   "/billing/salons/:salonId",
   "/billing/salons/:salonId/payments",
+  "/billing/salons/:salonId/transactions",
+  "/billing/salons/:salonId/payment-attempts",
   "/billing/payments",
+  "/billing/payment-attempts",
   "/billing/individuals",
   "/billing/individuals/:barberId/payments",
+  "/billing/individuals/:barberId/transactions",
+  "/billing/individuals/:barberId/payment-attempts",
 ];
 
 /* ── Middleware helper ────────────────────────────────── */
@@ -52,9 +59,14 @@ test("all routes have protect plus their fixed platform capability", () => {
     { path: "/billing/salons", method: "get" },
     { path: "/billing/salons/:salonId", method: "get" },
     { path: "/billing/salons/:salonId/payments", method: "get" },
+    { path: "/billing/salons/:salonId/transactions", method: "get" },
+    { path: "/billing/salons/:salonId/payment-attempts", method: "get" },
     { path: "/billing/payments", method: "get" },
+    { path: "/billing/payment-attempts", method: "get" },
     { path: "/billing/individuals", method: "get" },
     { path: "/billing/individuals/:barberId/payments", method: "get" },
+    { path: "/billing/individuals/:barberId/transactions", method: "get" },
+    { path: "/billing/individuals/:barberId/payment-attempts", method: "get" },
     { path: "/billing/salons/:salonId/subscription/activate", method: "patch" },
     { path: "/billing/salons/:salonId/subscription/seat-count", method: "patch" },
     { path: "/billing/salons/:salonId/seats/assign", method: "post" },
@@ -72,12 +84,22 @@ test("all routes have protect plus their fixed platform capability", () => {
     );
     assert.ok(route, `Route ${path} should exist`);
     assert.ok(route.route.methods[method], `${path} should accept ${method.toUpperCase()}`);
-    checkMiddleware(route, ["protect", "requirePlatformCapability"]);
+    const middlewareNames = checkMiddleware(route, ["protect", "requirePlatformCapability"]);
     const capabilityMiddleware = route.route.stack[1].handle;
     const expectedCapability = readPlatformRoutes.includes(path)
       ? PLATFORM_CAPABILITIES.BILLING_READ
       : PLATFORM_CAPABILITIES.BILLING_MANAGE;
     assert.equal(capabilityMiddleware.platformCapability, expectedCapability);
+    if (readPlatformRoutes.includes(path)) {
+      assert.ok(
+        !middlewareNames.includes("requireRecentAuthentication"),
+        `${path} must not require recent authentication`
+      );
+    }
+    if (writeBillingRoutes.includes(path)) {
+      assert.equal(route.route.stack[2].handle, securityMutationLimiter);
+      assert.equal(route.route.stack[3].handle, requireRecentAuthentication);
+    }
   }
 });
 
@@ -94,9 +116,14 @@ test("read handler names are correct", () => {
   assert.equal(getHandlerName("/dashboard/summary"), "getPlatformDashboardSummaryHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId"), "getSalonBillingDetailHandler");
   assert.equal(getHandlerName("/billing/salons/:salonId/payments"), "getSalonPaymentsHandler");
+  assert.equal(getHandlerName("/billing/salons/:salonId/transactions"), "getSalonTransactionsHandler");
+  assert.equal(getHandlerName("/billing/salons/:salonId/payment-attempts"), "getSalonPaymentAttemptsHandler");
   assert.equal(getHandlerName("/billing/payments"), "listAllSalonPayments");
+  assert.equal(getHandlerName("/billing/payment-attempts"), "listAllSalonPaymentAttempts");
   assert.equal(getHandlerName("/billing/individuals"), "listIndividualBillingSummaries");
   assert.equal(getHandlerName("/billing/individuals/:barberId/payments"), "getIndividualPaymentsHandler");
+  assert.equal(getHandlerName("/billing/individuals/:barberId/transactions"), "getIndividualTransactionsHandler");
+  assert.equal(getHandlerName("/billing/individuals/:barberId/payment-attempts"), "getIndividualPaymentAttemptsHandler");
 });
 
 test("write handler names are correct", () => {
@@ -105,7 +132,7 @@ test("write handler names are correct", () => {
   const getHandlerName = (path) => {
     const route = stack.find((l) => l.route && l.route.path === path);
     if (!route) return null;
-    return route.route.stack[2].handle.name || route.route.stack[2].name;
+    return route.route.stack[4].handle.name || route.route.stack[4].name;
   };
 
   assert.equal(getHandlerName("/billing/salons/:salonId/subscription/activate"), "activateSubscription");
