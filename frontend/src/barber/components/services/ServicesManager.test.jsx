@@ -109,4 +109,44 @@ describe("ServicesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save service" }));
     expect(addService).not.toHaveBeenCalled();
   });
+
+  test("retains the add-service form after a rejected create and closes it only after retry succeeds", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const addService = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ id: "service-1" });
+
+    render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Haircut" } });
+    const [priceInput, durationInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "5000" } });
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+
+    await waitFor(() => expect(addService).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Could not create service.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByLabelText("Service name")).toHaveValue("Haircut");
+    expect(priceInput).toHaveValue(5000);
+    expect(durationInput).toHaveValue(30);
+    expect(screen.getByRole("button", { name: "Add service" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+    await waitFor(() => expect(addService).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    expect(screen.getByLabelText("Service name")).toHaveValue("");
+    expect(screen.getAllByRole("spinbutton")[0]).toHaveValue(null);
+    expect(screen.getAllByRole("spinbutton")[1]).toHaveValue(null);
+  });
 });

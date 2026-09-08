@@ -98,6 +98,7 @@ export function useServiceManagement({
           "Could not save service. Please try again."
         )
       );
+      throw requestError;
     } finally {
       setIsSaving(false);
     }
