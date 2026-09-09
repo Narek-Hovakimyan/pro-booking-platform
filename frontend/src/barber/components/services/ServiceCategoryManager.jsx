@@ -44,19 +44,22 @@ export default function ServiceCategoryManager({
     () => allCategories.filter((category) => category.source === "custom"),
     [allCategories]
   );
-  const currentInactiveCategory = (() => {
-    const localCategory = inactiveCategories.find(
-      (category) => categoryId(category) === String(customCategoryId)
-    );
-    if (localCategory) return localCategory;
-    return form?.currentCustomCategory?.active === false &&
-      String(form.currentCustomCategory.id) === String(customCategoryId)
-      ? form.currentCustomCategory
-      : null;
-  })();
+  const currentCategory = form?.currentCustomCategory;
+  const hasCurrentSelection = Boolean(customCategoryId) && String(currentCategory?.id) === String(customCategoryId);
+  const unavailableCurrentCategory = currentCategory?.missing && hasCurrentSelection ? currentCategory : null;
+  const retainedCurrentCategory = inactiveCategories.find(
+    (category) => categoryId(category) === String(customCategoryId)
+  ) || (
+    currentCategory && !unavailableCurrentCategory && hasCurrentSelection && [true, false].includes(currentCategory.active)
+      ? currentCategory
+      : null
+  );
+  const currentInactiveCategory = retainedCurrentCategory?.active === false
+    ? retainedCurrentCategory
+    : unavailableCurrentCategory;
   const selectedCategory =
     customCategories.find((category) => categoryId(category) === String(customCategoryId)) ||
-    currentInactiveCategory;
+    retainedCurrentCategory;
   const retainsStoredReference =
     Boolean(form?.currentCustomCategory) &&
     String(form.currentCustomCategory.id) === String(customCategoryId);
@@ -114,11 +117,11 @@ export default function ServiceCategoryManager({
   }, [customCategories, onCustomCategoriesChange]);
 
   useEffect(() => {
-    if (categoriesLoadedForBarberId !== barberId || !customCategoryId || currentInactiveCategory) return;
+    if (categoriesLoadedForBarberId !== barberId || !customCategoryId || retainedCurrentCategory) return;
     if (!customCategories.some((category) => categoryId(category) === String(customCategoryId))) {
       onCustomCategoryIdChange?.("");
     }
-  }, [barberId, categoriesLoadedForBarberId, customCategories, currentInactiveCategory, customCategoryId, onCustomCategoryIdChange]);
+  }, [barberId, categoriesLoadedForBarberId, customCategories, retainedCurrentCategory, customCategoryId, onCustomCategoryIdChange]);
 
   useEffect(() => {
     if (confirmation) cancelConfirmationRef.current?.focus();
@@ -268,8 +271,10 @@ export default function ServiceCategoryManager({
           >
             <option value="">Select a custom category</option>
             {customCategories.map((category) => <option key={categoryId(category)} value={categoryId(category)}>{category.name}</option>)}
-            {currentInactiveCategory && !customCategories.some((category) => categoryId(category) === categoryId(currentInactiveCategory)) && (
-              <option value={categoryId(currentInactiveCategory)} disabled>{currentInactiveCategory.name} (Inactive)</option>
+            {retainedCurrentCategory && !customCategories.some((category) => categoryId(category) === categoryId(retainedCurrentCategory)) && (
+              <option value={categoryId(retainedCurrentCategory)} disabled={retainedCurrentCategory.active === false}>
+                {retainedCurrentCategory.name}{retainedCurrentCategory.active === false ? " (Inactive)" : ""}
+              </option>
             )}
           </select>
         )}

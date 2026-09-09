@@ -263,6 +263,46 @@ describe("ServicesManager", () => {
     expect(screen.getByRole("button", { name: "Save service" })).not.toBeDisabled();
   });
 
+  test("editing retains an active salon category omitted from the barber-scoped list", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1",
+      name: "Color",
+      price: 8000,
+      duration: 60,
+      active: true,
+      category: "other",
+      customCategoryId: {
+        _id: "salon-category",
+        name: "Salon Color",
+        active: true,
+      },
+    };
+    const updatedService = {
+      ...service,
+      name: "Salon Color Refresh",
+    };
+    const request = vi.fn().mockResolvedValue(updatedService);
+
+    render(<ServiceEditHarness initialService={service} request={request} />);
+
+    fireEvent.click(screen.getByTitle("Edit"));
+    const categoryOption = await screen.findByRole("option", { name: "Salon Color" });
+    expect(categoryOption.parentElement).toHaveValue("salon-category");
+
+    fireEvent.change(screen.getByLabelText("Service name"), {
+      target: { value: updatedService.name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save service" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request).toHaveBeenCalledWith("service-1", expect.objectContaining({
+      name: updatedService.name,
+      customCategoryId: "salon-category",
+    }));
+    expect(await screen.findByRole("heading", { name: updatedService.name })).toBeInTheDocument();
+  });
+
   test("clears a deactivated new-service category and blocks submission", async () => {
     const activeCategory = { id: "active-category", name: "Active Category", source: "custom", active: true };
     fetchServiceCategories

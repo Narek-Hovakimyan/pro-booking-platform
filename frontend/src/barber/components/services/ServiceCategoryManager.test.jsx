@@ -48,6 +48,99 @@ describe("ServiceCategoryManager", () => {
     expect(screen.getByRole("button", { name: "Reactivate selected category" })).toBeInTheDocument();
   });
 
+  test("retains an active existing category omitted from the barber-scoped list", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const onCustomCategoryIdChange = vi.fn();
+
+    renderManager({
+      form: {
+        categoryType: "custom",
+        customCategoryId: "salon-category",
+        currentCustomCategory: {
+          id: "salon-category",
+          name: "Salon Color",
+          active: true,
+        },
+      },
+      onCustomCategoryIdChange,
+    });
+
+    const option = await screen.findByRole("option", { name: "Salon Color" });
+    expect(option).not.toBeDisabled();
+    expect(option.parentElement).toHaveValue("salon-category");
+    expect(onCustomCategoryIdChange).not.toHaveBeenCalledWith("");
+  });
+
+  test("does not duplicate a retained category when the fetched list includes it", async () => {
+    const salonCategory = {
+      id: "salon-category",
+      name: "Salon Color",
+      source: "custom",
+      active: true,
+    };
+    fetchServiceCategories.mockResolvedValue([salonCategory]);
+
+    renderManager({
+      form: {
+        categoryType: "custom",
+        customCategoryId: salonCategory.id,
+        currentCustomCategory: salonCategory,
+      },
+    });
+
+    await screen.findByRole("option", { name: "Salon Color" });
+    expect(screen.getAllByRole("option", { name: "Salon Color" })).toHaveLength(1);
+  });
+
+  test("does not carry an edit-only retained category into create mode", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const initialProps = {
+      form: {
+        categoryType: "custom",
+        customCategoryId: "salon-category",
+        currentCustomCategory: {
+          id: "salon-category",
+          name: "Salon Color",
+          active: true,
+        },
+      },
+    };
+    const { rerender } = renderManager(initialProps);
+
+    expect(await screen.findByRole("option", { name: "Salon Color" })).toBeInTheDocument();
+    rerender(
+      <ServiceCategoryManager
+        barberId="barber-1"
+        form={{ categoryType: "custom", customCategoryId: "" }}
+        isSaving={false}
+      />
+    );
+
+    expect(screen.queryByRole("option", { name: "Salon Color" })).not.toBeInTheDocument();
+  });
+
+  test("does not retain an unavailable existing category", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const onCustomCategoryIdChange = vi.fn();
+
+    renderManager({
+      form: {
+        categoryType: "custom",
+        customCategoryId: "missing-category",
+        currentCustomCategory: {
+          id: "missing-category",
+          name: "Unavailable custom category",
+          active: false,
+          missing: true,
+        },
+      },
+      onCustomCategoryIdChange,
+    });
+
+    await waitFor(() => expect(onCustomCategoryIdChange).toHaveBeenCalledWith(""));
+    expect(screen.queryByRole("option", { name: /Unavailable custom category/ })).not.toBeInTheDocument();
+  });
+
   test("marks a missing legacy category as unavailable", async () => {
     fetchServiceCategories.mockResolvedValue([]);
 
