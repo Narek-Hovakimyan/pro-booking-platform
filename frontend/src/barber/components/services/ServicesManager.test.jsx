@@ -154,6 +154,39 @@ function ServiceToggleHarness({ initialService, request }) {
   );
 }
 
+function ServiceEditHarness({ initialService, request }) {
+  const [services, setServices] = useState([initialService]);
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const updateService = async (serviceId, payload) => {
+    setIsSaving(true);
+    setError("");
+    try {
+      const updatedService = await request(serviceId, payload);
+      setServices((currentServices) => currentServices.map((service) =>
+        service.id === serviceId ? updatedService : service
+      ));
+    } catch (requestError) {
+      setError("Could not update service. Please try again.");
+      throw requestError;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <ServicesManager
+      services={services}
+      removeService={vi.fn()}
+      addService={vi.fn()}
+      updateService={updateService}
+      error={error}
+      isSaving={isSaving}
+    />
+  );
+}
+
 function ServiceDeleteHarness({ initialService, request }) {
   const [services, setServices] = useState([initialService]);
   const [error, setError] = useState("");
@@ -357,6 +390,76 @@ describe("ServicesManager", () => {
       duration: 30,
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  test("edits a service to zero price and reconciles the authoritative response", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Consultation", price: 5000, duration: 30,
+      active: true, category: "other",
+    };
+    const updatedService = {
+      ...service,
+      name: "Complimentary consultation",
+      price: 0,
+      duration: 45,
+    };
+    const pendingUpdate = createDeferred();
+    const request = vi.fn().mockReturnValueOnce(pendingUpdate.promise);
+
+    render(<ServiceEditHarness initialService={service} request={request} />);
+
+    fireEvent.click(screen.getByTitle("Edit"));
+    const [priceInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save service" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request).toHaveBeenCalledWith("service-1", expect.objectContaining({
+      name: "Consultation",
+      price: 0,
+      duration: 30,
+    }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await act(async () => {
+      pendingUpdate.resolve(updatedService);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Complimentary consultation" })).toBeInTheDocument();
+    expect(screen.getByText("45 min")).toBeInTheDocument();
+    expect(screen.getByText("0 AMD")).toBeInTheDocument();
+  });
+
+  test("keeps the edit form open for a blank price without sending an update", () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const updateService = vi.fn();
+    const service = {
+      id: "service-1", name: "Consultation", price: 5000, duration: 30,
+      active: true, category: "other",
+    };
+
+    render(
+      <ServicesManager
+        services={[service]}
+        removeService={vi.fn()}
+        addService={vi.fn()}
+        updateService={updateService}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle("Edit"));
+    const [priceInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save service" }));
+
+    expect(updateService).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(priceInput).toHaveValue(null);
+    expect(screen.getByText("Price must be a non-negative number.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Service name")).toHaveValue("Consultation");
   });
 
   test("accepts only one pending create and releases the lock after success", async () => {

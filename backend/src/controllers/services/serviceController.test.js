@@ -436,6 +436,35 @@ test("only service owner barber can update a service", async () => {
   assert.equal(res.body.active, false);
 });
 
+test("service owner can update a service price to zero", async () => {
+  const res = createResponse();
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Consultation",
+    price: 5000,
+    duration: 30,
+    active: true,
+    save: async function save() {
+      return this;
+    },
+  };
+  Service.findById = async () => service;
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { price: 0 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(service.price, 0);
+  assert.equal(res.body.price, 0);
+});
+
 test("barber can update service category and tags", async () => {
   const res = createResponse();
   const service = {

@@ -197,6 +197,31 @@ describe("useServiceManagement updateService", () => {
     expect(setDataError).toHaveBeenCalledWith("");
     expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
   });
+
+  test("preserves a zero price and dispatches the authoritative updated service", async () => {
+    mocks.put.mockReset();
+    const updatePayload = { ...servicePayload, price: 0 };
+    const updatedService = {
+      _id: "service-1",
+      ...updatePayload,
+      name: "Complimentary consultation",
+    };
+    mocks.put.mockResolvedValueOnce({ data: updatedService });
+    const { ref, dispatch, setIsSaving } = renderHookHarness();
+
+    await act(async () => {
+      await ref.current.updateService("service-1", updatePayload);
+    });
+
+    expect(mocks.put).toHaveBeenCalledTimes(1);
+    expect(mocks.put).toHaveBeenCalledWith("/services/service-1", updatePayload);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0][0]).toMatchObject({
+      type: "services/updateService",
+      payload: updatedService,
+    });
+    expect(setIsSaving.mock.calls).toEqual([[true], [false]]);
+  });
 });
 
 describe("useServiceManagement deleteService", () => {
