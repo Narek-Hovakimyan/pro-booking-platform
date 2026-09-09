@@ -18,6 +18,14 @@ const mutationLockState = vi.hoisted(() => ({
   calls: [],
 }));
 
+const modalState = vi.hoisted(() => ({
+  capture: false,
+  target: null,
+  falseStateCalls: 0,
+  setter: null,
+  calls: [],
+}));
+
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal();
 
@@ -26,6 +34,26 @@ vi.mock("react", async (importOriginal) => {
     useState(initialValue) {
       const state = actual.useState(initialValue);
       const stack = new Error().stack || "";
+      if (modalState.capture && stack.includes("ServicesManager.jsx")) {
+        if (Array.isArray(initialValue) && initialValue.length === 0) {
+          modalState.falseStateCalls = 0;
+        }
+        const observesShowModal =
+          modalState.target === "show" &&
+          initialValue === false &&
+          ++modalState.falseStateCalls === 1;
+        const observesModalError =
+          modalState.target === "error" && initialValue === "";
+        if (observesShowModal || observesModalError) {
+          const [, setState] = state;
+          const observedSetter = (value) => {
+            modalState.calls.push(value);
+            return setState(value);
+          };
+          modalState.setter = observedSetter;
+          return [state[0], observedSetter];
+        }
+      }
       if (mutationLockState.capture && stack.includes("ServicesManager.jsx")) {
         if (Array.isArray(initialValue) && initialValue.length === 0) {
           mutationLockState.falseStateCalls = 0;
@@ -85,6 +113,11 @@ afterEach(() => {
   mutationLockState.falseStateCalls = 0;
   mutationLockState.setter = null;
   mutationLockState.calls = [];
+  modalState.capture = false;
+  modalState.target = null;
+  modalState.falseStateCalls = 0;
+  modalState.setter = null;
+  modalState.calls = [];
 });
 
 function ServiceToggleHarness({ initialService, request }) {
@@ -585,6 +618,146 @@ describe("ServicesManager", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(removeService).toHaveBeenCalledTimes(2));
+  });
+
+  test("does not close or reset local create state after late success unmount", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const pendingCreate = createDeferred();
+    const addService = vi.fn().mockReturnValueOnce(pendingCreate.promise);
+    modalState.capture = true;
+    modalState.target = "show";
+
+    const { unmount } = render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+    expect(modalState.setter).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Haircut" } });
+    const [priceInput, durationInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "5000" } });
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+    await waitFor(() => expect(addService).toHaveBeenCalledTimes(1));
+    modalState.calls = [];
+
+    unmount();
+    await act(async () => {
+      pendingCreate.resolve({ id: "service-1" });
+      await Promise.resolve();
+    });
+
+    expect(modalState.calls).toEqual([]);
+  });
+
+  test("does not set a local create error after late failure unmount", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const pendingCreate = createDeferred();
+    const addService = vi.fn().mockReturnValueOnce(pendingCreate.promise);
+    modalState.capture = true;
+    modalState.target = "error";
+
+    const { unmount } = render(
+      <ServicesManager
+        services={[]}
+        removeService={vi.fn()}
+        addService={addService}
+        updateService={vi.fn()}
+      />
+    );
+    expect(modalState.setter).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByRole("button", { name: /add your first service/i }));
+    fireEvent.change(screen.getByLabelText("Service name"), { target: { value: "Haircut" } });
+    const [priceInput, durationInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(priceInput, { target: { value: "5000" } });
+    fireEvent.change(durationInput, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add service" }));
+    await waitFor(() => expect(addService).toHaveBeenCalledTimes(1));
+    modalState.calls = [];
+
+    unmount();
+    await act(async () => {
+      pendingCreate.reject(new Error("temporary failure"));
+      await Promise.resolve();
+    });
+
+    expect(modalState.calls).toEqual([]);
+  });
+
+  test("does not close or reset local edit state after late success unmount", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const pendingUpdate = createDeferred();
+    const updateService = vi.fn().mockReturnValueOnce(pendingUpdate.promise);
+    modalState.capture = true;
+    modalState.target = "show";
+
+    const { unmount } = render(
+      <ServicesManager
+        services={[service]}
+        removeService={vi.fn()}
+        addService={vi.fn()}
+        updateService={updateService}
+      />
+    );
+    expect(modalState.setter).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByTitle("Edit"));
+    fireEvent.click(screen.getByRole("button", { name: "Save service" }));
+    await waitFor(() => expect(updateService).toHaveBeenCalledTimes(1));
+    modalState.calls = [];
+
+    unmount();
+    await act(async () => {
+      pendingUpdate.resolve({ ...service, name: "Updated haircut" });
+      await Promise.resolve();
+    });
+
+    expect(modalState.calls).toEqual([]);
+  });
+
+  test("does not set a local edit error after late failure unmount", async () => {
+    fetchServiceCategories.mockResolvedValue([]);
+    const service = {
+      id: "service-1", name: "Haircut", price: 5000, duration: 30,
+      active: true, category: "haircut",
+    };
+    const pendingUpdate = createDeferred();
+    const updateService = vi.fn().mockReturnValueOnce(pendingUpdate.promise);
+    modalState.capture = true;
+    modalState.target = "error";
+
+    const { unmount } = render(
+      <ServicesManager
+        services={[service]}
+        removeService={vi.fn()}
+        addService={vi.fn()}
+        updateService={updateService}
+      />
+    );
+    expect(modalState.setter).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByTitle("Edit"));
+    fireEvent.click(screen.getByRole("button", { name: "Save service" }));
+    await waitFor(() => expect(updateService).toHaveBeenCalledTimes(1));
+    modalState.calls = [];
+
+    unmount();
+    await act(async () => {
+      pendingUpdate.reject(new Error("temporary failure"));
+      await Promise.resolve();
+    });
+
+    expect(modalState.calls).toEqual([]);
   });
 
   test("does not attempt delete-confirmation state after late delete success unmount", async () => {

@@ -301,18 +301,26 @@ export default function ServicesManager({
       await runServiceMutation(async () => {
         try {
           await updateService(editingService.id, basePayload);
-          closeModal();
+          if (isMountedRef.current) {
+            closeModal();
+          }
         } catch (err) {
-          setModalError(err.response?.data?.message || "Could not update service.");
+          if (isMountedRef.current) {
+            setModalError(err.response?.data?.message || "Could not update service.");
+          }
         }
       });
     } else {
       await runServiceMutation(async () => {
         try {
           await addService(basePayload);
-          closeModal();
+          if (isMountedRef.current) {
+            closeModal();
+          }
         } catch (err) {
-          setModalError(err.response?.data?.message || "Could not create service.");
+          if (isMountedRef.current) {
+            setModalError(err.response?.data?.message || "Could not create service.");
+          }
         }
       });
     }
