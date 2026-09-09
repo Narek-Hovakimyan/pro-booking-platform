@@ -11,6 +11,7 @@ import Service from "../../models/Service.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPlan from "../../models/SubscriptionPlan.js";
 import User from "../../models/User.js";
+import { deleteService, updateService } from "../../controllers/services/serviceController.js";
 import { AccountDeletionError, deleteAccountAtomically } from "../users/accountDeletionService.js";
 import { beginAccountDeletionFence } from "../users/accountDeletionFenceService.js";
 import { createBookingService } from "./bookingCreateService.js";
@@ -46,6 +47,49 @@ const createBooking = ({ barber, client, service, time = "10:00" }) => createBoo
   body: { barberId: barber._id, clientId: client._id, serviceId: service._id, bookingDate: "2026-12-07", dayKey: "mon", time },
   user: client, referenceImages: [], cleanupReferenceImagesOnError: () => {},
 });
+const createResponse = () => ({
+  statusCode: 200,
+  body: null,
+  status(code) { this.statusCode = code; return this; },
+  json(body) { this.body = body; return this; },
+});
+const createDeferred = () => {
+  let resolve;
+  const promise = new Promise((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+};
+const interceptBookingServiceTouch = ({ serviceId, pause }) => {
+  const originalUpdateOne = Service.updateOne;
+  const reached = createDeferred();
+  const release = createDeferred();
+  let intercepted = false;
+
+  Service.updateOne = async function interceptUpdateOne(filter, update, options) {
+    const isBookingTouch = !intercepted &&
+      String(filter?._id) === String(serviceId) &&
+      filter?.active === true &&
+      update?.$currentDate?.updatedAt === true &&
+      options?.session;
+    if (!isBookingTouch) return originalUpdateOne.call(this, filter, update, options);
+
+    intercepted = true;
+    if (pause === "before") {
+      reached.resolve();
+      await release.promise;
+      return originalUpdateOne.call(this, filter, update, options);
+    }
+    const result = await originalUpdateOne.call(this, filter, update, options);
+    reached.resolve();
+    await release.promise;
+    return result;
+  };
+
+  return {
+    reached: reached.promise,
+    release: () => release.resolve(),
+    restore: () => { Service.updateOne = originalUpdateOne; },
+  };
+};
 afterEach(async () => { if (mongoose.connection.readyState) await mongoose.disconnect().catch(() => {}); });
 
 test("real production booking commits first and then blocks account deletion", { skip: !enabled }, async () => {
@@ -79,7 +123,106 @@ test("real Mongo overlapping creates commit one booking and one set of holds", {
     createBooking({ ...fixture, client: otherClient, time: "10:15" }),
   ]);
 
-  assert.deepEqual(results.map(({ status }) => status).sort(), [400, 201]);
+  assert.deepEqual(results.map(({ status }) => status).sort((left, right) => left - right), [201, 400]);
   assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
   assert.equal(await BookingSlotHold.countDocuments({ barberId: fixture.barber._id }), 30);
+});
+
+test("real Mongo deactivation winning before the booking touch leaves no booking or holds", { skip: !enabled, timeout: 15000 }, async () => {
+  await connect();
+  const fixture = await setup();
+  const touch = interceptBookingServiceTouch({ serviceId: fixture.service._id, pause: "before" });
+
+  try {
+    const booking = createBooking(fixture);
+    await touch.reached;
+
+    const response = createResponse();
+    await updateService({
+      user: fixture.barber,
+      params: { id: String(fixture.service._id) },
+      body: { active: false },
+    }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.active, false);
+
+    touch.release();
+    const result = await booking;
+    assert.equal(result.status, 400);
+    assert.equal(result.body.message, "Service is not available for this barber");
+    assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 0);
+    assert.equal(await BookingSlotHold.countDocuments({ barberId: fixture.barber._id }), 0);
+    assert.equal(await Notification.countDocuments({ userId: fixture.barber._id }), 0);
+    assert.equal((await Service.findById(fixture.service._id)).active, false);
+  } finally {
+    touch.release();
+    touch.restore();
+  }
+});
+
+test("real Mongo booking winning over a concurrent deactivation snapshots the active service", { skip: !enabled, timeout: 15000 }, async () => {
+  await connect();
+  const fixture = await setup();
+  const touch = interceptBookingServiceTouch({ serviceId: fixture.service._id, pause: "after" });
+
+  try {
+    const booking = createBooking(fixture);
+    await touch.reached;
+    const response = createResponse();
+    const deactivate = updateService({
+      user: fixture.barber,
+      params: { id: String(fixture.service._id) },
+      body: { active: false },
+    }, response);
+
+    touch.release();
+    const result = await booking;
+    await deactivate;
+
+    assert.equal(result.status, 201);
+    assert.equal(String(result.booking.serviceId), String(fixture.service._id));
+    assert.equal(result.booking.serviceName, "Cut");
+    assert.equal(result.booking.price, 100);
+    assert.equal(result.booking.duration, 30);
+    assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
+    assert.equal(await BookingSlotHold.countDocuments({ bookingId: result.booking._id }), 30);
+    assert.equal(response.statusCode, 200);
+    assert.equal((await Service.findById(fixture.service._id)).active, false);
+    const stored = await Booking.findById(result.booking._id);
+    assert.equal(stored.serviceName, "Cut");
+    assert.equal(stored.price, 100);
+    assert.equal(stored.duration, 30);
+  } finally {
+    touch.release();
+    touch.restore();
+  }
+});
+
+test("real Mongo deletion winning before the booking touch leaves no dangling booking state", { skip: !enabled, timeout: 15000 }, async () => {
+  await connect();
+  const fixture = await setup();
+  const touch = interceptBookingServiceTouch({ serviceId: fixture.service._id, pause: "before" });
+
+  try {
+    const booking = createBooking(fixture);
+    await touch.reached;
+
+    const response = createResponse();
+    await deleteService({
+      user: fixture.barber,
+      params: { id: String(fixture.service._id) },
+    }, response);
+    assert.equal(response.statusCode, 200);
+
+    touch.release();
+    const result = await booking;
+    assert.equal(result.status, 400);
+    assert.equal(result.body.message, "Service is not available for this barber");
+    assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 0);
+    assert.equal(await BookingSlotHold.countDocuments({ barberId: fixture.barber._id }), 0);
+    assert.equal(await Service.exists({ _id: fixture.service._id }), null);
+  } finally {
+    touch.release();
+    touch.restore();
+  }
 });
