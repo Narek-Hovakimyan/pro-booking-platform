@@ -117,6 +117,28 @@ test("barber can create their own service using req.user._id", async () => {
   assert.equal(res.body.barberId, barberA._id);
 });
 
+test("create redacts unexpected persistence errors", async () => {
+  const res = createResponse();
+  const rawError = "MongoNetworkError: mongodb://internal-db:27017/hairbook.services index secret_service_index";
+
+  Service.create = async () => {
+    throw new Error(rawError);
+  };
+
+  await createService(
+    {
+      user: barberA,
+      body: { name: "Cut", price: 0, duration: 30 },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not create service" });
+  assert.equal(res.body.message.includes("internal-db"), false);
+  assert.equal(res.body.message.includes("secret_service_index"), false);
+});
+
 test("barber can create service with valid barber-owned customCategoryId", async () => {
   const res = createResponse();
   let createdPayload;
@@ -463,6 +485,37 @@ test("service owner can update a service price to zero", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(service.price, 0);
   assert.equal(res.body.price, 0);
+});
+
+test("update redacts unexpected persistence errors", async () => {
+  const res = createResponse();
+  const rawError = "MongoServerError: topology rs0 database hairbook.services index secret_service_index";
+  const service = {
+    _id: "service-a",
+    barberId: barberA._id,
+    name: "Cut",
+    price: 5000,
+    duration: 30,
+    active: true,
+    save: async () => {
+      throw new Error(rawError);
+    },
+  };
+  Service.findById = async () => service;
+
+  await updateService(
+    {
+      user: barberA,
+      params: { id: service._id },
+      body: { name: "Refined Cut" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not update service" });
+  assert.equal(res.body.message.includes("rs0"), false);
+  assert.equal(res.body.message.includes("secret_service_index"), false);
 });
 
 test("barber can update service category and tags", async () => {

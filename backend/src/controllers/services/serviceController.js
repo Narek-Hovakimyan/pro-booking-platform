@@ -338,8 +338,8 @@ export const createService = async (req, res) => {
     if (error instanceof ServiceCategoryReferenceIntegrityError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not create service",
+    return sendControllerError(res, error, "Could not create service", {
+      duplicateKeyMessage: "Could not create service",
     });
   }
 };
@@ -437,8 +437,8 @@ export const updateService = async (req, res) => {
     if (error instanceof ServiceCategoryReferenceIntegrityError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not update service",
+    return sendControllerError(res, error, "Could not update service", {
+      duplicateKeyMessage: "Could not update service",
     });
   }
 };
