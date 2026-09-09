@@ -167,7 +167,7 @@ export const getServicesByBarber = async (req, res) => {
       path: "customCategoryId",
       select: isOwnerBarber
         ? "_id name ownerType ownerId sortOrder active"
-        : "_id name ownerType ownerId sortOrder",
+        : "_id name",
     };
     if (isOwnerBarber) {
       categoryPopulate.transform = (category, id) => {

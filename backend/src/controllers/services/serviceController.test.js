@@ -1019,6 +1019,9 @@ test("owner receives an inactive referenced custom category for safe editing", a
   assert.equal(res.body[0].customCategoryId.active, false);
   assert.equal(capturedPopulate.match, undefined);
   assert.equal(capturedPopulate.select.includes("active"), true);
+  assert.equal(capturedPopulate.select.includes("ownerType"), true);
+  assert.equal(capturedPopulate.select.includes("ownerId"), true);
+  assert.equal(capturedPopulate.select.includes("sortOrder"), true);
 });
 
 test("owner receives a fail-closed placeholder for a missing legacy custom category", async () => {
@@ -1069,7 +1072,13 @@ test("GET services by barber returns populated customCategoryId when service has
   Service.find = () => ({
     populate(opts) {
       capturedPopulate = opts;
-      return services;
+      const selectedFields = new Set(opts.select.split(" "));
+      return services.map((service) => ({
+        ...service,
+        customCategoryId: Object.fromEntries(
+          Object.entries(service.customCategoryId).filter(([field]) => selectedFields.has(field))
+        ),
+      }));
     },
   });
 
@@ -1084,11 +1093,12 @@ test("GET services by barber returns populated customCategoryId when service has
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].customCategoryId._id, customCategoryId);
   assert.equal(res.body[0].customCategoryId.name, "Bridal Updo");
-  // Verify populate uses object-style with active match
+  assert.equal(res.body[0].customCategoryId.ownerType, undefined);
+  assert.equal(res.body[0].customCategoryId.ownerId, undefined);
+  assert.equal(res.body[0].customCategoryId.sortOrder, undefined);
   assert.equal(capturedPopulate.path, "customCategoryId");
   assert.equal(capturedPopulate.match?.active, true);
-  // active is excluded from select
-  assert.equal(capturedPopulate.select?.includes("active"), false);
+  assert.equal(capturedPopulate.select, "_id name");
 });
 
 
