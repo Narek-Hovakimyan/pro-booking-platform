@@ -72,7 +72,18 @@ export default function JobApplicationsDialog({ job, onClose }) {
   const [isLoading, setIsLoading] = useState(true);
   const [updatingApplicationId, setUpdatingApplicationId] = useState("");
   const requestRevision = useRef(0);
+  const lifecycleRevision = useRef(0);
+  const isMountedRef = useRef(false);
   const jobId = getJobId(job);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      lifecycleRevision.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event) => {
@@ -89,21 +100,33 @@ export default function JobApplicationsDialog({ job, onClose }) {
   }, [onClose]);
 
   useEffect(() => {
+    const lifecycleId = ++lifecycleRevision.current;
     const requestId = ++requestRevision.current;
-    let isMounted = true;
+    let isCurrent = true;
 
     const loadApplications = async () => {
       setIsLoading(true);
       setError("");
+      setUpdatingApplicationId("");
 
       try {
         const { data } = await api.get(`/salon-jobs/${jobId}/applications`);
 
-        if (isMounted && requestRevision.current === requestId) {
+        if (
+          isCurrent &&
+          isMountedRef.current &&
+          lifecycleRevision.current === lifecycleId &&
+          requestRevision.current === requestId
+        ) {
           setApplications(Array.isArray(data) ? data : []);
         }
       } catch (requestError) {
-        if (isMounted && requestRevision.current === requestId) {
+        if (
+          isCurrent &&
+          isMountedRef.current &&
+          lifecycleRevision.current === lifecycleId &&
+          requestRevision.current === requestId
+        ) {
           setError(
             requestError.response?.data?.message ||
               "Could not load applications."
@@ -111,7 +134,12 @@ export default function JobApplicationsDialog({ job, onClose }) {
           setApplications([]);
         }
       } finally {
-        if (isMounted && requestRevision.current === requestId) {
+        if (
+          isCurrent &&
+          isMountedRef.current &&
+          lifecycleRevision.current === lifecycleId &&
+          requestRevision.current === requestId
+        ) {
           setIsLoading(false);
         }
       }
@@ -122,7 +150,7 @@ export default function JobApplicationsDialog({ job, onClose }) {
     }
 
     return () => {
-      isMounted = false;
+      isCurrent = false;
     };
   }, [jobId]);
 
@@ -135,6 +163,10 @@ export default function JobApplicationsDialog({ job, onClose }) {
 
   const updateStatus = async (application, status) => {
     const applicationId = getApplicationId(application);
+    const mutationLifecycleId = lifecycleRevision.current;
+
+    const isCurrentMutationLifecycle = () =>
+      isMountedRef.current && lifecycleRevision.current === mutationLifecycleId;
 
     if (!applicationId || status === application.status) return;
 
@@ -147,20 +179,26 @@ export default function JobApplicationsDialog({ job, onClose }) {
         { status }
       );
 
-      setApplications((currentApplications) =>
-        currentApplications.map((currentApplication) =>
-          getApplicationId(currentApplication) === applicationId
-            ? data
-            : currentApplication
-        )
-      );
+      if (isCurrentMutationLifecycle()) {
+        setApplications((currentApplications) =>
+          currentApplications.map((currentApplication) =>
+            getApplicationId(currentApplication) === applicationId
+              ? data
+              : currentApplication
+          )
+        );
+      }
     } catch (requestError) {
-      setError(
-        requestError.response?.data?.message ||
-          "Could not update application status."
-      );
+      if (isCurrentMutationLifecycle()) {
+        setError(
+          requestError.response?.data?.message ||
+            "Could not update application status."
+        );
+      }
     } finally {
-      setUpdatingApplicationId("");
+      if (isCurrentMutationLifecycle()) {
+        setUpdatingApplicationId("");
+      }
     }
   };
 

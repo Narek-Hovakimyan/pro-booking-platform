@@ -2,6 +2,49 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const mutationCompletionState = vi.hoisted(() => ({
+  calls: [],
+  capture: false,
+  hookIndex: 0,
+  setters: {},
+}));
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal();
+
+  return {
+    ...actual,
+    useState(initialValue) {
+      const state = actual.useState(initialValue);
+      const stack = new Error().stack || "";
+
+      if (
+        !mutationCompletionState.capture ||
+        !stack.includes("JobApplicationsDialog.jsx")
+      ) {
+        return state;
+      }
+
+      if (Array.isArray(initialValue)) {
+        mutationCompletionState.hookIndex = 0;
+      }
+
+      const hookIndex = mutationCompletionState.hookIndex;
+      mutationCompletionState.hookIndex += 1;
+
+      if (![0, 1, 3].includes(hookIndex)) return state;
+
+      const [, setState] = state;
+      const observedSetter = (value) => {
+        mutationCompletionState.calls.push({ hookIndex, value });
+        return setState(value);
+      };
+      mutationCompletionState.setters[hookIndex] = observedSetter;
+      return [state[0], observedSetter];
+    },
+  };
+});
+
 import JobApplicationsDialog from "./JobApplicationsDialog";
 import api from "@/shared/api/axios";
 
@@ -36,6 +79,10 @@ const renderDialog = (applications) => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  mutationCompletionState.calls = [];
+  mutationCompletionState.capture = false;
+  mutationCompletionState.hookIndex = 0;
+  mutationCompletionState.setters = {};
 });
 
 describe("JobApplicationsDialog", () => {
@@ -199,5 +246,203 @@ describe("JobApplicationsDialog", () => {
     expect(
       screen.queryByText("Waiting for applicant confirmation.")
     ).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale job A status success after switching to job B", async () => {
+    const user = userEvent.setup();
+    const pendingMutation = deferred();
+    const jobB = { id: "job-b", title: "Nail artist" };
+    const jobBApplication = application({
+      id: "application-b",
+      applicant: { name: "Jordan" },
+      status: "reviewed",
+    });
+    api.get
+      .mockResolvedValueOnce({ data: [application({ status: "pending" })] })
+      .mockResolvedValueOnce({ data: [jobBApplication] });
+    api.patch.mockReturnValueOnce(pendingMutation.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Status" }),
+      "accepted"
+    );
+    expect(api.patch).toHaveBeenCalledTimes(1);
+
+    view.rerender(<JobApplicationsDialog job={jobB} onClose={vi.fn()} />);
+    const jobBSelect = await screen.findByRole("combobox", { name: "Status" });
+    expect(jobBSelect).toHaveValue("reviewed");
+
+    await act(async () => {
+      pendingMutation.resolve({
+        data: application({ status: "accepted", onboardingStatus: "pending_consent" }),
+      });
+      await pendingMutation.promise;
+    });
+
+    expect(jobBSelect).toHaveValue("reviewed");
+    expect(screen.queryByText("Waiting for applicant confirmation.")).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale job A status error after switching to job B", async () => {
+    const user = userEvent.setup();
+    const pendingMutation = deferred();
+    const jobB = { id: "job-b", title: "Nail artist" };
+    api.get
+      .mockResolvedValueOnce({ data: [application({ status: "pending" })] })
+      .mockResolvedValueOnce({ data: [application({ id: "application-b", status: "reviewed" })] });
+    api.patch.mockReturnValueOnce(pendingMutation.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Status" }),
+      "accepted"
+    );
+    view.rerender(<JobApplicationsDialog job={jobB} onClose={vi.fn()} />);
+    expect(await screen.findByRole("combobox", { name: "Status" })).toHaveValue("reviewed");
+
+    await act(async () => {
+      pendingMutation.reject({ response: { data: { message: "Job A update failed" } } });
+      await pendingMutation.promise.catch(() => {});
+    });
+
+    expect(screen.queryByText("Job A update failed")).not.toBeInTheDocument();
+  });
+
+  it("keeps job B updating when job A reaches its stale mutation finally", async () => {
+    const user = userEvent.setup();
+    const jobAMutation = deferred();
+    const jobBMutation = deferred();
+    const jobB = { id: "job-b", title: "Nail artist" };
+    api.get
+      .mockResolvedValueOnce({ data: [application({ status: "pending" })] })
+      .mockResolvedValueOnce({ data: [application({ id: "application-b", status: "pending" })] });
+    api.patch
+      .mockReturnValueOnce(jobAMutation.promise)
+      .mockReturnValueOnce(jobBMutation.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Status" }),
+      "accepted"
+    );
+    view.rerender(<JobApplicationsDialog job={jobB} onClose={vi.fn()} />);
+    const jobBSelect = await screen.findByRole("combobox", { name: "Status" });
+    await user.selectOptions(jobBSelect, "accepted");
+    await waitFor(() => expect(jobBSelect).toBeDisabled());
+
+    await act(async () => {
+      jobAMutation.resolve({ data: application({ status: "accepted" }) });
+      await jobAMutation.promise;
+    });
+    expect(jobBSelect).toBeDisabled();
+
+    await act(async () => {
+      jobBMutation.resolve({
+        data: application({ id: "application-b", status: "accepted", onboardingStatus: "pending_consent" }),
+      });
+      await jobBMutation.promise;
+    });
+    await waitFor(() => expect(jobBSelect).not.toBeDisabled());
+    expect(jobBSelect).toHaveValue("accepted");
+  });
+
+  it("ignores an old mutation after closing and reopening the same job", async () => {
+    const user = userEvent.setup();
+    const pendingMutation = deferred();
+    const reopenedApplication = application({ id: "application-reopened", status: "reviewed" });
+    api.get
+      .mockResolvedValueOnce({ data: [application({ status: "pending" })] })
+      .mockResolvedValueOnce({ data: [reopenedApplication] });
+    api.patch.mockReturnValueOnce(pendingMutation.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Status" }),
+      "accepted"
+    );
+    view.rerender(<JobApplicationsDialog job={null} onClose={vi.fn()} />);
+    view.rerender(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+    const reopenedSelect = await screen.findByRole("combobox", { name: "Status" });
+    expect(reopenedSelect).toHaveValue("reviewed");
+
+    await act(async () => {
+      pendingMutation.resolve({ data: application({ status: "accepted" }) });
+      await pendingMutation.promise;
+    });
+    expect(reopenedSelect).toHaveValue("reviewed");
+  });
+
+  it("does not attempt success or cleanup state after an unmounted mutation settles", async () => {
+    const user = userEvent.setup();
+    const pendingMutation = deferred();
+    mutationCompletionState.capture = true;
+    api.get.mockResolvedValueOnce({ data: [application({ status: "pending" })] });
+    api.patch.mockReturnValueOnce(pendingMutation.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+    expect(mutationCompletionState.setters[0]).toEqual(expect.any(Function));
+    expect(mutationCompletionState.setters[3]).toEqual(expect.any(Function));
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Status" }),
+      "accepted"
+    );
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    mutationCompletionState.calls = [];
+    view.unmount();
+
+    await act(async () => {
+      pendingMutation.resolve({ data: application({ status: "accepted" }) });
+      await pendingMutation.promise;
+    });
+
+    expect(mutationCompletionState.calls).toEqual([]);
+  });
+
+  it("does not attempt error or cleanup state after an unmounted mutation rejects", async () => {
+    const user = userEvent.setup();
+    const pendingMutation = deferred();
+    mutationCompletionState.capture = true;
+    api.get.mockResolvedValueOnce({ data: [application({ status: "pending" })] });
+    api.patch.mockReturnValueOnce(pendingMutation.promise);
+    const view = render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+    expect(mutationCompletionState.setters[1]).toEqual(expect.any(Function));
+    expect(mutationCompletionState.setters[3]).toEqual(expect.any(Function));
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Status" }),
+      "accepted"
+    );
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    mutationCompletionState.calls = [];
+    view.unmount();
+
+    await act(async () => {
+      pendingMutation.reject({ response: { data: { message: "Late failure" } } });
+      await pendingMutation.promise.catch(() => {});
+    });
+
+    expect(mutationCompletionState.calls).toEqual([]);
+  });
+
+  it("shows a current mutation error and clears its loading state", async () => {
+    const user = userEvent.setup();
+    const pendingMutation = deferred();
+    api.get.mockResolvedValueOnce({ data: [application({ status: "pending" })] });
+    api.patch.mockReturnValueOnce(pendingMutation.promise);
+    render(<JobApplicationsDialog job={job} onClose={vi.fn()} />);
+
+    const statusSelect = await screen.findByRole("combobox", { name: "Status" });
+    await user.selectOptions(statusSelect, "accepted");
+    await waitFor(() => expect(statusSelect).toBeDisabled());
+
+    await act(async () => {
+      pendingMutation.reject({ response: { data: { message: "Could not accept application" } } });
+      await pendingMutation.promise.catch(() => {});
+    });
+
+    expect(await screen.findByText("Could not accept application")).toBeVisible();
+    expect(statusSelect).not.toBeDisabled();
+    expect(statusSelect).toHaveValue("pending");
   });
 });
