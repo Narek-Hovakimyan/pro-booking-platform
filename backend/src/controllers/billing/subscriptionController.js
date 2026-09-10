@@ -1,5 +1,6 @@
 import Subscription from "../../models/Subscription.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
+import { sendControllerError } from "../../utils/controllerError.js";
 import {
   getOrCreateDefaultSubscriptionPlan,
   getMySubscriptionAccess,
@@ -120,11 +121,7 @@ export const devGrantSubscription = async (req, res) => {
       },
       "Could not grant subscription"
     );
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not grant subscription",
-    });
+    return sendControllerError(res, error, "Could not grant subscription");
   }
 };
 
@@ -144,11 +141,7 @@ export const createPaymentIntent = async (req, res) => {
 
     return res.json(paymentIntent);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not prepare payment",
-    });
+    return sendControllerError(res, error, "Could not prepare payment");
   }
 };
 
@@ -161,11 +154,7 @@ export const getPaymentAttempt = async (req, res) => {
 
     return res.json(attempt);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not fetch payment attempt",
-    });
+    return sendControllerError(res, error, "Could not fetch payment attempt");
   }
 };
 
@@ -178,11 +167,7 @@ export const cancelPaymentAttempt = async (req, res) => {
 
     return res.json(attempt);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not cancel payment attempt",
-    });
+    return sendControllerError(res, error, "Could not cancel payment attempt");
   }
 };
 
@@ -195,11 +180,7 @@ export const devConfirmSeatUpdate = async (req, res) => {
 
     return res.json(result);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not confirm seat update",
-    });
+    return sendControllerError(res, error, "Could not confirm seat update");
   }
 };
 
@@ -212,11 +193,7 @@ export const devConfirmPaymentAttempt = async (req, res) => {
 
     return res.json(result);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not confirm payment attempt",
-    });
+    return sendControllerError(res, error, "Could not confirm payment attempt");
   }
 };
 
@@ -229,11 +206,7 @@ export const getMySubscriptionPayments = async (req, res) => {
 
     return res.json(payments);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not fetch payment history",
-    });
+    return sendControllerError(res, error, "Could not fetch payment history");
   }
 };
 
@@ -247,11 +220,7 @@ export const getSalonSubscriptionPayments = async (req, res) => {
 
     return res.json(payments);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      code: error.code,
-      message: error.message || "Could not fetch salon payment history",
-    });
+    return sendControllerError(res, error, "Could not fetch salon payment history");
   }
 };
 
@@ -272,10 +241,7 @@ export const getSalonSubscription = async (req, res) => {
     });
     return res.json(result);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      message: error.message || "Could not fetch salon subscription details",
-    });
+    return sendControllerError(res, error, "Could not fetch salon subscription details");
   }
 };
 
@@ -299,10 +265,7 @@ export const getSalonSubscriptionSeats = async (req, res) => {
       availableSeatCount,
     });
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      message: error.message || "Could not fetch salon subscription seats",
-    });
+    return sendControllerError(res, error, "Could not fetch salon subscription seats");
   }
 };
 
@@ -328,10 +291,7 @@ export const assignSeat = async (req, res) => {
 
     return res.status(201).json(seat);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      message: error.message || "Could not assign seat",
-    });
+    return sendControllerError(res, error, "Could not assign seat");
   }
 };
 
@@ -349,10 +309,7 @@ export const revokeSeat = async (req, res) => {
 
     return res.json(seat);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      message: error.message || "Could not revoke seat",
-    });
+    return sendControllerError(res, error, "Could not revoke seat");
   }
 };
 
@@ -378,9 +335,6 @@ export const updateSeatCount = async (req, res) => {
 
     return res.json(subscription);
   } catch (error) {
-    const status = error.statusCode || 500;
-    return res.status(status).json({
-      message: error.message || "Could not update seat count",
-    });
+    return sendControllerError(res, error, "Could not update seat count");
   }
 };

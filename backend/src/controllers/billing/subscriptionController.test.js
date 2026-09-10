@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, test } from "node:test";
+import { sendControllerError } from "../../utils/controllerError.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +47,21 @@ const assertNoSensitiveLeak = (value) => {
   assert.equal(logged.includes("authorization"), false);
 };
 
+const assertNoInternalErrorLeak = (value) => {
+  const serialized = JSON.stringify(value);
+  for (const detail of [
+    "MongoServerError",
+    "provider-secret",
+    "token-123",
+    "topology",
+    "hairbook_internal",
+    "subscriptionpaymentattempts",
+    "index",
+  ]) {
+    assert.equal(serialized.includes(detail), false);
+  }
+};
+
 const createUnexpectedStub = (name) => () => {
   throw new Error(`Unexpected dependency call: ${name}`);
 };
@@ -60,7 +76,7 @@ const loadSubscriptionController = async (overrides = {}) => {
     .replace(/import[\s\S]*?from\s+["'][^"']+["'];\n/g, "")
     .replace(/export const /g, "const ")
     .concat(
-      "\nreturn { getMySubscription, getDefaultPlan, devGrantSubscription, devExtendSubscription };"
+      "\nreturn { getMySubscription, getDefaultPlan, devGrantSubscription, devExtendSubscription, createPaymentIntent, getPaymentAttempt, cancelPaymentAttempt, confirmSubscriptionSeatUpdate, confirmSubscriptionPaymentAttempt, getMySubscriptionPayments, getSalonSubscriptionPayments, getSalonSubscription, getSalonSubscriptionSeats, assignSeat, revokeSeat, updateSeatCount };"
     );
 
   const factory = new Function(
@@ -80,6 +96,7 @@ const loadSubscriptionController = async (overrides = {}) => {
     "cancelSubscriptionPaymentAttempt",
     "confirmSubscriptionPaymentAttempt",
     "confirmSubscriptionSeatUpdate",
+    "sendControllerError",
     transformed
   );
 
@@ -100,6 +117,7 @@ const loadSubscriptionController = async (overrides = {}) => {
     cancelSubscriptionPaymentAttempt: createUnexpectedStub("cancelSubscriptionPaymentAttempt"),
     confirmSubscriptionPaymentAttempt: createUnexpectedStub("confirmSubscriptionPaymentAttempt"),
     confirmSubscriptionSeatUpdate: createUnexpectedStub("confirmSubscriptionSeatUpdate"),
+    sendControllerError,
     ...overrides,
   };
 
@@ -119,7 +137,8 @@ const loadSubscriptionController = async (overrides = {}) => {
     defaults.getSubscriptionPaymentAttempt,
     defaults.cancelSubscriptionPaymentAttempt,
     defaults.confirmSubscriptionPaymentAttempt,
-    defaults.confirmSubscriptionSeatUpdate
+    defaults.confirmSubscriptionSeatUpdate,
+    defaults.sendControllerError
   );
 };
 
@@ -221,7 +240,6 @@ test("devGrantSubscription logs safe structured context and preserves service er
 
   assert.equal(res.statusCode, 402);
   assert.deepEqual(res.body, {
-    code: "PAYMENT_REQUIRED",
     message: "payment required",
   });
   assert.equal(log.calls.length, 1);
@@ -266,11 +284,10 @@ test("devGrantSubscription preserves production-disabled behavior exactly", asyn
   });
 });
 
-test("devGrantSubscription preserves error response when logger is absent", async () => {
+test("devGrantSubscription redacts unexpected errors when logger is absent", async () => {
   process.env.NODE_ENV = "development";
 
-  const err = new Error("manual grant failed");
-  err.statusCode = 500;
+  const err = new Error("MongoServerError provider-secret topology hairbook_internal subscriptionpaymentattempts index");
 
   const { devGrantSubscription } = await loadSubscriptionController({
     extendManualSubscription: async () => {
@@ -294,7 +311,79 @@ test("devGrantSubscription preserves error response when logger is absent", asyn
 
   assert.equal(res.statusCode, 500);
   assert.deepEqual(res.body, {
-    code: undefined,
-    message: "manual grant failed",
+    message: "Could not grant subscription",
   });
+  assertNoInternalErrorLeak(res.body);
+});
+
+const unexpectedControllerError = () => new Error(
+  "MongoServerError provider-secret token-123 topology hairbook_internal subscriptionpaymentattempts index"
+);
+
+for (const {
+  name,
+  handler,
+  dependency,
+  request,
+  fallbackMessage,
+} of [
+  {
+    name: "payment intent",
+    handler: "createPaymentIntent",
+    dependency: "createSubscriptionPaymentIntent",
+    request: { user: { _id: "barber-1" }, body: {} },
+    fallbackMessage: "Could not prepare payment",
+  },
+  {
+    name: "payment attempt",
+    handler: "getPaymentAttempt",
+    dependency: "getSubscriptionPaymentAttempt",
+    request: { user: { _id: "barber-1" }, params: { attemptId: "attempt-1" } },
+    fallbackMessage: "Could not fetch payment attempt",
+  },
+  {
+    name: "salon subscription",
+    handler: "getSalonSubscription",
+    dependency: "getSalonSubscriptionDetails",
+    request: { user: { _id: "owner-1" }, params: { salonId: "salon-1" } },
+    fallbackMessage: "Could not fetch salon subscription details",
+  },
+  {
+    name: "subscription seat",
+    handler: "assignSeat",
+    dependency: "assignSalonSubscriptionSeat",
+    request: { user: { _id: "owner-1" }, params: { salonId: "salon-1" }, body: { barberId: "barber-1" } },
+    fallbackMessage: "Could not assign seat",
+  },
+]) {
+  test(`${name} controller redacts unexpected persistence/provider errors`, async () => {
+    const { [handler]: controller } = await loadSubscriptionController({
+      [dependency]: async () => {
+        throw unexpectedControllerError();
+      },
+    });
+    const res = createResponse();
+
+    await controller(request, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.body, { message: fallbackMessage });
+    assertNoInternalErrorLeak(res.body);
+  });
+}
+
+test("payment intent preserves intentional domain status and message", async () => {
+  const error = new Error("Only salon owners can prepare this payment");
+  error.statusCode = 403;
+  const { createPaymentIntent } = await loadSubscriptionController({
+    createSubscriptionPaymentIntent: async () => {
+      throw error;
+    },
+  });
+  const res = createResponse();
+
+  await createPaymentIntent({ user: { _id: "barber-1" }, body: {} }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, { message: "Only salon owners can prepare this payment" });
 });
