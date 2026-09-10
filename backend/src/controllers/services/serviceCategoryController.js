@@ -308,14 +308,8 @@ export const createServiceCategory = async (req, res) => {
     if (isSortOrderCollision(error)) {
       return res.status(409).json({ message: "Could not allocate a unique category order" });
     }
-    if (error.code === 11000) {
-      return res
-        .status(409)
-        .json({ message: "A custom category with this name already exists" });
-    }
-
-    return res.status(400).json({
-      message: error.message || "Could not create service category",
+    return sendControllerError(res, error, "Could not create service category", {
+      duplicateKeyMessage: "A custom category with this name already exists",
     });
   }
 };
@@ -424,14 +418,8 @@ export const updateServiceCategory = async (req, res) => {
     if (isSortOrderCollision(error)) {
       return res.status(409).json({ message: "Category sortOrder already exists" });
     }
-    if (error.code === 11000) {
-      return res
-        .status(409)
-        .json({ message: "A custom category with this name already exists" });
-    }
-
-    return res.status(400).json({
-      message: error.message || "Could not update service category",
+    return sendControllerError(res, error, "Could not update service category", {
+      duplicateKeyMessage: "A custom category with this name already exists",
     });
   }
 };

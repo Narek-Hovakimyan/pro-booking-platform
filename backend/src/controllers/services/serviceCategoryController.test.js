@@ -691,6 +691,28 @@ test("create maps a duplicate-key race to the stable category-name conflict", as
   assert.equal(res.body.message.includes("E11000"), false);
 });
 
+test("create redacts unexpected persistence errors", async () => {
+  const res = createResponse();
+  const rawError = "MongoNetworkError mongodb://internal-db:27017/category-db index secret_category_index";
+  ServiceCategory.findOne = makeCreateFindOneStub();
+  ServiceCategory.create = async () => {
+    throw new Error(rawError);
+  };
+
+  await createServiceCategory(
+    {
+      user: barberA,
+      body: { name: "Luxury Treatment", ownerType: "barber", ownerId: barberA._id },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not create service category" });
+  assert.equal(res.body.message.includes("internal-db"), false);
+  assert.equal(res.body.message.includes("secret_category_index"), false);
+});
+
 test("different owners can create categories with the same normalized name", async () => {
   const firstRes = createResponse();
   const secondRes = createResponse();
@@ -1309,6 +1331,31 @@ test("rename maps a duplicate-key race to the stable category-name conflict", as
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.message, "A custom category with this name already exists");
   assert.equal(res.body.message.includes("E11000"), false);
+});
+
+test("update redacts unexpected persistence errors", async () => {
+  const res = createResponse();
+  const rawError = "MongoServerError topology rs0 database category-db collection servicecategories";
+  const doc = makeDoc({ name: "Existing Category" });
+  doc.save = async () => {
+    throw new Error(rawError);
+  };
+  ServiceCategory.findById = async () => doc;
+  ServiceCategory.findOne = async () => null;
+
+  await updateServiceCategory(
+    {
+      user: barberA,
+      params: { id: doc._id },
+      body: { name: "Luxury Treatment" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not update service category" });
+  assert.equal(res.body.message.includes("rs0"), false);
+  assert.equal(res.body.message.includes("category-db"), false);
 });
 
 test("reactivation rejects a normalized-name collision", async () => {
