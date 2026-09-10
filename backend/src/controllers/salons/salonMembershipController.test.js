@@ -525,8 +525,46 @@ test("leave does not save a removed membership when accepted-request invalidatio
     res
   );
 
-  assert.equal(res.statusCode, 400);
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not leave salon" });
   assert.equal(saved, false);
+});
+
+test("leave redacts unexpected transaction persistence errors", async () => {
+  const salon = { _id: salonId, ownerId, admins: [], name: "Owner Salon" };
+  const barber = {
+    _id: barberId,
+    role: "barber",
+    salons: [{ salon: salonId, status: "approved", isPrimary: true }],
+    salon: salonId,
+    salonStatus: "approved",
+    workHistory: [],
+    async save() {
+      throw new Error("barber save must not run after invalidation failure");
+    },
+  };
+
+  mockSession();
+  Salon.findById = async () => salon;
+  User.findById = async () => barber;
+  SalonJoinRequest.updateMany = async () => {
+    throw new Error(
+      "MongoServerError: topology cluster-a database hairbook collection salonjoinrequests transaction internals index conflict"
+    );
+  };
+
+  const res = createResponse();
+  await leaveSalon(
+    { user: { _id: barberId, role: "barber" }, body: { salonId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, { message: "Could not leave salon" });
+  assert.equal(JSON.stringify(res.body).includes("MongoServerError"), false);
+  assert.equal(JSON.stringify(res.body).includes("topology"), false);
+  assert.equal(JSON.stringify(res.body).includes("collection"), false);
+  assert.equal(JSON.stringify(res.body).includes("transaction"), false);
 });
 
 test("leave ignores stale legacy approval when canonical membership is not approved", async () => {

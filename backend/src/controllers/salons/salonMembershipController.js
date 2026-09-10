@@ -280,8 +280,6 @@ export const leaveSalon = async (req, res) => {
       user: serializeUser(barber),
     });
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      message: error.message || "Could not leave salon",
-    });
+    return sendControllerError(res, error, "Could not leave salon");
   }
 };
