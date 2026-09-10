@@ -194,7 +194,7 @@ export default function ClientBookingStepContent({
           </div>
 
           <label className="grid gap-2 text-sm font-semibold sm:max-w-xs">
-            Or pick a custom date
+            Other date
             <input
               className="rounded-2xl border p-3 font-normal"
               min={todayKey}

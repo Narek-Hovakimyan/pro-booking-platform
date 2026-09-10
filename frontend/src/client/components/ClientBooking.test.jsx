@@ -786,7 +786,7 @@ describe("ClientBooking split boundaries", () => {
 
     renderBooking(<ClientBooking {...props} />);
 
-    const dateInput = screen.getByLabelText("Or pick a custom date");
+    const dateInput = screen.getByLabelText("Other date");
     expect(dateInput).toHaveAttribute("min", "2026-02-01");
 
     fireEvent.change(dateInput, { target: { value: "2026-01-31" } });
@@ -795,6 +795,50 @@ describe("ClientBooking split boundaries", () => {
     fireEvent.change(dateInput, { target: { value: "2026-02-02" } });
     expect(props.setSelectedDate).toHaveBeenCalledWith("2026-02-02");
     expect(props.setSelectedDayKey).toHaveBeenCalledWith("mon");
+  });
+
+  it("keeps seven quick dates and the Other date calendar on the shared selection flow", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-31T20:15:00.000Z"));
+    setupStrictMocks();
+    const dateOptions = [
+      ["2030-03-10", "Sun, Mar 10", "sun"],
+      ["2030-03-11", "Mon, Mar 11", "mon"],
+      ["2030-03-12", "Tue, Mar 12", "tue"],
+      ["2030-03-13", "Wed, Mar 13", "wed"],
+      ["2030-03-14", "Thu, Mar 14", "thu"],
+      ["2030-03-15", "Fri, Mar 15", "fri"],
+      ["2030-03-16", "Sat, Mar 16", "sat"],
+    ].map(([value, label, dayKey]) => ({ value, label, dayKey }));
+    const props = buildProps({
+      step: 3,
+      selectedDate: dateOptions[0].value,
+      selectedDateLabel: dateOptions[0].label,
+      selectedDayKey: dateOptions[0].dayKey,
+      selectedTime: "",
+      availableSlots: [],
+      dateOptions,
+    });
+
+    renderBooking(<ClientBooking {...props} />);
+
+    const quickDateButtons = dateOptions.map((day) =>
+      screen.getByRole("button", { name: day.label })
+    );
+    expect(quickDateButtons).toHaveLength(7);
+    expect(quickDateButtons[0]).toHaveClass("bg-neutral-950");
+    expect(screen.queryByRole("button", { name: "Sun, Feb 1" })).not.toBeInTheDocument();
+
+    fireEvent.click(quickDateButtons[1]);
+    expect(props.setSelectedDate).toHaveBeenCalledWith("2030-03-11");
+    expect(props.setSelectedDayKey).toHaveBeenCalledWith("mon");
+    expect(props.setSelectedTime).toHaveBeenCalledWith("");
+
+    const dateInput = screen.getByLabelText("Other date");
+    fireEvent.change(dateInput, { target: { value: "2026-02-08" } });
+    expect(props.setSelectedDate).toHaveBeenLastCalledWith("2026-02-08");
+    expect(props.setSelectedDayKey).toHaveBeenLastCalledWith("sun");
+    expect(props.setSelectedTime).toHaveBeenLastCalledWith("");
   });
 
   it("keeps confirmation unavailable while service data is loading", async () => {

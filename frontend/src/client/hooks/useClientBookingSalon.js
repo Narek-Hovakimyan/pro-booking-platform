@@ -74,6 +74,7 @@ export function useClientBookingSalon({
 
   return {
     approvedSalons,
+    dateOptions,
     hasMultipleSalons,
     handleContinueAfterService,
     handleSalonSelect,
