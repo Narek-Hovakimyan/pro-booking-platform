@@ -1,7 +1,6 @@
 import { useDispatch, useSelector } from "react-redux";
 
 import {
-  addBooking,
   cancelBooking as cancelBookingAction,
   fetchBarberBookings,
   fetchClientBookings,
@@ -12,7 +11,7 @@ export function useBooking() {
   const dispatch = useDispatch();
   const bookings = useSelector((state) => state.bookings);
 
-  const createBooking = async (bookingData) => {
+  const createBooking = async (bookingData, { onSuccess } = {}) => {
     // If referenceImages (File[]) are included, send as FormData
     const hasFiles = bookingData.files && bookingData.files.length > 0;
     let payload;
@@ -41,13 +40,18 @@ export function useBooking() {
       payload = data;
     }
 
-    const action = dispatch(addBooking(payload));
-    await Promise.all([
+    try {
+      onSuccess?.(payload);
+    } catch {
+      // The booking already exists. A UI handoff failure must not make it retryable.
+    }
+
+    void Promise.allSettled([
       dispatch(fetchClientBookings(bookingData.clientId)),
       dispatch(fetchBarberBookings(bookingData.barberId)),
     ]);
 
-    return action.payload;
+    return payload;
   };
 
   const cancelBooking = async (bookingId, clientId, cancelReason = "") => {

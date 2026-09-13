@@ -153,6 +153,8 @@ export function useClientBookingSubmission({
     setIsSaving(true);
     setError("");
 
+    let successHandedOff = false;
+
     try {
       const bookingPayload = buildClientBookingSubmissionPayload({
         barberId: selectedBarberId,
@@ -173,18 +175,32 @@ export function useClientBookingSubmission({
         selectedSalonId: selectedBookingSalonId,
       });
 
-      const createdBooking = await createBooking(bookingPayload);
+      const completeSuccess = (createdBooking) => {
+        if (!isCurrentRequest()) return;
+
+        successHandedOff = true;
+        try {
+          onResetBookingFlow();
+        } finally {
+          navigate("/success", {
+            state: {
+              booking: createdBooking,
+              payment: createdBooking?.payment || createdBooking?.depositPayment || null,
+            },
+          });
+        }
+      };
+      const createdBooking = await createBooking(bookingPayload, {
+        onSuccess: completeSuccess,
+      });
+      if (successHandedOff) {
+        return;
+      }
       if (!isCurrentRequest()) {
         return;
       }
 
-      onResetBookingFlow();
-      navigate("/success", {
-        state: {
-          booking: createdBooking,
-          payment: createdBooking?.payment || createdBooking?.depositPayment || null,
-        },
-      });
+      completeSuccess(createdBooking);
     } catch (requestError) {
       if (!isCurrentRequest()) {
         return;
@@ -197,7 +213,7 @@ export function useClientBookingSubmission({
         )
       );
     } finally {
-      if (isCurrentRequest()) {
+      if (isCurrentRequest() && !successHandedOff) {
         activeRequestIdRef.current = null;
         submitLockRef.current = false;
         setIsSaving(false);

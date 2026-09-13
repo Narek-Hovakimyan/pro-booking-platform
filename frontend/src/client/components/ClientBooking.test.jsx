@@ -1,9 +1,9 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useContext, useEffect, useState } from "react";
 import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, UNSAFE_NavigationContext } from "react-router-dom";
 
 import { renderWithProviders } from "@/test/renderWithProviders";
 import ClientBooking from "./ClientBooking";
@@ -1501,6 +1501,213 @@ describe("ClientBooking booking flow", () => {
       textVersion: "v1.0",
     });
     expect(formData.getAll("referenceImages")).toEqual([referenceFile]);
+  });
+
+  it.each([
+    ["client", `/bookings/client/${CLIENT_ID}`],
+    ["barber", `/bookings/barber/${BARBER_ID}`],
+  ])("hands off success before an immediate %s refresh can invalidate booking context", async (_scope, failedRefreshUrl) => {
+    const user = userEvent.setup();
+    const { useBooking: useActualBooking } = await vi.importActual("@/shared/hooks/useBooking");
+    const events = [];
+    const onResetBookingFlow = vi.fn(() => events.push("reset"));
+    const refreshFailure = new Error("Refresh unavailable");
+
+    api.post.mockResolvedValue({ data: createdBooking });
+    api.get.mockImplementation((url) => {
+      if (url === failedRefreshUrl) return Promise.reject(refreshFailure);
+      if (url === `/bookings/client/${CLIENT_ID}` || url === `/bookings/barber/${BARBER_ID}`) {
+        return Promise.resolve({
+          data: [{ ...createdBooking, clientId: CLIENT_ID, barberId: BARBER_ID }],
+        });
+      }
+      throw new Error(`Unexpected api.get call: ${url}`);
+    });
+
+    function ActualSubmissionHarness() {
+      const { bookings, createBooking } = useActualBooking();
+      const [error, setError] = useState("");
+      const [isSaving, setIsSaving] = useState(false);
+      const selectedTime = bookings.length > 0 ? "" : BOOKING_TIME;
+
+      const { submitBooking } = useClientBookingSubmission({
+        client: { name: "Jamie Client", phone: "+37477123456", note: CLIENT_NOTE },
+        consent: null,
+        consultation: null,
+        createBooking,
+        currentUser: { id: CLIENT_ID, role: "client" },
+        isSaving,
+        isSelectedTimeValid: true,
+        onResetBookingFlow,
+        referenceFiles: [],
+        selectedBarberId: BARBER_ID,
+        selectedBookingSalonId: EXPLICIT_SALON_ID,
+        selectedDate: BOOKING_DATE,
+        selectedDateDayKey: DAY_KEY,
+        selectedService: baseService,
+        selectedServiceEntityId: SERVICE_ID,
+        selectedTime,
+        setError,
+        setIsSaving,
+        setSelectedTime: vi.fn(),
+        voucherCode: "",
+      });
+
+      return (
+        <>
+          {error ? <p role="alert">{error}</p> : null}
+          <button onClick={submitBooking} type="button">Submit successful booking</button>
+        </>
+      );
+    }
+
+    function NavigationRecorder() {
+      const { navigator } = useContext(UNSAFE_NavigationContext);
+
+      useEffect(() => {
+        const push = navigator.push;
+        const pushSpy = vi.spyOn(navigator, "push").mockImplementation((...args) => {
+          events.push("navigate");
+          return push(...args);
+        });
+
+        return () => pushSpy.mockRestore();
+      }, [navigator]);
+
+      return null;
+    }
+
+    const { store } = renderBooking(
+      <>
+        <NavigationRecorder />
+        <Routes>
+          <Route path="/book" element={<ActualSubmissionHarness />} />
+          <Route path="/success" element={<div>Success marker</div>} />
+        </Routes>
+      </>
+    );
+    const unsubscribe = store.subscribe(() => {
+      if (store.getState().bookings.length > 0) events.push("reconcile");
+    });
+
+    const submitButton = screen.getByRole("button", { name: "Submit successful booking" });
+    await user.click(submitButton);
+    await user.click(submitButton);
+
+    expect(await screen.findByText("Success marker")).toBeVisible();
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith(
+      "/bookings",
+      expect.objectContaining({ salonId: EXPLICIT_SALON_ID })
+    );
+    expect(onResetBookingFlow).toHaveBeenCalledTimes(1);
+    expect(api.get).toHaveBeenCalledWith(failedRefreshUrl);
+    await waitFor(() => expect(events).toContain("reconcile"));
+    expect(events.indexOf("reset")).toBeLessThan(events.indexOf("reconcile"));
+    expect(events.indexOf("navigate")).toBeLessThan(events.indexOf("reconcile"));
+    unsubscribe();
+  });
+
+  it("keeps a successful create successful when reset throws during handoff", async () => {
+    const user = userEvent.setup();
+    const { useBooking: useActualBooking } = await vi.importActual("@/shared/hooks/useBooking");
+    const onResetBookingFlow = vi.fn(() => {
+      throw new Error("Reset failed");
+    });
+
+    api.post.mockResolvedValue({ data: createdBooking });
+    api.get.mockResolvedValue({ data: [] });
+
+    function ThrowingResetHarness() {
+      const { createBooking } = useActualBooking();
+      const [error, setError] = useState("");
+      const [isSaving, setIsSaving] = useState(false);
+      const { submitBooking } = useClientBookingSubmission({
+        client: { name: "Jamie Client", phone: "+37477123456", note: CLIENT_NOTE },
+        consent: null,
+        consultation: null,
+        createBooking,
+        currentUser: { id: CLIENT_ID, role: "client" },
+        isSaving,
+        isSelectedTimeValid: true,
+        onResetBookingFlow,
+        referenceFiles: [],
+        selectedBarberId: BARBER_ID,
+        selectedBookingSalonId: EXPLICIT_SALON_ID,
+        selectedDate: BOOKING_DATE,
+        selectedDateDayKey: DAY_KEY,
+        selectedService: baseService,
+        selectedServiceEntityId: SERVICE_ID,
+        selectedTime: BOOKING_TIME,
+        setError,
+        setIsSaving,
+        setSelectedTime: vi.fn(),
+        voucherCode: "",
+      });
+
+      return (
+        <>
+          {error ? <p role="alert">{error}</p> : null}
+          <button onClick={submitBooking} type="button">Submit with throwing reset</button>
+        </>
+      );
+    }
+
+    renderBooking(
+      <Routes>
+        <Route path="/book" element={<ThrowingResetHarness />} />
+        <Route path="/success" element={<div>Success marker</div>} />
+      </Routes>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Submit with throwing reset" }));
+
+    expect(await screen.findByText("Success marker")).toBeVisible();
+    expect(onResetBookingFlow).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("returns the created booking when the post-create handoff callback throws", async () => {
+    const user = userEvent.setup();
+    const { useBooking: useActualBooking } = await vi.importActual("@/shared/hooks/useBooking");
+
+    api.post.mockResolvedValue({ data: createdBooking });
+    api.get.mockResolvedValue({ data: [] });
+
+    function ThrowingCallbackHarness() {
+      const { createBooking } = useActualBooking();
+      const [result, setResult] = useState("");
+
+      return (
+        <button
+          onClick={async () => {
+            try {
+              const booking = await createBooking({
+                barberId: BARBER_ID,
+                clientId: CLIENT_ID,
+              }, {
+                onSuccess: () => {
+                  throw new Error("Handoff failed");
+                },
+              });
+              setResult(booking._id);
+            } catch {
+              setResult("rejected");
+            }
+          }}
+          type="button"
+        >
+          {result || "Submit with throwing callback"}
+        </button>
+      );
+    }
+
+    renderWithProviders(<ThrowingCallbackHarness />);
+    await user.click(screen.getByRole("button", { name: "Submit with throwing callback" }));
+
+    await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("booking-1"));
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 
   it("serializes consultation, consent, and reference files into the booking payload", async () => {

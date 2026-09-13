@@ -134,11 +134,9 @@ export default function BookingPage({
       ),
     [barberId, services]
   );
-  const selectedService = isServicesLoading
-    ? null
-    : barberServices.find(
-        (service) => String(service?.id || service?._id) === String(selectedServiceId)
-      ) || null;
+  const selectedService = barberServices.find(
+    (service) => String(service?.id || service?._id) === String(selectedServiceId)
+  ) || null;
   const barberScheduleEntry = useMemo(() => getBookingScheduleEntry({
     schedule,
     barberId,

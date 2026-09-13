@@ -1,14 +1,17 @@
-import { act, render, renderHook } from "@testing-library/react";
+import { act, render, renderHook, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  clientBookingProps: null,
+  confirmationSetStep: vi.fn(),
   dispatch: vi.fn(),
   navigate: vi.fn(),
 }));
 
 import api from "@/shared/api/axios";
 import useBookingPageData from "@/client/hooks/useBookingPageData";
+import { useClientBookingConfirmation } from "@/client/hooks/useClientBookingConfirmation";
 import BookingPage from "./BookingPage";
 
 vi.mock("react-redux", () => ({
@@ -22,7 +25,55 @@ vi.mock("react-router-dom", async (importOriginal) => ({
 }));
 
 vi.mock("@/shared/api/axios", () => ({
-  default: { get: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn() },
+}));
+
+vi.mock("@/client/components/booking/BookingPageContent", () => ({
+  default: function BookingPageContentMock({ clientBookingProps }) {
+    mocks.clientBookingProps = clientBookingProps;
+    const confirmation = useClientBookingConfirmation({
+      barberId: clientBookingProps.barber?.id || clientBookingProps.barber?._id,
+      client: clientBookingProps.client,
+      currentUser: clientBookingProps.currentUser,
+      isSaving: false,
+      isSelectedTimeValid: true,
+      onRefreshServices: clientBookingProps.onRefreshServices,
+      selectedBarberId: clientBookingProps.barber?.id || clientBookingProps.barber?._id,
+      selectedBookingSalonId: clientBookingProps.selectedSalonId,
+      selectedDate: clientBookingProps.selectedDate,
+      selectedDateDayKey: clientBookingProps.selectedDayKey || "mon",
+      selectedService: clientBookingProps.selectedService,
+      selectedServiceEntityId: clientBookingProps.selectedServiceId,
+      selectedTime: clientBookingProps.selectedTime,
+      setError: vi.fn(),
+      setSelectedTime: vi.fn(),
+      setStep: mocks.confirmationSetStep,
+      voucherCode: "",
+    });
+
+    return (
+      <div>
+        <output data-testid="selected-service-id">
+          {clientBookingProps.selectedService?.id || clientBookingProps.selectedService?._id || "none"}
+        </output>
+        <output data-testid="services-loading">
+          {String(clientBookingProps.isServiceDataLoading)}
+        </output>
+        <button onClick={() => clientBookingProps.onRefreshServices()} type="button">
+          Refresh services
+        </button>
+        <button onClick={confirmation.openConfirmation} type="button">
+          Start confirmation
+        </button>
+        <output data-testid="confirmation-preparing">
+          {String(confirmation.isPreparingConfirmation)}
+        </output>
+        <output data-testid="confirmation-open">
+          {String(confirmation.showConfirmation)}
+        </output>
+      </div>
+    );
+  },
 }));
 
 const renderPage = (state, props = {}) => {
@@ -101,7 +152,11 @@ describe("BookingPage route and reset behavior", () => {
     vi.useFakeTimers();
     mocks.dispatch.mockClear();
     mocks.navigate.mockClear();
+    mocks.confirmationSetStep.mockClear();
     vi.mocked(api.get).mockResolvedValue({ data: [] });
+    vi.mocked(api.post).mockResolvedValue({
+      data: { finalPrice: 1000, originalPrice: 1000, depositAmount: 0 },
+    });
   });
 
   afterEach(() => vi.useRealTimers());
@@ -132,6 +187,108 @@ describe("BookingPage route and reset behavior", () => {
     expect(props.setSelectedServiceId).toHaveBeenCalledWith(null);
     expect(props.setSelectedTime).toHaveBeenCalledWith("");
     expect(props.setClient).toHaveBeenCalledWith({ name: "", phone: "", note: "" });
+  });
+
+  it("keeps the selected service available while confirmation refreshes services", async () => {
+    const initial = createDeferred();
+    const refresh = createDeferred();
+    const service = { id: "service-1", barberId: "barber-1", active: true };
+    mockServiceRequests([initial, refresh]);
+
+    renderPage(
+      { barber: { id: "barber-1", depositSettings: { enabled: false } } },
+      { services: [service], selectedServiceId: service.id, selectedTime: "10:00" }
+    );
+
+    await resolveInitialServices(initial, [service]);
+    expect(screen.getByTestId("selected-service-id")).toHaveTextContent(service.id);
+
+    act(() => {
+      screen.getByRole("button", { name: "Refresh services" }).click();
+    });
+
+    expect(screen.getByTestId("services-loading")).toHaveTextContent("true");
+    expect(screen.getByTestId("selected-service-id")).toHaveTextContent(service.id);
+
+    await act(async () => {
+      refresh.resolve({ data: [service] });
+      await refresh.promise;
+    });
+
+    expect(screen.getByTestId("services-loading")).toHaveTextContent("false");
+    expect(screen.getByTestId("selected-service-id")).toHaveTextContent(service.id);
+  });
+
+  it("continues confirmation through the quote after the refresh loading transition", async () => {
+    const initial = createDeferred();
+    const refresh = createDeferred();
+    const service = { id: "service-1", barberId: "barber-1", active: true, price: 1000 };
+    mockServiceRequests([initial, refresh]);
+
+    renderPage(
+      { barber: { id: "barber-1", depositSettings: { enabled: false } } },
+      {
+        client: { name: "Client", phone: "+37477123456", note: "" },
+        currentUser: { id: "client-1", role: "client" },
+        services: [service],
+        selectedServiceId: service.id,
+        selectedTime: "10:00",
+      }
+    );
+
+    await resolveInitialServices(initial, [service]);
+    act(() => {
+      screen.getByRole("button", { name: "Start confirmation" }).click();
+    });
+
+    expect(screen.getByTestId("services-loading")).toHaveTextContent("true");
+    expect(screen.getByTestId("selected-service-id")).toHaveTextContent(service.id);
+    expect(screen.getByTestId("confirmation-preparing")).toHaveTextContent("true");
+
+    await act(async () => {
+      refresh.resolve({ data: [service] });
+      await refresh.promise;
+    });
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/bookings/quote",
+      expect.objectContaining({ barberId: "barber-1", serviceId: service.id }),
+      expect.any(Object)
+    );
+    expect(screen.getByTestId("confirmation-open")).toHaveTextContent("true");
+  });
+
+  it("fails closed when the refreshed service is no longer available", async () => {
+    const initial = createDeferred();
+    const refresh = createDeferred();
+    const service = { id: "service-1", barberId: "barber-1", active: true, price: 1000 };
+    mockServiceRequests([initial, refresh]);
+    vi.mocked(api.post).mockClear();
+
+    renderPage(
+      { barber: { id: "barber-1", depositSettings: { enabled: false } } },
+      {
+        client: { name: "Client", phone: "+37477123456", note: "" },
+        currentUser: { id: "client-1", role: "client" },
+        services: [service],
+        selectedServiceId: service.id,
+        selectedTime: "10:00",
+      }
+    );
+
+    await resolveInitialServices(initial, [service]);
+    act(() => {
+      screen.getByRole("button", { name: "Start confirmation" }).click();
+    });
+
+    await act(async () => {
+      refresh.resolve({ data: [] });
+      await refresh.promise;
+    });
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(mocks.confirmationSetStep).toHaveBeenCalledWith(2);
+    expect(screen.getByTestId("confirmation-open")).toHaveTextContent("false");
   });
 
   it("keeps a newer manual service refresh when the initial request resolves late", async () => {
