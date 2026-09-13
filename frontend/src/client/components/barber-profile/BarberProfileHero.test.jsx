@@ -12,6 +12,7 @@ function LocationProbe() {
     <div data-testid="location-probe">
       {JSON.stringify({
         pathname: location.pathname,
+        search: location.search,
         state: location.state,
       })}
     </div>
@@ -80,7 +81,7 @@ describe("BarberProfileHero", () => {
     );
     expect(
       screen.getByRole("link", { name: "Book appointment" })
-    ).toHaveAttribute("href", "/booking/barber-1");
+    ).toHaveAttribute("href", "/booking/barber-1?salonId=salon-1");
     expect(screen.getByRole("link", { name: "Message" })).toHaveAttribute(
       "href",
       "/messages/barber-1"
@@ -93,8 +94,23 @@ describe("BarberProfileHero", () => {
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       '"pathname":"/booking/barber-1"'
     );
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      '"search":"?salonId=salon-1"'
+    );
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      '"selectedSalonId":"salon-1"'
+    );
     expect(screen.getByTestId("location-probe")).toHaveTextContent('"id":"barber-1"');
     expectNoUnsafeCurrency(container);
+  });
+
+  it("keeps independent booking unscoped when no displayed salon is available", () => {
+    renderHero({ salonId: "unrelated-salon", showSalonLink: false });
+
+    expect(screen.getByRole("link", { name: "Book appointment" })).toHaveAttribute(
+      "href",
+      "/booking/barber-1"
+    );
   });
 
   it("supports numeric strings and valid zero without falling back to no services", () => {

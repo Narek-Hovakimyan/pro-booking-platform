@@ -25,7 +25,14 @@ function normalizePrice(value) {
   return numericValue;
 }
 
-function ServiceCard({ service, barber, profileBarberId }) {
+function ServiceCard({ service, barber, bookingSalonId, profileBarberId }) {
+  const bookingPath = bookingSalonId
+    ? `/booking/${profileBarberId}?salonId=${encodeURIComponent(bookingSalonId)}`
+    : `/booking/${profileBarberId}`;
+  const bookingState = bookingSalonId
+    ? { barber, selectedSalonId: bookingSalonId }
+    : { barber };
+
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-all hover:border-neutral-300 hover:shadow-md">
       <div className="absolute left-0 top-0 h-full w-1 bg-emerald-500" />
@@ -57,8 +64,8 @@ function ServiceCard({ service, barber, profileBarberId }) {
             as={Link}
             className="mt-2"
             size="sm"
-            state={{ barber }}
-            to={`/booking/${profileBarberId}`}
+            state={bookingState}
+            to={bookingPath}
           >
             Book
           </Button>
@@ -71,6 +78,7 @@ function ServiceCard({ service, barber, profileBarberId }) {
 export default function BarberServicesSection({
   barber,
   barberServices,
+  bookingSalonId = null,
   profileBarberId,
 }) {
   const groupedServices = groupServicesByDisplayCategory(barberServices);
@@ -108,6 +116,7 @@ export default function BarberServicesSection({
                     <ServiceCard
                       key={service.id || service._id}
                       barber={barber}
+                      bookingSalonId={bookingSalonId}
                       profileBarberId={profileBarberId}
                       service={service}
                     />

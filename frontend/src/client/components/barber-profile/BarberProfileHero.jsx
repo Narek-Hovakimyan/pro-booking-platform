@@ -47,6 +47,13 @@ export default function BarberProfileHero({
   totalCerts,
 }) {
   const normalizedStartingPrice = normalizeStartingPrice(startingPrice);
+  const bookingSalonId = showSalonLink && salonId ? salonId : null;
+  const bookingPath = bookingSalonId
+    ? `/booking/${profileBarberId}?salonId=${encodeURIComponent(bookingSalonId)}`
+    : `/booking/${profileBarberId}`;
+  const bookingState = bookingSalonId
+    ? { barber, selectedSalonId: bookingSalonId }
+    : { barber };
 
   return (
     <Card className="overflow-hidden rounded-2xl shadow-card sm:rounded-3xl">
@@ -176,8 +183,8 @@ export default function BarberProfileHero({
               as={Link}
               className="sm:min-w-[160px]"
               size="lg"
-              state={{ barber }}
-              to={`/booking/${profileBarberId}`}
+              state={bookingState}
+              to={bookingPath}
             >
               Book appointment
             </Button>

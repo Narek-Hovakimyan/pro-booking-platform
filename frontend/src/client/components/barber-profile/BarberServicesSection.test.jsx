@@ -12,6 +12,7 @@ function LocationProbe() {
     <div data-testid="location-probe">
       {JSON.stringify({
         pathname: location.pathname,
+        search: location.search,
         state: location.state,
       })}
     </div>
@@ -58,6 +59,7 @@ describe("BarberServicesSection", () => {
           price: "0",
         },
       ],
+      bookingSalonId: "salon-1",
       profileBarberId: "barber-1",
     });
 
@@ -71,8 +73,23 @@ describe("BarberServicesSection", () => {
 
     await user.click(screen.getAllByRole("link", { name: "Book" })[0]);
     expect(screen.getByTestId("location-probe")).toHaveTextContent('"pathname":"/booking/barber-1"');
+    expect(screen.getByTestId("location-probe")).toHaveTextContent('"search":"?salonId=salon-1"');
+    expect(screen.getByTestId("location-probe")).toHaveTextContent('"selectedSalonId":"salon-1"');
     expect(screen.getByTestId("location-probe")).toHaveTextContent('"id":"barber-1"');
     expectNoUnsafeCurrency(container);
+  });
+
+  it("keeps independent booking unscoped without a displayed salon ID", () => {
+    renderSection({
+      barber: { id: "barber-1", name: "Anna", salon: { id: "unrelated-salon" } },
+      barberServices: [{ id: "service-1", category: "haircut", name: "Cut", price: 5000 }],
+      profileBarberId: "barber-1",
+    });
+
+    expect(screen.getByRole("link", { name: "Book" })).toHaveAttribute(
+      "href",
+      "/booking/barber-1"
+    );
   });
 
   it("renders missing, empty, invalid, negative, and non-finite prices safely", () => {

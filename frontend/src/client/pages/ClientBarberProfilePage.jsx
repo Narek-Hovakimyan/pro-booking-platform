@@ -382,6 +382,7 @@ export default function ClientBarberProfilePage() {
               <BarberServicesSection
                 barber={barber}
                 barberServices={barberServices}
+                bookingSalonId={showSalonLink ? salonId : null}
                 profileBarberId={profileBarberId}
               />
 
