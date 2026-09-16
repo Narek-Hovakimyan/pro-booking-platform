@@ -46,6 +46,23 @@ test("factory supports mock provider outside production", () => {
   assert.equal(provider.providerName, "mock");
 });
 
+test("mock provider reuses an intent for the same idempotency key", async () => {
+  const provider = new MockPaymentProvider();
+  const first = await provider.createPaymentIntent({
+    amount: 500,
+    currency: "AMD",
+    idempotencyKey: "booking-deposit:booking-1",
+  });
+  const second = await new MockPaymentProvider().createPaymentIntent({
+    amount: 500,
+    currency: "AMD",
+    idempotencyKey: "booking-deposit:booking-1",
+  });
+
+  assert.equal(first.providerPaymentId, second.providerPaymentId);
+  assert.equal(first.checkoutUrl, second.checkoutUrl);
+});
+
 test("mock provider is disabled in production", () => {
   process.env.NODE_ENV = "production";
 

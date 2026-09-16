@@ -6,6 +6,7 @@ import path from "path";
 import { __bookingTestHooks, createBooking, updateBooking } from "./bookingController.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
+import BookingCreateIdempotencyOperation from "../../models/BookingCreateIdempotencyOperation.js";
 import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
@@ -48,6 +49,8 @@ const originalConsoleError = console.error;
 const originalServiceFind = Service.find;
 const originalPaymentProvider = process.env.PAYMENT_PROVIDER;
 const originalFindByIdAndDelete = Booking.findByIdAndDelete;
+const originalBookingCreateIdempotencyFindOne = BookingCreateIdempotencyOperation.findOne;
+const originalBookingCreateIdempotencyCreate = BookingCreateIdempotencyOperation.create;
 const originalStageBookingReferenceMedia =
   __bookingCreateServiceTestHooks.stageBookingReferenceMedia;
 const originalPromoteBookingReferenceMedia =
@@ -63,6 +66,8 @@ const originalVoucherFind = Voucher.find;
 const originalVoucherFindOne = Voucher.findOne;
 const originalVoucherFindOneAndUpdate = Voucher.findOneAndUpdate;
 const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
+const originalSubscriptionPaymentAttemptFindOneAndUpdate =
+  SubscriptionPaymentAttempt.findOneAndUpdate;
 const originalLoyaltyClaim =
   __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward;
 const mockLoyaltyClaim = async ({
@@ -117,10 +122,14 @@ afterEach(() => {
   Service.find = originalServiceFind;
   Subscription.findOne = originalMethods.subscriptionFindOne;
   SubscriptionPaymentAttempt.create = originalMethods.subscriptionPaymentAttemptCreate;
+  SubscriptionPaymentAttempt.findOneAndUpdate =
+    originalSubscriptionPaymentAttemptFindOneAndUpdate;
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
   Booking.findByIdAndDelete = originalFindByIdAndDelete;
+  BookingCreateIdempotencyOperation.findOne = originalBookingCreateIdempotencyFindOne;
+  BookingCreateIdempotencyOperation.create = originalBookingCreateIdempotencyCreate;
   __bookingCreateServiceTestHooks.stageBookingReferenceMedia =
     originalStageBookingReferenceMedia;
   __bookingCreateServiceTestHooks.promoteBookingReferenceMedia =
@@ -176,6 +185,27 @@ const installReferenceMediaSuccessHooks = () => {
     },
     async endSession() {},
   });
+};
+
+const installBookingCreateIdempotencyStore = (createdBookings) => {
+  const operations = [];
+  BookingCreateIdempotencyOperation.findOne = async (filter) =>
+    operations.find((operation) =>
+      String(operation.actorId) === String(filter.actorId) &&
+      operation.keyHash === filter.keyHash
+    ) || null;
+  BookingCreateIdempotencyOperation.create = async ([payload]) => {
+    if (operations.some((operation) =>
+      String(operation.actorId) === String(payload.actorId) &&
+      operation.keyHash === payload.keyHash
+    )) {
+      throw Object.assign(new Error("duplicate key"), { code: 11000 });
+    }
+    operations.push(payload);
+    return [payload];
+  };
+  Booking.findById = async () => createdBookings[0] || null;
+  return operations;
 };
 
 installReferenceMediaSuccessHooks();
@@ -3521,12 +3551,15 @@ test("createBooking with enabled deposit stores pending deposit fields", async (
     booking.rawWebhookPayload = { secret: true };
     return booking;
   };
-  SubscriptionPaymentAttempt.create = async (payload) => {
-    paymentAttempts.push(payload);
-    return {
-      _id: "deposit-payment-attempt-1",
-      ...payload,
-    };
+  let paymentAttempt;
+  SubscriptionPaymentAttempt.findOneAndUpdate = async (_filter, update) => {
+    if (update.$setOnInsert) {
+      paymentAttempts.push(update.$setOnInsert);
+      paymentAttempt = { _id: "deposit-payment-attempt-1", ...update.$setOnInsert };
+      return paymentAttempt;
+    }
+    Object.assign(paymentAttempt, update.$set);
+    return paymentAttempt;
   };
   BarberProfile.findOne = () => ({
     lean: async () => ({
@@ -3867,6 +3900,119 @@ test("post-commit realtime failure still returns the created booking", async () 
 
   assert.equal(res.statusCode, 201);
   assert.equal(createdBookings.length, 1);
+});
+
+const idempotentBookingRequest = ({ key, body = {}, user = client } = {}) => ({
+  user,
+  get: (name) => (name === "Idempotency-Key" ? key : undefined),
+  body: {
+    barberId,
+    clientId: user._id,
+    serviceId,
+    bookingDate,
+    time: "10:00",
+    salonId,
+    clientName: user.name || "Client",
+    ...body,
+  },
+});
+
+test("booking create replays a same actor/key request without duplicate side effects", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const operations = installBookingCreateIdempotencyStore(createdBookings);
+  let notifications = 0;
+  Notification.create = async (payload) => {
+    notifications += 1;
+    return payload;
+  };
+
+  const first = createResponse();
+  const replay = createResponse();
+  await createBooking(idempotentBookingRequest({ key: "booking-create-replay-1" }), first);
+  await createBooking(idempotentBookingRequest({ key: "booking-create-replay-1" }), replay);
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(replay.statusCode, 201);
+  assert.equal(replay.body._id, first.body._id);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(operations.length, 1);
+  assert.equal(notifications, 1);
+});
+
+test("concurrent same-key booking creates commit once", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const operations = installBookingCreateIdempotencyStore(createdBookings);
+  const first = createResponse();
+  const second = createResponse();
+
+  await Promise.all([
+    createBooking(idempotentBookingRequest({ key: "booking-create-concurrent-1" }), first),
+    createBooking(idempotentBookingRequest({ key: "booking-create-concurrent-1" }), second),
+  ]);
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(second.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(operations.length, 1);
+});
+
+test("booking create rejects a reused idempotency key with changed intent", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installBookingCreateIdempotencyStore(createdBookings);
+
+  const first = createResponse();
+  const conflict = createResponse();
+  await createBooking(idempotentBookingRequest({ key: "booking-create-conflict-1" }), first);
+  await createBooking(
+    idempotentBookingRequest({
+      key: "booking-create-conflict-1",
+      body: { time: "11:00" },
+    }),
+    conflict
+  );
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.body.message, "Idempotency-Key was already used with a different request");
+  assert.equal(createdBookings.length, 1);
+});
+
+test("booking idempotency keys are actor-scoped and legacy requests remain unchanged", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const operations = installBookingCreateIdempotencyStore(createdBookings);
+  const other = { ...client, _id: "64b000000000000000000008", id: "64b000000000000000000008", name: "Other Client" };
+
+  const legacy = createResponse();
+  await createBooking(idempotentBookingRequest({ key: undefined, body: { time: "09:00" } }), legacy);
+  const first = createResponse();
+  await createBooking(idempotentBookingRequest({ key: "shared-key-1" }), first);
+  const otherActor = createResponse();
+  await createBooking(
+    idempotentBookingRequest({ key: "shared-key-1", user: other, body: { time: "11:00" } }),
+    otherActor
+  );
+
+  assert.equal(legacy.statusCode, 201);
+  assert.equal(first.statusCode, 201);
+  assert.equal(otherActor.statusCode, 201);
+  assert.equal(createdBookings.length, 3);
+  assert.equal(operations.length, 2);
+});
+
+test("booking create rejects malformed Idempotency-Key before mutation", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const res = createResponse();
+
+  await createBooking(idempotentBookingRequest({ key: "not a valid key" }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, "Idempotency-Key must be a valid non-empty token");
+  assert.equal(createdBookings.length, 0);
 });
 
 test("unexpected revalidation failure compensates staged reference media", async () => {

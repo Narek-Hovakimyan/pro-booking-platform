@@ -71,6 +71,45 @@ export const buildSafePaymentMetadata = ({
       : "Deposit is required, but online payment is not enabled yet."),
 });
 
+const BOOKING_DEPOSIT_PURPOSE = "booking_deposit";
+const BOOKING_DEPOSIT_CURRENCY = "AMD";
+const bookingDepositIdempotencyKey = (bookingId) =>
+  `booking-deposit:${getIdString(bookingId)}`;
+const bookingDepositClaimPayload = ({ booking, createdBy, providerName, now }) => ({
+  purpose: BOOKING_DEPOSIT_PURPOSE, ownerType: "barber", ownerId: booking.barberId,
+  payerId: booking.clientId || createdBy, bookingId: booking._id, amount: booking.depositAmount,
+  currency: BOOKING_DEPOSIT_CURRENCY, provider: providerName,
+  providerIdempotencyKey: bookingDepositIdempotencyKey(booking._id),
+  status: "pending", metadata: { purpose: BOOKING_DEPOSIT_PURPOSE }, createdBy,
+  expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+});
+
+const isDuplicateKeyError = (error) => error?.code === 11000 || error?.codeName === "DuplicateKey";
+const claimBookingDepositAttempt = async ({ booking, createdBy, providerName, now }) => {
+  const claim = bookingDepositClaimPayload({ booking, createdBy, providerName, now });
+  try {
+    return await SubscriptionPaymentAttempt.findOneAndUpdate({ purpose: BOOKING_DEPOSIT_PURPOSE, bookingId: booking._id }, { $setOnInsert: claim }, { upsert: true, new: true, setDefaultsOnInsert: true });
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+    return SubscriptionPaymentAttempt.findOne({ purpose: BOOKING_DEPOSIT_PURPOSE, bookingId: booking._id });
+  }
+};
+
+const assertBookingDepositAttemptMatchesBooking = ({ attempt, booking, createdBy }) => {
+  const payerId = booking.clientId || createdBy;
+  const matches = attempt && attempt.ownerType === "barber" &&
+    getIdString(attempt.ownerId) === getIdString(booking.barberId) &&
+    getIdString(attempt.payerId) === getIdString(payerId) && attempt.amount === booking.depositAmount &&
+    attempt.currency === BOOKING_DEPOSIT_CURRENCY;
+  if (matches) return;
+  const error = new Error("Booking deposit payment attempt context is invalid");
+  error.code = "BOOKING_DEPOSIT_ATTEMPT_CONTEXT_INVALID";
+  error.statusCode = 409;
+  throw error;
+};
+
+const hasBookingDepositContinuation = (attempt) => Boolean(attempt?.providerPaymentId || attempt?.providerIntentId || attempt?.checkoutUrl) || attempt?.provider === "manual" || TERMINAL_STATUSES.has(attempt?.status);
+
 export const createBookingDepositPaymentAttempt = async ({
   booking,
   createdBy,
@@ -88,10 +127,18 @@ export const createBookingDepositPaymentAttempt = async ({
     });
   }
 
-  const provider = getPaymentProvider(providerName);
+  let attempt = await claimBookingDepositAttempt({ booking, createdBy, providerName, now });
+  assertBookingDepositAttemptMatchesBooking({ attempt, booking, createdBy });
+  if (hasBookingDepositContinuation(attempt)) {
+    return buildSafePaymentMetadata({ attempt });
+  }
+
+  const idempotencyKey = attempt.providerIdempotencyKey || bookingDepositIdempotencyKey(booking._id);
+  const provider = getPaymentProvider(attempt.provider || providerName);
   const paymentIntent = await provider.createPaymentIntent({
     amount: booking.depositAmount,
-    currency: "AMD",
+    currency: BOOKING_DEPOSIT_CURRENCY,
+    idempotencyKey,
     metadata: {
       purpose: "booking_deposit",
       bookingId: getIdString(booking._id),
@@ -100,30 +147,26 @@ export const createBookingDepositPaymentAttempt = async ({
     },
   });
 
-  const attempt = await SubscriptionPaymentAttempt.create({
-    purpose: "booking_deposit",
-    ownerType: "barber",
-    ownerId: booking.barberId,
-    payerId: booking.clientId || createdBy,
-    bookingId: booking._id,
-    amount: booking.depositAmount,
-    currency: "AMD",
-    provider: providerName,
-    providerPaymentId:
-      paymentIntent.providerPaymentId || paymentIntent.providerIntentId || null,
-    providerIntentId:
-      paymentIntent.providerIntentId || paymentIntent.providerPaymentId || null,
-    checkoutUrl: paymentIntent.checkoutUrl || null,
-    status: paymentIntent.status || "pending",
-    metadata: {
-      purpose: "booking_deposit",
-      bookingId: getIdString(booking._id),
-      barberId: getIdString(booking.barberId),
-      clientId: getIdString(booking.clientId),
+  attempt = await SubscriptionPaymentAttempt.findOneAndUpdate(
+    { _id: attempt._id, purpose: BOOKING_DEPOSIT_PURPOSE, bookingId: booking._id },
+    {
+      $set: {
+        provider: attempt.provider || providerName,
+        providerIdempotencyKey: idempotencyKey,
+        providerPaymentId: paymentIntent.providerPaymentId || paymentIntent.providerIntentId || null,
+        providerIntentId: paymentIntent.providerIntentId || paymentIntent.providerPaymentId || null,
+        checkoutUrl: paymentIntent.checkoutUrl || null,
+        status: paymentIntent.status || "pending",
+      },
     },
-    createdBy,
-    expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-  });
+    { new: true }
+  );
+  if (!attempt) {
+    const error = new Error("Booking deposit payment attempt could not be persisted");
+    error.code = "BOOKING_DEPOSIT_ATTEMPT_PERSIST_FAILED";
+    error.statusCode = 503;
+    throw error;
+  }
 
   return buildSafePaymentMetadata({
     attempt,

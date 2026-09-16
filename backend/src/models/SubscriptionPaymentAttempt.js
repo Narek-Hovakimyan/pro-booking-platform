@@ -73,6 +73,12 @@ const subscriptionPaymentAttemptSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    providerIdempotencyKey: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 256,
+    },
     checkoutUrl: {
       type: String,
       default: null,
@@ -195,6 +201,13 @@ subscriptionPaymentAttemptSchema.pre("validate", function validatePurposeReferen
 subscriptionPaymentAttemptSchema.index({ payerId: 1, status: 1, createdAt: -1 });
 subscriptionPaymentAttemptSchema.index({ ownerType: 1, ownerId: 1, status: 1 });
 subscriptionPaymentAttemptSchema.index({ purpose: 1, bookingId: 1, status: 1 });
+subscriptionPaymentAttemptSchema.index(
+  { purpose: 1, bookingId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { purpose: "booking_deposit" },
+  }
+);
 subscriptionPaymentAttemptSchema.index(
   { provider: 1, providerIntentId: 1 },
   { unique: true, partialFilterExpression: { providerIntentId: { $type: "string", $gt: "" } } }

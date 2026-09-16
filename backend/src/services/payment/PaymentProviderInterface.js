@@ -19,7 +19,8 @@ export default class PaymentProviderInterface {
     throw new Error("Not implemented");
   }
 
-  async createPaymentIntent() {
+  async createPaymentIntent({ idempotencyKey } = {}) {
+    void idempotencyKey;
     throw new Error("Not implemented");
   }
 

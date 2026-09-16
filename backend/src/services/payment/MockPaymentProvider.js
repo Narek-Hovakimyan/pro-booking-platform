@@ -1,17 +1,25 @@
 import PaymentProviderInterface from "./PaymentProviderInterface.js";
 
 export default class MockPaymentProvider extends PaymentProviderInterface {
+  static paymentIntentsByIdempotencyKey = new Map();
+
   constructor(providerName = "mock") {
     super(providerName);
     this.providerName = providerName;
   }
 
-  async createPaymentIntent({ amount, currency, metadata } = {}) {
+  async createPaymentIntent({ amount, currency, metadata, idempotencyKey } = {}) {
+    const stableKey = typeof idempotencyKey === "string" && idempotencyKey.length > 0
+      ? idempotencyKey
+      : null;
+    if (stableKey && MockPaymentProvider.paymentIntentsByIdempotencyKey.has(stableKey)) {
+      return MockPaymentProvider.paymentIntentsByIdempotencyKey.get(stableKey);
+    }
     const providerPaymentId = `${this.providerName}_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 10)}`;
 
-    return {
+    const intent = {
       provider: this.providerName,
       providerPaymentId,
       checkoutUrl: `/mock-payments/${providerPaymentId}`,
@@ -21,6 +29,8 @@ export default class MockPaymentProvider extends PaymentProviderInterface {
       currency,
       metadata: metadata || {},
     };
+    if (stableKey) MockPaymentProvider.paymentIntentsByIdempotencyKey.set(stableKey, intent);
+    return intent;
   }
 
   async getPaymentStatus() {
