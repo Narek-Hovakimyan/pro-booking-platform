@@ -11,23 +11,13 @@ import { useSelector } from "react-redux";
 import BookingPageContent from "@/client/components/booking/BookingPageContent";
 import useBookingPageAvailability from "@/client/hooks/useBookingPageAvailability";
 import useBookingPageData from "@/client/hooks/useBookingPageData";
+import useBookingPageDerivedState from "@/client/hooks/useBookingPageDerivedState";
 import {
-  getBookingScheduleEntry,
-  getDefaultSchedule,
   getEntityId,
-  getScheduleOverrides,
   getStateSelectedSalonId,
-  getWeeklySchedule,
   resolveBookingSalonId,
 } from "@/client/utils/bookingPageSchedule";
-import {
-  formatArmeniaDateLabel,
-  getArmeniaDayKey,
-  getNext7ArmeniaDays,
-  isDateKey,
-} from "@/shared/utils/dates";
-
-const EMPTY_NON_WORKING_DAYS = [];
+import { getNext7ArmeniaDays } from "@/shared/utils/dates";
 
 const getRebookContext = (state) => {
   if (!state?.rebook) return null;
@@ -120,53 +110,27 @@ export default function BookingPage({
     setSelectedTime,
   });
 
-  const barberBookings = useMemo(
-    () =>
-      (bookings || []).filter(
-        (booking) => String(booking?.barberId) === String(barberId)
-      ),
-    [barberId, bookings]
-  );
-  const barberServices = useMemo(
-    () =>
-      (services || []).filter(
-        (service) => String(service?.barberId) === String(barberId)
-      ),
-    [barberId, services]
-  );
-  const selectedService = barberServices.find(
-    (service) => String(service?.id || service?._id) === String(selectedServiceId)
-  ) || null;
-  const barberScheduleEntry = useMemo(() => getBookingScheduleEntry({
-    schedule,
-    barberId,
-    barberDefaultSchedule: barber?.defaultSchedule,
-  }), [barber?.defaultSchedule, barberId, schedule]);
-  const barberScheduleOverrides = useMemo(
-    () => getScheduleOverrides(barberScheduleEntry),
-    [barberScheduleEntry]
-  );
-  const barberWeeklySchedule = useMemo(
-    () => getWeeklySchedule(barberScheduleEntry),
-    [barberScheduleEntry]
-  );
-  const barberDefaultSchedule = getDefaultSchedule(
+  const {
+    barberBookings,
+    barberDefaultSchedule,
     barberScheduleEntry,
-    barber?.defaultSchedule
-  );
-  const nonWorkingDays = barberScheduleEntry.nonWorkingDays || EMPTY_NON_WORKING_DAYS;
-  const dateOptions = useMemo(() => getNext7ArmeniaDays(), []);
-  const customSelectedDateOption = isDateKey(selectedDate)
-    ? {
-        value: selectedDate,
-        dayKey: getArmeniaDayKey(selectedDate),
-        label: formatArmeniaDateLabel(selectedDate),
-      }
-    : null;
-  const selectedDateOption =
-    dateOptions.find((option) => option.value === selectedDate) ||
-    customSelectedDateOption;
-  const selectedDateLabel = selectedDateOption?.label || "";
+    barberScheduleOverrides,
+    barberServices,
+    barberWeeklySchedule,
+    dateOptions,
+    nonWorkingDays,
+    selectedDateLabel,
+    selectedDateOption,
+    selectedService,
+  } = useBookingPageDerivedState({
+    barber,
+    barberId,
+    bookings,
+    schedule,
+    selectedDate,
+    selectedServiceId,
+    services,
+  });
   const isRebooking =
     Boolean(rebookContext?.serviceId) &&
     (!rebookContext?.barberId ||
