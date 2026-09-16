@@ -11,7 +11,7 @@ export function useBooking() {
   const dispatch = useDispatch();
   const bookings = useSelector((state) => state.bookings);
 
-  const createBooking = async (bookingData, { onSuccess } = {}) => {
+  const createBooking = async (bookingData, { onSuccess, idempotencyKey } = {}) => {
     // If referenceImages (File[]) are included, send as FormData
     const hasFiles = bookingData.files && bookingData.files.length > 0;
     let payload;
@@ -31,12 +31,18 @@ export function useBooking() {
       for (const file of bookingData.files) {
         formData.append("referenceImages", file);
       }
-      const { data } = await api.post("/bookings", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const headers = {
+        "Content-Type": "multipart/form-data",
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      };
+      const { data } = await api.post("/bookings", formData, { headers });
       payload = data;
     } else {
-      const { data } = await api.post("/bookings", bookingData);
+      const { data } = idempotencyKey
+        ? await api.post("/bookings", bookingData, {
+            headers: { "Idempotency-Key": idempotencyKey },
+          })
+        : await api.post("/bookings", bookingData);
       payload = data;
     }
 

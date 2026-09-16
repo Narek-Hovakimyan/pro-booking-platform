@@ -4,6 +4,18 @@ import { useNavigate } from "react-router-dom";
 import { getFriendlyApiError } from "@/shared/api/errors";
 import { buildClientBookingSubmissionPayload } from "@/client/utils/clientBookingPayload";
 
+const referenceFileIdentities = new WeakMap();
+let nextReferenceFileIdentity = 0;
+
+const getReferenceFileIdentity = (file) => {
+  if (!file || typeof file !== "object") return "";
+  if (!referenceFileIdentities.has(file)) {
+    nextReferenceFileIdentity += 1;
+    referenceFileIdentities.set(file, nextReferenceFileIdentity);
+  }
+  return referenceFileIdentities.get(file);
+};
+
 function getSubmissionContextKey({
   client,
   consultation,
@@ -38,14 +50,19 @@ function getSubmissionContextKey({
     clientNote: client?.note || "",
     consultation: consultation || null,
     consent: consent || null,
-    referenceFiles: referenceFiles?.map(({ lastModified, name, size, type }) => ({
-      lastModified,
-      name,
-      size,
-      type,
+    referenceFiles: referenceFiles?.map((file) => ({
+      identity: getReferenceFileIdentity(file),
+      lastModified: file.lastModified,
+      name: file.name,
+      size: file.size,
+      type: file.type,
     })) || [],
   });
 }
+
+const createIdempotencyKey = () =>
+  globalThis.crypto?.randomUUID?.() ||
+  `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 export function useClientBookingSubmission({
   client,
@@ -74,6 +91,7 @@ export function useClientBookingSubmission({
   const activeRequestIdRef = useRef(null);
   const contextGenerationRef = useRef(0);
   const nextRequestIdRef = useRef(0);
+  const idempotencyKeyRef = useRef(null);
   const submissionContextKey = getSubmissionContextKey({
     client,
     consultation,
@@ -98,6 +116,7 @@ export function useClientBookingSubmission({
 
     submissionContextKeyRef.current = submissionContextKey;
     contextGenerationRef.current += 1;
+    idempotencyKeyRef.current = null;
 
     if (activeRequestIdRef.current !== null) {
       activeRequestIdRef.current = null;
@@ -150,6 +169,8 @@ export function useClientBookingSubmission({
 
     submitLockRef.current = true;
     activeRequestIdRef.current = requestId;
+    const idempotencyKey = idempotencyKeyRef.current || createIdempotencyKey();
+    idempotencyKeyRef.current = idempotencyKey;
     setIsSaving(true);
     setError("");
 
@@ -179,6 +200,7 @@ export function useClientBookingSubmission({
         if (!isCurrentRequest()) return;
 
         successHandedOff = true;
+        idempotencyKeyRef.current = null;
         try {
           onResetBookingFlow();
         } finally {
@@ -192,6 +214,7 @@ export function useClientBookingSubmission({
       };
       const createdBooking = await createBooking(bookingPayload, {
         onSuccess: completeSuccess,
+        idempotencyKey,
       });
       if (successHandedOff) {
         return;

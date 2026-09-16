@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Route, Routes, UNSAFE_NavigationContext } from "react-router-dom";
+import { Route, Routes, UNSAFE_NavigationContext, useNavigate } from "react-router-dom";
 
 import { renderWithProviders } from "@/test/renderWithProviders";
 import ClientBooking from "./ClientBooking";
@@ -1234,6 +1234,114 @@ describe("ClientBooking booking flow", () => {
     expect(await screen.findByText("Success marker")).toBeVisible();
   });
 
+  it("reuses an idempotency key for an ambiguous retry and rotates it for changed intent", async () => {
+    const user = userEvent.setup();
+    const requestFailure = Object.assign(new Error("Request outcome unavailable"), {
+      response: { data: { message: "Request outcome unavailable" } },
+    });
+    const createBookingMock = vi.fn().mockRejectedValue(requestFailure);
+
+    renderSubmissionConcurrencyHarness({
+      createBooking: createBookingMock,
+      onResetBookingFlow: vi.fn(),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    await waitFor(() => expect(createBookingMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    await waitFor(() => expect(createBookingMock).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "Change time context" }));
+    await user.click(screen.getByRole("button", { name: "Submit booking" }));
+    await waitFor(() => expect(createBookingMock).toHaveBeenCalledTimes(3));
+
+    const [firstPayload, firstOptions] = createBookingMock.mock.calls[0];
+    const [, retryOptions] = createBookingMock.mock.calls[1];
+    const [, changedIntentOptions] = createBookingMock.mock.calls[2];
+    expect(firstOptions.idempotencyKey).toEqual(expect.any(String));
+    expect(retryOptions.idempotencyKey).toBe(firstOptions.idempotencyKey);
+    expect(changedIntentOptions.idempotencyKey).not.toBe(firstOptions.idempotencyKey);
+    expect(firstPayload).not.toHaveProperty("idempotencyKey");
+  });
+
+  it("uses a new idempotency key for a new booking after successful handoff", async () => {
+    const user = userEvent.setup();
+    const { useBooking: useActualBooking } = await vi.importActual("@/shared/hooks/useBooking");
+    const onResetBookingFlow = vi.fn();
+
+    api.post
+      .mockResolvedValueOnce({ data: createdBooking })
+      .mockResolvedValueOnce({ data: { ...createdBooking, _id: "booking-2" } });
+    api.get.mockResolvedValue({ data: [] });
+
+    function ActualSubmissionHarness() {
+      const { createBooking } = useActualBooking();
+      const [error, setError] = useState("");
+      const [isSaving, setIsSaving] = useState(false);
+      const { submitBooking } = useClientBookingSubmission({
+        client: { name: "Jamie Client", phone: "+37477123456", note: CLIENT_NOTE },
+        consent: null,
+        consultation: null,
+        createBooking,
+        currentUser: { id: CLIENT_ID, role: "client" },
+        isSaving,
+        isSelectedTimeValid: true,
+        onResetBookingFlow,
+        referenceFiles: [],
+        selectedBarberId: BARBER_ID,
+        selectedBookingSalonId: EXPLICIT_SALON_ID,
+        selectedDate: BOOKING_DATE,
+        selectedDateDayKey: DAY_KEY,
+        selectedService: baseService,
+        selectedServiceEntityId: SERVICE_ID,
+        selectedTime: BOOKING_TIME,
+        setError,
+        setIsSaving,
+        voucherCode: "",
+      });
+
+      return (
+        <>
+          {error ? <p role="alert">{error}</p> : null}
+          <button onClick={submitBooking} type="button">Submit new booking</button>
+        </>
+      );
+    }
+
+    function SuccessPage() {
+      const navigate = useNavigate();
+
+      return (
+        <>
+          <div>Success marker</div>
+          <button onClick={() => navigate("/book")} type="button">Start new booking</button>
+        </>
+      );
+    }
+
+    renderBooking(
+      <Routes>
+        <Route path="/book" element={<ActualSubmissionHarness />} />
+        <Route path="/success" element={<SuccessPage />} />
+      </Routes>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Submit new booking" }));
+    expect(await screen.findByText("Success marker")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Start new booking" }));
+    await user.click(screen.getByRole("button", { name: "Submit new booking" }));
+    expect(await screen.findByText("Success marker")).toBeVisible();
+
+    const bookingCalls = api.post.mock.calls.filter(([url]) => url === "/bookings");
+    expect(bookingCalls).toHaveLength(2);
+    const [[, firstPayload, firstOptions], [, secondPayload, secondOptions]] = bookingCalls;
+    expect(firstPayload).not.toHaveProperty("idempotencyKey");
+    expect(secondPayload).not.toHaveProperty("idempotencyKey");
+    expect(firstOptions?.headers?.["Idempotency-Key"]).toEqual(expect.any(String));
+    expect(secondOptions?.headers?.["Idempotency-Key"]).toEqual(expect.any(String));
+    expect(secondOptions.headers["Idempotency-Key"]).not.toBe(firstOptions.headers["Idempotency-Key"]);
+    expect(onResetBookingFlow).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps confirmation active through StrictMode and blocks stale updates after unmount", async () => {
     const user = userEvent.setup();
     const pendingQuote = createDeferred();
@@ -1475,7 +1583,7 @@ describe("ClientBooking booking flow", () => {
               consultation: { hairType: "curly", notes: "client-safe" },
               consent: { accepted: true, textVersion: "v1.0" },
               files: [referenceFile],
-            })
+            }, { idempotencyKey: "multipart-idempotency-key-1" })
           }
         >
           Submit multipart booking
@@ -1489,7 +1597,12 @@ describe("ClientBooking booking flow", () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       "/bookings",
       expect.any(FormData),
-      { headers: { "Content-Type": "multipart/form-data" } }
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          "Idempotency-Key": "multipart-idempotency-key-1",
+        },
+      }
     ));
     const formData = api.post.mock.calls.find(([url]) => url === "/bookings")?.[1];
     expect(JSON.parse(formData.get("consultation"))).toEqual({
@@ -1596,10 +1709,12 @@ describe("ClientBooking booking flow", () => {
 
     expect(await screen.findByText("Success marker")).toBeVisible();
     expect(api.post).toHaveBeenCalledTimes(1);
-    expect(api.post).toHaveBeenCalledWith(
-      "/bookings",
-      expect.objectContaining({ salonId: EXPLICIT_SALON_ID })
-    );
+    const bookingCall = api.post.mock.calls.find(([url]) => url === "/bookings");
+    expect(bookingCall?.[1]).toEqual(expect.objectContaining({ salonId: EXPLICIT_SALON_ID }));
+    expect(bookingCall?.[1]).not.toHaveProperty("idempotencyKey");
+    expect(bookingCall?.[2]).toEqual({
+      headers: { "Idempotency-Key": expect.any(String) },
+    });
     expect(onResetBookingFlow).toHaveBeenCalledTimes(1);
     expect(api.get).toHaveBeenCalledWith(failedRefreshUrl);
     await waitFor(() => expect(events).toContain("reconcile"));
