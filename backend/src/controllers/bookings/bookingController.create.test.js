@@ -14,6 +14,7 @@ import Schedule from "../../models/Schedule.js";
 import Service from "../../models/Service.js";
 import Subscription from "../../models/Subscription.js";
 import SubscriptionPaymentAttempt from "../../models/SubscriptionPaymentAttempt.js";
+import MockPaymentProvider from "../../services/payment/MockPaymentProvider.js";
 import SubscriptionSeat from "../../models/SubscriptionSeat.js";
 import User from "../../models/User.js";
 import Voucher from "../../models/Voucher.js";
@@ -68,6 +69,7 @@ const originalVoucherFindOneAndUpdate = Voucher.findOneAndUpdate;
 const originalVoucherFindByIdAndUpdate = Voucher.findByIdAndUpdate;
 const originalSubscriptionPaymentAttemptFindOneAndUpdate =
   SubscriptionPaymentAttempt.findOneAndUpdate;
+const originalMockCreatePaymentIntent = MockPaymentProvider.prototype.createPaymentIntent;
 const originalLoyaltyClaim =
   __loyaltyRewardRedemptionTestHooks.claimLoyaltyReward;
 const mockLoyaltyClaim = async ({
@@ -124,6 +126,8 @@ afterEach(() => {
   SubscriptionPaymentAttempt.create = originalMethods.subscriptionPaymentAttemptCreate;
   SubscriptionPaymentAttempt.findOneAndUpdate =
     originalSubscriptionPaymentAttemptFindOneAndUpdate;
+  MockPaymentProvider.prototype.createPaymentIntent = originalMockCreatePaymentIntent;
+  MockPaymentProvider.paymentIntentsByIdempotencyKey.clear();
   SubscriptionSeat.find = originalMethods.subscriptionSeatFind;
   SubscriptionSeat.findOne = originalMethods.subscriptionSeatFindOne;
   User.findById = originalMethods.userFindById;
@@ -3940,6 +3944,76 @@ test("booking create replays a same actor/key request without duplicate side eff
   assert.equal(notifications, 1);
 });
 
+test("booking create replays accepted consent without treating its server timestamp as new intent", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const operations = installBookingCreateIdempotencyStore(createdBookings);
+  const body = {
+    consultation: { hairType: "curly" },
+    consent: { accepted: true, textVersion: "v1" },
+  };
+  const first = createResponse();
+  const replay = createResponse();
+
+  await createBooking(idempotentBookingRequest({ key: "booking-create-consent-1", body }), first);
+  await createBooking(idempotentBookingRequest({ key: "booking-create-consent-1", body }), replay);
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(replay.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(operations.length, 1);
+  assert.match(operations[0].keyHash, /^[a-f0-9]{64}$/);
+  assert.notEqual(operations[0].keyHash, "booking-create-consent-1");
+});
+
+test("booking replay resumes a committed deposit exactly once after initial payment setup fails", async () => {
+  process.env.PAYMENT_PROVIDER = "mock";
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installBookingCreateIdempotencyStore(createdBookings);
+  BarberProfile.findOne = () => ({
+    lean: async () => ({ depositSettings: { enabled: true, mode: "fixed", value: 25 } }),
+  });
+  let initialClaim = true;
+  let attempt = null;
+  let providerCalls = 0;
+  MockPaymentProvider.prototype.createPaymentIntent = async () => {
+    providerCalls += 1;
+    return {
+      providerPaymentId: "mock-replay-payment-1",
+      checkoutUrl: "/mock-payments/mock-replay-payment-1",
+      status: "requires_action",
+    };
+  };
+  SubscriptionPaymentAttempt.findOneAndUpdate = async (_filter, update) => {
+    if (update.$setOnInsert) {
+      if (initialClaim) {
+        initialClaim = false;
+        throw new Error("payment store temporarily unavailable");
+      }
+      if (!attempt) attempt = { _id: "deposit-replay-attempt-1", ...update.$setOnInsert };
+      return attempt;
+    }
+    Object.assign(attempt, update.$set);
+    return attempt;
+  };
+
+  const first = createResponse();
+  const replay = createResponse();
+  const repeatedReplay = createResponse();
+  await createBooking(idempotentBookingRequest({ key: "booking-create-deposit-replay-1" }), first);
+  await createBooking(idempotentBookingRequest({ key: "booking-create-deposit-replay-1" }), replay);
+  await createBooking(idempotentBookingRequest({ key: "booking-create-deposit-replay-1" }), repeatedReplay);
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(replay.statusCode, 201);
+  assert.equal(repeatedReplay.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
+  assert.equal(replay.body.payment.paymentAttemptId, "deposit-replay-attempt-1");
+  assert.equal(repeatedReplay.body.payment.checkoutUrl, "/mock-payments/mock-replay-payment-1");
+  assert.equal(providerCalls, 1);
+});
+
 test("concurrent same-key booking creates commit once", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
@@ -4000,6 +4074,34 @@ test("booking idempotency keys are actor-scoped and legacy requests remain uncha
   assert.equal(first.statusCode, 201);
   assert.equal(otherActor.statusCode, 201);
   assert.equal(createdBookings.length, 3);
+  assert.equal(operations.length, 2);
+});
+
+test("independent keyed bookings replay by key while different keys remain distinct", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barber);
+  const operations = installBookingCreateIdempotencyStore(createdBookings);
+  const first = createResponse();
+  const replay = createResponse();
+  const distinct = createResponse();
+
+  await createBooking(idempotentBookingRequest({
+    key: "independent-booking-key-1",
+    body: { salonId: null, time: "10:00" },
+  }), first);
+  await createBooking(idempotentBookingRequest({
+    key: "independent-booking-key-1",
+    body: { salonId: null, time: "10:00" },
+  }), replay);
+  await createBooking(idempotentBookingRequest({
+    key: "independent-booking-key-2",
+    body: { salonId: null, time: "11:00" },
+  }), distinct);
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(replay.body._id, first.body._id);
+  assert.equal(distinct.statusCode, 201);
+  assert.equal(createdBookings.length, 2);
   assert.equal(operations.length, 2);
 });
 

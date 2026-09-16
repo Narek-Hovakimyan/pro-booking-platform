@@ -51,6 +51,9 @@ import {
   createBookingMutationHooks,
   createBookingRecord,
 } from "./bookingCreateMutationHelpers.js";
+import {
+  createBookingCreateIdempotencyLifecycle,
+} from "./bookingCreateIdempotencyService.js";
 
 const bookingCreateHooks = createBookingMutationHooks({
   activateBookingReferenceMedia,
@@ -77,12 +80,31 @@ const bookingReadinessError = (result) => Object.assign(
   new Error(result?.body?.message || "This specialist is not currently accepting bookings."), { bookingReadiness: result }
 );
 
+const resumeBookingCreateReplay = async ({ replay, user }) => {
+  if (replay?.body || !replay.booking?.depositRequired) return replay;
+  try {
+    return {
+      ...replay,
+      payment: await createBookingDepositPaymentAttempt({
+        booking: replay.booking,
+        createdBy: user?._id,
+      }),
+    };
+  } catch {
+    return {
+      status: 503,
+      body: { message: "Booking payment initialization is temporarily unavailable" },
+    };
+  }
+};
+
 export const createBookingService = async ({
   body,
   user,
   referenceImages,
   referenceUploads = [],
   cleanupReferenceImagesOnError,
+  idempotencyKey = null,
 }) => {
   const cleanup = cleanupReferenceImagesOnError;
   const {
@@ -167,6 +189,17 @@ export const createBookingService = async ({
     return normalizedIds;
   }
   const { barberId, serviceId, salonId } = normalizedIds;
+
+  const idempotency = await createBookingCreateIdempotencyLifecycle({
+    key: idempotencyKey,
+    actorId: user?._id,
+    request: { body, barberId, clientId, serviceId, salonId, bookingDate, dayKey, time, createdBy, consultation, consent, referenceImages, referenceUploads },
+  });
+  const existingReplay = await idempotency.findReplayResult();
+  if (existingReplay) {
+    cleanup();
+    return resumeBookingCreateReplay({ replay: existingReplay, user });
+  }
 
   // Block booking creation for unpaid barbers in the selected salon context.
   const barberPaidAccess = await barberHasBookingPaidAccessForSalon(barberId, salonId);
@@ -273,6 +306,7 @@ export const createBookingService = async ({
       const createInsideMutation = async () => {
         transactionEntered = true;
         await guardBookingMutation({ barberId, clientId, isManualBooking, session });
+        await idempotency.persist(bookingId, session);
         const paidAccess = await resolveBookingPaidAccessForSalon(barberId, salonId, session);
         if (!paidAccess.allowed) throw bookingReadinessError({
           status: 403, body: { code: "BARBER_UNAVAILABLE", message: "This specialist is not currently accepting bookings." },
@@ -425,6 +459,10 @@ export const createBookingService = async ({
           body: { message: createErr.message || "Could not promote booking reference media" },
         };
       }
+      if (idempotency.isDuplicateError(createErr)) {
+        const replay = await idempotency.findReplayResult();
+        if (replay) return replay;
+      }
       if (createErr?.bookingReadiness) return createErr.bookingReadiness;
       if (createErr?.bookingPricingError) {
         return {
@@ -474,8 +512,13 @@ export const createBookingService = async ({
     return createResult;
   }
 
-  const { booking, payment } = createResult;
-  if (!isManualBooking) {
+  const completedResult = createResult?.idempotencyReplay
+    ? await resumeBookingCreateReplay({ replay: createResult, user })
+    : createResult;
+  if (completedResult?.body) return completedResult;
+
+  const { booking, payment, idempotencyReplay } = completedResult;
+  if (!idempotencyReplay && !isManualBooking) {
     try {
       const notificationClientName = await getClientName(booking, user);
       await createNotification({
@@ -489,10 +532,12 @@ export const createBookingService = async ({
     }
   }
 
-  try {
-    emitBookingUpdated(booking, "created");
-  } catch {
-    // Booking persistence has already committed; realtime delivery is best-effort.
+  if (!idempotencyReplay) {
+    try {
+      emitBookingUpdated(booking, "created");
+    } catch {
+      // Booking persistence has already committed; realtime delivery is best-effort.
+    }
   }
 
   return { status: 201, booking, payment };

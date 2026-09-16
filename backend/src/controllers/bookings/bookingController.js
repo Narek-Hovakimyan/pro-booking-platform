@@ -13,6 +13,7 @@ import {
 import { updateBookingTreatmentRecord } from "../../services/booking/bookingTreatmentRecordService.js";
 import { delayBookingService } from "../../services/booking/bookingDelayService.js";
 import { createBookingService } from "../../services/booking/bookingCreateService.js";
+import { normalizeBookingCreateIdempotencyKey } from "../../services/booking/bookingCreateIdempotencyService.js";
 import { executeBookingPriceQuote } from "../../services/booking/bookingQuoteService.js";
 import { resolveReferenceImageRequest } from "../../services/booking/bookingReferenceImageService.js";
 import { openBookingReferenceMediaStream } from "../../services/booking/bookingReferenceMediaService.js";
@@ -92,11 +93,17 @@ export const createBooking = async (req, res) => {
   const cleanup = () => cleanupReferenceImages(referenceImages);
 
   try {
+    const idempotencyKey = normalizeBookingCreateIdempotencyKey(
+      typeof req.get === "function"
+        ? req.get("Idempotency-Key")
+        : req.headers?.["idempotency-key"]
+    );
     const createResult = await createBookingService({
       body: req.body,
       user: req.user,
       referenceImages,
       referenceUploads,
+      idempotencyKey,
       cleanupReferenceImagesOnError: cleanup,
     });
 

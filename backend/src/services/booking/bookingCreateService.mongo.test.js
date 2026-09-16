@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
+import BookingCreateIdempotencyOperation from "../../models/BookingCreateIdempotencyOperation.js";
 import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Schedule from "../../models/Schedule.js";
@@ -28,6 +29,7 @@ const connect = async () => {
   await mongoose.connect(uri.toString(), { serverSelectionTimeoutMS: 5000 });
   await mongoose.connection.dropDatabase();
   await BookingSlotHold.syncIndexes();
+  await BookingCreateIdempotencyOperation.syncIndexes();
 };
 const user = async (role) => {
   const id = `${process.pid}${++serial}`;
@@ -43,9 +45,9 @@ const setup = async () => {
   await Subscription.create({ ownerType: "barber", ownerId: barber._id, ownerRefModel: "User", payerId: barber._id, planId: plan._id, status: "active", pricePerSeat: 1, totalPrice: 1, currentPeriodStart: new Date(), currentPeriodEnd: new Date("2027-01-01") });
   return { barber, client, service };
 };
-const createBooking = ({ barber, client, service, time = "10:00" }) => createBookingService({
+const createBooking = ({ barber, client, service, time = "10:00", idempotencyKey = null }) => createBookingService({
   body: { barberId: barber._id, clientId: client._id, serviceId: service._id, bookingDate: "2026-12-07", dayKey: "mon", time },
-  user: client, referenceImages: [], cleanupReferenceImagesOnError: () => {},
+  user: client, referenceImages: [], cleanupReferenceImagesOnError: () => {}, idempotencyKey,
 });
 const createResponse = () => ({
   statusCode: 200,
@@ -126,6 +128,43 @@ test("real Mongo overlapping creates commit one booking and one set of holds", {
   assert.deepEqual(results.map(({ status }) => status).sort((left, right) => left - right), [201, 400]);
   assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
   assert.equal(await BookingSlotHold.countDocuments({ barberId: fixture.barber._id }), 30);
+});
+
+test("real Mongo same-key booking creates once and safely replays after a lost response", { skip: !enabled, timeout: 15000 }, async () => {
+  await connect();
+  const fixture = await setup();
+  const idempotencyKey = "booking-create-real-mongo-replay-1";
+
+  const [first, concurrentReplay] = await Promise.all([
+    createBooking({ ...fixture, idempotencyKey }),
+    createBooking({ ...fixture, idempotencyKey }),
+  ]);
+  const replay = await createBooking({ ...fixture, idempotencyKey });
+
+  assert.equal(first.status, 201);
+  assert.equal(concurrentReplay.status, 201);
+  assert.equal(replay.status, 201);
+  assert.equal(String(replay.booking._id), String(first.booking._id));
+  assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
+  assert.equal(await BookingSlotHold.countDocuments({ bookingId: first.booking._id }), 30);
+  assert.equal(await BookingCreateIdempotencyOperation.countDocuments({ actorId: fixture.client._id }), 1);
+});
+
+test("real Mongo keyed failure rolls back the operation and a changed request conflicts safely", { skip: !enabled, timeout: 15000 }, async () => {
+  await connect();
+  const fixture = await setup();
+  const idempotencyKey = "booking-create-real-mongo-abort-1";
+
+  const failed = await createBooking({ ...fixture, time: "08:00", idempotencyKey });
+  assert.equal(failed.status, 400);
+  assert.equal(await BookingCreateIdempotencyOperation.countDocuments({ actorId: fixture.client._id }), 0);
+
+  const created = await createBooking({ ...fixture, idempotencyKey });
+  const changed = await createBooking({ ...fixture, time: "11:00", idempotencyKey });
+  assert.equal(created.status, 201);
+  assert.equal(changed.status, 409);
+  assert.equal(changed.body.message, "Idempotency-Key was already used with a different request");
+  assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
 });
 
 test("real Mongo deactivation winning before the booking touch leaves no booking or holds", { skip: !enabled, timeout: 15000 }, async () => {
