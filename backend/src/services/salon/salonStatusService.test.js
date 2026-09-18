@@ -203,6 +203,42 @@ test("barber with approved salons gets same status shape", async () => {
   assert.deepEqual(status.managedSalons, [managedSalonResponse]);
 });
 
+test("omits approved memberships whose salon no longer exists", async () => {
+  const existingSalon = createSalon({ _id: salonAId, name: "Existing Salon" });
+
+  User.findById = async () => ({
+    _id: barberId,
+    salon: null,
+    salonStatus: "approved",
+    salons: [
+      { salon: salonAId, status: "approved", isPrimary: true },
+      { salon: salonBId, status: "approved", isPrimary: false },
+    ],
+  });
+  createFindMock({ approvedSalons: [existingSalon] });
+  SalonJoinRequest.find = () => createJoinRequestQuery();
+
+  const status = await getSalonStatusForBarber(barberId);
+
+  assert.equal(status.salonStatus, "approved");
+  assert.deepEqual(status.salon, publicSalon(existingSalon));
+  assert.deepEqual(status.salons, [{
+    ...publicSalon(existingSalon),
+    status: "approved",
+    isPrimary: true,
+    joinedAt: undefined,
+    defaultSchedule: {
+      startTime: "09:00",
+      endTime: "18:00",
+      hasBreak: false,
+      breakStart: "",
+      breakEnd: "",
+    },
+  }]);
+  assert.deepEqual(status.salonStates.map((entry) => entry.salonId), [salonAId]);
+  assert.equal(JSON.stringify(status).includes(salonBId), false);
+});
+
 test("manager-only status fields expose effective join policy without changing public salon entries", async () => {
   const managedClosedSalon = createSalon({
     _id: "managed-closed",

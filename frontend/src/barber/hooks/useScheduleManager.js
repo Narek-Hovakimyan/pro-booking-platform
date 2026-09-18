@@ -28,6 +28,15 @@ import {
   timeInputClass,
 } from "@/barber/utils/scheduleManagerHelpers";
 
+const fetchSalonEntries = async () => {
+  const [statusResult, manageableResult] = await Promise.allSettled([api.get("/salons/me/status"), api.get("/salons/mine/manageable")]);
+  const statusData = statusResult.status === "fulfilled" ? statusResult.value.data : {};
+  const manageableEntries = manageableResult.status === "fulfilled" ? normalizeManageableSalonEntries(manageableResult.value.data) : [];
+  const approvedEntries = (statusData.salons || []).filter(isSelectableScheduleSalonEntry);
+  const legacyEntries = statusData.salon && statusData.salonStatus === "approved" ? [{ salon: statusData.salon, status: "approved", isPrimary: true }] : [];
+  return mergeScheduleSalonEntries(approvedEntries, legacyEntries, manageableEntries);
+};
+
 export default function useScheduleManager({
   schedule,
   isLoading = false,
@@ -38,41 +47,66 @@ export default function useScheduleManager({
   const services = useSelector((state) => state.services);
 
   const currentUserId = currentUser?.id || currentUser?._id;
-  const [salonEntries, setSalonEntries] = useState([]), [isLoadingSalons, setIsLoadingSalons] = useState(true), [isLoadingServices, setIsLoadingServices] = useState(false), [servicesError, setServicesError] = useState(""), [selectedSalonId, setSelectedSalonId] = useState(null), [perSalonSchedule, setPerSalonSchedule] = useState(null), [loadedScheduleSalonId, setLoadedScheduleSalonId] = useState(null), [isPerSalonLoading, setIsPerSalonLoading] = useState(false), [perSalonError, setPerSalonError] = useState(""), [saveSuccess, setSaveSuccess] = useState(""), [isDrawerOpen, setIsDrawerOpen] = useState(false), [onboardingStep, setOnboardingStep] = useState(null), [isOnboardingStepLoading, setIsOnboardingStepLoading] = useState(false), [validationState, setValidationState] = useState({ dateKey: "", message: "" }), [breakToggleState, setBreakToggleState] = useState({ dateKey: "", enabled: false });
+  const [salonEntries, setSalonEntries] = useState([]), [isLoadingSalons, setIsLoadingSalons] = useState(true), [isLoadingServices, setIsLoadingServices] = useState(false), [servicesError, setServicesError] = useState(""), [selectedSalonId, setSelectedSalonId] = useState(), [perSalonSchedule, setPerSalonSchedule] = useState(null), [loadedScheduleSalonId, setLoadedScheduleSalonId] = useState(null), [isPerSalonLoading, setIsPerSalonLoading] = useState(false), [perSalonError, setPerSalonError] = useState(""), [saveSuccess, setSaveSuccess] = useState(""), [isDrawerOpen, setIsDrawerOpen] = useState(false), [onboardingStep, setOnboardingStep] = useState(null), [isOnboardingStepLoading, setIsOnboardingStepLoading] = useState(false), [validationState, setValidationState] = useState({ dateKey: "", message: "" }), [breakToggleState, setBreakToggleState] = useState({ dateKey: "", enabled: false });
   const initialDateOptions = getNext7ArmeniaDays(), initialSelectedDateKey = initialDateOptions[0].value, initialTodayKey = getArmeniaTodayKey();
   const [selectedDate, setSelectedDate] = useState(initialSelectedDateKey);
   const [draftOverride, setDraftOverride] = useState(() => getDefaultDateOverrideDraft(initialSelectedDateKey, getNormalizedDateOverride({ selectedDateKey: initialSelectedDateKey, scheduleOverrides: filterCurrentScheduleOverrides(schedule.scheduleOverrides || {}, initialTodayKey), nonWorkingDays: filterCurrentNonWorkingDays(schedule.nonWorkingDays || [], initialTodayKey), defaultDaySchedule: getDayScheduleFromDefaultSchedule(normalizeDefaultScheduleDraft(schedule.defaultSchedule)) })));
-  const isMountedRef = useRef(true), servicesFetchAttemptedRef = useRef(""), onboardingRequestRef = useRef(0), salonLoadRequestRef = useRef(0), scheduleLoadRequestRef = useRef(0), saveRequestRef = useRef(0), activeSalonIdRef = useRef(null);
+  const isMountedRef = useRef(true), servicesFetchAttemptedRef = useRef(""), onboardingRequestRef = useRef(0), salonLoadRequestRef = useRef(0), scheduleLoadRequestRef = useRef(0), saveRequestRef = useRef(0), activeSalonIdRef = useRef(null), selectedSalonIdRef = useRef();
   const approvedSalons = useMemo(() => (salonEntries || []).filter(isSelectableScheduleSalonEntry), [salonEntries]);
   const initialSalonId = useMemo(() => {
     if (approvedSalons.length === 0) return null;
     const primary = approvedSalons.find((salon) => salon.isPrimary) || approvedSalons[0];
     return getSalonIdFromEntry(primary);
   }, [approvedSalons]);
-  const activeSalonId = selectedSalonId || initialSalonId;
-  useEffect(() => { activeSalonIdRef.current = activeSalonId; }, [activeSalonId]);
+  const activeSalonId = selectedSalonId === undefined ? initialSalonId : selectedSalonId;
+  useEffect(() => { activeSalonIdRef.current = activeSalonId; selectedSalonIdRef.current = selectedSalonId; }, [activeSalonId, selectedSalonId]);
   const barberServices = useMemo(() => (services || []).filter((service) => String(service?.barberId) === String(currentUserId)), [currentUserId, services]);
   const selectedSalonEntry = useMemo(() => approvedSalons.find((entry) => String(getSalonIdFromEntry(entry)) === String(activeSalonId)) || null, [activeSalonId, approvedSalons]);
+  const refreshSalonEntries = useCallback(async () => {
+    if (!currentUserId) {
+      Promise.resolve().then(() => isMountedRef.current && setIsLoadingSalons(false));
+      return;
+    }
+    const requestId = ++salonLoadRequestRef.current;
+    setIsLoadingSalons(true);
+    try {
+      const nextEntries = await fetchSalonEntries();
+      if (!isMountedRef.current || salonLoadRequestRef.current !== requestId) return;
+      setSalonEntries((currentEntries) => (JSON.stringify(currentEntries) === JSON.stringify(nextEntries) ? currentEntries : nextEntries));
+      const selectedId = selectedSalonIdRef.current;
+      if (selectedId && !nextEntries.some((entry) => String(getSalonIdFromEntry(entry)) === String(selectedId))) {
+        selectedSalonIdRef.current = null;
+        setSelectedSalonId(null);
+        setPerSalonSchedule(null); setLoadedScheduleSalonId(null); setIsPerSalonLoading(false); setSaveSuccess("");
+      }
+    } catch {
+      if (!isMountedRef.current || salonLoadRequestRef.current !== requestId) return;
+      setSalonEntries((currentEntries) => (currentEntries.length === 0 ? currentEntries : []));
+    } finally {
+      if (isMountedRef.current && salonLoadRequestRef.current === requestId) setIsLoadingSalons(false);
+    }
+  }, [currentUserId]);
   useEffect(() => {
     isMountedRef.current = true;
     if (!currentUserId) {
       Promise.resolve().then(() => {
-        if (isMountedRef.current) {
-          setIsLoadingSalons(false);
-        }
+        if (isMountedRef.current) setIsLoadingSalons(false);
       });
-      return () => {
-        isMountedRef.current = false;
-      };
+      return () => { isMountedRef.current = false; };
     }
     const requestId = ++salonLoadRequestRef.current; let cancelled = false;
     (async () => {
       setIsLoadingSalons(true);
       try {
-        const [statusResult, manageableResult] = await Promise.allSettled([api.get("/salons/me/status"), api.get("/salons/mine/manageable")]);
+        const nextEntries = await fetchSalonEntries();
         if (cancelled || !isMountedRef.current || salonLoadRequestRef.current !== requestId) return;
-        const statusData = statusResult.status === "fulfilled" ? statusResult.value.data : {}, manageableEntries = manageableResult.status === "fulfilled" ? normalizeManageableSalonEntries(manageableResult.value.data) : [], approvedEntries = (statusData.salons || []).filter(isSelectableScheduleSalonEntry), legacyEntries = statusData.salon && statusData.salonStatus === "approved" ? [{ salon: statusData.salon, status: "approved", isPrimary: true }] : [], nextEntries = mergeScheduleSalonEntries(approvedEntries, legacyEntries, manageableEntries);
         setSalonEntries((currentEntries) => (JSON.stringify(currentEntries) === JSON.stringify(nextEntries) ? currentEntries : nextEntries));
+        const selectedId = selectedSalonIdRef.current;
+        if (selectedId && !nextEntries.some((entry) => String(getSalonIdFromEntry(entry)) === String(selectedId))) {
+          selectedSalonIdRef.current = null;
+          setSelectedSalonId(null);
+          setPerSalonSchedule(null); setLoadedScheduleSalonId(null); setIsPerSalonLoading(false); setSaveSuccess("");
+        }
       } catch {
         if (cancelled || !isMountedRef.current || salonLoadRequestRef.current !== requestId) return;
         setSalonEntries((currentEntries) => (currentEntries.length === 0 ? currentEntries : []));
@@ -80,7 +114,7 @@ export default function useScheduleManager({
         if (!cancelled && isMountedRef.current && salonLoadRequestRef.current === requestId) setIsLoadingSalons(false);
       }
     })();
-    return () => { cancelled = true; isMountedRef.current = false; salonLoadRequestRef.current += 1; };
+    return () => { isMountedRef.current = false; salonLoadRequestRef.current += 1; };
   }, [currentUserId]);
   useEffect(() => {
     isMountedRef.current = true;
@@ -418,7 +452,8 @@ export default function useScheduleManager({
   };
   const openDrawer = useCallback(() => {
     setIsDrawerOpen(true);
-  }, []);
+    void refreshSalonEntries();
+  }, [refreshSalonEntries]);
 
   const closeDrawer = useCallback(() => {
     setIsDrawerOpen(false);
@@ -437,6 +472,7 @@ export default function useScheduleManager({
       }
 
       const nextSalonId = String(salonId);
+      selectedSalonIdRef.current = nextSalonId;
       setSelectedSalonId(nextSalonId);
       setPerSalonSchedule(null);
       setLoadedScheduleSalonId(null);

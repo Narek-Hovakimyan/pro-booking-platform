@@ -70,6 +70,11 @@ export const getSalonStatusForBarber = async (barberId) => {
   const approvedSalons = approvedSalonIds.length > 0
     ? await Salon.find({ _id: { $in: approvedSalonIds } })
     : [];
+  const missingApprovedSalonIds = new Set(
+    approvedSalonEntries
+      .filter((entry) => !approvedSalons.some((salon) => sameId(salon._id, entry.salon)))
+      .map((entry) => String(entry.salon))
+  );
 
   const primaryEntry =
     approvedSalonEntries.find((salonEntry) => salonEntry.isPrimary) ||
@@ -96,16 +101,6 @@ export const getSalonStatusForBarber = async (barberId) => {
     }
   });
 
-  const authoritativePendingRequests = joinRequests.filter((request) => {
-    const salonId = getRequestSalonId(request);
-    if (!salonId) return false;
-    return (
-      latestRequestsBySalonId.get(String(salonId)) === request &&
-      request.status === "pending" &&
-      !approvedSalonEntries.some((approved) => sameId(approved.salon, salonId))
-    );
-  });
-
   const pendingSalonEntries = canonicalSalonEntries.filter((salonEntry) => {
     if (salonEntry.status !== "pending") return false;
     if (approvedSalonEntries.some((approved) => sameId(approved.salon, salonEntry.salon))) {
@@ -119,6 +114,16 @@ export const getSalonStatusForBarber = async (barberId) => {
     ? await Salon.find({ _id: { $in: pendingSalonIds } })
     : [];
 
+  const authoritativePendingRequests = joinRequests.filter((request) => {
+    const salonId = getRequestSalonId(request);
+    if (!salonId) return false;
+    return (
+      latestRequestsBySalonId.get(String(salonId)) === request &&
+      request.status === "pending" &&
+      !approvedSalonEntries.some((approved) => sameId(approved.salon, salonId))
+    );
+  });
+
   const enrichedPendingEntries = pendingSalonEntries.map((entry) => {
     const salonData = pendingSalons.find((salon) => sameId(salon._id, entry.salon));
     return serializeSalonEntrySummary(entry, salonData);
@@ -128,12 +133,15 @@ export const getSalonStatusForBarber = async (barberId) => {
     $or: [{ ownerId: barberId }, { admins: barberId }],
   }).sort({ createdAt: -1 });
 
-  const enrichedApprovedEntries = approvedSalonEntries.map((entry) => {
+  const enrichedApprovedEntries = approvedSalonEntries.flatMap((entry) => {
     const salonData = approvedSalons.find((salon) => sameId(salon._id, entry.salon));
-
-    return serializeSalonEntrySummary(entry, salonData, {
-      defaultSchedule: entry.defaultSchedule || createDefaultSalonEntrySchedule(),
-    });
+    return salonData
+      ? [
+          serializeSalonEntrySummary(entry, salonData, {
+            defaultSchedule: entry.defaultSchedule || createDefaultSalonEntrySchedule(),
+          }),
+        ]
+      : [];
   });
 
   const primaryPendingRequest = authoritativePendingRequests.length > 0
@@ -156,7 +164,9 @@ export const getSalonStatusForBarber = async (barberId) => {
     salonStateIds.add(String(barber.salon));
   }
 
-  const salonStates = [...salonStateIds].map((salonId) => {
+  const salonStates = [...salonStateIds]
+    .filter((salonId) => !missingApprovedSalonIds.has(salonId))
+    .map((salonId) => {
     const canonicalEntries = canonicalBySalonId.get(salonId) || [];
     const latestRequest = latestRequestsBySalonId.get(salonId);
     const approvedCanonical = canonicalEntries.some((entry) => entry.status === "approved");
@@ -172,17 +182,17 @@ export const getSalonStatusForBarber = async (barberId) => {
       approvedSalons.find((salon) => sameId(salon._id, salonId)) ||
       pendingSalons.find((salon) => sameId(salon._id, salonId));
 
-    return serializeSalonState({
-      salonId,
-      status,
-      salon: latestRequest?.salonId || canonicalSalonData,
+      return serializeSalonState({
+        salonId,
+        status,
+        salon: latestRequest?.salonId || canonicalSalonData,
+      });
     });
-  });
 
   const legacyApprovedFallback = approvedSalon &&
     approvedSalonEntries.length === 0 &&
     !latestRequestsBySalonId.has(String(barber?.salon));
-  const summarizedSalonStatus = approvedSalonEntries.length > 0 || legacyApprovedFallback
+  const summarizedSalonStatus = enrichedApprovedEntries.length > 0 || legacyApprovedFallback
     ? "approved"
     : salonStates.some((entry) => entry.status === "pending")
       ? "pending"
@@ -190,7 +200,7 @@ export const getSalonStatusForBarber = async (barberId) => {
         ? "rejected"
         : salonStates.some((entry) => entry.status === "cancelled")
           ? "cancelled"
-          : barber?.salonStatus || "none";
+        : approvedSalonEntries.length > 0 ? "none" : barber?.salonStatus || "none";
 
   return {
     salonStatus: summarizedSalonStatus,

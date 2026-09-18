@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getArmeniaTodayKey } from "@/shared/utils/dates";
@@ -44,11 +44,12 @@ vi.mock("@/barber/components/schedule/PersonalScheduleView", () => ({
 }));
 
 vi.mock("@/barber/components/schedule/ScheduleSalonDrawer", () => ({
-  default: ({ isOpen, salons, onClose, onSelect }) => {
+  default: ({ isOpen, salons, selectedId, onClose, onSelect }) => {
     if (!isOpen) return null;
 
     return (
       <div role="dialog" aria-label="Select salon schedule">
+        <output data-testid="drawer-selected-salon-id">{selectedId || "none"}</output>
         <button type="button" onClick={onClose}>
           Close
         </button>
@@ -254,6 +255,114 @@ describe("ScheduleManager", () => {
     expect(await screen.findByText("11:00 to 20:00")).toBeInTheDocument();
   });
 
+  it("refreshes the drawer list and removes a salon that is no longer approved", async () => {
+    let statusRequests = 0;
+    mocks.apiGet.mockImplementation((url) => {
+      if (url === "/salons/me/status") {
+        statusRequests += 1;
+        return Promise.resolve({
+          data: { salons: statusRequests === 1 ? [salonA, salonB] : [salonA] },
+        });
+      }
+      if (url === "/salons/mine/manageable") {
+        return Promise.resolve({ data: { salons: [] } });
+      }
+      if (url === "/schedules/barber-1/salon-a") {
+        return Promise.resolve(salonResponse(baseSchedule()));
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    const view = renderPage();
+
+    expect(await screen.findByText("Aurora Salon")).toBeInTheDocument();
+    expect(statusRequests).toBe(1);
+    view.rerender(<ScheduleManager schedule={baseSchedule()} />);
+    await waitFor(() => expect(statusRequests).toBe(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "Select salon schedule" });
+    expect(statusRequests).toBe(2);
+    expect(drawer).toHaveTextContent("Aurora Salon");
+    expect(drawer).not.toHaveTextContent("Blush Studio");
+    expect(screen.getAllByText("Aurora Salon")).toHaveLength(2);
+  });
+
+  it("clears a removed selected salon instead of operating against the remaining salon", async () => {
+    let statusRequests = 0;
+    mocks.apiGet.mockImplementation((url) => {
+      if (url === "/salons/me/status") {
+        statusRequests += 1;
+        return Promise.resolve({ data: { salons: statusRequests < 3 ? [salonA, salonB] : [salonA] } });
+      }
+      if (url === "/salons/mine/manageable") return Promise.resolve({ data: { salons: [] } });
+      if (url === "/schedules/barber-1/salon-a" || url === "/schedules/barber-1/salon-b") {
+        return Promise.resolve(salonResponse(baseSchedule()));
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Aurora Salon")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Blush Studio" }));
+    await screen.findByDisplayValue("09:00");
+    fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
+
+    expect(await screen.findByText("Please select a salon to manage schedule.")).toBeInTheDocument();
+    expect(screen.getByTestId("drawer-selected-salon-id")).toHaveTextContent("none");
+    expect(screen.queryByDisplayValue("09:00")).not.toBeInTheDocument();
+  });
+
+  it("keeps the latest drawer refresh when responses resolve out of order", async () => {
+    const staleRefresh = deferred();
+    const latestRefresh = deferred();
+    let statusRequests = 0;
+    mocks.apiGet.mockImplementation((url) => {
+      if (url === "/salons/me/status") {
+        statusRequests += 1;
+        if (statusRequests === 1) return Promise.resolve({ data: { salons: [salonA, salonB] } });
+        return statusRequests === 2 ? staleRefresh.promise : latestRefresh.promise;
+      }
+      if (url === "/salons/mine/manageable") return Promise.resolve({ data: { salons: [] } });
+      if (url === "/schedules/barber-1/salon-a") return Promise.resolve(salonResponse(baseSchedule()));
+      throw new Error(`Unexpected GET ${url}`);
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Aurora Salon")).toBeInTheDocument();
+    const changeSalon = screen.getByRole("button", { name: "Change salon" });
+    act(() => {
+      changeSalon.click();
+      changeSalon.click();
+    });
+
+    expect(statusRequests).toBe(3);
+    await act(async () => {
+      latestRefresh.resolve({ data: { salons: [salonA] } });
+      await latestRefresh.promise;
+    });
+
+    const drawer = await screen.findByRole("dialog", { name: "Select salon schedule" });
+    expect(drawer).toHaveTextContent("Aurora Salon");
+    expect(drawer).not.toHaveTextContent("Blush Studio");
+    expect(screen.getByTestId("drawer-selected-salon-id")).toHaveTextContent("salon-a");
+    expect(statusRequests).toBe(3);
+
+    await act(async () => {
+      staleRefresh.resolve({ data: { salons: [salonA, salonB] } });
+      await staleRefresh.promise;
+    });
+
+    expect(screen.getByRole("dialog", { name: "Select salon schedule" })).toHaveTextContent("Aurora Salon");
+    expect(screen.getByRole("dialog", { name: "Select salon schedule" })).not.toHaveTextContent("Blush Studio");
+    expect(screen.getByTestId("drawer-selected-salon-id")).toHaveTextContent("salon-a");
+    expect(statusRequests).toBe(3);
+  });
+
   it("keeps salon B data when salon A resolves late", async () => {
     const salonBLoad = deferred();
     mocks.apiGet.mockImplementation((url) => {
@@ -298,9 +407,9 @@ describe("ScheduleManager", () => {
 
     expect(await screen.findByText("Aurora Salon")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
-    fireEvent.click(screen.getByRole("button", { name: "Blush Studio" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Blush Studio" }));
     fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
-    fireEvent.click(screen.getByRole("button", { name: "Aurora Salon" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Aurora Salon" }));
     salonBLoad.resolve(
       salonResponse(
         baseSchedule({
@@ -355,7 +464,7 @@ describe("ScheduleManager", () => {
 
     expect(await screen.findByText("Aurora Salon")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
-    fireEvent.click(screen.getByRole("button", { name: "Blush Studio" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Blush Studio" }));
     await screen.findByDisplayValue("10:00");
 
     const saveButton = screen.getByRole("button", { name: "Save date override" });
@@ -445,7 +554,7 @@ describe("ScheduleManager", () => {
     expect(screen.getByText("Unsaved changes.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Change salon" }));
-    fireEvent.click(screen.getByRole("button", { name: "Blush Studio" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Blush Studio" }));
     await screen.findByDisplayValue("10:00");
     expect(screen.queryByText("Unsaved changes.")).not.toBeInTheDocument();
   });
