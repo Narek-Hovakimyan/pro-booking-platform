@@ -98,8 +98,16 @@ const createRequestLogger = () => {
   const calls = [];
   return {
     calls,
+    infoCalls: [],
+    warnCalls: [],
     error(...args) {
       calls.push(args);
+    },
+    info(...args) {
+      this.infoCalls.push(args);
+    },
+    warn(...args) {
+      this.warnCalls.push(args);
     },
   };
 };
@@ -2253,6 +2261,37 @@ test("simultaneous duplicate booking attempts create only one booking", async ()
   );
 });
 
+test("booking slot conflict emits one safe terminal outcome", async () => {
+  const createdBookings = [];
+  mockCreateBookingDependencies(createdBookings);
+  const createdLogger = createRequestLogger();
+  const conflictLogger = createRequestLogger();
+  const body = {
+    barberId,
+    serviceId,
+    createdBy: "barber",
+    clientName: "Walk In",
+    bookingDate,
+    time: "10:00",
+  };
+  const first = createResponse();
+  const second = createResponse();
+
+  await createBooking({ user: barber, log: createdLogger, body }, first);
+  await createBooking({ user: barber, log: conflictLogger, body }, second);
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(second.statusCode, 400);
+  assert.deepEqual(conflictLogger.infoCalls, [[{
+    event: "booking.create.outcome",
+    operation: "create",
+    outcome: "slot_conflict",
+    replay: false,
+    statusCode: 400,
+  }, "booking.create.outcome"]]);
+  assert.equal(JSON.stringify(conflictLogger.infoCalls).includes("Walk In"), false);
+});
+
 // ── Reference image upload basics ─────────────────────────────────
 
 test("booking create with referenceImages saves internal upload paths", async () => {
@@ -2385,6 +2424,13 @@ test("booking create cleans uploaded reference files on database error", async (
     statusCode: 500,
     userId: client._id,
   }]]);
+  assert.deepEqual(logger.warnCalls, [[{
+    event: "booking.create.outcome",
+    operation: "create",
+    outcome: "internal_failure",
+    replay: false,
+    statusCode: 500,
+  }, "booking.create.outcome"]]);
   assert.equal(JSON.stringify(logger.calls).includes("/srv/uploads/reference"), false);
   assert.equal(JSON.stringify(logger.calls).includes("../filesystem"), false);
   assert.equal(JSON.stringify(logger.calls).includes(filename), false);
@@ -3906,8 +3952,9 @@ test("post-commit realtime failure still returns the created booking", async () 
   assert.equal(createdBookings.length, 1);
 });
 
-const idempotentBookingRequest = ({ key, body = {}, user = client } = {}) => ({
+const idempotentBookingRequest = ({ key, body = {}, user = client, log } = {}) => ({
   user,
+  log,
   get: (name) => (name === "Idempotency-Key" ? key : undefined),
   body: {
     barberId,
@@ -3919,6 +3966,88 @@ const idempotentBookingRequest = ({ key, body = {}, user = client } = {}) => ({
     clientName: user.name || "Client",
     ...body,
   },
+});
+
+test("booking create emits safe fresh, replay, and idempotency-conflict outcomes", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installBookingCreateIdempotencyStore(createdBookings);
+  const freshLogger = createRequestLogger();
+  const replayLogger = createRequestLogger();
+  const conflictLogger = createRequestLogger();
+  const key = "booking-observability-key-1";
+  const sensitiveNote = "private booking note";
+
+  const fresh = createResponse();
+  const replay = createResponse();
+  const conflict = createResponse();
+  await createBooking(idempotentBookingRequest({
+    key,
+    log: freshLogger,
+    body: { note: sensitiveNote, clientPhone: "+37499123456" },
+  }), fresh);
+  await createBooking(idempotentBookingRequest({
+    key,
+    log: replayLogger,
+    body: { note: sensitiveNote, clientPhone: "+37499123456" },
+  }), replay);
+  await createBooking(idempotentBookingRequest({
+    key,
+    log: conflictLogger,
+    body: { time: "11:00", note: sensitiveNote },
+  }), conflict);
+
+  assert.equal(fresh.statusCode, 201);
+  assert.equal(replay.statusCode, 201);
+  assert.equal(conflict.statusCode, 409);
+  assert.deepEqual(freshLogger.infoCalls, [[{
+    event: "booking.create.outcome",
+    operation: "create",
+    outcome: "created",
+    replay: false,
+    statusCode: 201,
+  }, "booking.create.outcome"]]);
+  assert.deepEqual(replayLogger.infoCalls, [[{
+    event: "booking.create.outcome",
+    operation: "create",
+    outcome: "idempotency_replay",
+    replay: true,
+    statusCode: 201,
+  }, "booking.create.outcome"]]);
+  assert.deepEqual(conflictLogger.infoCalls, [[{
+    event: "booking.create.outcome",
+    operation: "create",
+    outcome: "idempotency_conflict",
+    replay: false,
+    statusCode: 409,
+  }, "booking.create.outcome"]]);
+  const output = JSON.stringify([freshLogger.infoCalls, replayLogger.infoCalls, conflictLogger.infoCalls]);
+  assert.equal(output.includes(key), false);
+  assert.equal(output.includes(sensitiveNote), false);
+  assert.equal(output.includes("+37499123456"), false);
+});
+
+test("booking observability logger failures do not change a successful create", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const response = createResponse();
+  const logger = {
+    info() {
+      throw new Error("observability unavailable");
+    },
+    warn() {
+      throw new Error("observability unavailable");
+    },
+  };
+
+  await createBooking({
+    user: client,
+    log: logger,
+    body: { barberId, clientId, serviceId, bookingDate, time: "10:00", salonId, clientName: "Client" },
+  }, response);
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(createdBookings.length, 1);
 });
 
 test("booking create replays a same actor/key request without duplicate side effects", async () => {
@@ -3969,6 +4098,7 @@ test("booking create replays accepted consent without treating its server timest
 test("booking replay resumes a committed deposit exactly once after initial payment setup fails", async () => {
   process.env.PAYMENT_PROVIDER = "mock";
   const createdBookings = [];
+  const initialLogger = createRequestLogger();
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
   installBookingCreateIdempotencyStore(createdBookings);
   BarberProfile.findOne = () => ({
@@ -4001,7 +4131,10 @@ test("booking replay resumes a committed deposit exactly once after initial paym
   const first = createResponse();
   const replay = createResponse();
   const repeatedReplay = createResponse();
-  await createBooking(idempotentBookingRequest({ key: "booking-create-deposit-replay-1" }), first);
+  await createBooking(idempotentBookingRequest({
+    key: "booking-create-deposit-replay-1",
+    log: initialLogger,
+  }), first);
   await createBooking(idempotentBookingRequest({ key: "booking-create-deposit-replay-1" }), replay);
   await createBooking(idempotentBookingRequest({ key: "booking-create-deposit-replay-1" }), repeatedReplay);
 
@@ -4012,6 +4145,11 @@ test("booking replay resumes a committed deposit exactly once after initial paym
   assert.equal(replay.body.payment.paymentAttemptId, "deposit-replay-attempt-1");
   assert.equal(repeatedReplay.body.payment.checkoutUrl, "/mock-payments/mock-replay-payment-1");
   assert.equal(providerCalls, 1);
+  assert.deepEqual(initialLogger.warnCalls, [[{
+    event: "booking.deposit.recovery",
+    operation: "create",
+    outcome: "initialization_recovered",
+  }, "booking.deposit.recovery"]]);
 });
 
 test("concurrent same-key booking creates commit once", async () => {
@@ -4108,13 +4246,25 @@ test("independent keyed bookings replay by key while different keys remain disti
 test("booking create rejects malformed Idempotency-Key before mutation", async () => {
   const createdBookings = [];
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const logger = createRequestLogger();
   const res = createResponse();
 
-  await createBooking(idempotentBookingRequest({ key: "not a valid key" }), res);
+  await createBooking(idempotentBookingRequest({
+    key: "not a valid key",
+    log: logger,
+  }), res);
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.message, "Idempotency-Key must be a valid non-empty token");
   assert.equal(createdBookings.length, 0);
+  assert.deepEqual(logger.infoCalls, [[{
+    event: "booking.create.outcome",
+    operation: "create",
+    outcome: "controlled_rejection",
+    replay: false,
+    statusCode: 400,
+  }, "booking.create.outcome"]]);
+  assert.equal(JSON.stringify([logger.infoCalls, logger.calls]).includes("not a valid key"), false);
 });
 
 test("unexpected revalidation failure compensates staged reference media", async () => {

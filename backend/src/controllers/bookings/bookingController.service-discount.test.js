@@ -65,8 +65,12 @@ const createRequestLogger = () => {
   const calls = [];
   return {
     calls,
+    infoCalls: [],
     error(...args) {
       calls.push(args);
+    },
+    info(...args) {
+      this.infoCalls.push(args);
     },
   };
 };
@@ -241,6 +245,51 @@ test("quoteBookingPrice unexpected error logs only safe request context", async 
   }]]);
   assert.equal(JSON.stringify(logger.calls).includes("../../pricing"), false);
   assert.equal(JSON.stringify(logger.calls).includes("do not log me"), false);
+});
+
+test("quoteBookingPrice emits safe terminal success and rejection outcomes", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  const successLogger = createRequestLogger();
+  const rejectionLogger = createRequestLogger();
+  const sensitiveNote = "private quote note";
+
+  const success = createResponse();
+  await quoteBookingPrice(
+    {
+      user: client,
+      log: successLogger,
+      body: { barberId, serviceId, salonId, note: sensitiveNote, clientPhone: "+37499123456" },
+    },
+    success
+  );
+  const rejection = createResponse();
+  await quoteBookingPrice(
+    {
+      user: client,
+      log: rejectionLogger,
+      body: { barberId: "invalid", serviceId, note: sensitiveNote },
+    },
+    rejection
+  );
+
+  assert.equal(success.statusCode, 200);
+  assert.equal(rejection.statusCode, 400);
+  assert.deepEqual(successLogger.infoCalls, [[{
+    event: "booking.quote.outcome",
+    operation: "quote",
+    outcome: "success",
+    statusCode: 200,
+  }, "booking.quote.outcome"]]);
+  assert.deepEqual(rejectionLogger.infoCalls, [[{
+    event: "booking.quote.outcome",
+    operation: "quote",
+    outcome: "controlled_rejection",
+    statusCode: 400,
+  }, "booking.quote.outcome"]]);
+  const output = JSON.stringify([successLogger.infoCalls, rejectionLogger.infoCalls]);
+  assert.equal(output.includes(sensitiveNote), false);
+  assert.equal(output.includes("+37499123456"), false);
 });
 
 test("createBooking with discounted service (percent) uses discountedPrice as booking.price", async () => {

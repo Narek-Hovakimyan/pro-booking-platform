@@ -2,6 +2,7 @@ import Booking from "../../models/Booking.js";
 import {
   allowedBookingDelayMinutes,
   attemptsDateTimeChange,
+  getErrorStatusCode,
   sendControllerError,
 } from "../../services/booking/bookingControllerHelpers.js";
 import {
@@ -14,6 +15,10 @@ import { updateBookingTreatmentRecord } from "../../services/booking/bookingTrea
 import { delayBookingService } from "../../services/booking/bookingDelayService.js";
 import { createBookingService } from "../../services/booking/bookingCreateService.js";
 import { normalizeBookingCreateIdempotencyKey } from "../../services/booking/bookingCreateIdempotencyService.js";
+import {
+  logBookingCreateOutcome,
+  logBookingQuoteOutcome,
+} from "../../services/booking/bookingObservabilityService.js";
 import { executeBookingPriceQuote } from "../../services/booking/bookingQuoteService.js";
 import { resolveReferenceImageRequest } from "../../services/booking/bookingReferenceImageService.js";
 import { openBookingReferenceMediaStream } from "../../services/booking/bookingReferenceMediaService.js";
@@ -105,9 +110,11 @@ export const createBooking = async (req, res) => {
       referenceUploads,
       idempotencyKey,
       cleanupReferenceImagesOnError: cleanup,
+      requestLogger: req.log,
     });
 
     if (createResult.body) {
+      logBookingCreateOutcome({ logger: req.log, result: createResult });
       return res.status(createResult.status).json(createResult.body);
     }
 
@@ -118,10 +125,19 @@ export const createBooking = async (req, res) => {
       responseBooking.depositPayment = payment;
     }
 
+    logBookingCreateOutcome({ logger: req.log, result: createResult });
     return res.status(201).json(responseBooking);
   } catch (error) {
     // DB or unexpected failure — cleanup uploaded files
     cleanup();
+    const statusCode = getErrorStatusCode(error);
+    logBookingCreateOutcome({
+      logger: req.log,
+      result: {
+        status: statusCode,
+        ...(statusCode >= 500 ? { observabilityOutcome: "internal_failure" } : {}),
+      },
+    });
     return sendControllerError(res, error, "Could not create booking", {
       req,
       userId: req.user?._id,
@@ -136,6 +152,7 @@ export const quoteBookingPrice = async (req, res) => {
       user: req.user,
     });
 
+    logBookingQuoteOutcome({ logger: req.log, result });
     return res.status(result.status).json(result.body);
   } catch (error) {
     return sendControllerError(res, error, "Could not quote booking price", {

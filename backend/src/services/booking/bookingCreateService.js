@@ -54,6 +54,7 @@ import {
 import {
   createBookingCreateIdempotencyLifecycle,
 } from "./bookingCreateIdempotencyService.js";
+import { logBookingDepositRecovery } from "./bookingObservabilityService.js";
 
 const bookingCreateHooks = createBookingMutationHooks({
   activateBookingReferenceMedia,
@@ -105,6 +106,7 @@ export const createBookingService = async ({
   referenceUploads = [],
   cleanupReferenceImagesOnError,
   idempotencyKey = null,
+  requestLogger = null,
 }) => {
   const cleanup = cleanupReferenceImagesOnError;
   const {
@@ -244,6 +246,7 @@ export const createBookingService = async ({
     cleanup();
     return {
       status: 400,
+      observabilityOutcome: slotValidation.message === "This time is already booked" ? "slot_conflict" : "controlled_rejection",
       body: { message: slotValidation.message },
     };
   }
@@ -480,6 +483,7 @@ export const createBookingService = async ({
       if (isBookingSlotConflictError(createErr)) {
         return {
           status: 400,
+          observabilityOutcome: "slot_conflict",
           body: { message: "This time is already booked" },
         };
       }
@@ -496,6 +500,7 @@ export const createBookingService = async ({
           createdBy: user?._id,
         });
       } catch (paymentError) {
+        logBookingDepositRecovery({ logger: requestLogger });
         payment = buildSafePaymentMetadata({
           providerName: "manual",
           message:
@@ -540,5 +545,5 @@ export const createBookingService = async ({
     }
   }
 
-  return { status: 201, booking, payment };
+  return { status: 201, booking, payment, idempotencyReplay };
 };
