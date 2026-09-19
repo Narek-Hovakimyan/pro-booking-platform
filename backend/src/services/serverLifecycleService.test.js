@@ -14,6 +14,24 @@ const createLogger = () => ({
   },
 });
 
+test("shutdown stops the booking post-commit dispatch scheduler", async () => {
+  const calls = [];
+  const service = createServerLifecycleService({
+    stopBookingReminderSchedulerFn: async () => {},
+    stopBookingPostCommitDispatchSchedulerFn: async () => { calls.push("post-commit"); },
+    stopWaitlistExpirationSchedulerFn: async () => {},
+    stopSubscriptionExpirationSchedulerFn: async () => {},
+    stopMediaReconciliationSchedulerFn: async () => {},
+    closeHttpServerFn: async () => {},
+    closeSocketServerFn: async () => {},
+    shutdownRedisFn: async () => {},
+    disconnectDatabaseFn: async () => {},
+  });
+
+  assert.deepEqual(await service.shutdown("SIGTERM"), { ok: true, exitCode: 0 });
+  assert.deepEqual(calls, ["post-commit"]);
+});
+
 test("readiness reports healthy only when not shutting down and database ping succeeds", async () => {
   const service = createServerLifecycleService({
     isDatabaseConnectedFn: () => true,

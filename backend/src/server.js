@@ -48,6 +48,7 @@ import platformRoutes from "./routes/platform/platformRoutes.js";
 import { servePublicPortfolioImage } from "./controllers/portfolio/portfolioPhotoMediaController.js";
 import { initSocket } from "./socket.js";
 import { startBookingReminderScheduler } from "./services/booking/bookingReminderScheduler.js";
+import { startBookingPostCommitDispatchScheduler } from "./services/booking/bookingPostCommitDispatchScheduler.js";
 import { redisClientService } from "./services/redisClientService.js";
 import { serverLifecycleService } from "./services/serverLifecycleService.js";
 import { startSubscriptionExpirationScheduler } from "./services/subscriptionExpirationScheduler.js";
@@ -278,6 +279,7 @@ const startServer = async () => {
 
   logger.info(`Server running on port ${PORT}`);
   startBookingReminderScheduler();
+  startBookingPostCommitDispatchScheduler({ logger });
   startWaitlistExpirationScheduler();
   startSubscriptionExpirationScheduler();
   startMediaReconciliationScheduler({ logger });

@@ -3,6 +3,7 @@ import {
   __bookingSideEffectsTestHooks,
 } from "../../services/booking/bookingSideEffectsService.js";
 import Booking from "../../models/Booking.js";
+import BookingPostCommitDispatch from "../../models/BookingPostCommitDispatch.js";
 import BookingSlotHold from "../../models/BookingSlotHold.js";
 import BarberProfile from "../../models/BarberProfile.js";
 import Notification from "../../models/Notification.js";
@@ -33,6 +34,11 @@ export const originalMethods = {
   bookingAggregate: Booking.aggregate,
   bookingFindById: Booking.findById,
   bookingFindOneAndUpdate: Booking.findOneAndUpdate,
+  bookingPostCommitDispatchCreate: BookingPostCommitDispatch.create,
+  bookingPostCommitDispatchFind: BookingPostCommitDispatch.find,
+  bookingPostCommitDispatchFindOne: BookingPostCommitDispatch.findOne,
+  bookingPostCommitDispatchFindOneAndUpdate:
+    BookingPostCommitDispatch.findOneAndUpdate,
   bookingSlotHoldFindOne: BookingSlotHold.findOne,
   bookingSlotHoldInsertMany: BookingSlotHold.insertMany,
   bookingSlotHoldBulkWrite: BookingSlotHold.bulkWrite,
@@ -50,13 +56,130 @@ export const originalMethods = {
   userFindById: User.findById,
 };
 
-export const mockBookingSlotHoldModel = () => {
+let mockBookingPostCommitDispatchStore;
+
+const dispatchMatches = (dispatch, filter = {}) => {
+  if (!dispatch) return false;
+  for (const field of ["_id", "bookingId", "eventType", "status", "leaseToken"]) {
+    if (filter[field] !== undefined && String(dispatch[field]) !== String(filter[field])) {
+      return false;
+    }
+  }
+  if (!filter.$or) return true;
+  return filter.$or.some((candidate) => {
+    if (candidate.status && dispatch.status !== candidate.status) return false;
+    if (candidate.nextAttemptAt?.$lte && dispatch.nextAttemptAt > candidate.nextAttemptAt.$lte) {
+      return false;
+    }
+    if (candidate.leaseExpiresAt?.$lte && dispatch.leaseExpiresAt > candidate.leaseExpiresAt.$lte) {
+      return false;
+    }
+    return true;
+  });
+};
+
+export const mockBookingPostCommitDispatchModel = ({ createError = null } = {}) => {
+  let sequence = 0;
+  const rows = [];
+  const stagedRows = new WeakMap();
+  const visibleRows = (session) => [
+    ...rows,
+    ...(session ? stagedRows.get(session) || [] : []),
+  ];
+  const state = {
+    rows,
+    begin(session) {
+      stagedRows.set(session, []);
+    },
+    commit(session) {
+      rows.push(...(stagedRows.get(session) || []));
+      stagedRows.delete(session);
+    },
+    rollback(session) {
+      stagedRows.delete(session);
+    },
+  };
+  mockBookingPostCommitDispatchStore = state;
+
+  BookingPostCommitDispatch.create = async (documents, { session } = {}) => {
+    if (createError) throw createError;
+    const payloads = Array.isArray(documents) ? documents : [documents];
+    const target = session ? stagedRows.get(session) : rows;
+    if (!target && session) throw new Error("dispatch persistence requires an active transaction");
+    const created = payloads.map((payload) => {
+      if (visibleRows(session).some((row) =>
+        String(row.bookingId) === String(payload.bookingId) && row.eventType === payload.eventType
+      )) {
+        throw Object.assign(new Error("duplicate dispatch"), { code: 11000 });
+      }
+      return { _id: `dispatch-${++sequence}`, ...payload };
+    });
+    (target || rows).push(...created);
+    return Array.isArray(documents) ? created : created[0];
+  };
+  BookingPostCommitDispatch.findOne = async (filter, _projection, { session } = {}) =>
+    visibleRows(session).find((row) => dispatchMatches(row, filter)) || null;
+  BookingPostCommitDispatch.findOneAndUpdate = async (filter, update, { session } = {}) => {
+    const row = visibleRows(session).find((entry) => dispatchMatches(entry, filter));
+    if (!row) return null;
+    Object.assign(row, update.$set || {});
+    for (const [field, value] of Object.entries(update.$inc || {})) {
+      row[field] = (row[field] || 0) + value;
+    }
+    for (const field of Object.keys(update.$unset || {})) delete row[field];
+    return row;
+  };
+  BookingPostCommitDispatch.find = (filter) => {
+    const query = {
+      sort() { return query; },
+      limit() { return Promise.resolve(visibleRows().filter((row) => dispatchMatches(row, filter))); },
+    };
+    return query;
+  };
+  return state;
+};
+
+export const getMockBookingPostCommitDispatches = () =>
+  mockBookingPostCommitDispatchStore?.rows || [];
+
+export const beginMockBookingPostCommitDispatchTransaction = (session) =>
+  mockBookingPostCommitDispatchStore?.begin(session);
+
+export const commitMockBookingPostCommitDispatchTransaction = (session) =>
+  mockBookingPostCommitDispatchStore?.commit(session);
+
+export const rollbackMockBookingPostCommitDispatchTransaction = (session) =>
+  mockBookingPostCommitDispatchStore?.rollback(session);
+
+const createMockTransactionSession = (withTransaction) => {
   const session = {
+    resetDispatchAttempt() {
+      mockBookingPostCommitDispatchStore?.begin(session);
+    },
     async withTransaction(callback) {
-      return callback();
+      const executeAttempt = async () => {
+        session.resetDispatchAttempt();
+        return callback();
+      };
+      try {
+        const result = withTransaction
+          ? await withTransaction(executeAttempt)
+          : await executeAttempt();
+        mockBookingPostCommitDispatchStore?.commit(session);
+        return result;
+      } catch (error) {
+        mockBookingPostCommitDispatchStore?.rollback(session);
+        throw error;
+      }
     },
     async endSession() {},
   };
+  return session;
+};
+
+export const mockBookingSlotHoldModel = () => {
+  mockBookingPostCommitDispatchModel();
+  const session = createMockTransactionSession();
   __bookingSlotHoldServiceTestHooks.supportsTransactions = () => true;
   __bookingSlotHoldServiceTestHooks.indexesReady = async () => true;
   __bookingSlotHoldServiceTestHooks.startSession = async () => session;
@@ -255,6 +378,8 @@ export const mockCreateBookingDependencies = (createdBookings) => {
     },
   });
   Booking.find = mockBookingFind(createdBookings);
+  Booking.findById = async (id) =>
+    createdBookings.find((booking) => String(booking._id) === String(id)) || null;
   mockBookingSlotHoldModel();
   const createBooking = async (payload) => {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -262,7 +387,7 @@ export const mockCreateBookingDependencies = (createdBookings) => {
     const bookingPayload = Array.isArray(payload) ? payload[0] : payload;
     const booking = {
       ...bookingPayload,
-      _id: `booking-${createdBookings.length + 1}`,
+      _id: bookingPayload._id || `booking-${createdBookings.length + 1}`,
     };
     createdBookings.push(booking);
     return Array.isArray(payload) ? [booking] : booking;
@@ -276,7 +401,7 @@ export const mockCreateBookingDependencies = (createdBookings) => {
 
     const booking = {
       ...update.$setOnInsert,
-      _id: `booking-${createdBookings.length + 1}`,
+      _id: update.$setOnInsert?._id || query._id || `booking-${createdBookings.length + 1}`,
     };
     if (Booking.create !== createBooking) {
       const created = await Booking.create(booking);

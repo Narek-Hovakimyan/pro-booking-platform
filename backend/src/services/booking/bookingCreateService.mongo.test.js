@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
 import BookingCreateIdempotencyOperation from "../../models/BookingCreateIdempotencyOperation.js";
+import BookingPostCommitDispatch from "../../models/BookingPostCommitDispatch.js";
 import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Schedule from "../../models/Schedule.js";
@@ -30,6 +31,7 @@ const connect = async () => {
   await mongoose.connection.dropDatabase();
   await BookingSlotHold.syncIndexes();
   await BookingCreateIdempotencyOperation.syncIndexes();
+  await BookingPostCommitDispatch.syncIndexes();
 };
 const user = async (role) => {
   const id = `${process.pid}${++serial}`;
@@ -148,6 +150,7 @@ test("real Mongo same-key booking creates once and safely replays after a lost r
   assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
   assert.equal(await BookingSlotHold.countDocuments({ bookingId: first.booking._id }), 30);
   assert.equal(await BookingCreateIdempotencyOperation.countDocuments({ actorId: fixture.client._id }), 1);
+  assert.equal(await BookingPostCommitDispatch.countDocuments({ bookingId: first.booking._id }), 1);
 });
 
 test("real Mongo keyed failure rolls back the operation and a changed request conflicts safely", { skip: !enabled, timeout: 15000 }, async () => {
@@ -158,6 +161,7 @@ test("real Mongo keyed failure rolls back the operation and a changed request co
   const failed = await createBooking({ ...fixture, time: "08:00", idempotencyKey });
   assert.equal(failed.status, 400);
   assert.equal(await BookingCreateIdempotencyOperation.countDocuments({ actorId: fixture.client._id }), 0);
+  assert.equal(await BookingPostCommitDispatch.countDocuments({}), 0);
 
   const created = await createBooking({ ...fixture, idempotencyKey });
   const changed = await createBooking({ ...fixture, time: "11:00", idempotencyKey });
@@ -165,6 +169,7 @@ test("real Mongo keyed failure rolls back the operation and a changed request co
   assert.equal(changed.status, 409);
   assert.equal(changed.body.message, "Idempotency-Key was already used with a different request");
   assert.equal(await Booking.countDocuments({ barberId: fixture.barber._id }), 1);
+  assert.equal(await BookingPostCommitDispatch.countDocuments({}), 1);
 });
 
 test("real Mongo deactivation winning before the booking touch leaves no booking or holds", { skip: !enabled, timeout: 15000 }, async () => {

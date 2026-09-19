@@ -7,6 +7,7 @@ import { __bookingTestHooks, createBooking, updateBooking } from "./bookingContr
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
 import BookingCreateIdempotencyOperation from "../../models/BookingCreateIdempotencyOperation.js";
+import BookingPostCommitDispatch from "../../models/BookingPostCommitDispatch.js";
 import BookingSlotHold from "../../models/BookingSlotHold.js";
 import Notification from "../../models/Notification.js";
 import Salon from "../../models/Salon.js";
@@ -29,17 +30,22 @@ import {
   barber,
   barberId,
   barberWithSalon,
+  beginMockBookingPostCommitDispatchTransaction,
   bookingDate,
   client,
   clientId,
+  commitMockBookingPostCommitDispatchTransaction,
   createMutableBooking,
   createResponse,
+  getMockBookingPostCommitDispatches,
   getFutureBookingDateForDay,
   mockBookingFind,
+  mockBookingPostCommitDispatchModel,
   mockBookingSlotHoldModel,
   mockCreateBookingDependencies,
   mockSuccessfulCreateDependencies,
   originalMethods,
+  rollbackMockBookingPostCommitDispatchTransaction,
   salonBId,
   salonId,
   serviceId,
@@ -118,6 +124,11 @@ afterEach(() => {
   Booking.find = originalMethods.bookingFind;
   Booking.findById = originalMethods.bookingFindById;
   Booking.findOneAndUpdate = originalMethods.bookingFindOneAndUpdate;
+  BookingPostCommitDispatch.create = originalMethods.bookingPostCommitDispatchCreate;
+  BookingPostCommitDispatch.find = originalMethods.bookingPostCommitDispatchFind;
+  BookingPostCommitDispatch.findOne = originalMethods.bookingPostCommitDispatchFindOne;
+  BookingPostCommitDispatch.findOneAndUpdate =
+    originalMethods.bookingPostCommitDispatchFindOneAndUpdate;
   BookingSlotHold.findOne = originalMethods.bookingSlotHoldFindOne;
   BookingSlotHold.insertMany = originalMethods.bookingSlotHoldInsertMany;
   BookingSlotHold.bulkWrite = originalMethods.bookingSlotHoldBulkWrite;
@@ -222,12 +233,28 @@ const installBookingCreateIdempotencyStore = (createdBookings) => {
 
 installReferenceMediaSuccessHooks();
 
-const createTransactionSession = (withTransaction) => ({
-  async withTransaction(callback) {
-    return withTransaction ? withTransaction(callback) : callback();
-  },
-  async endSession() {},
-});
+const createTransactionSession = (withTransaction) => {
+  const session = {
+    async withTransaction(callback) {
+      const executeAttempt = async () => {
+        beginMockBookingPostCommitDispatchTransaction(session);
+        return callback();
+      };
+      try {
+        const result = withTransaction
+          ? await withTransaction(executeAttempt)
+          : await executeAttempt();
+        commitMockBookingPostCommitDispatchTransaction(session);
+        return result;
+      } catch (error) {
+        rollbackMockBookingPostCommitDispatchTransaction(session);
+        throw error;
+      }
+    },
+    async endSession() {},
+  };
+  return session;
+};
 
 const installTransactionalBookingCreate = ({
   createdBookings,
@@ -250,6 +277,7 @@ const installTransactionalBookingCreate = ({
   const session = createTransactionSession(async (callback) => {
     const executeAttempt = async () => {
       pendingBookings = new Map();
+      beginMockBookingPostCommitDispatchTransaction(session);
       return callback();
     };
     const result = withTransaction
@@ -2895,12 +2923,7 @@ test("transaction-capable booking create uses a Mongo session for booking and me
   const filename = "ref-transaction.jpg";
   createReferenceUploadFile(filename);
   const createdBookings = [];
-  const session = {
-    async withTransaction(callback) {
-      return callback();
-    },
-    async endSession() {},
-  };
+  const session = createTransactionSession();
   let bookingCreateSession = null;
   let mediaActivationSession = null;
   mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
@@ -4070,7 +4093,42 @@ test("booking create replays a same actor/key request without duplicate side eff
   assert.equal(replay.body._id, first.body._id);
   assert.equal(createdBookings.length, 1);
   assert.equal(operations.length, 1);
+  assert.equal(getMockBookingPostCommitDispatches().length, 1);
+  assert.equal(
+    String(getMockBookingPostCommitDispatches()[0].bookingId),
+    String(first.body._id)
+  );
   assert.equal(notifications, 1);
+});
+
+test("booking create fails the transaction when required dispatch persistence fails", async () => {
+  const createdBookings = [];
+  mockSuccessfulCreateDependencies(createdBookings, barberWithSalon);
+  installTransactionalBookingCreate({ createdBookings });
+  mockBookingPostCommitDispatchModel({
+    createError: new Error("dispatch persistence unavailable"),
+  });
+
+  const response = createResponse();
+  await createBooking(
+    {
+      user: client,
+      body: {
+        barberId,
+        clientId,
+        serviceId,
+        bookingDate,
+        time: "10:00",
+        salonId,
+        clientName: "Client",
+      },
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(createdBookings.length, 0);
+  assert.equal(getMockBookingPostCommitDispatches().length, 0);
 });
 
 test("booking create replays accepted consent without treating its server timestamp as new intent", async () => {

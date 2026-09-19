@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import BarberProfile from "../../models/BarberProfile.js";
 import Booking from "../../models/Booking.js";
 import { calculateDeposit } from "../../controllers/bookings/depositSettingsController.js";
-import { createNotification } from "../../controllers/notifications/notificationController.js";
 import { barberHasBookingPaidAccessForSalon, resolveBookingPaidAccessForSalon, touchBookingPaidAccess } from "../subscription/subscriptionPaidAccessQueries.js";
 import {
   buildBookingPricing,
@@ -16,17 +15,11 @@ import {
   buildSafePaymentMetadata,
   createBookingDepositPaymentAttempt,
 } from "../payment/paymentAttemptService.js";
-import { formatBookedMessage } from "../../utils/bookingUtils.js";
-import { getBookingNotificationData } from "../../utils/bookingNotificationData.js";
 import {
   getBookingCreationLockKey,
   validateBookingSlot,
   withBookingCreationLock,
 } from "../../utils/bookingSlotValidation.js";
-import { emitBookingUpdated } from "./bookingSideEffectsService.js";
-import {
-  getClientName,
-} from "./bookingControllerHelpers.js";
 import {
   normalizeScopedBookingReadinessIds,
   resolveScopedBookingReadiness,
@@ -55,6 +48,10 @@ import {
   createBookingCreateIdempotencyLifecycle,
 } from "./bookingCreateIdempotencyService.js";
 import { logBookingDepositRecovery } from "./bookingObservabilityService.js";
+import {
+  deliverBookingCreatedPostCommitDispatch,
+  enqueueBookingCreatedPostCommitDispatch,
+} from "./bookingPostCommitDispatchService.js";
 
 const bookingCreateHooks = createBookingMutationHooks({
   activateBookingReferenceMedia,
@@ -295,6 +292,7 @@ export const createBookingService = async ({
     }
 
     let booking;
+    let postCommitDispatch;
     let session = null;
     let transactionEntered = false;
     let voucherClaim = null;
@@ -437,6 +435,10 @@ export const createBookingService = async ({
           session,
         });
         booking = await createBookingRecord({ Booking, payload, session });
+        postCommitDispatch = await enqueueBookingCreatedPostCommitDispatch({
+          bookingId,
+          session,
+        });
         if (hasNewReferenceMedia) {
           await bookingCreateHooks.activateBookingReferenceMedia({
             media: stagedReferenceMedia,
@@ -510,7 +512,7 @@ export const createBookingService = async ({
       }
     }
 
-    return { booking, payment, status: 201 };
+    return { booking, payment, postCommitDispatch, status: 201 };
   });
 
   if (createResult?.body) {
@@ -522,26 +524,15 @@ export const createBookingService = async ({
     : createResult;
   if (completedResult?.body) return completedResult;
 
-  const { booking, payment, idempotencyReplay } = completedResult;
-  if (!idempotencyReplay && !isManualBooking) {
-    try {
-      const notificationClientName = await getClientName(booking, user);
-      await createNotification({
-        userId: barberId,
-        type: "booking_created",
-        message: formatBookedMessage(notificationClientName, booking),
-        data: getBookingNotificationData(booking),
-      });
-    } catch {
-      // Booking persistence has already committed; notification delivery is best-effort.
-    }
-  }
-
+  const { booking, payment, idempotencyReplay, postCommitDispatch } = completedResult;
   if (!idempotencyReplay) {
     try {
-      emitBookingUpdated(booking, "created");
+      await deliverBookingCreatedPostCommitDispatch({
+        dispatchId: postCommitDispatch?._id,
+        requester: user,
+      });
     } catch {
-      // Booking persistence has already committed; realtime delivery is best-effort.
+      // Booking persistence has already committed; dispatch recovery is durable.
     }
   }
 

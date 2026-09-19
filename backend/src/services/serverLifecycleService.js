@@ -4,6 +4,7 @@ import {
   pingDatabase,
 } from "../config/db.js";
 import { stopBookingReminderScheduler } from "./booking/bookingReminderScheduler.js";
+import { stopBookingPostCommitDispatchScheduler } from "./booking/bookingPostCommitDispatchScheduler.js";
 import { stopSubscriptionExpirationScheduler } from "./subscriptionExpirationScheduler.js";
 import { stopWaitlistExpirationScheduler } from "./waitlist/waitlistExpirationScheduler.js";
 import { stopMediaReconciliationScheduler } from "./media/mediaReconciliationScheduler.js";
@@ -69,6 +70,7 @@ export const createServerLifecycleService = ({
   pingDatabaseFn = pingDatabase,
   disconnectDatabaseFn = disconnectDB,
   stopBookingReminderSchedulerFn = stopBookingReminderScheduler,
+  stopBookingPostCommitDispatchSchedulerFn = stopBookingPostCommitDispatchScheduler,
   stopWaitlistExpirationSchedulerFn = stopWaitlistExpirationScheduler,
   stopSubscriptionExpirationSchedulerFn = stopSubscriptionExpirationScheduler,
   stopMediaReconciliationSchedulerFn = stopMediaReconciliationScheduler,
@@ -168,6 +170,7 @@ export const createServerLifecycleService = ({
 
         for (const stopFn of [
           stopBookingReminderSchedulerFn,
+          stopBookingPostCommitDispatchSchedulerFn,
           stopWaitlistExpirationSchedulerFn,
           stopSubscriptionExpirationSchedulerFn,
           stopMediaReconciliationSchedulerFn,
